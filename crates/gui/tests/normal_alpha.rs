@@ -2281,3 +2281,144 @@ fn an_unsure_key_is_not_written() {
     );
     settle(&mut m);
 }
+
+/// N8-h (round 2, B4): Reset all removes a listed key's own table, which held only `remove`; the `data` that the
+/// extension-less table already held shows through. The step wrote no `data`: the entry stays listed (N-27).
+#[test]
+fn a_reset_that_uncovers_data_leaves_the_entry() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nalpha.policy = \"remove\"\n\n[files.\"pbr/iron_n\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("remove")),
+        "precondition"
+    );
+    m.reset_all_settings(&[IRON_N.to_string()]);
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: the reset removed the table"
+    );
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "a reset is files-only"
+    );
+}
+
+/// N8-h (B4), a pin of the batch compare: a bulk Data on a six-file cube is copied to its other face entries in the
+/// same batch (DT31); a listed secondary face that the copy wrote `data` into leaves the list.
+#[test]
+fn a_six_face_copy_onto_a_listed_face_unlists_it() {
+    use sdc_gui::model::bulk::BulkOp;
+    const NX: &str = "a/chrome_e_nx.png";
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/a");
+    std::fs::create_dir_all(&r).unwrap();
+    for (i, f) in ["px", "nx", "py", "ny", "pz", "nz"].iter().enumerate() {
+        image::RgbImage::from_pixel(16, 16, image::Rgb([30 + 40 * i as u8, 20, 10]))
+            .save(r.join(format!("chrome_e_{f}.png")))
+            .unwrap();
+    }
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"a/chrome_e_nx.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let key = m
+        .items
+        .iter()
+        .find(|i| i.job.is_some())
+        .expect("the six-face item")
+        .key
+        .clone();
+    assert_ne!(key, NX, "precondition: the face is a secondary one");
+    m.decide(&key, Answer::Subtype(Subtype::Cubemap));
+    settle(&mut m);
+    m.apply_bulk_edit(
+        std::slice::from_ref(&key),
+        "alpha.policy",
+        BulkOp::Set(json!("data")),
+    );
+    settle(&mut m);
+    assert_eq!(
+        held(&m, NX, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the copy reached the listed face"
+    );
+    assert!(auto_data(&m).is_empty(), "the user's batch wrote it");
+}
+
+fn aged(p: &Path) {
+    std::fs::File::options()
+        .write(true)
+        .open(p)
+        .unwrap()
+        .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(86_400))
+        .unwrap();
+}
+
+/// N8-h (B3): a crash restore is no user alpha edit. Saved: a listed key with its alpha reset. Unsaved at the crash:
+/// a later share wrote the automatic `data` back. The restore keeps the list as the snapshot had it, so ending the
+/// share later takes the `data` back.
+#[test]
+fn a_crash_restore_keeps_the_list_it_restores() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.clear_alpha(IRON_N);
+    settle(&mut m);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "precondition: listed, reset"
+    );
+    m.save().unwrap();
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it again"
+    );
+    sdc_gui::crash_log::write_recovery(&m.recovery_changed().unwrap_or_default());
+    drop(m);
+    let t = d.path().join("textures");
+    aged(&t.join("sdc.toml"));
+    aged(&t.join("sdc-project.toml"));
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    assert_eq!(
+        m.undo_label(),
+        Some("Restore crash edits"),
+        "precondition: restored"
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "the restore keeps the record"
+    );
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "ending the share takes it back"
+    );
+}

@@ -537,8 +537,10 @@ pub struct AppModel {
     /// user change in it: while it still holds that state against that saved text, its only unsaved change is
     /// automatic (the recorder's `auto_normal` listing). Any save, reload or open ends it.
     listing_only: Option<(u64, String, String)>,
-    /// Note JS7 (N-33 as the owner narrowed it, N-37): true while the recorder or the fuzz switch writes its automatic
-    /// step; the shared-alpha follow-on rides only the user's own steps.
+    /// Note JS7 (N-33 as the owner narrowed it, N-37, N8-h): true while a step that is not the user's own alpha edit
+    /// writes: the recorder's or the fuzz switch's automatic step, and the crash restore, which reinstates both
+    /// documents as the snapshot recorded them. The shared-alpha follow-on and the unlisting ride only the user's own
+    /// steps.
     automatic_step: bool,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
@@ -3683,6 +3685,8 @@ impl AppModel {
         let before = self.history.undo.len();
         // Only a document whose text really changed counts as restored: `restore` ignores text that does not parse.
         let mut restored = vec![];
+        // Note JS7 (N8-h): the restore reinstates the list as the snapshot recorded it: no unlisting, no follow-on.
+        self.automatic_step = true;
         self.edit_docs(LABEL, None, false, |p, s| {
             if let Some((path, t)) = project {
                 let old = p.text();
@@ -3699,6 +3703,7 @@ impl AppModel {
                 }
             }
         });
+        self.automatic_step = false;
         // shortcut: a file that does not parse as TOML restores nothing, shows no notice and stays on disk (the
         // other document's file, if it restored, is the only one the toast's Undo deletes); give it a notice if one
         // is ever seen.

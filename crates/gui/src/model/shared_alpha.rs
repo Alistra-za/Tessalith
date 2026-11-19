@@ -442,26 +442,55 @@ fn changes(
     c
 }
 
-/// N8-c (N-34): the listed keys with the `alpha.policy` each holds, read before a user's step.
-pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> Vec<(String, Option<Value>)> {
-    s.auto_data()
+/// Each list entry with the `alpha.policy` of every `[files]` table that matches its file, by the table's spelling.
+pub(super) type ListedAlpha = Vec<(String, BTreeMap<String, Value>)>;
+
+/// The `alpha.policy` of every table among `keys` that matches file `entry`, by spelling.
+fn tables_alpha(p: &ProjectDoc, keys: &[String], entry: &str) -> BTreeMap<String, Value> {
+    holders(p, keys, entry, "alpha.policy")
         .into_iter()
-        .map(|k| {
-            let v = p.file_value(&k, "alpha.policy");
-            (k, v)
+        .filter_map(|t| {
+            let v = p.file_value(&t, "alpha.policy")?;
+            Some((t, v))
         })
         .collect()
 }
 
-/// N8-c (N-34): a listed key whose `alpha.policy` the user's step changed to `data` holds the user's own value now: it
-/// leaves `auto_data` in that step, before the follow-on runs, so the follow-on's own writes never count. A pick of the
-/// `data` the key already holds changes nothing a compare can see: `data_pick_unlists` takes that one.
-pub(super) fn unlist_user_data(held: &[(String, Option<Value>)], p: &ProjectDoc, s: &mut SetsDoc) {
-    let data = Some(json!("data"));
+/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step.
+pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> ListedAlpha {
+    let listed = s.auto_data();
+    if listed.is_empty() {
+        return vec![];
+    }
+    let keys = p.file_keys();
+    listed
+        .into_iter()
+        .map(|e| {
+            let t = tables_alpha(p, &keys, &e);
+            (e, t)
+        })
+        .collect()
+}
+
+/// N8-c, N8-h (N-34): an entry the user's step itself wrote `data` for, in any table matching its file (one that held
+/// no `data` before the step), holds the user's own value now: it leaves `auto_data` in that step, before the
+/// follow-on runs, so the follow-on's own writes never count. Tables are compared, not the value the file resolves
+/// to: a step that removes a table and so uncovers a `data` another table already held wrote nothing (N-27: a reset
+/// is files-only). A pick of the `data` a table already holds changes no table: `data_pick_unlists` takes that one.
+pub(super) fn unlist_user_data(held: &ListedAlpha, p: &ProjectDoc, s: &mut SetsDoc) {
+    if held.is_empty() {
+        return;
+    }
+    let data = json!("data");
+    let keys = p.file_keys();
     let mine: Vec<&String> = held
         .iter()
-        .filter(|(k, v)| *v != data && p.file_value(k, "alpha.policy") == data)
-        .map(|(k, _)| k)
+        .filter(|(e, before)| {
+            tables_alpha(p, &keys, e)
+                .iter()
+                .any(|(t, v)| *v == data && before.get(t) != Some(&data))
+        })
+        .map(|(e, _)| e)
         .collect();
     if mine.is_empty() {
         return;
