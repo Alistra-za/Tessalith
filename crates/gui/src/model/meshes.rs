@@ -1131,10 +1131,14 @@ impl MeshesModel {
         });
         // A NIF an earlier reload still holds (its rows never landed) counts as the selection.
         let nif = self.selected_nif.or(self.reselect.take());
-        self.clear_nif();
+        // Ruling E6-C: an open edit that may not end keeps its NIF selected; the mod list and rows are read again
+        let ended = self.clear_nif();
         match keep {
             Some(id) => {
                 self.select_mod(id);
+                if !ended {
+                    return;
+                }
                 if !self.store_settled() {
                     // Note GQ4: select_nif refuses now; the next completed scan's reload takes it
                     self.reselect = nif;
@@ -1145,7 +1149,9 @@ impl MeshesModel {
             // Any mod, or a picked mod that is gone: the picker's own path back, then the NIF waits for the rows.
             None => {
                 self.any_mod();
-                self.reselect = nif;
+                if ended {
+                    self.reselect = nif;
+                }
             }
         }
     }
@@ -1213,7 +1219,11 @@ impl MeshesModel {
         tx
     }
 
-    fn clear_nif(&mut self) {
+    /// Clears the selected NIF and its details; false (nothing cleared) when its open edit may not end (ruling E6-C).
+    fn clear_nif(&mut self) -> bool {
+        if !self.drop_edit() {
+            return false;
+        }
         self.selected_nif = None;
         self.selected_info = None;
         self.card_sel = None;
@@ -1223,8 +1233,8 @@ impl MeshesModel {
         self.view_source = false;
         self.tex_users = None;
         self.plugin_uses.clear();
-        self.drop_edit();
         self.v3.set_mesh(None);
+        true
     }
 
     /// Picks a mod: the list shows its NIF copies, winning or not. A PGPatcher-derived mod is never picked: its
@@ -1681,7 +1691,10 @@ impl MeshesModel {
         if !self.store_settled() {
             return;
         }
-        self.clear_nif();
+        // Ruling E6-C: an open edit whose ops are not durable and cannot be saved keeps the NIF selected
+        if !self.clear_nif() {
+            return;
+        }
         self.selected_nif = Some(copy_id);
         self.selected_info = self.find_row(copy_id).cloned();
         match self.find_pair(copy_id) {

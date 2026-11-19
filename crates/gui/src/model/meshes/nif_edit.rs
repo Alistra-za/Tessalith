@@ -87,8 +87,10 @@ pub struct NifEdit {
     /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded; only that one is replaced by
     /// it, and the first save into the project draft deletes it.
     kept_autosave: Option<PathBuf>,
-    /// `retarget_error` is the project switch's (both saves failed), not a record folder's.
+    /// `retarget_error` says no save worked when the session was to end (a project switch, or ruling E6-C's other
+    /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
+    switch_wording: bool,
     /// A retry of the two saves succeeded: the model ends the session and opens the wanted project's.
     switch_saved: bool,
     /// Attempts of the project switch's two saves (the test of ruling r4-2).
@@ -641,6 +643,11 @@ fn recover_from(
     }
 }
 
+/// The same ops in the same order; their statuses are worked out again on every apply, so they are not compared.
+fn same_ops(a: &[DocOp], b: &[DocOp]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.op == y.op)
+}
+
 /// The folder the plain autosave lives in (`<dir>\nif-edits\<sha>.toml`), where kept autosaves go too.
 fn autosave_dir(autosave: &Path) -> Option<&Path> {
     autosave.parent()?.parent()
@@ -742,6 +749,7 @@ impl NifEdit {
             doc_unseen: recovered && had_doc,
             kept_autosave,
             switch_failed: false,
+            switch_wording: false,
             switch_saved: false,
             #[cfg(feature = "test-hooks")]
             switch_save_attempts: 0,
@@ -842,9 +850,7 @@ impl NifEdit {
     /// session's (`foreign_record`) and differ from them. Task 9 moves such documents; until then the export waits.
     fn record_block(&self, foreign: Option<&[DocOp]>) -> Option<String> {
         let theirs = foreign?;
-        let same = theirs.len() == self.doc.ops.len()
-            && theirs.iter().zip(&self.doc.ops).all(|(a, b)| a.op == b.op);
-        (!same).then(|| {
+        (!same_ops(theirs, &self.doc.ops)).then(|| {
             format!(
                 "{} holds other edits of this NIF (from another project or an earlier Tessalith); an export would \
                  replace them. Move that file out of the folder to keep them, or choose another export folder.",
@@ -1208,8 +1214,9 @@ impl NifEdit {
     }
 
     fn save(&mut self) {
-        // The project switch could not save anywhere: each save tries the same two again (A's draft, then the kept
-        // autosave); a success hands the session to the model, which ends it (`switch_saved`).
+        // The session could not be saved when it was to end (`MeshesModel::may_end_edit`): each save tries the same
+        // two again (the draft, then the kept autosave); a success tells the model (`switch_saved`), which finishes a
+        // waiting project switch.
         if self.switch_failed {
             self.unsaved = true;
             match self.save_for_switch() {
@@ -1220,7 +1227,7 @@ impl NifEdit {
                     self.retarget_fail = None;
                     self.refresh_blocked();
                 }
-                Err(why) => self.set_switch_failed(&why),
+                Err(why) => self.set_switch_failed(&why, self.switch_wording),
             }
             return;
         }
@@ -1274,8 +1281,9 @@ impl NifEdit {
         }
     }
 
-    /// The project switch's save: the draft in its own project, and when that fails (the folder is gone, renamed or
-    /// not writable) the kept autosave keyed on the draft's id. Err(reason) when both fail. Counted by
+    /// The save before the session ends (a project switch, another NIF, Close edit): the draft in its own project,
+    /// and when that fails (the folder is gone, renamed or not writable) the kept autosave keyed on the draft's id;
+    /// with no project, the plain autosave (its draft) alone. Err(reason) when no save worked. Counted by
     /// `switch_save_attempts`.
     fn save_for_switch(&mut self) -> Result<(), String> {
         #[cfg(feature = "test-hooks")]
@@ -1294,6 +1302,9 @@ impl NifEdit {
             }
             Err(e) => e,
         };
+        if self.project.is_none() {
+            return Err(draft_err); // the kept autosave would be beside it, in the folder that just failed
+        }
         match self.save_kept(&draft_err) {
             Ok(()) => {
                 self.unsaved = false;
@@ -1333,14 +1344,22 @@ impl NifEdit {
         Ok(())
     }
 
-    /// The switch's block: both saves failed, the edits stay open here (ruling r3-3).
-    fn set_switch_failed(&mut self, why: &str) {
-        let line = format!(
-            "Could not save the edits of {} while changing the project: {why}. They are still open here. Make a \
-             change to try again, or open the project again.",
-            edit_doc::win(&self.data_path).unwrap_or_else(|_| self.data_path.clone())
-        );
+    /// The session was to end but no save worked: the edits stay open here, export is blocked with the reason and the
+    /// footer shows it (ruling r3-3 for a project switch, E6-C for another NIF, Close edit or the Edit toggle).
+    pub(super) fn set_switch_failed(&mut self, why: &str, switching: bool) {
+        let path = edit_doc::win(&self.data_path).unwrap_or_else(|_| self.data_path.clone());
+        let line = match switching {
+            true => format!(
+                "Could not save the edits of {path} while changing the project: {why}. They are still open here. \
+                 Make a change to try again, or open the project again."
+            ),
+            false => format!(
+                "Could not save the edits of {path}: {why}. They are still open here. Make a change to try again, or \
+                 undo back to what was last saved to close this NIF."
+            ),
+        };
         self.switch_failed = true;
+        self.switch_wording = switching;
         self.unsaved = true;
         if self.retarget_error.as_ref() != Some(&line) {
             self.retarget_error = Some(line);
@@ -1363,10 +1382,32 @@ impl NifEdit {
         true
     }
 
-    /// Whether a project switch has to save this session: it holds work (`touched`) that is not on disk in its
-    /// draft (unsaved, or the draft gone with its folder). Never only to write the id (ruling E6-B).
-    pub(super) fn needs_switch_save(&self) -> bool {
-        self.touched() && (self.unsaved || !self.draft_path.is_file())
+    /// Ruling E6-C1: the session may end with nothing written, because its current ops are what is durably on disk
+    /// for it: in the draft (the plain autosave with no project) or in the kept autosave it wrote or loaded. No ops
+    /// and no file count as equal; a file that does not read or parse does not. Undo and redo history are not ops,
+    /// so they never hold a session back, and a draft is never written only for its id (E6-B). An untouched session
+    /// is equal without a read; a read-only one (no draft path) has nowhere to save.
+    pub(super) fn durable(&self) -> bool {
+        if !self.touched() || self.draft_path.as_os_str().is_empty() {
+            return true;
+        }
+        let equal = |p: &Path| match edit_doc::load(p) {
+            Ok(Some(d)) => same_ops(&d.ops, &self.doc.ops),
+            Ok(None) => self.doc.ops.is_empty(),
+            Err(_) => false,
+        };
+        equal(&self.draft_path) || self.kept_autosave.as_deref().is_some_and(equal)
+    }
+
+    /// Ends a drag without saving it: what is left to save is `MeshesModel::may_end_edit`'s to decide.
+    pub(super) fn end_drag(&mut self) {
+        self.drag = None;
+        self.history.break_merge();
+    }
+
+    /// After `switch_saved`: the draft (not a kept autosave) holds the edits, so the session can go on in its project.
+    pub(super) fn saved_in_draft(&self) -> bool {
+        !self.unsaved && self.kept_autosave.is_none()
     }
 
     /// Note GD19, GD25: before this session writes `path`, a file there with edits it never loaded (an autosave it
@@ -2124,14 +2165,16 @@ impl MeshesModel {
         self.switch_attempts_done + self.edit.as_ref().map_or(0, |e| e.switch_save_attempts)
     }
 
-    /// Ends the session and opens the same NIF again in the current project, keeping the selection (what a project
-    /// switch does once the edits are saved).
-    fn reopen_keeping_selection(&mut self) {
+    /// Ends the session and opens the same NIF again in `project`, keeping the selection (what a project switch does
+    /// once the edits are saved). Nothing when the session may not end (`may_end_edit`).
+    fn reopen_keeping_selection(&mut self, project: Option<&Path>) {
         let Some(selection) = self.edit.as_ref().map(|e| e.selection) else {
             return;
         };
-        self.drop_edit();
-        self.open_edit();
+        if !self.drop_edit_for(true) {
+            return;
+        }
+        self.open_edit_in(project.map(Path::to_path_buf));
         let keep = self.edit.as_ref().is_some_and(|e| match selection {
             Selection::Root => true,
             Selection::Shape(id) => e.parsed.shapes.iter().any(|s| s.id.0 == id),
@@ -2141,44 +2184,73 @@ impl MeshesModel {
         }
     }
 
-    /// A retry of a failed project switch saved (`NifEdit::save`): the session ends and the wanted project's opens.
+    /// A retry of a session that could not be saved worked (`NifEdit::save`). With a project switch waiting
+    /// (`pending_root`, the root last asked for), the session ends and the NIF opens in that project; when that is the
+    /// session's own project and its draft took the edits, the session simply goes on there. With none waiting (a
+    /// refused Close edit or another NIF), the session goes on, saved.
     pub(super) fn finish_switch(&mut self) {
-        if !self.edit.as_ref().is_some_and(|e| e.switch_saved) {
+        let Some(e) = self.edit.as_mut().filter(|e| e.switch_saved) else {
+            return;
+        };
+        e.switch_saved = false;
+        let Some(to) = self.pending_root.take() else {
+            return;
+        };
+        if e.project == to && e.saved_in_draft() {
             return;
         }
-        // the wanted root is `project_root` (set by `set_project_root` before it asked the session)
-        self.pending_root = None;
-        self.reopen_keeping_selection();
+        self.reopen_keeping_selection(to.as_deref());
+    }
+
+    /// Ruling E6-C, the one check before any session ends (another NIF, Close edit, the Edit toggle, a project
+    /// switch, a scan's reload): true when it may, because its ops are durable (`NifEdit::durable`, ruling E6-C1) or
+    /// a save made them so (the draft, then the kept autosave; with no project the plain autosave). Otherwise the
+    /// session stays as it is, its footer and export say why (`retarget_error`), and so does `error` for the refused
+    /// action. `switching`: the action is a project switch (its own wording, ruling r3-3).
+    fn may_end_edit(&mut self, switching: bool) -> bool {
+        let Some(e) = self.edit.as_mut() else {
+            return true;
+        };
+        e.end_drag();
+        if e.durable() {
+            return true;
+        }
+        match e.save_for_switch() {
+            Ok(()) => true,
+            Err(why) => {
+                e.set_switch_failed(&why, switching);
+                self.error = e.retarget_error.clone();
+                false
+            }
+        }
     }
 
     /// The opened project changed (`MeshesModel::set_project_root`): what the open edit does (review E6).
-    /// - back in the project a failed switch left (ruling r4-5): the draft is saved there and the session goes on;
+    /// - back in its own project while a switch is waiting (ruling r4-5): the draft is saved there and the session
+    ///   goes on; when that save fails too, the switch waits as before;
     /// - none to a project with a touched session: it moves to the project's draft (Note GD5 (c)), the one carry-over;
-    /// - a project to another or to none: the edits are saved in the old project's draft (or, when that fails, in
-    ///   a kept autosave), then the session ends and the NIF opens again from the new place. When neither save
-    ///   works the session stays open, blocked, and nothing is retried until the next edit (ruling r3-3).
+    /// - otherwise the session ends once its edits are durable (`may_end_edit`: the old project's draft, or a kept
+    ///   autosave) and the NIF opens again from the new place. When no save works the session stays open, blocked,
+    ///   the wanted root waits in `pending_root`, and nothing is retried until the next edit (ruling r3-3).
     pub(super) fn switch_project(&mut self, to: Option<&Path>) {
-        let Some(e) = self.edit.as_mut() else { return };
-        if e.switch_failed && e.project.as_deref() == to {
+        let Some(e) = self.edit.as_mut() else {
             self.pending_root = None;
-            e.save_back_into_own_project();
             return;
-        }
-        e.flush(); // a drag not saved yet; in a failed switch this is the retry
-        if e.switch_failed {
+        };
+        if e.switch_failed && e.project.as_deref() == to {
+            // the wanted root is A now; it stays wanted until a save into A works (Important 8)
             self.pending_root = Some(to.map(Path::to_path_buf));
+            if e.save_back_into_own_project() {
+                self.pending_root = None;
+            }
             return;
         }
-        if e.switch_saved {
-            self.finish_switch();
-            return;
-        }
-        match (e.project.is_some(), to) {
-            (false, Some(p)) if e.touched() => match e.retarget(p) {
+        if let (None, Some(p), true) = (&e.project, to, e.touched()) {
+            e.end_drag();
+            match e.retarget(p) {
                 Ok(lines) => {
                     self.messages.extend(lines);
                     e.save();
-                    return;
                 }
                 // never overwritten: the edits stay in the autosave, and the draft is not opened over them
                 Err(why) => {
@@ -2186,19 +2258,16 @@ impl MeshesModel {
                         "Could not move the edits of {} into the project: {why}. They stay in the autosave.",
                         e.data_path
                     ));
-                    return;
-                }
-            },
-            (true, _) if e.needs_switch_save() => {
-                if let Err(why) = e.save_for_switch() {
-                    e.set_switch_failed(&why);
-                    self.pending_root = Some(to.map(Path::to_path_buf));
-                    return;
                 }
             }
-            _ => {}
+            return;
         }
-        self.reopen_keeping_selection();
+        if !self.may_end_edit(true) {
+            self.pending_root = Some(to.map(Path::to_path_buf));
+            return;
+        }
+        self.pending_root = None;
+        self.reopen_keeping_selection(to);
     }
 
     /// Where NIF edits go: the chosen export folder, and nowhere without one (Note GD5 supersedes CI29's
@@ -2214,16 +2283,23 @@ impl MeshesModel {
     }
 
     /// Opens an edit session for the selected NIF and shows its patched bytes as `Content::Parsed` (an LE NIF
-    /// opens with no preview).
+    /// opens with no preview). An open session that may not end (ruling E6-C) stays, and nothing opens.
     pub fn open_edit(&mut self) {
-        self.drop_edit();
+        self.open_edit_in(self.project_root.clone());
+    }
+
+    /// `open_edit` with the draft read from `project` (a project switch names the root it waited for).
+    fn open_edit_in(&mut self, project: Option<PathBuf>) {
+        if !self.drop_edit() {
+            return;
+        }
         // Final review Minor 8: the column before Edit (Edit locks it on Shapes); `drop_edit` puts it back.
         let column = self.shapes_col;
         let Some(row) = self.selected_row().cloned() else {
             return;
         };
         let edit_mod = self.edit_mod();
-        match self.start_edit(&row.path, edit_mod.as_deref()) {
+        match self.start_edit(&row.path, edit_mod.as_deref(), project.as_deref()) {
             Ok((mut e, content)) => {
                 e.selection = first_selection(&e.model, self.card_sel.as_ref());
                 self.messages.append(&mut e.open_lines);
@@ -2253,6 +2329,7 @@ impl MeshesModel {
         &self,
         path: &str,
         edit_mod: Option<&Path>,
+        project: Option<&Path>,
     ) -> Result<(NifEdit, Option<Content>), String> {
         let store = self.store.as_ref().ok_or("No scan store.")?;
         edit_doc::win(path)?; // before the read: a loose copy's root joined with `..` would read outside its mod
@@ -2262,14 +2339,7 @@ impl MeshesModel {
             .clone();
         let bytes = read_file(&FileSource::from_store(src.kind, &src.root, path))?;
         let autosave = self.autosave_of(path);
-        let mut e = NifEdit::open(
-            bytes,
-            src,
-            path,
-            self.project_root.as_deref(),
-            edit_mod,
-            autosave.as_deref(),
-        )?;
+        let mut e = NifEdit::open(bytes, src, path, project, edit_mod, autosave.as_deref())?;
         e.copies = copies;
         e.weight_sibling = weight_sibling_of(path)
             .filter(|s| store.copies_of_path(s).is_ok_and(|c| !c.is_empty()));
@@ -2321,23 +2391,33 @@ impl MeshesModel {
         self.edit.as_ref().is_some_and(|e| !e.le_mesh) && !self.v3.nif_view
     }
 
-    /// Ends the session (an unsaved drag is saved) and shows the NIF as a mesh again.
+    /// Ends the session (what is not durable is saved first) and shows the NIF as a mesh again. A session that may not
+    /// end stays (ruling E6-C).
     pub fn close_edit(&mut self) {
         if self.edit.is_none() {
             return;
         }
-        self.drop_edit();
-        self.load_shapes();
+        if self.drop_edit() {
+            self.load_shapes();
+        }
     }
 
-    /// Ends the session without touching the view's content.
-    pub(super) fn drop_edit(&mut self) {
+    /// Ends the session without touching the view's content, once `may_end_edit` allows it; false (nothing changed)
+    /// when it does not.
+    pub(super) fn drop_edit(&mut self) -> bool {
+        self.drop_edit_for(false)
+    }
+
+    /// `drop_edit`; `switching`: for a project switch (the refusal's wording).
+    fn drop_edit_for(&mut self, switching: bool) -> bool {
+        if !self.may_end_edit(switching) {
+            return false;
+        }
         self.clear_nif_answers(); // Note GD29: `close_edit` too, which ends here
         if let Some(column) = self.shapes_col_before.take() {
             self.shapes_col = column;
         }
         if let Some(mut e) = self.edit.take() {
-            e.flush();
             #[cfg(feature = "test-hooks")]
             {
                 self.switch_attempts_done += e.switch_save_attempts;
@@ -2346,9 +2426,11 @@ impl MeshesModel {
             if let Some(err) = e.error {
                 self.error = Some(err);
             }
+            self.pending_root = None; // a switch waiting on this session waits no more
         }
         self.v3.nif_view = false;
         self.v3.clock = None;
+        true
     }
 
     /// One drawn frame of the animation (v2 B3). Call once per frame the Meshes 3D view is drawn, before
@@ -2551,7 +2633,12 @@ impl MeshesModel {
     /// Note GD2: one row per NIF with pending edits (today the open edit only), for the Review. Reads the export
     /// path's state from the disk only when its length, time or the last export's hash changed.
     pub fn nif_review_rows(&self) -> Vec<NifReviewRow> {
-        let Some(e) = self.edit.as_ref().filter(|e| e.pending()) else {
+        // a session no save works for has its row too, with that reason, even when it equals the last export (E6-C)
+        let Some(e) = self
+            .edit
+            .as_ref()
+            .filter(|e| e.switch_failed || e.pending())
+        else {
             return vec![];
         };
         let mut blocked = e.blocked.clone();
@@ -2761,9 +2848,16 @@ impl MeshesModel {
                 return;
             }
             self.select_nif(id);
+            if self.selected_nif != Some(id) {
+                return; // the open session could not end (ruling E6-C): `error` says why
+            }
             self.open_edit();
         }
-        if self.edit.is_some() {
+        if self
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.data_path.eq_ignore_ascii_case(path))
+        {
             self.nif_tab = Some((tab, field));
         }
     }

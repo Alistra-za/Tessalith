@@ -5371,7 +5371,10 @@ fn an_untouched_session_writes_nothing_on_a_switch() {
     assert!(m.edit.is_some(), "premise: and again with no project");
     assert!(!a.join("_sdc").exists());
     assert!(!b.join("_sdc").exists());
-    assert!(tomls_under(&d.path().join("nif-edits")).is_empty());
+    assert!(
+        !d.path().join("nif-edits").exists(),
+        "no file and no folder in the autosave place"
+    );
 }
 
 #[test]
@@ -5512,6 +5515,9 @@ fn when_both_saves_fail_the_edit_stays_open_and_export_is_blocked() {
         why.starts_with("Could not save the edits of meshes\\x.nif while changing the project: "),
         "{why}"
     );
+    // what the modder sees: Export this NIF's greyed hover and the Review row
+    assert_eq!(m.quick_export_block().as_deref(), Some(why.as_str()));
+    assert_eq!(review_row(&m).blocked.as_deref(), Some(why.as_str()));
     let (tries, lines, stamp) = (
         m.switch_save_attempts_for_test(),
         m.messages.len(),
@@ -5520,6 +5526,8 @@ fn when_both_saves_fail_the_edit_stays_open_and_export_is_blocked() {
     assert_eq!(tries, 1, "one attempt of the two saves");
     for _ in 0..10 {
         m.set_project_root(Some(&b));
+        assert_eq!(m.quick_export_block().as_deref(), Some(why.as_str()));
+        assert_eq!(review_row(&m).blocked.as_deref(), Some(why.as_str()));
     }
     assert_eq!(
         m.switch_save_attempts_for_test(),
@@ -5607,6 +5615,11 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
     project_with_a_draft(&mut m, &b);
     m.set_project_root(Some(&a));
     m.open_edit();
+    let glossiness = |m: &MeshesModel| {
+        let e = m.edit.as_ref().unwrap();
+        e.model.lighting[&lit_shape(e).1].lighting.params.glossiness
+    };
+    let source_value = glossiness(&m);
     gloss(&mut m, 12.5);
     gloss(&mut m, 13.5);
     let shape = lit_shape(m.edit.as_ref().unwrap()).0;
@@ -5635,6 +5648,188 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
         "both steps are still undoable"
     );
     assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
+    assert_eq!(glossiness(&m), source_value, "the source's value is back");
+}
+
+/// Project `a`'s session of x.nif with one edit (12.5) that can be saved nowhere: after the NIF opened, `a\_sdc` and
+/// the autosave folder `d\nif-edits` became plain files. Returns `a`.
+fn unsaveable_edit(d: &tempfile::TempDir, m: &mut MeshesModel) -> std::path::PathBuf {
+    let a = project_folder(d, "a");
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    std::fs::write(a.join("_sdc"), b"a file").unwrap();
+    std::fs::write(d.path().join("nif-edits"), b"a file").unwrap();
+    gloss(m, 12.5);
+    assert!(m.error.is_some(), "premise: the edit's save failed");
+    a
+}
+
+fn y_nif(m: &MeshesModel) -> i64 {
+    m.nifs
+        .iter()
+        .find(|n| n.path.ends_with("y.nif"))
+        .unwrap()
+        .copy_id
+}
+
+/// Review E6 (Critical 1, ruling E6-C): selecting another NIF never drops an edit that could be saved nowhere: the
+/// selection stays, and the footer and the model's error say why.
+#[test]
+fn selecting_another_nif_keeps_an_edit_that_cannot_be_saved() {
+    let (d, mut m) = export_session();
+    unsaveable_edit(&d, &mut m);
+    let x = m.selected_nif;
+    m.select_nif(y_nif(&m));
+    assert!(m.edit.is_some(), "the session is not dropped");
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5]
+    );
+    assert_eq!(m.selected_nif, x, "the selection stays");
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(
+        why.starts_with("Could not save the edits of meshes\\x.nif: "),
+        "{why}"
+    );
+    assert_eq!(m.error.as_deref(), Some(why.as_str()));
+}
+
+/// Ruling E6-C: Close edit and the Edit toggle (`open_edit`) keep such an edit too, history and all.
+#[test]
+fn closing_or_reopening_keeps_an_edit_that_cannot_be_saved() {
+    let (d, mut m) = export_session();
+    unsaveable_edit(&d, &mut m);
+    m.close_edit();
+    assert!(m.edit.is_some(), "Close edit does not drop it");
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5],
+        "no new session over it"
+    );
+    assert!(
+        m.edit.as_ref().unwrap().history.can_undo(),
+        "the same session"
+    );
+}
+
+/// Ruling E6-C1: the way out without quitting. Undo back to what is on disk (no draft here: no ops) and the NIF closes
+/// with nothing written, redo history and all; the on-disk state is the session's, so nothing is lost.
+#[test]
+fn undoing_back_to_the_saved_state_lets_an_unsaveable_edit_go() {
+    let (d, mut m) = export_session();
+    let a = unsaveable_edit(&d, &mut m);
+    let y = y_nif(&m);
+    m.select_nif(y);
+    assert_eq!(op_values(&m).len(), 1, "premise: refused while unsaved");
+    assert!(m.undo_edit());
+    assert!(
+        m.edit.as_ref().unwrap().history.can_redo(),
+        "premise: redo left"
+    );
+    m.select_nif(y);
+    assert_eq!(m.selected_nif, Some(y), "the other NIF is selected");
+    assert!(m.edit.is_none(), "the session ended");
+    assert_eq!(std::fs::read(a.join("_sdc")).unwrap(), b"a file");
+    assert_eq!(
+        std::fs::read(d.path().join("nif-edits")).unwrap(),
+        b"a file"
+    );
+    assert_eq!(
+        std::fs::read_dir(&a).unwrap().count(),
+        1,
+        "no file was made in the project"
+    );
+}
+
+/// Review E6 (Important 8, ruling E6-C): after a failed switch a drag tick is the next edit: it tries the two saves at
+/// once, not at the drag's end.
+#[test]
+fn a_drag_after_a_failed_switch_tries_the_saves_again() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    let blocker = d.path().join("nif-edits");
+    std::fs::write(&blocker, b"a file").unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    let tries = m.switch_save_attempts_for_test();
+    std::fs::remove_file(&blocker).unwrap();
+    tick(&mut m, 40.5);
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
+    assert_eq!(doc_values(&kept(&d, &id)), [12.5, 40.5]);
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "B opens"
+    );
+}
+
+/// Review E6 (Important 8, ruling E6-C): a return to the session's own project that cannot save there keeps the
+/// switch's reason; the next edit that saves into the project goes on in the same session.
+#[test]
+fn a_failed_return_to_the_own_project_keeps_the_reason_until_a_save_works() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    gloss(&mut m, 13.5);
+    std::fs::remove_dir_all(a.join("_sdc")).unwrap();
+    std::fs::write(a.join("_sdc"), b"a file").unwrap();
+    std::fs::write(d.path().join("nif-edits"), b"a file").unwrap();
+    m.set_project_root(Some(&b));
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(why.contains("while changing the project"), "{why}");
+    for _ in 0..3 {
+        m.set_project_root(Some(&a)); // A still cannot be written
+    }
+    assert_eq!(
+        m.edit.as_ref().unwrap().export_block(),
+        Some(why),
+        "the reason stays until a save works"
+    );
+    std::fs::remove_file(a.join("_sdc")).unwrap();
+    gloss(&mut m, 14.5);
+    assert_eq!(doc_values(&draft(&a)), [12.5, 13.5, 14.5]);
+    let e = m.edit.as_ref().unwrap();
+    assert!(!e
+        .export_block()
+        .is_some_and(|w| w.contains("while changing the project")));
+    assert!(
+        m.undo_edit() && m.undo_edit() && m.undo_edit(),
+        "the same session goes on in A"
+    );
+}
+
+/// Review E6 (Important 8, ruling E6-C): a session that cannot be saved says so on Export this NIF and in Review even
+/// when its edits are the ones last exported (no "No edits").
+#[test]
+fn an_unsaveable_edit_equal_to_its_export_still_says_why() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(!m.edit.as_ref().unwrap().pending(), "premise: exported");
+    std::fs::write(d.path().join("nif-edits"), b"a file").unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(why.contains("while changing the project"), "{why}");
+    assert_eq!(
+        m.quick_export_block().as_deref(),
+        Some(why.as_str()),
+        "Export this NIF says why"
+    );
+    assert_eq!(review_row(&m).blocked.as_deref(), Some(why.as_str()));
+    export_fails(&mut m, "while changing the project");
 }
 
 /// Sets or clears the read-only attribute of `p` (Windows refuses to replace a read-only file).
