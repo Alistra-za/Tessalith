@@ -8,7 +8,7 @@
 
 use crate::checks::{run_checks, Finding};
 use crate::frame::{snapshot, Node, Snapshot, Text};
-use crate::screens::{entries, holds, Needle, Screen, ScreenEntry};
+use crate::screens::{entries, holds, no_stray_dialog, Needle, Screen, ScreenEntry};
 use crate::support::bar_clearance;
 use eframe::egui::{vec2, Key, Rect, Vec2};
 use egui_kittest::Harness;
@@ -31,6 +31,11 @@ pub trait Entry {
     /// The frame of the screen at `size`, or why it cannot be had (the walk names the screen and size).
     fn at(&mut self, size: Vec2) -> Result<Snapshot, String>;
 
+    /// True when the screen is a modal dialog; on any other entry an open modal dialog is an error of the visit and of
+    /// the key step (`screens::no_stray_dialog`).
+    fn dialog(&self) -> bool {
+        false
+    }
     /// True when the key step may press keys on this entry; a test-only entry that is only a layout fixture says no.
     fn takes_keys(&self) -> bool {
         false
@@ -68,10 +73,17 @@ pub struct Pressed {
 }
 
 /// Before a key: takes the keyboard focus from whatever holds it (`clear_focus`) and says whether `marker` holds on
-/// the frame after, which is the frame the key lands in.
-pub fn arm<S>(h: &mut Harness<'static, S>, marker: &[Needle]) -> Result<bool, String> {
+/// the frame after, which is the frame the key lands in. A modal dialog open on that frame of a screen that is no
+/// dialog (`dialog` false) is an `Err` naming it: the key would land in the dialog.
+pub fn arm<S>(
+    h: &mut Harness<'static, S>,
+    marker: &[Needle],
+    dialog: bool,
+) -> Result<bool, String> {
     clear_focus(h)?;
-    Ok(holds(&snapshot(h), marker))
+    let snap = snapshot(h);
+    no_stray_dialog(&snap, dialog)?;
+    Ok(holds(&snap, marker))
 }
 
 /// One key on an armed screen. Needs an idle baseline (no export running; else an error, not a suppressed finding).
@@ -948,7 +960,10 @@ pub fn walk(
     for e in entries.iter_mut() {
         let mut kept = None;
         for (i, size) in SIZES.into_iter().enumerate() {
-            let snap = match e.at(size) {
+            let snap = match e
+                .at(size)
+                .and_then(|snap| no_stray_dialog(&snap, e.dialog()).map(|()| snap))
+            {
                 Ok(snap) => snap,
                 Err(why) => {
                     walked
@@ -2032,6 +2047,7 @@ fn an_entry_whose_open_panics_is_collected_and_the_walk_goes_on() {
         act: None,
         marker: &[crate::screens::has("never drawn")],
         transient: false,
+        dialog: false,
     };
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(ScreenEntry::new(&BOOM)), the_start_screen()];
     let walked = walk(&mut list, &mut real_checker);
@@ -2232,6 +2248,10 @@ struct Faults {
     running_at_start: bool,
     /// The watched folder does not exist, so it cannot be listed.
     unreadable_root: bool,
+    /// A modal dialog named "Planted dialog" is open over the screen, whose marker still holds underneath.
+    modal: bool,
+    /// The entry says it is a dialog screen (`Entry::dialog`).
+    is_dialog: bool,
 }
 
 const NO_FAULTS: Faults = Faults {
@@ -2243,6 +2263,8 @@ const NO_FAULTS: Faults = Faults {
     times_out_at: None,
     running_at_start: false,
     unreadable_root: false,
+    modal: false,
+    is_dialog: false,
 };
 
 /// A test-only entry whose keys break the rule as `Faults` says: Enter writes a new file (and rewrites another with the
@@ -2299,6 +2321,10 @@ fn key_fault_harness(size: Vec2, cfg: Faults) -> (tempfile::TempDir, Harness<'st
                 }
                 if s.open && focused {
                     ui.label("Keys fault screen");
+                }
+                if s.cfg.modal {
+                    eframe::egui::Modal::new(eframe::egui::Id::unique("planted-dialog"))
+                        .show(ui.ctx(), |ui| ui.label("Planted dialog"));
                 }
                 let (enter, escape, space) = ui.input(|i| {
                     (
@@ -2362,6 +2388,10 @@ impl Entry for KeyFault {
         Ok(snapshot(&self.h))
     }
 
+    fn dialog(&self) -> bool {
+        self.cfg.is_dialog
+    }
+
     fn takes_keys(&self) -> bool {
         true
     }
@@ -2379,7 +2409,7 @@ impl Entry for KeyFault {
     }
 
     fn arm(&mut self) -> Result<bool, String> {
-        arm(&mut self.h, KEY_FAULT_MARKER)
+        arm(&mut self.h, KEY_FAULT_MARKER, self.cfg.is_dialog)
     }
 
     fn press(&mut self, key: Key) -> Result<Pressed, String> {
@@ -2561,6 +2591,37 @@ fn a_settle_timeout_is_an_error_and_earlier_findings_stay() {
     assert!(walked.errors[0].contains(": Escape: the app did not go idle"));
     let got: Vec<&str> = walked.hits.iter().map(|h| h.what.as_str()).collect();
     assert_eq!(got, ["Enter: fault folder/new.txt (new file)"]);
+}
+
+/// A modal dialog open over a screen that is no dialog is an error naming the dialog, at every size and before the
+/// first key, although the screen's marker still holds underneath: no visit and no key is taken from such a frame. The
+/// same dialog on an entry that says it is a dialog screen is its screen.
+#[test]
+fn a_modal_dialog_over_a_screen_that_is_no_dialog_is_an_error() {
+    let (walked, _) = walk_fault(Faults {
+        modal: true,
+        ..NO_FAULTS
+    });
+    let mut want: Vec<String> = WIDTHS
+        .iter()
+        .map(|size| format!("test-only key-fault screen at {size}: a modal dialog"))
+        .collect();
+    want.push("test-only key-fault screen keys at 1280x800: before Enter: a modal dialog".into());
+    assert_eq!(walked.errors.len(), want.len(), "{:?}", walked.errors);
+    for (e, start) in walked.errors.iter().zip(&want) {
+        assert!(
+            e.starts_with(start.as_str()) && e.contains("\"Planted dialog\""),
+            "{e}"
+        );
+    }
+    assert!(walked.visits.is_empty() && walked.presses.is_empty() && walked.hits.is_empty());
+    let (walked, _) = walk_fault(Faults {
+        modal: true,
+        is_dialog: true,
+        ..NO_FAULTS
+    });
+    assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    assert_eq!((walked.visits.len(), walked.presses.len()), (3, 3));
 }
 
 /// No idle baseline is an error, not a suppressed finding.

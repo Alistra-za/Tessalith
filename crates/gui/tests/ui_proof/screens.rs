@@ -20,7 +20,7 @@ use crate::app_harness::{plain_harness, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
 use crate::invariants::{arm, strike, Entry, Pressed};
-use eframe::egui::{Key, Vec2};
+use eframe::egui::{Key, Pos2, Rect, Vec2};
 use sdc_gui::app::SdcApp;
 use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::rename::RenameMode;
@@ -80,8 +80,15 @@ const fn lacks(text: &'static str) -> Needle {
     }
 }
 
-/// True when every needle of `marker` holds on `s`.
+/// True when every needle of `marker` holds on `s`. A node or a painted text counts only where it is shown: its rect
+/// meets the window with positive area, and its clip too where the snapshot knows it (a node scrolled out of view, or
+/// a text its clip hides, is not on the screen).
 pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
+    let window = Rect::from_min_size(Pos2::ZERO, s.size);
+    let shown = |r: Rect, clip: Option<Rect>| {
+        let seen = r.intersect(window);
+        seen.is_positive() && clip.is_none_or(|c| seen.intersect(c).is_positive())
+    };
     marker.iter().all(|n| {
         // no Sets column panel in the frame: nothing is right of it
         let left = match (n.right_of_sets, s.sets_right) {
@@ -92,15 +99,28 @@ pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
         let found = s.nodes.iter().any(|x| {
             (n.role.is_empty() || x.role == n.role)
                 && x.rect.min.x >= left
+                && shown(x.rect, x.clip)
                 && (x.label == n.text
                     || x.value.as_deref() == Some(n.text)
                     || x.placeholder.as_deref() == Some(n.text))
         }) || (n.role.is_empty()
             && s.texts
                 .iter()
-                .any(|t| t.text == n.text && t.rect.min.x >= left));
+                .any(|t| t.text == n.text && t.rect.min.x >= left && shown(t.rect, Some(t.clip))));
         found == n.present
     })
+}
+
+/// `Err` naming the dialog when a modal dialog is open on a frame of a screen that is no dialog (`Screen::dialog`): the
+/// marker can still hold underneath, but the dialog takes the keys and covers the screen, so the frame is not the
+/// screen's.
+pub fn no_stray_dialog(s: &Snapshot, dialog: bool) -> Result<(), String> {
+    match s.modal_name() {
+        Some(name) if !dialog => Err(format!(
+            "a modal dialog ({name}) is open over a screen that is no dialog, so the frame and the next key are the dialog's; close it in the entry, or mark the entry as a dialog screen"
+        )),
+        _ => Ok(()),
+    }
 }
 
 pub struct Screen {
@@ -114,11 +134,15 @@ pub struct Screen {
     /// A last action `steps` cannot express (a click scoped to a region), run after `steps`.
     pub act: Option<fn(&mut H)>,
     /// What only this screen shows. It must not hold before `open` or, with `steps`, before the steps, and no other
-    /// entry's screen may satisfy it.
+    /// entry's screen may satisfy it. At least one needle that is present comes from the screen's own body, not from a
+    /// header, a tab row or a column that other screens draw too.
     pub marker: &'static [Needle],
     /// A menu or popup: reopened at each size, because a resize can close it. A stable screen is opened once and
     /// resized.
     pub transient: bool,
+    /// The screen is a modal dialog. On any other screen an open modal dialog is an error of the visit
+    /// (`no_stray_dialog`).
+    pub dialog: bool,
 }
 
 fn nothing(_: &mut H) {}
@@ -206,6 +230,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Open a folder of source textures to begin.")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "main window with problems",
@@ -218,6 +243,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Kinds ▾"), has("← architecture/stone/stonewall")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "export to menu",
@@ -227,6 +253,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Re-encode every output")],
         transient: true,
+        dialog: false,
     },
     Screen {
         name: "settings tab",
@@ -234,8 +261,13 @@ pub const SCREENS: &[Screen] = &[
         open: |h| model(h).open_settings_tab(),
         steps: &[],
         act: None,
-        marker: CLOSE_SETTINGS,
+        // the close button sits on the tab's title row; the line under it is the settings body's
+        marker: &[
+            has("Close Settings"),
+            has_role("Label", "App settings: these apply to every project"),
+        ],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "tile menu",
@@ -245,6 +277,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Copy settings from stonewall.png to 0 selected…")],
         transient: true,
+        dialog: false,
     },
     Screen {
         name: "texture panel",
@@ -254,6 +287,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("← plants/fern"), has("Alpha threshold")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "set card menu",
@@ -263,6 +297,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Fill from names…")],
         transient: true,
+        dialog: false,
     },
     Screen {
         name: "review tab",
@@ -272,6 +307,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("What will be written")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "presets tab",
@@ -288,6 +324,7 @@ pub const SCREENS: &[Screen] = &[
             "Built-in presets are read-only: Duplicate makes an editable copy.",
         )],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "json editor",
@@ -297,6 +334,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("+ Add a delete section")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "rename inputs dialog",
@@ -309,8 +347,10 @@ pub const SCREENS: &[Screen] = &[
         },
         steps: &[],
         act: None,
-        marker: &[has("Rename 2 inputs")],
+        // the title, and a field of the dialog's body
+        marker: &[has("Rename 2 inputs"), has_role("TextInput", "Find")],
         transient: false,
+        dialog: true,
     },
     Screen {
         name: "marker dialog",
@@ -320,6 +360,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("F0 = (code/255)^1.6")],
         transient: false,
+        dialog: true,
     },
     Screen {
         name: "set editor",
@@ -327,11 +368,14 @@ pub const SCREENS: &[Screen] = &[
         open: |h| select_set(h, "architecture/stone/stonewall"),
         steps: &[],
         act: None,
+        // the path is the editor's name box (its header); the format combo is a slot row of its body
         marker: &[
             has("textures/architecture/stone/stonewall"),
+            has_role("ComboBox", "Diffuse format"),
             lacks("Fill from names…"),
         ],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "set editor slot menu",
@@ -348,6 +392,7 @@ pub const SCREENS: &[Screen] = &[
             has_right_of_sets("Pin this slot (always use this file)"),
         ],
         transient: true,
+        dialog: false,
     },
     Screen {
         name: "also export tab",
@@ -359,11 +404,14 @@ pub const SCREENS: &[Screen] = &[
         },
         steps: &[],
         act: None,
+        // the tab scrolls its row to the top, so the editor's name box is out of view; cobble's RMAOS file in the
+        // editor's slot rows names the set
         marker: &[
-            has("textures/architecture/stone/cobble"),
+            has_right_of_sets("cobble_rmaos.png"),
             has("Skip vanilla/CM for this set"),
         ],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "pgp material tab",
@@ -371,12 +419,16 @@ pub const SCREENS: &[Screen] = &[
         open: |h| select_set(h, "architecture/stone/cobble"),
         steps: &[],
         act: None,
+        // the path is the editor's name box (its header), drawn whatever the tab; the Specular level box is the
+        // Material tab's body
         marker: &[
             has("textures/architecture/stone/cobble"),
+            has_role("SpinButton", "Specular level"),
             lacks("Skip vanilla/CM for this set"),
             lacks("Pin this slot (always use this file)"),
         ],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "helper panel",
@@ -386,6 +438,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("← props/crate"), has_role("ComboBox", "Helper role")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "meshes view",
@@ -395,6 +448,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("5 of 5 NIFs")],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "mo2 popup",
@@ -404,6 +458,7 @@ pub const SCREENS: &[Screen] = &[
         act: None,
         marker: &[has("Scan a folder…")],
         transient: true,
+        dialog: false,
     },
     Screen {
         name: "skin card",
@@ -411,8 +466,13 @@ pub const SCREENS: &[Screen] = &[
         open: |h| material_tab(h, "actors/body", engine::shader::Shader::AdvancedSkin),
         steps: &[],
         act: None,
-        marker: &[has("textures/actors/body"), has("RFAOS, empty")],
+        // the skin card's own header (an "RFAOS, empty" chip is the Sets column's, not the card's)
+        marker: &[
+            has("textures/actors/body"),
+            has_role("DisclosureTriangle", "Advanced skin (Community Shaders)"),
+        ],
         transient: false,
+        dialog: false,
     },
     Screen {
         name: "landscape card",
@@ -420,8 +480,13 @@ pub const SCREENS: &[Screen] = &[
         open: |h| material_tab(h, "pbr/metal", engine::shader::Shader::PbrLandscape),
         steps: &[],
         act: None,
-        marker: &[has("textures/pbr/metal"), has("PBR Landscape")],
+        // a control of the card's body: "PBR Landscape" is also the Sets column's shader value and its card's label
+        marker: &[
+            has("textures/pbr/metal"),
+            has_role("ComboBox", "PBR texture set template"),
+        ],
         transient: false,
+        dialog: false,
     },
 ];
 
@@ -637,6 +702,10 @@ impl Entry for ScreenEntry {
         Ok(snap)
     }
 
+    fn dialog(&self) -> bool {
+        self.screen.dialog
+    }
+
     fn takes_keys(&self) -> bool {
         true
     }
@@ -660,9 +729,9 @@ impl Entry for ScreenEntry {
     }
 
     fn arm(&mut self) -> Result<bool, String> {
-        let marker = self.screen.marker;
+        let (marker, dialog) = (self.screen.marker, self.screen.dialog);
         let (_, h) = self.open.as_mut().ok_or("the screen is not open")?;
-        arm(h, marker)
+        arm(h, marker, dialog)
     }
 
     /// The export witnesses: the running flag the app's gate uses (read on the key-down frame and after settling) and
@@ -744,6 +813,7 @@ fn an_entry_that_opens_nothing_fails() {
             act: None,
             marker: CLOSE_SETTINGS,
             transient: false,
+            dialog: false,
         },
         vec2_1280(),
     )
@@ -764,6 +834,7 @@ fn an_entry_whose_marker_is_already_on_the_window_fails() {
             act: None,
             marker: SAVE_BUTTON,
             transient: false,
+            dialog: false,
         },
         vec2_1280(),
     )
@@ -784,6 +855,7 @@ fn an_entry_whose_marker_is_there_before_its_last_step_fails() {
             act: None,
             marker: CLOSE_SETTINGS,
             transient: false,
+            dialog: false,
         },
         vec2_1280(),
     )
@@ -879,6 +951,85 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         transformed_layers: vec![],
         pointer: None,
         panels: vec![],
+        modal: None,
+    }
+}
+
+/// A needle counts only where its node or text is shown: inside the window, and inside its clip where the snapshot
+/// knows it.
+#[test]
+fn a_needle_counts_only_where_it_is_shown() {
+    use eframe::egui::{pos2, vec2};
+    let marker = &[has("textures/architecture/stone/cobble")];
+    let base = pin_frame(400.0, true);
+    assert!(holds(&base, marker));
+    // the node scrolled below the window, or out of its known clip, or a zero-size node
+    let moved = |f: &dyn Fn(&mut crate::frame::Node)| {
+        let mut s = base.clone();
+        f(&mut s.nodes[0]);
+        s
+    };
+    assert!(!holds(
+        &moved(&|n| n.rect = n.rect.translate(vec2(0.0, 900.0))),
+        marker
+    ));
+    assert!(!holds(
+        &moved(&|n| n.clip = Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(50.0, 50.0)))),
+        marker
+    ));
+    assert!(holds(&moved(&|n| n.clip = Some(n.rect)), marker));
+    assert!(!holds(
+        &moved(&|n| n.rect = Rect::from_min_size(n.rect.min, vec2(0.0, 20.0))),
+        marker
+    ));
+    // a painted text its clip hides
+    let pin = &[has("Pin this slot (always use this file)")];
+    let text = pin_frame(400.0, false);
+    assert!(holds(&text, pin));
+    let mut hidden = text.clone();
+    hidden.texts[0].clip = Rect::from_min_size(pos2(0.0, 0.0), vec2(50.0, 50.0));
+    assert!(!holds(&hidden, pin));
+    // an absent needle is satisfied by a node that is not shown
+    let gone = moved(&|n| n.rect = n.rect.translate(vec2(0.0, 900.0)));
+    assert!(holds(&gone, &[lacks("textures/architecture/stone/cobble")]));
+}
+
+/// The set editor's entries need their screen's body, not only the editor's header: with everything right of the Sets
+/// column and below the name box taken out of the real frame (the body suppressed), the header's path still holds and
+/// the marker does not.
+#[test]
+fn an_editor_marker_needs_the_body_and_not_only_the_header() {
+    for name in [
+        "pgp material tab",
+        "set editor",
+        "skin card",
+        "landscape card",
+    ] {
+        let s = SCREENS.iter().find(|s| s.name == name).unwrap();
+        let (_d, h) = enter(s, vec2_1280()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let snap = snapshot(&h);
+        assert!(holds(&snap, s.marker), "{name}: the real frame");
+        let edge = snap.sets_right.expect("the Sets column's panel");
+        let name_box = snap
+            .nodes
+            .iter()
+            .find(|n| n.role == "TextInput" && n.label == "Input name" && n.rect.min.x >= edge)
+            .unwrap_or_else(|| panic!("{name}: no name box"))
+            .rect;
+        let mut header = snap.clone();
+        let body = |r: &Rect| r.min.x >= edge && r.min.y >= name_box.max.y;
+        header.nodes.retain(|n| !body(&n.rect));
+        header.texts.retain(|t| !body(&t.rect));
+        let path = s
+            .marker
+            .iter()
+            .find(|n| n.text.starts_with("textures/"))
+            .unwrap();
+        assert!(
+            holds(&header, std::slice::from_ref(path)),
+            "{name}: the header keeps the path"
+        );
+        assert!(!holds(&header, s.marker), "{name}: the header alone");
     }
 }
 

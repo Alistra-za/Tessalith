@@ -70,12 +70,26 @@ pub struct Snapshot {
     /// The outer rects of the named panels the frame built (`ui::panel_ids`), and the centre column as "centre": what
     /// names the area a scroll bar belongs to.
     pub panels: Vec<(String, Rect)>,
+    /// The layer of the topmost open modal dialog (egui's `Memory::top_modal_layer`, the `Debug` text a node's `layer`
+    /// has), when one is open.
+    pub modal: Option<String>,
 }
 
 impl Snapshot {
     /// The rect of the named panel (see `panels`).
     pub fn panel(&self, name: &str) -> Option<Rect> {
         self.panels.iter().find(|(n, _)| n == name).map(|(_, r)| *r)
+    }
+
+    /// The open modal dialog, named by its layer and the first named node in it (its title, as `ui::dialogs` draws one).
+    pub fn modal_name(&self) -> Option<String> {
+        let layer = self.modal.as_ref()?;
+        let title = self
+            .nodes
+            .iter()
+            .find(|n| n.layer.as_ref() == Some(layer) && !n.label.is_empty())
+            .map_or("no named node", |n| n.label.as_str());
+        Some(format!("{title:?} in {layer}"))
     }
 }
 
@@ -383,6 +397,10 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
         transformed_layers,
         pointer: h.ctx.input(|i| i.pointer.latest_pos()),
         panels,
+        modal: h
+            .ctx
+            .memory(|m| m.top_modal_layer())
+            .map(|l| format!("{l:?}")),
     }
 }
 
