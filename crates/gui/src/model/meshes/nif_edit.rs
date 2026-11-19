@@ -87,8 +87,6 @@ pub struct NifEdit {
     /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded; only that one is replaced by
     /// it, and the first save into the project draft deletes it.
     kept_autosave: Option<PathBuf>,
-    /// The draft on disk carries `doc.id` (false until the next successful draft save when `open` made the id).
-    id_on_disk: bool,
     /// `retarget_error` is the project switch's (both saves failed), not a record folder's.
     switch_failed: bool,
     /// A retry of the two saves succeeded: the model ends the session and opens the wanted project's.
@@ -682,7 +680,6 @@ impl NifEdit {
             false => edit_doc::load(&draft_path)?,
         };
         let had_doc = saved.is_some();
-        let had_id = saved.as_ref().is_some_and(|d| d.id.is_some());
         // Note GD11: with a project, a newer kept autosave of the draft's id (a switch that could not save into the
         // project) or else a newer plain autosave is offered; with none the draft is the autosave itself.
         let mut saved = saved;
@@ -711,7 +708,7 @@ impl NifEdit {
             }
         }
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
-        let id_on_disk = had_id && !recovered;
+        // the id every draft save writes (`write_draft` writes `doc`); a draft without one gets it with its next edit
         if doc.id.is_none() {
             doc.id = Some(edit_doc::new_id(data_path));
         }
@@ -744,7 +741,6 @@ impl NifEdit {
             // Note GD25: a recovered autosave replaced the project's draft, which this session never shows
             doc_unseen: recovered && had_doc,
             kept_autosave,
-            id_on_disk,
             switch_failed: false,
             switch_saved: false,
             #[cfg(feature = "test-hooks")]
@@ -894,7 +890,7 @@ impl NifEdit {
         self.source = Arc::new(source);
         self.reapply();
         self.count_changed();
-        self.save();
+        self.ops_changed(true);
         Ok(())
     }
 
@@ -1257,7 +1253,6 @@ impl NifEdit {
     /// this session wrote or loaded. A file it never loaded is not ours to delete.
     fn draft_saved(&mut self, path: &Path) {
         self.unsaved = false;
-        self.id_on_disk = true;
         if self.autosave.as_deref() == Some(path) {
             self.owns_autosave = true;
         }
@@ -1369,9 +1364,9 @@ impl NifEdit {
     }
 
     /// Whether a project switch has to save this session: it holds work (`touched`) that is not on disk in its
-    /// draft (unsaved, the draft gone with its folder, or the draft without the id).
+    /// draft (unsaved, or the draft gone with its folder). Never only to write the id (ruling E6-B).
     pub(super) fn needs_switch_save(&self) -> bool {
-        self.touched() && (self.unsaved || !self.id_on_disk || !self.draft_path.is_file())
+        self.touched() && (self.unsaved || !self.draft_path.is_file())
     }
 
     /// Note GD19, GD25: before this session writes `path`, a file there with edits it never loaded (an autosave it
@@ -1464,7 +1459,6 @@ impl NifEdit {
         self.doc_unseen = theirs.is_some();
         // the autosave is this session's document (`owns_autosave`): the first save into the project removes it
         (self.project, self.draft_path) = (Some(project.to_path_buf()), draft);
-        self.id_on_disk = false;
         self.drag = None;
         self.history.break_merge();
         self.unsaved = true;
@@ -1544,9 +1538,16 @@ impl NifEdit {
             });
         }
         self.reapply();
-        if merging {
-            self.unsaved = true;
-        } else {
+        self.ops_changed(!merging); // a drag is saved when it ends (`flush`)
+    }
+
+    /// Ruling E6-B, the one way a change of the ops reaches disk (push, undo, redo, revert, a resolved conflict, a
+    /// source reload): the session is unsaved BEFORE the save is tried, and only a successful write of the draft (or
+    /// of a kept autosave in a failed switch) clears it, so a failed save never looks saved. `now` false (a drag
+    /// tick) leaves the save to `flush`, except after a failed switch, where every change is the next try.
+    fn ops_changed(&mut self, now: bool) {
+        self.unsaved = true;
+        if now || self.switch_failed {
             self.save();
         }
     }
@@ -1588,7 +1589,7 @@ impl NifEdit {
             }
         }
         self.reapply();
-        self.save();
+        self.ops_changed(true);
         true
     }
 
@@ -1612,7 +1613,7 @@ impl NifEdit {
         self.history.record(self.doc.to_text(), &label, None);
         self.doc.ops.remove(i);
         self.reapply();
-        self.save();
+        self.ops_changed(true);
     }
 
     /// A conflict resolved for my value: its base becomes the value the source has now.
@@ -1630,7 +1631,7 @@ impl NifEdit {
             d.op = op;
         }
         self.reapply();
-        self.save();
+        self.ops_changed(true);
     }
 
     /// A conflict resolved for the source: the op is dropped (`nif::edit::take_source`).

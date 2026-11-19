@@ -5637,6 +5637,62 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
     assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
 }
 
+/// Sets or clears the read-only attribute of `p` (Windows refuses to replace a read-only file).
+fn read_only(p: &Path, on: bool) {
+    let mut perm = std::fs::metadata(p).unwrap().permissions();
+    perm.set_readonly(on);
+    std::fs::set_permissions(p, perm).unwrap();
+}
+
+/// Review E6 (Critical 2, ruling E6-B): an edit whose save fails is unsaved, even when an older draft with the id is
+/// still on disk, so the project switch keeps it (here in the kept autosave) instead of dropping it.
+#[test]
+fn a_failed_save_of_an_edit_is_kept_by_the_next_switch() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    read_only(&draft(&a), true); // the draft stays, but cannot be replaced
+    gloss(&mut m, 13.5);
+    assert!(m.error.is_some(), "premise: the save failed");
+    m.set_project_root(Some(&b));
+    read_only(&draft(&a), false);
+    assert_eq!(
+        load(&kept(&d, &id)).unwrap().map(|k| k.ops.len()),
+        Some(2),
+        "the edit the failed save left is kept"
+    );
+    assert_eq!(doc_values(&draft(&a)), [12.5], "the old draft is as it was");
+}
+
+/// Ruling E6-B (review Q6): a draft written before drafts had an id is not rewritten by a switch just to add one.
+#[test]
+fn a_switch_never_writes_a_draft_only_for_its_id() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let mut legacy = load(&draft(&a)).unwrap().unwrap();
+    legacy.id = None;
+    save(&draft(&a), &legacy).unwrap();
+    let before = std::fs::read(draft(&a)).unwrap();
+    m.open_edit();
+    assert!(
+        m.edit.as_ref().unwrap().touched(),
+        "premise: the draft's edit is open"
+    );
+    m.set_project_root(Some(&b));
+    assert_eq!(
+        std::fs::read(draft(&a)).unwrap(),
+        before,
+        "nothing new to save: the draft is not written"
+    );
+}
+
 #[test]
 fn export_still_writes_the_record_in_the_export_folder() {
     let (d, mut m) = export_session();
