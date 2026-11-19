@@ -408,6 +408,9 @@ pub enum Fix {
     ChangeShader(String),
     /// Review E10 (SUG-CONTRADICTION): the undecided rows' type picker, for this item.
     SetType(String),
+    /// Owner A1 (PACK-RECIPE-CONFLICT, PACK-RECIPE-UNBUILDABLE, SHADER-EXTRA-MAP on a packed output): remove
+    /// `packing.recipe` from both packed keys of the set; the planned packed key names it.
+    ClearRecipe(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -735,6 +738,12 @@ pub fn reason_scans(m: &AppModel) -> u64 {
     m.reason_scans.get()
 }
 
+/// Every set lookup `scope_label` ran (final wave Group 7), not `cached_scope_label`'s cached answers.
+#[cfg(feature = "test-hooks")]
+pub fn scope_label_lookups(m: &AppModel) -> u64 {
+    m.scope_label_lookups.get()
+}
+
 /// `AppModel::export_files` counts that were not served from the cache.
 #[cfg(feature = "test-hooks")]
 pub fn export_files_builds(m: &AppModel) -> u64 {
@@ -931,6 +940,13 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::ChanNormalLength => Some(Fix::RebuildZ(k())),
                 Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
                 Code::SugContradiction => Some(Fix::SetType(k())),
+                // Owner A1-4: both rows sit on the planned packed key.
+                // Only where a recipe is written on the entries: a project or preset value is out of its reach.
+                Code::PackRecipeConflict | Code::PackRecipeUnbuildable
+                    if m.recipe_written(&i.key) =>
+                {
+                    Some(Fix::ClearRecipe(k()))
+                }
                 _ => None,
             };
             // A job-dependent sentence (A3) keeps the engine's message on the hover.
@@ -952,17 +968,35 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
                 let (fix, second_fix, target) = match w.code {
-                    Code::ShaderExtraMap => match extra_member(m, v, w) {
-                        Some(item) => (
-                            Some(Fix::RemoveMember {
-                                set_id: v.id.clone(),
-                                item: item.clone(),
-                            }),
-                            shader(),
-                            Some(SlotTarget::Item(item)),
-                        ),
-                        None => (shader(), None, None),
-                    },
+                    Code::ShaderExtraMap => {
+                        let member = w.data.get("member").and_then(|x| x.as_str()).unwrap_or("");
+                        // Owner A1-7: a packed output with a written recipe offers Clear recipe, then Change shader….
+                        if let Some(k) = extra_map_recipe_key(m, v, member) {
+                            (
+                                Some(Fix::ClearRecipe(k.clone())),
+                                shader(),
+                                Some(SlotTarget::Item(k)),
+                            )
+                        } else {
+                            match extra_member(m, v, w) {
+                                Some(item) => (
+                                    Some(Fix::RemoveMember {
+                                        set_id: v.id.clone(),
+                                        item: item.clone(),
+                                    }),
+                                    shader(),
+                                    Some(SlotTarget::Item(item)),
+                                ),
+                                // A packed output is skipped by `extra_member`: Change shader… alone, and Go to
+                                // set still outlines its row, whichever packed output it is (final wave Group 3).
+                                None => (
+                                    shader(),
+                                    None,
+                                    packed_member_key(m, v, member).map(SlotTarget::Item),
+                                ),
+                            }
+                        }
+                    }
                     _ => (None, None, None),
                 };
                 out.push(Problem {
@@ -1373,12 +1407,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         let at = || set_at(&v.key, &v.id);
         // `v.json` ignores the target (a PBR pick with a filled slot); `pgp_written` is the export's own test.
         if m.pgp_written(v) {
-            // A typed match that matches nothing drops the set's entry (`json_entries`), so the mesh keeps nothing.
-            let has_entry = !crate::pgp::prefix::matches_nothing(
-                &v.settings,
-                v.derived_match.as_deref().unwrap_or(""),
-            );
-            if let Some(path) = pbr_export::no_albedo_slot1(v).filter(|_| has_entry) {
+            // Ruling 3b-F9: the row promises what the written entry does, so it reads `writes_entry` (a typed match
+            // that matches nothing writes no entry, and the mesh keeps nothing).
+            if let Some(path) =
+                pbr_export::no_albedo_slot1(v).filter(|_| pbr_export::writes_entry(m, v))
+            {
                 out.push(row(
                     Level::Info,
                     at(),
@@ -1433,19 +1466,60 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
 
 /// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's `data.member` names.
 /// The engine writes the member's output file name (`engine::api` `shader_members`); a source file name is matched too.
+/// A packed output is skipped: it cannot leave its set (controller ruling, 2026-11-18).
 fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
     let name = w.data.get("member")?.as_str()?;
     v.members
         .iter()
         .find(|k| {
             m.item(k).is_some_and(|i| {
-                i.name == name
-                    || i.job
-                        .as_ref()
-                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name))
+                i.kind != items::ItemKind::Packed
+                    && (i.name == name
+                        || i.job
+                            .as_ref()
+                            .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name)))
             })
         })
         .cloned()
+}
+
+/// Owner A1-7: the key of `v`'s packed output (the Rmaos slot's own item) whose output file name is `member`, with
+/// no condition on the recipe.
+fn packed_output_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let Some(sets::SlotFill::Own { item: k }) = v.slots.get(&sets::SlotKind::Rmaos) else {
+        return None;
+    };
+    let named = m
+        .item(k)?
+        .job
+        .as_ref()?
+        .output
+        .file_name()
+        .is_some_and(|f| f == member);
+    named.then(|| k.clone())
+}
+
+/// The key of `v`'s packed member (any recipe: the RMAOS slot's, a complex `_m`, a parallax pack) whose output file
+/// name is `member`: the Go to set target of a SHADER-EXTRA-MAP row that `extra_member` skips (final wave Group 3).
+fn packed_member_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    v.members
+        .iter()
+        .find(|k| {
+            m.item(k).is_some_and(|i| {
+                i.kind == items::ItemKind::Packed
+                    && i.job
+                        .as_ref()
+                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == member))
+            })
+        })
+        .cloned()
+}
+
+/// Owner A1-7: [`packed_output_key`] when a recipe is written on either packed key of that set
+/// (`AppModel::recipe_written`, which is false off cs, so this is `None` there).
+fn extra_map_recipe_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let k = packed_output_key(m, v, member)?;
+    m.recipe_written(&k).then_some(k)
 }
 
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
@@ -1597,22 +1671,95 @@ impl Scope {
 
 /// The view `s` names: the set with that key, else the key-less set with that id, else the set whose id matches it by
 /// fold (Note BF: a keyed set's id is folded, a key-less one keeps its typed case), so a filter opened on a key-less
-/// set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
-fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
+/// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
+/// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
+/// and has no key. The key wins. `None` for the empty string.
+fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
+    view_lookup(views, root, s).map(|(v, _)| v)
+}
+
+/// `view_of`, and whether `s` named the set by its id (the second and third lookups) rather than by a key (the first
+/// and fourth). The lookup order lives here only.
+fn view_lookup<'a>(
+    views: &'a [sets::SetView],
+    root: &Path,
+    s: &str,
+) -> Option<(&'a sets::SetView, bool)> {
     if s.is_empty() {
         return None;
     }
     views
         .iter()
         .find(|v| v.key == s)
-        .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
-        .or_else(|| views.iter().find(|v| engine::sets::same_id(&v.id, s)))
+        .map(|v| (v, false))
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| v.key.is_empty() && v.id == s)
+                .map(|v| (v, true))
+        })
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| engine::sets::same_id(&v.id, s))
+                .map(|v| (v, true))
+        })
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+                .map(|v| (v, false))
+        })
+}
+
+impl AppModel {
+    /// Whether the open set filter's stored value names its set by id under the plan now in place (a key-less set's
+    /// id is typed by the user and may look like a key). Asked before a landing plan replaces the sets and the root,
+    /// so a root change leaves such a value alone. `false` with no set filter open.
+    pub(super) fn set_filter_names_an_id(&self) -> bool {
+        let Some(
+            ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
+        ) = &self.bottom.filter
+        else {
+            return false;
+        };
+        let views = sets::views(self);
+        view_lookup(&views, &self.sets_root(), k).is_some_and(|(_, by_id)| by_id)
+    }
+}
+
+/// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip
+/// (read through `cached_scope_label`); `s` itself when no set matches.
+fn scope_label(m: &AppModel, s: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    m.scope_label_lookups.set(m.scope_label_lookups.get() + 1);
+    let views = sets::views(m);
+    view_of(&views, &m.sets_root(), s).map_or_else(|| s.to_string(), |v| v.id.clone())
+}
+
+/// `scope_label` for the Problems chip, which is drawn every frame (final wave Group 7, ledger 253): looked up once
+/// per set views build and stored key `s`. The views live in the same cache cell, which is emptied when they change.
+pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
+    // Before the borrow: `views` writes the same cell.
+    let views = sets::views(m);
+    if let Some((.., l)) = m
+        .views
+        .borrow()
+        .scope_label
+        .as_ref()
+        .filter(|(v, k, _)| Arc::ptr_eq(v, &views) && k == s)
+    {
+        return l.clone();
+    }
+    let l = scope_label(m, s);
+    m.views.borrow_mut().scope_label = Some((views, s.to_string(), l.clone()));
+    l
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
 fn scope(m: &AppModel, s: &str) -> Scope {
     let views = sets::views(m);
-    match view_of(&views, s) {
+    match view_of(&views, &m.sets_root(), s) {
         Some(v) => Scope::of(v),
         None => Scope {
             key: s.to_string(),
@@ -1708,7 +1855,7 @@ fn with_counted_rows<T>(
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
     let views = sets::views(m);
-    let v = view_of(&views, key)?;
+    let v = view_of(&views, &m.sets_root(), key)?;
     if set_ready_in(&flagged(m), v) {
         return None;
     }

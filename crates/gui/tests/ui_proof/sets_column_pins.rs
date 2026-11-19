@@ -1040,14 +1040,32 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
     );
 }
 
-/// Note HP (SC4): a cut title keeps the middle segment the search matched, and still ends with its leaf.
+/// Note HP (SC4): a cut title keeps the middle segment the search matched, and still ends with its leaf. Final wave
+/// Group 6 (ledger 187): the demo's ids have three parts, so their two-part tails already hold "stone"; the two
+/// four-part ids added here keep it only by the search rule (their tails are `a/w` and `b/w`; at 180 px the search's
+/// form `…/stone/a/w` fits, and no middle-cut form that fits holds "stone").
 #[test]
 fn a_search_keeps_its_match_in_cut_titles() {
     let ids = [
         ("architecture/stone/banner", "banner"),
         ("architecture/stone/cobble", "cobble"),
         ("architecture/stone/stonewall", "stonewall"),
+        ("architecture/stone/a/w", "a/w"),
+        ("architecture/stone/b/w", "b/w"),
     ];
+    let deep = |h: &mut crate::app_harness::H| {
+        let m = &mut h.state_mut().model;
+        let root = m.root.clone().expect("the demo is open");
+        for id in ["architecture/stone/a/w", "architecture/stone/b/w"] {
+            let p = root.join(format!("{id}.png"));
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            image::ImageBuffer::from_fn(16, 16, |_, _| image::Rgb([90u8; 3]))
+                .save(&p)
+                .unwrap();
+        }
+        m.replan();
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    };
     for (w, h_px) in [(1400, 790), (1055, 770)] {
         let resize = format!(r#"{{"op":"resize","w":{w},"h":{h_px}}}"#);
         let first = [
@@ -1056,7 +1074,7 @@ fn a_search_keeps_its_match_in_cut_titles() {
         ];
         let (_d, mut h) = crate::replay_mid(
             "demo",
-            |_| {},
+            deep,
             &first,
             |h| sets_width(h, 180.0),
             &[r#"{"op":"settle","frames":6}"#],
@@ -1064,6 +1082,15 @@ fn a_search_keeps_its_match_in_cut_titles() {
         crate::app_harness::quiet(&mut h);
         let mut any_cut = false;
         for (id, leaf) in ids {
+            // five cards need not fit the column's height: bring each into view first
+            if let Some(n) = h
+                .query_all_by_label_contains(&format!("Set {id}, position"))
+                .next()
+            {
+                n.scroll_to_me();
+            }
+            h.run();
+            crate::app_harness::quiet(&mut h);
             let title = h
                 .query_all_by_label(id)
                 .map(|n| n.rect())

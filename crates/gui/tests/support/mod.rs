@@ -170,6 +170,68 @@ pub fn opened_as_the_app(root: PathBuf, export: PathBuf) -> AppModel {
     m
 }
 
+fn flat_png(dir: &Path, name: &str, rgb: [u8; 3]) {
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb(rgb))
+        .save(dir.join(name))
+        .unwrap();
+}
+
+/// A PBR set `wall` (albedo + normal), and a PBR-picked set `leaf` with only `_n` and `_rmaos` (Note HL5).
+pub fn no_albedo_pair(dir: &Path) -> AppModel {
+    no_albedo_pair_with(dir, &[])
+}
+
+/// `no_albedo_pair` with more PNGs in `textures/arch`: each `(name, colour, sub-type)` is written before the folder
+/// is opened and decided to its sub-type after the first plan.
+pub fn no_albedo_pair_with(dir: &Path, extra: &[(&str, [u8; 3], Subtype)]) -> AppModel {
+    no_albedo_pair_at(dir, "", extra)
+}
+
+/// `no_albedo_pair_with` opened at `dir/textures/<below>` (`""` is `dir/textures`): the files are the same, so with
+/// `below = "arch"` the set ids are `wall` and `leaf` and the item keys have no `arch/` part.
+pub fn no_albedo_pair_at(dir: &Path, below: &str, extra: &[(&str, [u8; 3], Subtype)]) -> AppModel {
+    let key = |n: &str| {
+        if below.is_empty() {
+            format!("arch/{n}")
+        } else {
+            n.to_string()
+        }
+    };
+    let r = dir.join("textures/arch");
+    std::fs::create_dir_all(&r).unwrap();
+    for (n, c) in [
+        ("wall.png", [90, 90, 90]),
+        ("wall_rmaos.png", [200, 20, 255]),
+        ("leaf_rmaos.png", [100, 50, 255]),
+        ("wall_n.png", [128, 128, 255]),
+        ("leaf_n.png", [128, 128, 255]),
+    ] {
+        flat_png(&r, n, c);
+    }
+    for (n, c, _) in extra {
+        flat_png(&r, n, *c);
+    }
+    let mut m = opened_as_the_app(dir.join("textures").join(below), dir.join("export"));
+    for (n, _, st) in extra {
+        m.decide(&key(n), Answer::Subtype(*st));
+    }
+    m.decide(&key("wall.png"), Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(&key("wall_n.png"), Answer::Subtype(Subtype::PbrNormal));
+    m.decide(&key("wall_n.png"), Answer::Green(GreenConvention::Directx));
+    m.decide(&key("leaf_n.png"), Answer::Subtype(Subtype::PbrNormal));
+    m.decide(&key("leaf_n.png"), Answer::Green(GreenConvention::Directx));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for id in sdc_gui::model::sets::views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect::<Vec<_>>()
+    {
+        m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+    }
+    m
+}
+
 /// Note AZ: give the set whose key ends with `key_end` the complex-material shader (under vanilla it then packs the
 /// complex `_m`, the old cpm target) and wait for the re-plan.
 pub fn complex_material(m: &mut AppModel, key_end: &str) {
@@ -484,6 +546,61 @@ pub fn dds_pbr_sets(dir: &Path, sets: &[&str]) -> PathBuf {
         }
     }
     dir.join("textures")
+}
+
+/// The painted text galleys of the last frame whose rect lies inside `r.expand(1.0)`, each with whether egui elided
+/// it or it ends in `…`. Shapes are flattened as `ui_proof/sets_column_pins.rs` `texts` does.
+fn painted_galleys<S>(
+    h: &egui_kittest::Harness<'_, S>,
+    r: eframe::egui::Rect,
+) -> Vec<(String, bool)> {
+    use eframe::egui::Shape;
+    fn flat(s: &Shape, r: eframe::egui::Rect, out: &mut Vec<(String, bool)>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|s| flat(s, r, out)),
+            Shape::Text(t) if r.contains_rect(t.visual_bounding_rect()) => {
+                let text = t.galley.job.text.clone();
+                // `job.text` is the whole text even when egui elided its end: read the elided flag too.
+                let cut = t.galley.elided || text.ends_with('…');
+                out.push((text, cut));
+            }
+            _ => {}
+        }
+    }
+    let r = r.expand(1.0);
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, r, &mut out);
+    }
+    out
+}
+
+/// The painted texts inside `r.expand(1.0)`, joined (Tasks 6, 7 and 9).
+pub fn painted_in<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> String {
+    painted_galleys(h, r)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect::<String>()
+}
+
+/// Whether any text painted inside `r.expand(1.0)` is elided by egui or ends in `…`.
+pub fn painted_cut<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
+    painted_galleys(h, r).into_iter().any(|(_, cut)| cut)
+}
+
+/// Whether egui elided any text painted inside `r.expand(1.0)` (a hand cut such as `front_cut`'s leading `…` is not
+/// egui's; final wave Group 6, ledger 140).
+pub fn painted_elided<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
+    use eframe::egui::Shape;
+    fn flat(s: &Shape, r: eframe::egui::Rect) -> bool {
+        match s {
+            Shape::Vec(v) => v.iter().any(|s| flat(s, r)),
+            Shape::Text(t) => r.contains_rect(t.visual_bounding_rect()) && t.galley.elided,
+            _ => false,
+        }
+    }
+    let r = r.expand(1.0);
+    h.output().shapes.iter().any(|c| flat(&c.shape, r))
 }
 
 /// The filled rects of one shape (nested shapes flattened), each with its fill's alpha.

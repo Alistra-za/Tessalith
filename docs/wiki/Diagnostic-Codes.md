@@ -139,7 +139,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `PACK-SIZE-MISMATCH` | error | Sources of one recipe, or an assigned helper and its target, have different aspect ratios. | Crop or resize the sources to one aspect ratio. |
 | `PACK-SOURCE-RESIZED` | info | Sources of one aspect ratio and different sizes: each smaller one was enlarged to the largest. | Nothing; supply maps of one size for exact control. |
 | `PACK-CONFLICT` | warning | A pre-packed file and raw maps target one output; the pre-packed file wins by default. | Remove one side, or set `packing.prefer`. |
-| `PACK-UNUSED-INPUT` | warning | A raw map is used by no recipe under the target. | Change the target, set a sub-type, or remove it. |
+| `PACK-UNUSED-INPUT` | warning | A packing input isn't used by this set, for example when no recipe under the target reads it, or when the set's own `_f` is its PBR fuzz texture in place of a fuzz map. | Remove it, or change the set's shader, the file's type or the target. |
 | `PACK-RECIPE-CONFLICT` | warning | The `_rfaos` and `_rmaos` keys of one set disagree on `packing.recipe`; the `_rfaos` entry wins. | Keep the recipe on one key. |
 | `PACK-RECIPE-UNBUILDABLE` | warning | An `rfaos` recipe the set can't build; `_rmaos` was built ([recipes](Texture-Packing.md#packing-loose-maps)). | Add roughness, glossiness or AO, or drop the setting. |
 

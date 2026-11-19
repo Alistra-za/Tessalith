@@ -3,10 +3,11 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
-    set_views, SetView, SlotFill, SlotKind,
+    engine_inputs, feature_slots, has_slot_clear, has_slot_link, item_output_key,
+    item_output_key_in, json_files, json_keeps_fill, output_candidates, packed_owners,
+    projected_slot, set_views, slot_string, JsonFile, SetView, SlotFill, SlotKind,
 };
-use super::txst_map::record_entries;
+use super::txst_map::{record_entries, slot_path_key};
 use super::AppModel;
 use crate::pgp::prefix::{
     check_file_name, check_json_path, default_prefix, matches_nothing, output_rel, pitfalls,
@@ -19,7 +20,7 @@ use engine::config::Target;
 use engine::sets::{same_id, OutputKey};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +78,11 @@ fn fill_path<'a>(
         .and_then(|k| paths.get(&k))
 }
 
+fn same_slot_file(requested: &str, written: &str) -> bool {
+    Path::new(&slot_path_key(requested).replace('\\', "/"))
+        == Path::new(&written.replace('\\', "/"))
+}
+
 /// The final slot paths of a set: a slot whose finished file lives at another set's path points there (a borrowed
 /// slot, or the set's own texture when a set earlier in the order owns it, spec §3.3); an explicit `slotN` setting
 /// wins.
@@ -85,8 +91,11 @@ fn slots_of(
     views: &[SetView],
     paths: &BTreeMap<OutputKey, PathBuf>,
     m: &AppModel,
-) -> BTreeMap<u8, String> {
+    roots: &[PathBuf; 2],
+) -> (BTreeMap<u8, String>, BTreeMap<u8, SlotKind>) {
     let mut out = BTreeMap::new();
+    // Two fills can share a slot number. Only the winning fill supplies its string.
+    let mut winners = BTreeMap::new();
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
@@ -96,14 +105,22 @@ fn slots_of(
         // Note HL5: a no-albedo set's outputs stay at the mesh's own paths: the mapped output (a rel path under
         // `textures`), else the file's game path.
         let json_only = v.json && !v.pbr;
-        let p = match fill_path(item, views, paths, m) {
+        let Some(it) = m.item(item) else { continue };
+        let key = item_output_key(views, it);
+        let requested = match key.as_ref().and_then(|k| paths.get(k)) {
             // Note HQ6: an explicit path is under the export folder, as the JSON names it.
             Some(p) => p.clone(),
-            None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
+            None if json_only => match it.job.as_ref() {
                 Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
                 None => continue,
             },
             None => continue,
+        };
+        let requested = requested.to_string_lossy().replace('/', "\\");
+        let written = projected_slot(m, roots, it, key.as_ref()).map(|s| s.to_ascii_lowercase());
+        let path = match &written {
+            Some(game) if !same_slot_file(&requested, game) => game.clone(),
+            _ => requested,
         };
         // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command, `prefix` being the
         // one it fills from by default: a `Slots`-form rename moves the files away from it, so each is named (HJ3).
@@ -111,11 +128,13 @@ fn slots_of(
         // explicit slot is never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
         let at_own_path = *kind != SlotKind::SkinSk
             && v.pbr
-            && default_prefix(&v.settings, v.derived_match.as_deref().unwrap_or(""))
-                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(&pre, kind.suffix())));
+            && default_prefix(&v.settings, v.derived_match.as_deref().unwrap_or("")).is_some_and(
+                |pre| path_lower(Path::new(&path)) == path_lower(&output_rel(&pre, kind.suffix())),
+            );
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
-            out.insert(n, p.to_string_lossy().replace('/', "\\"));
+            out.insert(n, path);
+            winners.insert(n, *kind);
         }
     }
     if v.json && !v.pbr {
@@ -139,13 +158,14 @@ fn slots_of(
             out.insert(n, s.clone());
         }
     }
-    out
+    (out, winners)
 }
 
 /// Note HL5: the diffuse path of a no-albedo JSON set whose slot 1 is empty: the mapping's slot 1, else the set's base
-/// path. `None` for any other set. The Problems row (Note HL6) names the same path.
+/// path. `None` for any other set, and when the set writes `slot1` itself (a link, a typed path or a clear): the JSON
+/// names that, so the mesh keeps nothing (review E1, Task 15a). The Problems row (Note HL6) names the same path.
 pub(super) fn no_albedo_slot1(v: &SetView) -> Option<String> {
-    if !v.json || v.pbr || slot_filled(v, 1) {
+    if !v.json || v.pbr || slot_filled(v, 1) || slot_string(&v.settings, 1).is_some() {
         return None;
     }
     let stored = v
@@ -209,7 +229,8 @@ fn unresolved_slots(
         if v.json && !v.pbr && from.is_none() {
             continue;
         }
-        if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {
+        // A `slotN` link or clear the JSON writes in place of the fill names no path of it (3b-F8: `json_keeps_fill`).
+        if !json_keeps_fill(v, *kind) {
             continue;
         }
         if fill_path(item, views, paths, m).is_none() {
@@ -237,44 +258,88 @@ pub(crate) fn file_name_problem(what: &str, name: &str) -> Option<String> {
     check_file_name(name, what).err().map(|e| e.0)
 }
 
-/// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
+/// Whether `v` is written as a PGPatcher JSON entry on this target (CS, a JSON set, and a match that applies).
+pub(crate) fn exports_json(m: &AppModel, v: &SetView) -> bool {
+    m.target == Target::Cs
+        && v.json
+        && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+}
+
+/// Review E1 (Task 15a): whether `v` writes a PGPatcher entry: `exports_json`, and the statics rule keeps the entry
+/// (design §5.1, `pgp_entry_wanted`). The one answer the link display, the feature defaults, the missing-map
+/// suppression and the cleared state read (`txst_map::link_slots`), and the filter of `written_json_entries`.
+pub(crate) fn writes_entry(m: &AppModel, v: &SetView) -> bool {
+    exports_json(m, v) && m.pgp_entry_wanted(v)
+}
+
+/// Every PBR set's JSON entry, in display order (CS only; empty otherwise). A candidate: it keeps the sets whose
+/// entry the statics rule drops, which the 3D preview simulates (`written_json_entries` is what the file holds).
+/// Ruling 3b-F9: such a set's stored `slotN` commands change nothing, so its candidate leaves them out.
 pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     if m.target != Target::Cs {
         return vec![];
     }
     let (_, paths) = engine_inputs(m);
     let views = set_views(m);
+    let roots = super::sets::output_roots(m);
     views
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
-        .filter(|v| {
-            v.json && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
-        })
-        .map(|v| {
-            let slots = slots_of(v, &views, &paths, m);
-            let mut settings = crate::model::auto_flags::resolved_for(
-                v.json,
-                &v.slots,
-                &v.settings,
-                &crate::model::auto_flags::hint(m, v),
-            );
-            lock_empty_slots(v, &slots, &mut settings);
-            let e = EntryInput {
-                settings,
-                slots,
-                derived_match: v.derived_match.clone().unwrap_or_default(),
-                section: false,
+        .filter(|v| exports_json(m, v))
+        .map(|full| {
+            let bare;
+            let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
+            let v = if commands && !writes_entry(m, full) {
+                bare = SetView {
+                    settings: without_slot_commands(&full.settings),
+                    ..full.clone()
+                };
+                &bare
+            } else {
+                full
             };
-            (v.clone(), e)
+            let (e, _) = entry_for(v, &views, &paths, m, &roots);
+            (full.clone(), e)
         })
         .collect()
+}
+
+fn entry_for(
+    v: &SetView,
+    views: &[SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+    m: &AppModel,
+    roots: &[PathBuf; 2],
+) -> (EntryInput, BTreeMap<u8, SlotKind>) {
+    let (slots, winners) = slots_of(v, views, paths, m, roots);
+    let mut settings = crate::model::auto_flags::resolved_for(
+        v.json,
+        feature_slots(v),
+        &v.settings,
+        &crate::model::auto_flags::hint(m, v),
+    );
+    lock_empty_slots(v, &slots, &mut settings);
+    let entry = EntryInput {
+        settings,
+        slots,
+        derived_match: v.derived_match.clone().unwrap_or_default(),
+        section: false,
+    };
+    (entry, winners)
+}
+
+/// `s` less its string `slot1`-`slot8` (links and clears).
+fn without_slot_commands(s: &Settings) -> Settings {
+    let mut s = s.clone();
+    s.retain(|k, v| !(v.is_string() && (1..=8u8).any(|n| *k == format!("slot{n}"))));
+    s
 }
 
 /// `json_entries` less the sets whose entry the statics rule drops (design §5.1): what the written file holds.
 pub fn written_json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     json_entries(m)
         .into_iter()
-        .filter(|(v, _)| m.pgp_entry_wanted(v))
+        .filter(|(v, _)| writes_entry(m, v))
         .collect()
 }
 
@@ -299,8 +364,16 @@ const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [
     ),
 ];
 
+/// Review E1 (Task 15a): whether the JSON `v` writes fills `s`'s row (`json_files`): a typed path no set writes fills
+/// it too, and a cleared one does not.
 fn has(v: &SetView, s: SlotKind) -> bool {
-    v.slots.get(&s).is_some_and(SlotFill::is_filled)
+    json_files(v).any(|f| f.fills(s))
+}
+
+/// Whether the JSON `v` writes would hold own or borrowed files of both kinds `a` and `b` on their one game slot: a
+/// `slotN` there names one path, so only fills can clash.
+fn clash(v: &SetView, a: SlotKind, b: SlotKind) -> bool {
+    json_keeps_fill(v, a) && json_keeps_fill(v, b)
 }
 
 /// The "feature is on but its texture is missing" blocks of one PBR set; `has` says whether a slot is filled.
@@ -385,60 +458,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
         if m.target == Target::Cs && !m.pgp_entry_wanted(v) {
             continue;
         }
-        if has(v, SlotKind::Coat) && has(v, SlotKind::Fuzz) {
-            out.push(issue(v, format!("{}: _cnr and _f both use slot 7", v.id)));
-        }
-        if has(v, SlotKind::Emissive) && has(v, SlotKind::SkinSk) {
-            out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
-        }
-        if m.target != Target::Cs || !v.json {
-            continue;
-        }
-        let s = &v.settings;
-        for text in missing_texture_texts(&v.id, s, |k| has(v, k)) {
-            out.push(issue(v, text));
-        }
-        for (f, _) in FEATURE_KEYS {
-            if let Some(b) = feature_on(s, f).then(|| blocked_by(s, f)).flatten() {
-                if f < b {
-                    let text = format!(
-                        "{}: {} and {} can't both be on",
-                        v.id,
-                        feature_key(f).trim_end_matches("_on"),
-                        feature_key(b).trim_end_matches("_on")
-                    );
-                    // P26, owner 2026-11-04 (Note FN5): the row offers to turn off either one.
-                    out.push(ExportIssue {
-                        fix: Some(Fix::FeatureClash(v.id.clone(), f, b)),
-                        ..issue(v, text)
-                    });
-                }
-            }
-        }
-        // Note FC3 (P13): every path error starts with its field's key; the row goes to that field when it has a box
-        // to focus, else it keeps Go to set.
-        let fix_path = |e: &str| {
-            let field = e.split_once(':').map_or(e, |(f, _)| f);
-            // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
-            crate::pgp::prefix::is_path_key(field)
-                .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
-        };
-        if let Some(e) = &v.prefix_error {
-            out.push(ExportIssue {
-                fix: fix_path(e),
-                ..issue(v, format!("{}: {e}", v.id))
-            });
-        }
-        for n in 1..=8u8 {
-            if let Some(Value::String(p)) = s.get(&format!("slot{n}")) {
-                if !p.is_empty() {
-                    if let Err(e) = check_json_path(p, &format!("slot{n}")) {
-                        // Slot paths have no focusable box (the JSON editor holds them): the row offers Go to set.
-                        out.push(issue(v, format!("{}: {}", v.id, e.0)));
-                    }
-                }
-            }
-        }
+        out.extend(set_blocks(m, v));
     }
     out.extend(path_collisions(m));
     if m.target == Target::Cs {
@@ -457,14 +477,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                     .iter()
                     .filter(|v| v.json && m.pgp_entry_wanted(v) && m.in_run(&v.key))
                 {
-                    for (n, from) in unresolved_slots(v, &views, &paths, m) {
-                        let text = match from {
-                            Some(from) => format!(
-                                "{}: slot{n} borrows from {from}, which has no output path",
-                                v.id
-                            ),
-                            None => format!("{}: slot{n}'s texture has no output path", v.id),
-                        };
+                    for text in unresolved_texts(v, &views, &paths, m) {
                         out.push(issue(v, text));
                     }
                 }
@@ -477,6 +490,86 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                     "PGPatcher JSON does not validate: {}",
                     errs[0]
                 )));
+            }
+        }
+    }
+    out
+}
+
+/// The blocks `unresolved_slots` raises for one set, each starting with its id.
+fn unresolved_texts(
+    v: &SetView,
+    views: &[SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+    m: &AppModel,
+) -> Vec<String> {
+    unresolved_slots(v, views, paths, m)
+        .into_iter()
+        .map(|(n, from)| match from {
+            Some(from) => format!(
+                "{}: slot{n} borrows from {from}, which has no output path",
+                v.id
+            ),
+            None => format!("{}: slot{n}'s texture has no output path", v.id),
+        })
+        .collect()
+}
+
+/// One set's own blocks: the slot clashes and, for a JSON set on CS, its missing textures, feature clashes and path
+/// errors. Export reads them for the sets in the run, and `prepare` for the entries it keeps from outside it (3b-F7).
+fn set_blocks(m: &AppModel, v: &SetView) -> Vec<ExportIssue> {
+    let mut out = vec![];
+    if clash(v, SlotKind::Coat, SlotKind::Fuzz) {
+        out.push(issue(v, format!("{}: _cnr and _f both use slot 7", v.id)));
+    }
+    if clash(v, SlotKind::Emissive, SlotKind::SkinSk) {
+        out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
+    }
+    if m.target != Target::Cs || !v.json {
+        return out;
+    }
+    let s = &v.settings;
+    for text in missing_texture_texts(&v.id, s, |k| has(v, k)) {
+        out.push(issue(v, text));
+    }
+    for (f, _) in FEATURE_KEYS {
+        if let Some(b) = feature_on(s, f).then(|| blocked_by(s, f)).flatten() {
+            if f < b {
+                let text = format!(
+                    "{}: {} and {} can't both be on",
+                    v.id,
+                    feature_key(f).trim_end_matches("_on"),
+                    feature_key(b).trim_end_matches("_on")
+                );
+                // P26, owner 2026-11-04 (Note FN5): the row offers to turn off either one.
+                out.push(ExportIssue {
+                    fix: Some(Fix::FeatureClash(v.id.clone(), f, b)),
+                    ..issue(v, text)
+                });
+            }
+        }
+    }
+    // Note FC3 (P13): every path error starts with its field's key; the row goes to that field when it has a box
+    // to focus, else it keeps Go to set.
+    let fix_path = |e: &str| {
+        let field = e.split_once(':').map_or(e, |(f, _)| f);
+        // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
+        crate::pgp::prefix::is_path_key(field)
+            .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
+    };
+    if let Some(e) = &v.prefix_error {
+        out.push(ExportIssue {
+            fix: fix_path(e),
+            ..issue(v, format!("{}: {e}", v.id))
+        });
+    }
+    for n in 1..=8u8 {
+        if let Some(Value::String(p)) = s.get(&format!("slot{n}")) {
+            if !p.is_empty() {
+                if let Err(e) = check_json_path(p, &format!("slot{n}")) {
+                    // Slot paths have no focusable box (the JSON editor holds them): the row offers Go to set.
+                    out.push(issue(v, format!("{}: {}", v.id, e.0)));
+                }
             }
         }
     }
@@ -608,6 +701,56 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
         .collect()
 }
 
+/// Run-row identity and the exact path the job writes. Only the latter is a filesystem path.
+#[derive(Debug, Clone)]
+pub struct JsonDependency {
+    pub job_key: String,
+    pub output: PathBuf,
+    /// A successful row alone cannot vouch for a slot path that has no matching producer.
+    pub slot_file: Option<PathBuf>,
+    /// The 1-based JSON slot and the game path of its local producer.
+    pub slot: Option<(u8, String)>,
+}
+
+fn dependency(
+    m: &AppModel,
+    views: &[SetView],
+    roots: &[PathBuf; 2],
+    f: JsonFile<'_>,
+    entry: &EntryInput,
+    winners: &BTreeMap<u8, SlotKind>,
+) -> Option<JsonDependency> {
+    let (item, number) = match f {
+        JsonFile::Fill(k, fill) => (
+            fill.item()?,
+            k.game_slot().filter(|n| winners.get(n) == Some(&k)),
+        ),
+        JsonFile::Linked(n, link) => (link.item.as_deref()?, Some(n)),
+        JsonFile::External(_) => return None,
+    };
+    let item = m.item(item)?;
+    let job = item.job.as_ref().filter(|_| !item.job_key.is_empty())?;
+    let mut slot_file = None;
+    let slot = number
+        .filter(|&n| entry.written_slot(n).is_some())
+        .map(|n| {
+            let projected = projected_slot(m, roots, item, item_output_key(views, item).as_ref());
+            let game = projected.unwrap_or_else(|| {
+                // A legacy output outside textures also needs the installed copy the reader opens.
+                let game = slot_path_key(&super::sets::written_game_path(job).replace('/', "\\"));
+                slot_file = Some(roots[0].join(&game));
+                game
+            });
+            (n, game.to_ascii_lowercase())
+        });
+    Some(JsonDependency {
+        job_key: item.job_key.clone(),
+        output: job.output.clone(),
+        slot_file,
+        slot,
+    })
+}
+
 /// What an export about to start writes once it has ended: the PGPatcher JSON and the vanilla copies.
 #[derive(Debug, Clone)]
 pub struct PendingJson {
@@ -615,13 +758,15 @@ pub struct PendingJson {
     /// A4), else the export folder, as `PendingCs.root` and `PendingCm.root`.
     pub root: PathBuf,
     pub path: PathBuf,
-    /// Set id, the job keys its entry depends on, and the entry.
-    pub entries: Vec<(String, Vec<String>, EntryInput)>,
+    /// Set id, the local outputs its entry depends on, and the entry.
+    pub entries: Vec<(String, Vec<JsonDependency>, EntryInput)>,
     /// Borrowed-slot copies for vanilla: (owner output, borrower path, owner job key), paths absolute (P4).
     pub copies: Vec<(PathBuf, PathBuf, String)>,
-    /// Note HF9: on a run that leaves sets out, the plan's output root: a dep with no row passes when its file is
-    /// there. `None`: every dep needs its row, as before.
-    pub untouched_root: Option<PathBuf>,
+    /// Note HF9: a run that leaves sets out accepts an untouched dependency present on disk.
+    pub leaves_sets_out: bool,
+    /// 3b-F7: entries of sets outside the run that their own checks refuse, as (set id, why); `finish` notes each as
+    /// "not in JSON" and writes the rest.
+    pub held: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -679,24 +824,42 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             path: PathBuf::new(),
             entries: vec![],
             copies,
-            untouched_root: m.untouched_root(),
+            leaves_sets_out: m.leaves_sets_out(),
+            held: vec![],
         });
     }
-    let deps = |v: &SetView| -> Vec<String> {
-        v.slots
-            .values()
-            .filter_map(|f| {
-                m.item(f.item()?)
-                    .map(|i| i.job_key.clone())
-                    .filter(|j| !j.is_empty())
-            })
-            .collect()
+    // Review E1 (Task 15a): the local files the JSON names (`json_files`): a link that names a set's output is a dep as
+    // a borrow is; an own or borrowed file a `slotN` overrides is none (the set still converts its own).
+    let roots = super::sets::output_roots(m);
+    // 3b-F7, 3b-F12: a set outside the run gates nothing (Note HF9). One with a stored slot command gets its entry
+    // only when its own checks pass; one with none is not checked, as on main.
+    let (_, paths) = engine_inputs(m);
+    let refused = |v: &SetView| -> Option<String> {
+        let mut why = set_blocks(m, v).into_iter().map(|i| i.text);
+        let text = why
+            .next()
+            .or_else(|| unresolved_texts(v, &views, &paths, m).into_iter().next())?;
+        let prefix = format!("{}: ", v.id);
+        Some(text.strip_prefix(&prefix).unwrap_or(&text).to_string())
     };
+    let (mut entries, mut held) = (vec![], vec![]);
     // Design §5.1: a set with a texture-set block gets its entry only for the statics that use its diffuse.
-    let mut entries: Vec<_> = written_json_entries(m)
-        .into_iter()
-        .map(|(v, e)| (v.id.clone(), deps(&v), e))
-        .collect();
+    for v in views.iter().filter(|v| writes_entry(m, v)) {
+        let commands = has_slot_link(&v.settings) || has_slot_clear(&v.settings);
+        match (commands && !m.in_run(&v.key))
+            .then(|| refused(v))
+            .flatten()
+        {
+            Some(why) => held.push((v.id.clone(), why)),
+            None => {
+                let (e, winners) = entry_for(v, &views, &paths, m, &roots);
+                let deps = json_files(v)
+                    .filter_map(|f| dependency(m, &views, &roots, f, &e, &winners))
+                    .collect();
+                entries.push((v.id.clone(), deps, e));
+            }
+        }
+    }
     // GUI tweaks G4: the delete sections go last, so nothing after them changes the shapes they match.
     for (i, s) in m.sections().into_iter().enumerate() {
         if crate::model::sections::written(&s) {
@@ -708,10 +871,10 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             entries.push((format!("delete section {}", i + 1), vec![], e));
         }
     }
-    if entries.is_empty() {
+    if entries.is_empty() && held.is_empty() {
         return None;
     }
-    let root = m.output_root();
+    let [root, _] = roots;
     Some(PendingJson {
         path: root
             .join("PBRNIFPatcher")
@@ -719,35 +882,32 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
         entries,
         copies: vec![],
         root,
-        untouched_root: m.untouched_root(),
+        leaves_sets_out: m.leaves_sets_out(),
+        held,
     })
 }
 
-fn exported(rows: &[Row], key: &str) -> Result<(), String> {
-    match rows.iter().find(|r| r.job_key.eq_ignore_ascii_case(key)) {
-        Some(Row {
-            state: RowState::Done { .. } | RowState::UpToDate,
-            ..
-        }) => Ok(()),
-        Some(r) => Err(r.state.label()),
-        None => Err("not exported".into()),
-    }
-}
-
-/// Note HF9: one dep of an entry: written or up to date in this run, or, on a run that leaves sets out, untouched by it
-/// and on disk ("leave it alone" keeps an entry whose source changed since).
-fn dep_ok(p: &PendingJson, rows: &[Row], key: &str) -> Result<(), String> {
-    let touched = rows.iter().any(|r| r.job_key.eq_ignore_ascii_case(key));
-    match &p.untouched_root {
-        Some(root) if !touched => {
-            if root.join(key).is_file() {
-                Ok(())
-            } else {
-                Err("not exported yet".into())
-            }
+/// Note HF9: a dependency must succeed in this run, or be left untouched with its exact output on disk.
+fn dep_ok(
+    p: &PendingJson,
+    rows: &[Row],
+    key: &str,
+    output: &Path,
+    slot_file: Option<&Path>,
+) -> Result<(), String> {
+    if let Some(r) = rows.iter().find(|r| r.job_key.eq_ignore_ascii_case(key)) {
+        if !matches!(r.state, RowState::Done { .. } | RowState::UpToDate) {
+            return Err(r.state.label());
         }
-        _ => exported(rows, key),
+        if slot_file.is_none() {
+            return Ok(());
+        }
+    } else if !p.leaves_sets_out {
+        return Err("not exported".into());
     }
+    (output.is_file() && slot_file.is_none_or(Path::is_file))
+        .then_some(())
+        .ok_or_else(|| "not exported yet".into())
 }
 
 /// After a successful export, the vanilla borrowed-slot copies (P4, P22). A copy replaces only a file it wrote
@@ -761,7 +921,7 @@ pub fn copy_files(
 ) {
     for (src, dst, owner_key) in &p.copies {
         if !owner_key.is_empty() {
-            if let Err(why) = dep_ok(p, rows, owner_key) {
+            if let Err(why) = dep_ok(p, rows, owner_key, src, None) {
                 notes.push(format!("could not copy {} ({why})", src.display()));
                 continue;
             }
@@ -801,6 +961,9 @@ pub fn finish(
     last_sha: Option<&str>,
     notes: &mut Vec<String>,
 ) -> Finish {
+    for (id, why) in &p.held {
+        notes.push(format!("not in JSON: {id} ({why})"));
+    }
     if p.entries.is_empty() {
         return Finish::Nothing;
     }
@@ -808,7 +971,14 @@ pub fn finish(
     for (id, deps, e) in &p.entries {
         match deps
             .iter()
-            .map(|k| dep_ok(p, rows, k))
+            .map(|d| {
+                if let Some((n, game)) = &d.slot {
+                    if !e.written_slot(*n).is_some_and(|s| same_slot_file(s, game)) {
+                        return Err("not exported yet".into());
+                    }
+                }
+                dep_ok(p, rows, &d.job_key, &d.output, d.slot_file.as_deref())
+            })
             .find_map(Result::err)
         {
             None => kept.push(e.clone()),

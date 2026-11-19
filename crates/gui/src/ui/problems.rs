@@ -501,7 +501,11 @@ fn shader_menu(
         .inner
     });
     let menu = r.inner;
-    let name = format!("Change shader for {id}");
+    // Two rows of one set can both offer it: the row's code tells their names apart (final wave Group 5).
+    let name = format!(
+        "Change shader for {id} ({})",
+        p.code.map_or("", |c| c.as_str())
+    );
     menu.response
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
     if let Some(why) = off {
@@ -707,6 +711,25 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
+        // Owner A1-8: it writes sdc.toml, so a read-only one disables it with its reason; a pointer click only (FC5).
+        Fix::ClearRecipe(k) => {
+            let out = format!("{}.dds", k.rsplit('/').next().unwrap_or(k));
+            // Two rows (a PACK-RECIPE-* and the SHADER-EXTRA-MAP of one output) can both offer it: the row's code
+            // tells their names apart (egui-ui-rules 8.4; final wave Group 5).
+            let name = format!(
+                "Clear the packing recipe of {out} ({})",
+                p.code.map_or("", |c| c.as_str())
+            );
+            let toml = m.toml_read_only_reason();
+            let off = toml.as_deref().or(off);
+            click_only_button(
+                ui,
+                egui::Button::new("Clear recipe"),
+                Some(&name),
+                "Remove packing.recipe from this set's packed entries in sdc.toml. A project or preset recipe can apply next.",
+                off,
+            )
+        }
         Fix::KeepAlpha { table, name } => {
             let why = off.or_else(|| table.as_ref().err().map(String::as_str));
             let b = ui.add_enabled(why.is_none(), egui::Button::new("Keep alpha"));
@@ -1032,12 +1055,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
     let mut act = None;
-    let label = |k: &String| {
-        crate::model::sets::views(model)
-            .iter()
-            .find(|v| v.key == *k)
-            .map_or(k.clone(), |v| v.id.clone())
-    };
+    let label = |k: &String| crate::model::bottom::cached_scope_label(model, k);
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
     let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
     if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {
@@ -1312,6 +1330,7 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
+        Fix::ClearRecipe(k) => model.clear_packing_recipe(&k),
         Fix::KeepAlpha { table, .. } => {
             if let (At::Texture(key), Ok(table)) = (at, table) {
                 if let Err(why) = model.keep_alpha_shown(&key, Some(&table)) {

@@ -39,6 +39,15 @@ pub struct EntryInput {
     pub section: bool,
 }
 
+impl EntryInput {
+    /// A lock suppresses a derived slot unless the project contains its slot key (AN6).
+    pub(crate) fn written_slot(&self, n: u8) -> Option<&str> {
+        let path = self.slots.get(&n)?;
+        (!pgp_locked(&self.settings, n) || self.settings.contains_key(&format!("slot{n}")))
+            .then_some(path)
+    }
+}
+
 fn colour(v: &Value, alpha: bool) -> Option<Node> {
     let c = super::settings::rgb_of(v)?;
     // AG133: a float is written as stored (0.08 stays 0.08, 1.25 stays 1.25), within 0..=RGB_MAX; an old 0-255 colour
@@ -145,7 +154,9 @@ fn fixed_default_block() -> Vec<(String, Node)> {
 }
 
 /// The entry for one set: only the set's own settings, under the per-kind rules, in schema order.
-fn object(own: &Settings, derived: &str, slots: &BTreeMap<u8, String>) -> Vec<(String, Node)> {
+fn object(entry: &EntryInput) -> Vec<(String, Node)> {
+    let own = &entry.settings;
+    let derived = &entry.derived_match;
     let mut out = vec![];
     // One match key per entry (DECISIONS AN1): a `Key`-form rename matches by its `match_diffuse` only; a `Slots`-form
     // one has no `json_rename` and keeps its matches, its slots naming the renamed files (HJ3).
@@ -215,12 +226,7 @@ fn object(own: &Settings, derived: &str, slots: &BTreeMap<u8, String>) -> Vec<(S
             KeyKind::Rgba => v.and_then(|v| colour(v, true)),
             KeyKind::Slot => {
                 let n: u8 = k.key[4..].parse().expect("slotN");
-                // A PGPatcher lock keeps the mesh's texture: only an explicit slot command still overrides it (AN6).
-                let derived_only = !own.contains_key(k.key);
-                slots
-                    .get(&n)
-                    .filter(|_| !(derived_only && pgp_locked(own, n)))
-                    .map(|p| Node::Scalar(json!(p)))
+                entry.written_slot(n).map(|p| Node::Scalar(json!(p)))
             }
         };
         if let Some(n) = node {
@@ -263,7 +269,7 @@ pub fn entry_node(e: &EntryInput) -> Node {
     if e.section {
         return Node::Obj(section_object(&e.settings));
     }
-    Node::Obj(object(&e.settings, &e.derived_match, &e.slots))
+    Node::Obj(object(e))
 }
 
 /// A delete section (GUI tweaks G4): its exact matches (in the JSON form), `path_contains`, `nif_filter`, then

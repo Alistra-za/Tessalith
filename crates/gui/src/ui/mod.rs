@@ -52,6 +52,58 @@ use std::cell::RefCell;
 /// The badge rule lives in the model (the "Has warnings" filter shares it).
 pub use crate::model::counts_toward_badge;
 
+/// Retain a drawing value while it is in use. Text layout must run outside the context lock.
+fn paint_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: egui::Id,
+    build: impl FnOnce() -> T,
+) -> T {
+    type Cache<T> = egui::cache::FramePublisher<egui::Id, T>;
+    if let Some(value) = ctx.memory_mut(|m| {
+        let cache = m.caches.cache::<Cache<T>>();
+        let value = cache.get(&key)?.clone();
+        cache.set(key, value.clone());
+        Some(value)
+    }) {
+        return value;
+    }
+    let value = build();
+    ctx.memory_mut(|m| m.caches.cache::<Cache<T>>().set(key, value.clone()));
+    value
+}
+
+/// Measurements of set-editor paint work on the current GUI thread.
+#[cfg(feature = "test-hooks")]
+pub mod paint_counts {
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy)]
+    pub enum Work {
+        Title,
+        TitleFit,
+        ShortTitles,
+        OutputSummary,
+        OutputLine,
+        Format,
+        Picker,
+    }
+
+    thread_local! { static BUILDS: Cell<[usize; 7]> = const { Cell::new([0; 7]) }; }
+
+    impl Work {
+        pub(super) fn built(self) {
+            BUILDS.with(|b| {
+                let mut counts = b.get();
+                counts[self as usize] += 1;
+                b.set(counts);
+            });
+        }
+        pub fn count(self) -> usize {
+            BUILDS.with(|b| b.get()[self as usize])
+        }
+    }
+}
+
 /// Per-window drawing state that is not part of the model.
 #[derive(Default)]
 pub struct State {
@@ -164,13 +216,15 @@ pub fn draw_with_scan(
     ui.data_mut(|d| d.insert_temp(seen_id, seen));
     // The 2D | 3D switch (AB4, AG78): in 3D the set's 3D view takes the centre in place of the set editor's body.
     let three_d = state.set3d.enabled && set_preview::wanted(model);
+    let selection_in_front = model.centre_front() == CentreTab::Selection;
     // A11: no columns until a folder is open. Note JI7: nothing is drawn at the window's right edge in any state.
     if model.root.is_some() {
         let (thumbs, drops, cmds) = (&mut state.thumbs, &mut state.drops, &mut state.slot_cmds);
         // Each column stops at its minimum and leaves the columns after it theirs and the centre its floor.
         let mut floor = centre_floor(ui.ctx(), model);
         // Note FB2: the 2D set editor's one column needs its slot rows' width, so the columns yield it.
-        let editor = !three_d && set_editor_shown(model, false);
+        // Review E24: only while the Selection tab is in front; a centre tab has no slot rows to make room for.
+        let editor = !three_d && selection_in_front && set_editor_shown(model, false);
         if editor {
             floor = floor.max(set_editor::ROWS_MIN);
         }
@@ -215,7 +269,6 @@ pub fn draw_with_scan(
         );
     }
     let c = egui::CentralPanel::default().show(ui, |ui| centre(ui, model, state, three_d));
-    let selection_in_front = model.centre_front() == CentreTab::Selection;
     ui.ctx()
         .data_mut(|d| d.insert_temp(centre_id(), c.response.rect));
     // Folders (or files, which stand for their folder) dropped anywhere but on a slot card open like Open folder
@@ -229,11 +282,13 @@ pub fn draw_with_scan(
     slot_commands::draw(ui.ctx(), model, &mut state.slot_cmds);
     dialogs::draw(ui.ctx(), model);
     centre_tabs::popped(ui.ctx(), model);
-    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab).
+    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab). The front
+    // tab is read again here, after `centre()` ran, not taken from the hoisted value: a strip click this frame must
+    // show or hide the window this frame.
     set_preview::settings_window(
         ui.ctx(),
         model,
-        three_d && selection_in_front && set_editor_shown(model, three_d),
+        three_d && model.centre_front() == CentreTab::Selection && set_editor_shown(model, three_d),
     );
     // T7 K10: last, so it is over everything and survives a virtualised source.
     columns::drag_ghost(ui.ctx(), model, &mut state.thumbs);
@@ -291,9 +346,10 @@ pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {
 
 /// The narrowest the centre gets: `CENTRE_MIN`, and while a texture is expanded enough for `PREVIEW_MIN` beside the
 /// collapsed settings strip (K8), or beside the open settings in a window where they start open (Note FC8). The 16 is
-/// `Frame::central_panel`'s 8 px margin a side.
+/// `Frame::central_panel`'s 8 px margin a side. Review E24: the preview's part holds only while the Selection tab is in
+/// front, as the set editor's floor does; behind a centre tab the floor is `CENTRE_MIN`. The only caller sizes the columns.
 pub(crate) fn centre_floor(ctx: &egui::Context, model: &AppModel) -> f32 {
-    if model.expanded.is_some() {
+    if model.expanded.is_some() && model.centre_front() == CentreTab::Selection {
         let settings = if ctx.content_rect().width() >= preview::WIDE_WINDOW {
             preview::SETTINGS_WIDTH
         } else {

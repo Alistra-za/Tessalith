@@ -444,9 +444,9 @@ fn an_old_skin_entry_drops_at_the_next_export_under_the_keep_rules() {
     let rows: Vec<Row> = p
         .entries
         .iter()
-        .flat_map(|(_, deps, _)| deps.clone())
-        .map(|job_key| Row {
-            job_key,
+        .flat_map(|(_, deps, _)| deps)
+        .map(|dep| Row {
+            job_key: dep.job_key.clone(),
             path: String::new(),
             state: RowState::Done { passed: true },
             warnings: vec![],

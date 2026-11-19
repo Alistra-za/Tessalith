@@ -4,7 +4,9 @@ mod support;
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::sets::{set_views, slot_row, SlotFill, SlotKind};
+use engine::config::Subtype;
+use sdc_gui::model::bulk::MenuAction;
+use sdc_gui::model::sets::{set_views, slot_row, view_row, views, SlotCommand, SlotFill, SlotKind};
 use sdc_gui::model::AppModel;
 use std::time::Duration;
 use support::*;
@@ -896,5 +898,680 @@ fn a_far_jump_does_not_shift_the_scroll() {
     assert!(
         ys.windows(2).all(|w| (w[0] - w[1]).abs() < 1.5),
         "card 200 moved between frames: {ys:?}"
+    );
+}
+
+/// The AccessKit name `member_chip` gives the own `leaf_f.png` chip on base (read off the premise run).
+const FUZZ_CHIP: &str = "F";
+
+#[test]
+fn a_linked_chip_is_filled_and_named_for_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 1,
+        item: "arch/wall.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        on_card_of(&h, "arch/leaf", "D, from set arch/wall").len(),
+        1
+    );
+    assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
+    h.state_mut().undo();
+    h.run();
+    assert_eq!(on_card_of(&h, "arch/leaf", "D, empty").len(), 1);
+}
+
+#[test]
+fn a_coat_link_fills_one_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal)],
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    let linked = h
+        .query_all_by_label_contains(", from set arch/lacq")
+        .count();
+    assert_eq!(
+        linked, 1,
+        "one slot-7 link is one chip, not a Coat and a Fuzz chip"
+    );
+}
+
+#[test]
+fn a_coat_link_over_an_own_fuzz_shows_only_the_link() {
+    let d = tempfile::tempdir().unwrap();
+    let m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        on_card_of(&h, "arch/leaf", FUZZ_CHIP).len(),
+        1,
+        "premise: the own _f's chip is on the card"
+    );
+    h.state_mut().run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    h.run();
+    let drawn = h
+        .query_all_by_label_contains(", from set arch/lacq")
+        .count()
+        + on_card_of(&h, "arch/leaf", FUZZ_CHIP).len();
+    let v = views(h.state())
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .clone();
+    let counted = view_row(&v)
+        .iter()
+        .filter(|c| c.kind.game_slot() == Some(7))
+        .count();
+    assert_eq!(
+        (drawn, counted),
+        (1, 1),
+        "slot 7: one chip drawn (the link's), one counted"
+    );
+    assert!(
+        on_card_of(&h, "arch/leaf", FUZZ_CHIP).is_empty(),
+        "the own _f is not written, so its chip goes"
+    );
+    // chip_row's trailing loop names an un-chipped member "{file}, {slot text} (its slot is taken)": not for a
+    // Replaced file
+    assert!(
+        h.query_all_by_label_contains("leaf_f.png, ").all(|n| !n
+            .accesskit_node()
+            .label()
+            .is_some_and(|l| l.contains("(its slot is taken)"))),
+        "no thumbnail for the own _f"
+    );
+}
+
+#[test]
+fn a_cleared_slot_has_a_cleared_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(on_card_of(&h, "arch/wall", "N, cleared").len(), 1);
+}
+
+/// Final wave Group 5 (Important 6, ledger 88, 89): a chip's AccessKit node says what its hover says, while the hover
+/// stays lazy: an own chip its file and lock, a cleared chip its file (and no "empty" value left behind by the box's
+/// Label), a typed-path box its path; the typed-path box paints its slot's lock as a thumbnail does.
+#[test]
+fn chips_describe_what_their_hover_says_and_a_typed_path_box_paints_its_lock() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    m.set_slot_command(
+        "arch/leaf",
+        1,
+        SlotCommand::Path(r"textures\other\x_d.dds".into()),
+    )
+    .unwrap();
+    for set in ["arch/wall", "arch/leaf"] {
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLock {
+                set: set.into(),
+                n: 1,
+                on: true
+            }),
+            None
+        );
+    }
+    let mut h = harness(m);
+    h.run();
+    let desc = |h: &Harness<'static, AppModel>, set: &str, label: &str| {
+        let n = on_card_of(h, set, label);
+        assert_eq!(n.len(), 1, "{set}: one {label:?} chip");
+        let a = n[0].accesskit_node();
+        (a.description(), a.value(), n[0].rect())
+    };
+    let (own, _, _) = desc(&h, "arch/wall", "D");
+    let own = own.unwrap_or_default();
+    assert!(
+        own.contains("wall.png") && own.contains("(slot pinned)"),
+        "own chip: {own:?}"
+    );
+    let (cleared, value, _) = desc(&h, "arch/wall", "N, cleared");
+    assert!(
+        cleared
+            .as_deref()
+            .is_some_and(|c| c.contains("wall_n.png") && c.contains("(cleared)")),
+        "cleared chip: {cleared:?}"
+    );
+    assert!(
+        value.as_deref().is_none_or(|v| !v.contains("empty")),
+        "no empty value: {value:?}"
+    );
+    let (typed, _, rect) = desc(&h, "arch/leaf", "D, path x_d.dds");
+    assert_eq!(
+        typed.as_deref(),
+        Some(r"Diffuse linked to textures\other\x_d.dds")
+    );
+    assert!(
+        texts_in(&h, rect).iter().any(|(t, _)| t == "🔒"),
+        "the typed-path box paints its slot's lock: {:?}",
+        texts_in(&h, rect)
+    );
+}
+
+/// The painted text shapes of the frame inside `chip`: (text, galley rect in screen space).
+fn texts_in(h: &Harness<'static, AppModel>, chip: egui::Rect) -> Vec<(String, egui::Rect)> {
+    shapes(h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Text(t) => Some((
+                t.galley.text().to_string(),
+                t.galley.rect.translate(t.pos.to_vec2()),
+            )),
+            _ => None,
+        })
+        .filter(|(_, r)| chip.contains_rect(*r))
+        .collect()
+}
+
+/// Whether two rects share area (rects that only touch along an edge do not overlap).
+fn overlaps(a: egui::Rect, b: egui::Rect) -> bool {
+    let i = a.intersect(b);
+    i.width() > 0.0 && i.height() > 0.0
+}
+
+/// Linked Coat (slot 7) and RMAOS (slot 6) chips on `leaf`, each with both locks when `locks`: the chip named
+/// `label` has its link mark (backing square and two rings) at its top centre, inside the chip and touching neither
+/// the slot letter nor a lock.
+fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool, theme: egui::Theme) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal)],
+    );
+    for (n, item) in [(6, "arch/wall_rmaos.png"), (7, "arch/lacq_cnr.png")] {
+        // Ruling 3b-F21: a pick waits for the plan the lock before it started.
+        idle(&mut m);
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLink {
+                set: "arch/leaf".into(),
+                n,
+                item: item.into(),
+            }),
+            None,
+            "{item}"
+        );
+        if locks {
+            m.set_slot_lock("arch/leaf", n, true).unwrap();
+            m.run_menu(MenuAction::PgpLock {
+                set: "arch/leaf".into(),
+                n,
+                on: true,
+            });
+        }
+    }
+    idle(&mut m);
+    let mut h = harness(m);
+    h.ctx.set_theme(theme);
+    h.run();
+    let visuals = &h.ctx.global_style().visuals;
+    assert_eq!(visuals.dark_mode, theme == egui::Theme::Dark);
+    assert_ne!(visuals.strong_text_color(), visuals.panel_fill);
+    let chip = {
+        let card = card_of(&h, "arch/leaf");
+        let found: Vec<_> = h
+            .query_all_by_label_contains(label)
+            .filter(|n| card.contains_rect(n.rect()))
+            .collect();
+        assert_eq!(found.len(), 1, "the {label} chip");
+        found[0].rect()
+    };
+    let texts = texts_in(&h, chip);
+    let lock_rects: Vec<egui::Rect> = texts
+        .iter()
+        .filter(|(t, _)| t == "🔒")
+        .map(|(_, r)| *r)
+        .collect();
+    assert_eq!(lock_rects.len(), if locks { 2 } else { 0 }, "{texts:?}");
+    let letter_rect = texts
+        .iter()
+        .find(|(t, _)| t == letter)
+        .unwrap_or_else(|| panic!("the letter {letter}: {texts:?}"))
+        .1;
+    let circles: Vec<egui::Pos2> = shapes(&h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Circle(c) if c.stroke.width == 1.5 && chip.contains(c.center) => {
+                assert_eq!(
+                    c.stroke.color,
+                    visuals.strong_text_color(),
+                    "link rings in {theme:?}"
+                );
+                Some(c.center)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(circles.len(), 2, "the mark's two rings are inside the chip");
+    let mark = shapes(&h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if r.fill == visuals.panel_fill
+                    && chip.contains_rect(r.rect)
+                    && r.rect.width() < chip.width()
+                    && circles.iter().all(|c| r.rect.contains(*c)) =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the mark's backing square");
+    assert_eq!(
+        mark,
+        egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0)),
+        "the mark is at the chip's top centre in every lock state"
+    );
+    assert!(
+        !overlaps(mark, letter_rect),
+        "the mark {mark:?} covers the letter {letter_rect:?}"
+    );
+    for l in &lock_rects {
+        assert!(!overlaps(mark, *l), "the mark {mark:?} covers a lock {l:?}");
+    }
+}
+
+#[test]
+fn the_link_mark_clears_the_letter_and_both_locks_on_a_coat_chip() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        assert_mark_at_top_centre(", from set arch/lacq", "CNR", true, theme);
+    }
+}
+
+#[test]
+fn the_link_mark_clears_the_letter_and_both_locks_on_an_rmaos_chip() {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        assert_mark_at_top_centre(", from set arch/wall", "RMAOS", true, theme);
+    }
+}
+
+#[test]
+fn the_link_mark_is_in_the_same_place_without_locks() {
+    assert_mark_at_top_centre(", from set arch/lacq", "CNR", false, egui::Theme::Dark);
+    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", false, egui::Theme::Dark);
+}
+
+#[test]
+fn a_typed_path_link_is_a_filled_box_named_for_its_file_with_the_slot_menu() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command(
+        "arch/leaf",
+        1,
+        SlotCommand::Path("textures\\other\\thing_d.dds".into()),
+    )
+    .unwrap();
+    let mut h = harness(m);
+    h.run();
+    let chip = on_card_of(&h, "arch/leaf", "D, path thing_d.dds");
+    assert_eq!(chip.len(), 1, "the typed path's box");
+    chip[0].hover();
+    h.run();
+    h.run();
+    h.get_by_label_contains("Diffuse linked to textures\\other\\thing_d.dds");
+    on_card_of(&h, "arch/leaf", "D, path thing_d.dds")[0].click_secondary();
+    h.run();
+    h.get_by_label("Slot 1: Diffuse");
+}
+
+#[test]
+fn a_cleared_chip_offers_the_slot_menu_that_restores_the_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    on_card_of(&h, "arch/wall", "N, cleared")[0].click_secondary();
+    h.run();
+    h.get_by_label_contains("Slot 2:");
+    let from_set = h.get_by_label_contains("From this set");
+    assert!(!from_set.accesskit_node().is_disabled());
+    from_set.click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    assert!(on_card_of(&h, "arch/wall", "N, cleared").is_empty());
+}
+
+/// Nodes named "<file>, ... (its slot is taken)": the trailing loop's thumbnails for a file with no slot of its own.
+fn taken_thumbs(h: &Harness<'static, AppModel>, file: &str) -> usize {
+    h.query_all_by_label_contains(&format!("{file}, "))
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("(its slot is taken)"))
+        })
+        .count()
+}
+
+/// The cells of `id`'s slot row on game slot `n`: what `chip_rows` counts for it.
+fn counted_on_slot(m: &AppModel, id: &str, n: u8) -> usize {
+    let v = views(m).iter().find(|v| v.id == id).unwrap().clone();
+    view_row(&v)
+        .iter()
+        .filter(|c| c.kind.game_slot() == Some(n))
+        .count()
+}
+
+#[test]
+fn a_cleared_slot_over_an_own_file_draws_one_chip_that_names_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    let cleared = on_card_of(&h, "arch/wall", "N, cleared").len();
+    let drawn = cleared + taken_thumbs(&h, "wall_n.png");
+    assert_eq!(cleared, 1);
+    assert_eq!(
+        (drawn, counted_on_slot(h.state(), "arch/wall", 2)),
+        (1, 1),
+        "slot 2: one chip drawn, one counted"
+    );
+    assert_eq!(
+        taken_thumbs(&h, "wall_n.png"),
+        0,
+        "no thumbnail for the file"
+    );
+    on_card_of(&h, "arch/wall", "N, cleared")[0].hover();
+    h.run();
+    h.run();
+    h.get_by_label_contains("(cleared): wall_n.png");
+}
+
+#[test]
+fn a_link_over_an_own_file_of_its_kind_draws_one_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("other.png", [10, 200, 10], Subtype::PbrAlbedo)],
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/wall".into(),
+        n: 1,
+        item: "arch/other.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    let linked = h
+        .query_all_by_label_contains(", from set arch/other")
+        .count();
+    assert_eq!(linked, 1, "the linked chip");
+    let drawn = linked + taken_thumbs(&h, "wall.png");
+    assert_eq!(
+        (drawn, counted_on_slot(h.state(), "arch/wall", 1)),
+        (1, 1),
+        "slot 1: one chip drawn (the link's), one counted"
+    );
+    assert_eq!(
+        taken_thumbs(&h, "wall.png"),
+        0,
+        "no thumbnail for the own file"
+    );
+}
+
+/// What a card's title painted: its text, how many lines the galley has, and the title node's rect.
+fn title_probe(h: &Harness<'static, AppModel>, id: &str) -> (String, usize, egui::Rect) {
+    let r = h
+        .query_all_by_label(id)
+        .next()
+        .expect("the card title")
+        .rect();
+    let mut found = None;
+    fn flat(s: &egui::Shape, r: egui::Rect, out: &mut Option<(String, usize)>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, r, out)),
+            egui::Shape::Text(t) if r.expand(1.0).contains_rect(t.visual_bounding_rect()) => {
+                *out = Some((t.galley.job.text.clone(), t.galley.rows.len()));
+            }
+            _ => {}
+        }
+    }
+    for c in &h.output().shapes {
+        flat(&c.shape, r, &mut found);
+    }
+    let (text, rows) = found.expect("the title's text is painted");
+    (text, rows, r)
+}
+
+/// The status pill's kind label of the card whose title is `title`: of every painted copy of the set's kind text
+/// inside the Sets column (final wave Group 6, ledger 202: the set editor paints the same text), the one nearest the
+/// title vertically (the pill sits on the title's row or the row under it).
+fn pill_of(h: &Harness<'static, AppModel>, id: &str, title: egui::Rect) -> egui::Rect {
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
+    let v = set_views(h.state())
+        .into_iter()
+        .find(|v| v.id == id)
+        .expect("the set's view");
+    let kind = sdc_gui::model::sets::kind_text(h.state(), &v);
+    fn flat(s: &egui::Shape, kind: &str, out: &mut Vec<egui::Rect>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, kind, out)),
+            egui::Shape::Text(t) if t.galley.job.text == kind => out.push(t.visual_bounding_rect()),
+            _ => {}
+        }
+    }
+    let mut all = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, kind, &mut all);
+    }
+    all.into_iter()
+        .filter(|r| panel.contains_rect(*r))
+        .min_by(|a, b| {
+            (a.center().y - title.center().y)
+                .abs()
+                .total_cmp(&(b.center().y - title.center().y).abs())
+        })
+        .unwrap_or_else(|| panic!("the pill's {kind:?} label is painted in the Sets column"))
+}
+
+#[test]
+fn warm_card_titles_reuse_the_fit_at_the_drawn_width() {
+    use sdc_gui::ui::paint_counts::Work::{Title, TitleFit};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.sets_filter.search = "arch/wall".into();
+    let mut h = harness(m);
+    h.run_steps(4);
+    let warm = Title.count();
+    let fits = TitleFit.count();
+    assert!(warm > 0 && fits > 0);
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm,
+        "unchanged card rebuilt its fitted title"
+    );
+    assert_eq!(TitleFit.count(), fits, "unchanged width repeated the fit");
+    h.state_mut().sets_filter.search = "wall".into();
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm + 1,
+        "one measure for the changed title search"
+    );
+    assert_eq!(
+        TitleFit.count(),
+        fits + 1,
+        "one fit at the drawn width after search changes"
+    );
+    let width_id = sdc_gui::ui::panel_ids::chosen_width_id("sets");
+    h.ctx.data_mut(|d| d.insert_persisted(width_id, 380.0_f32));
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm + 1,
+        "resizing can reuse the measured text"
+    );
+    assert_eq!(
+        TitleFit.count(),
+        fits + 2,
+        "one fit for the new label width"
+    );
+}
+
+/// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, the pill
+/// wholly below it) instead of wrapping mid-word beside the pill; with a set open, at 1055x770.
+#[test]
+fn a_title_too_wide_beside_the_pill_takes_its_own_line() {
+    // Sets at its default 266 px at 1055x770 (nothing open): the one-row layout is chosen, and a 25-character
+    // tail does not fit beside the pill. This is the state that is RED without the fix.
+    own_line_case(
+        [
+            "architecture/whiterun/wrwoodbeamlong01",
+            "architecture/windhelm/wrwoodbeamlong01",
+        ],
+        false,
+    );
+}
+
+/// A pin of the narrower state: with a set open the Sets column is at its floor at 1055x770 and the narrow layout
+/// was already chosen before the fix, so this passes on the old code too.
+#[test]
+fn a_title_in_the_narrowest_column_with_a_set_open_stays_on_one_line_above_the_pill() {
+    own_line_case(
+        [
+            "architecture/whiterun/wrbeam01",
+            "architecture/windhelm/wrbeam01",
+        ],
+        true,
+    );
+}
+
+fn own_line_case(ids: [&str; 2], open: bool) {
+    let d = tempfile::tempdir().unwrap();
+    for (id, rgb) in ids.iter().zip([[90u8; 3], [60u8; 3]]) {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb(rgb))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let key = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == ids[0])
+        .unwrap()
+        .key;
+    let mut h = harness(m);
+    h.set_size(egui::vec2(1055.0, 770.0));
+    if open {
+        h.state_mut().select_set(&key);
+    }
+    h.run();
+    h.run();
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
+    for id in ids {
+        // the narrow layout: the title beside the position and handle at the card's full width, the pill below
+        let (text, rows, r) = title_probe(&h, id);
+        assert_eq!(rows, 1, "{id}: one line, shown {text:?} in {r:?}");
+        let pill = pill_of(&h, id, r);
+        assert!(
+            pill.min.y >= r.max.y - 1.0,
+            "{id}: the pill {pill:?} lies below the title {r:?}"
+        );
+        assert!(
+            r.height() < 1.5 * h.ctx.global_style().text_styles[&egui::TextStyle::Body].size + 6.0
+                && panel.contains_rect(r),
+            "{id}: {r:?} one line high inside the column {panel:?}"
+        );
+    }
+}
+#[test]
+fn two_cards_sharing_a_leaf_never_read_the_same() {
+    const IDS: [&str; 2] = [
+        "architecture/whiterun/whiterunstonework/wallblocklarge01",
+        "architecture/windhelm/whiterunstonework/wallblocklarge01",
+    ];
+    let d = tempfile::tempdir().unwrap();
+    for (id, rgb) in IDS.iter().zip([[90u8; 3], [60u8; 3]]) {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb(rgb))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let mut h = harness(m);
+    h.run();
+    let shown: Vec<String> = IDS
+        .iter()
+        .map(|id| {
+            // the title's AccessKit name is the full id (HN6 `widget_info`)
+            let r = h
+                .query_all_by_label(id)
+                .next()
+                .expect("the card title")
+                .rect();
+            painted_in(&h, r)
+        })
+        .collect();
+    assert!(
+        IDS.iter().zip(&shown).all(|(id, s)| s != id),
+        "premise: both titles are cut: {shown:?}"
+    );
+    assert_ne!(shown[0], shown[1], "two cards read the same");
+    let measured = sdc_gui::ui::paint_counts::Work::ShortTitles;
+    assert_eq!(
+        measured.count(),
+        2,
+        "each cut card measured its alternatives once"
+    );
+    h.run_steps(4);
+    assert_eq!(
+        measured.count(),
+        2,
+        "steady frames rebuilt the short title forms"
+    );
+    for id in IDS {
+        let (text, rows, r) = title_probe(&h, id);
+        // these tails are wider than the whole card, so they may wrap, and only as the last resort
+        let last_resort = text == format!("…/{}", id.split_once('/').unwrap().1);
+        assert!(
+            rows == 1 || last_resort,
+            "{id}: {rows} lines for {text:?} in {r:?}"
+        );
+        // on its own row: the pill lies wholly below the title, never beside it
+        let pill = pill_of(&h, id, r);
+        assert!(
+            pill.min.y >= r.max.y - 1.0,
+            "{id}: the pill {pill:?} lies below the title {r:?}"
+        );
+    }
+    assert!(
+        shown[0].ends_with("whiterun/whiterunstonework/wallblocklarge01")
+            && shown[1].ends_with("windhelm/whiterunstonework/wallblocklarge01"),
+        "each title ends with its unique tail (Task 1's `short`): {shown:?}"
     );
 }

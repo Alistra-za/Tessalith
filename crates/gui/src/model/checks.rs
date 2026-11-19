@@ -1,7 +1,7 @@
 //! The artist checks (v2, DECISIONS Note CL): one pure function per check turns the engine's cached check stats
 //! into `CHK-*` warnings, gated by the `[checks]` switches. Results live only in `AppModel`'s check maps: never in
 //! `TextureItem::warnings` or `SetView::set_warnings`, so they never change "ready" (owner answer 1).
-use super::sets::{SlotFill, SlotKind};
+use super::sets::{feature_slots, SlotFill, SlotKind};
 use super::AppModel;
 use crate::pgp::settings::{feature_on, Feature, Settings};
 use crate::settings::ChecksSettings;
@@ -297,13 +297,13 @@ impl AppModel {
             let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
             let resolved = super::auto_flags::resolved_for(
                 v.json,
-                &v.slots,
+                feature_slots(v),
                 &v.settings,
                 &super::auto_flags::hint(self, v),
             );
             neutral.insert(v.key.as_str(), height_neutral(shader, &resolved));
             if matches!(shader, Some(Shader::Landscape | Shader::PbrLandscape))
-                && filled(&v.slots, SlotKind::Height)
+                && filled(feature_slots(v), SlotKind::Height)
             {
                 // The texture-set block's displacementScale is already overlaid into the set's settings.
                 let s = resolved

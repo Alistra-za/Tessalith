@@ -138,6 +138,11 @@ impl TomlFile {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SKIPPED_IDS_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub struct ProjectDoc {
     f: TomlFile,
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
@@ -365,10 +370,11 @@ impl ProjectDoc {
 
     /// [`Self::text`] for an undo step: while a blame holds the document, the stashed text it stands for.
     pub fn snapshot_text(&self) -> String {
-        match &self.stash {
-            Some((doc, _)) => doc.to_string(),
-            None => self.f.text(),
-        }
+        self.snapshot_doc().to_string()
+    }
+
+    fn snapshot_doc(&self) -> &DocumentMut {
+        self.stash.as_ref().map_or(&self.f.doc, |(doc, _)| doc)
     }
 
     /// Replace the document with `text` (an undo or redo). It is an unsaved change. A read-only document is left
@@ -511,11 +517,14 @@ impl ProjectDoc {
     }
 
     pub fn file_value(&self, key: &str, field: &str) -> Option<Json> {
-        let mut item: &Item = self.entry(key)?.get(field.split('.').next()?)?;
-        for part in field.split('.').skip(1) {
-            item = item.get(part)?;
-        }
-        toml_to_json(item)
+        field_value(self.entry(key)?, field)
+    }
+
+    /// For a disabled Problems fix, show the setting the user wrote even while the engine rejects the document.
+    pub(crate) fn snapshot_file_value(&self, key: &str, field: &str) -> Option<Json> {
+        let files = self.snapshot_doc().get("files")?.as_table_like()?;
+        let entry = files.get(&find_file_key(files, key)?)?.as_table_like()?;
+        field_value(entry, field)
     }
 
     pub fn set_file_value(&mut self, key: &str, field: &str, value: &Json) {
@@ -771,10 +780,18 @@ impl ProjectDoc {
 
     /// `[export]` (Track A, TA9), the default when absent or unparsable. Cached by `rev`.
     pub fn export_config(&self) -> ExportConfig {
+        self.with_export_config(|c| {
+            #[cfg(test)]
+            SKIPPED_IDS_COPIED.with(|n| n.set(n.get() + c.skip.len()));
+            c.clone()
+        })
+    }
+
+    pub(crate) fn with_export_config<T>(&self, read: impl FnOnce(&ExportConfig) -> T) -> T {
         let rev = self.rev();
         if let Some((r, c)) = &*self.export_cache.borrow() {
             if *r == rev {
-                return c.clone();
+                return read(c);
             }
         }
         let c = self
@@ -782,8 +799,9 @@ impl ProjectDoc {
             .ok()
             .and_then(|c| c.export)
             .unwrap_or_default();
-        *self.export_cache.borrow_mut() = Some((rev, c.clone()));
-        c
+        let result = read(&c);
+        *self.export_cache.borrow_mut() = Some((rev, c));
+        result
     }
 
     /// Write `[export]` as `cfg`: only the fields that differ from the default, so a tick does not freeze today's
@@ -878,6 +896,15 @@ pub fn key_walks() -> usize {
 fn walked() {
     #[cfg(feature = "test-hooks")]
     KEY_WALKS.with(|c| c.set(c.get() + 1));
+}
+
+fn field_value(entry: &dyn TableLike, field: &str) -> Option<Json> {
+    let mut parts = field.split('.');
+    let mut item = entry.get(parts.next()?)?;
+    for part in parts {
+        item = item.get(part)?;
+    }
+    toml_to_json(item)
 }
 
 /// Remove the dotted field `parts` from table `t`, and each sub-table that leaves empty; true when it was there.

@@ -1,5 +1,5 @@
 //! Note HF9/HF10: the export scope (Export set, Export group, Export N sets) and what a run leaves out: the request's
-//! `write_only`, the untouched-root check, orphan reports, and the scope's life.
+//! `write_only`, the untouched-file check, orphan reports, and the scope's life.
 use super::sets::{set_views, SlotFill};
 use super::AppModel;
 use engine::sets::{same_id, set_id, set_key};
@@ -50,8 +50,38 @@ impl AppModel {
         self.set_scope(Some(ExportScope { keys, label }));
     }
 
+    /// For Selection and the Problems filter (`Set`, `SetNotes`, `SetChecks`), a key under the old root
+    /// moves to the new root, so it never survives a root change to equal another set's rebuilt key. A value not
+    /// under the old root (a key-less set's id) is left as it is. `names_an_id` is `set_filter_names_an_id`, asked
+    /// under the old plan: a value the resolver took for an id is never rekeyed, however it reads.
+    pub(super) fn rekey_selected_and_filtered_sets(
+        &mut self,
+        old_root: Option<&Path>,
+        names_an_id: bool,
+    ) {
+        use super::bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
+        let new = self.sets_root();
+        let Some(old) = old_root.filter(|o| *o != new.as_path()) else {
+            return;
+        };
+        let rekey = |k: &mut String| {
+            let id = set_id(old, k);
+            if id != *k {
+                *k = set_key(&new, &id);
+            }
+        };
+        if let super::Selection::Set(k) = &mut self.selection {
+            rekey(k);
+        }
+        if !names_an_id {
+            if let Some(Set(k) | SetNotes(k) | SetChecks(k)) = &mut self.bottom.filter {
+                rekey(k);
+            }
+        }
+    }
+
     /// Note HF9: this run leaves sets out: a scope, an excluded group, or a texture in no set.
-    fn leaves_sets_out(&self) -> bool {
+    pub(super) fn leaves_sets_out(&self) -> bool {
         self.export_scope.is_some()
             || !self.excluded_sets().is_empty()
             || self
@@ -75,12 +105,6 @@ impl AppModel {
         })
     }
 
-    /// The plan's output root when this run leaves sets out (a PGPatcher entry's untouched dep is checked on disk
-    /// under it), else `None`.
-    pub(super) fn untouched_root(&self) -> Option<std::path::PathBuf> {
-        self.leaves_sets_out().then(|| self.sets_root())
-    }
-
     /// Note HF9: per-set files no set writes any more are reported only on a whole-project run without an excluded
     /// group; otherwise a set left out of the run would read as gone.
     pub(super) fn reports_orphans(&self) -> bool {
@@ -95,10 +119,17 @@ impl AppModel {
         if self.export.running.is_some() {
             return;
         }
-        let keys = self.with_hosts(keys);
         self.set_scope(Some(ExportScope { keys, label }));
         self.export_go();
         self.end_idle_scope();
+    }
+
+    /// Resolve hosts after the plan settles, when mirrored jobs have their new output paths.
+    pub(super) fn expand_scope_hosts(&mut self) {
+        if let Some(mut scope) = self.export_scope.clone() {
+            scope.keys = self.with_hosts(scope.keys);
+            self.set_scope(Some(scope));
+        }
     }
 
     /// A scope lives while its Review is open, its export runs or waits for a plan, or a dialog is open (one may park
@@ -127,8 +158,8 @@ impl AppModel {
         self.export_sets(keys, format!("Export group {}", g.name));
     }
 
-    /// `keys` plus every set a slot of theirs borrows from, transitively. A host in an excluded group is left alone
-    /// unless it is in `keys`: its file on disk serves the borrower.
+    /// `keys` plus every set a slot of theirs borrows from or links to (a `slotN` that names its output), transitively.
+    /// A host in an excluded group is left alone unless it is in `keys`: its file on disk serves the borrower.
     fn with_hosts(&self, mut keys: BTreeSet<String>) -> BTreeSet<String> {
         let views = set_views(self);
         let excluded = self.excluded_sets();
@@ -137,10 +168,12 @@ impl AppModel {
             let Some(v) = views.iter().find(|v| v.key == k) else {
                 continue;
             };
-            for f in v.slots.values() {
-                let SlotFill::Borrowed { from, .. } = f else {
-                    continue;
-                };
+            // Review E1 (Task 15a): a `slotN` link that names a set's output brings that set in as a borrow does.
+            let borrowed = v.slots.values().filter_map(|f| match f {
+                SlotFill::Borrowed { from, .. } => Some(from),
+                _ => None,
+            });
+            for from in borrowed.chain(v.linked.values().filter_map(|l| l.from.as_ref())) {
                 let Some(h) = views.iter().find(|h| same_id(&h.id, from)) else {
                     continue;
                 };

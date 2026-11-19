@@ -41,9 +41,9 @@ Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alp
 
 ### Check the set
 
-Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TruePBR settings are optional, and **Matching** stays on the diffuse path.
+Select your set in the Sets column. In the demo shown below, choose `textures/architecture/stone/stonewall` and open **Set**. For the iron plate example, choose `ironplate`, check that **Shader** reads `pbr` (auto) and leave **Matching** on the diffuse path.
 
-![The set editor for a set in the demo project.](../img/gui/GUI-Set-Editor/set-editor.png)
+![The Set tab for textures/architecture/stone/stonewall in the demo project.](../img/gui/GUI-Set-Editor/set-editor.png)
 
 ### Export
 

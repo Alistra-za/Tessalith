@@ -59,6 +59,14 @@ fn kind_of(choice: PackRecipe) -> Option<RecipeKind> {
     }
 }
 
+/// The `packing.recipe` written on the `[files]` entry `{base}_{suffix}`, `Auto` when none or unreadable: the one
+/// parse `explicit_recipe` and `recipe_written` share (final wave Group 8, ledger 129).
+fn written_recipe(value: Option<serde_json::Value>) -> PackRecipe {
+    value
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or(PackRecipe::Auto)
+}
+
 impl AppModel {
     /// The recipe a packed output was explicitly given: the `_rfaos` key wins, then the `_rmaos` key, then the
     /// output's own resolved `packing.recipe` (a project or preset value). `Auto` when nobody chose.
@@ -67,12 +75,9 @@ impl AppModel {
         else {
             return PackRecipe::Auto;
         };
-        let read = |suffix: &str| -> PackRecipe {
-            p.file_value(&format!("{base}_{suffix}"), "packing.recipe")
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or(PackRecipe::Auto)
-        };
-        let (on_rfaos, on_rmaos) = (read("rfaos"), read("rmaos"));
+        let recipe =
+            |suffix| written_recipe(p.file_value(&format!("{base}_{suffix}"), "packing.recipe"));
+        let (on_rfaos, on_rmaos) = (recipe("rfaos"), recipe("rmaos"));
         if on_rfaos != PackRecipe::Auto {
             return on_rfaos;
         }
@@ -123,6 +128,42 @@ impl AppModel {
             .iter()
             .any(|r| r.kind == RecipeKind::Rfaos);
         (!built).then_some(RFAOS_UNBUILDABLE)
+    }
+
+    /// Task 5a review F1: a recipe is written on either `[files]` entry of the set that owns the cs packed output
+    /// `packed_key` (`_rmaos`, `_rfaos`), parsed as `explicit_recipe` does: a hand-written `auto` is not written.
+    /// This is what `clear_packing_recipe` can clear, so it decides whether Clear recipe is offered; a recipe from
+    /// the project or a preset is out of its reach.
+    pub fn recipe_written(&self, packed_key: &str) -> bool {
+        let (Some(p), Some((base, _))) = (self.project.as_ref(), split_packed_key(packed_key))
+        else {
+            return false;
+        };
+        self.target == Target::Cs
+            && ["rmaos", "rfaos"].iter().any(|s| {
+                let value = p.snapshot_file_value(&format!("{base}_{s}"), "packing.recipe");
+                written_recipe(value) != PackRecipe::Auto
+            })
+    }
+
+    /// Owner A1-4, A1-8: take `packing.recipe` off both packed keys of the set that owns `packed_key` (`_rmaos` and
+    /// `_rfaos`), as one undo step; the shader and the maps decide the recipe again. `clear_file_value` prunes an
+    /// emptied `packing` table and an emptied `[files."…"]` entry. Fills stay where they are. Does nothing for a
+    /// non-packed key, off the cs target or on a read-only `sdc.toml`.
+    pub fn clear_packing_recipe(&mut self, packed_key: &str) {
+        let Some((base, _)) = split_packed_key(packed_key) else {
+            return;
+        };
+        if self.target != Target::Cs || self.project.as_ref().is_none_or(ProjectDoc::read_only) {
+            return;
+        }
+        let keys = [format!("{base}_rmaos"), format!("{base}_rfaos")];
+        self.edit_docs("Packing recipe", None, true, move |p, _| {
+            for k in &keys {
+                p.clear_file_value(k, "packing.recipe");
+            }
+        });
+        self.dropped_fills.clear();
     }
 
     /// Choose `_rmaos` or `_rfaos` for the set that owns the packed output `packed_key`, as one undo step.

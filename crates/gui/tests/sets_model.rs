@@ -1560,6 +1560,57 @@ fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
     ));
 }
 
+/// Final wave Group 2 (review Important 3, Q5 b): rock01 owns a normal and borrows rock02's into its Normal slot, and
+/// its own normal still converts (leaf could borrow it). The Output files list is what the set's own members write, so
+/// the displaced normal is listed after the ordered slot pass, under its slot kind.
+#[test]
+fn the_output_files_list_an_own_normal_a_borrow_displaced() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    idle(&mut m);
+    let out = m
+        .item(&normal)
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.clone())
+        .expect("premise: the displaced normal still has a job");
+    let views = set_views(&m);
+    let v = view(&views, "landscape/rock01");
+    assert!(
+        matches!(
+            v.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ),
+        "premise: the borrow holds the Normal slot"
+    );
+    let listed = set_outputs(v);
+    let at = listed
+        .iter()
+        .position(|(k, i, p)| *i == normal && *p == out && *k == Some(SlotKind::Normal))
+        .unwrap_or_else(|| panic!("the displaced normal is listed: {listed:?}"));
+    let own_slots = v
+        .slots
+        .values()
+        .filter(|f| matches!(f, SlotFill::Own { .. }))
+        .count();
+    assert!(
+        at >= own_slots,
+        "it comes after the {own_slots} own slots: {listed:?}"
+    );
+    // The packed RMAOS output is both an own slot and a member: listed once.
+    let paths: std::collections::BTreeSet<_> = listed.iter().map(|(_, _, p)| p).collect();
+    assert_eq!(paths.len(), listed.len(), "each path once: {listed:?}");
+    assert!(
+        listed
+            .iter()
+            .any(|(k, i, _)| *k == Some(SlotKind::Rmaos) && i == "landscape/rock01_rmaos"),
+        "premise: the packed output is listed: {listed:?}"
+    );
+}
+
 /// Note JN2: what `sdc-project.toml` says set `id` borrows for slot `n`.
 fn borrow_of(m: &sdc_gui::model::AppModel, id: &str, n: u8) -> Option<String> {
     m.sets_doc
@@ -4194,5 +4245,67 @@ fn every_required_role_has_a_slot() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn short_names_keep_two_parts_and_differ() {
+    use sdc_gui::model::sets::short_names;
+    assert_eq!(
+        short_names(&["textures/arch/eye/eye", "textures/arch/eye/m", "solo"]),
+        vec!["eye/eye", "eye/m", "solo"]
+    );
+    // a shared two-part tail grows until the names differ
+    assert_eq!(
+        short_names(&["a/stone/m", "b/stone/m", "c/wood/m"]),
+        vec!["a/stone/m", "b/stone/m", "wood/m"]
+    );
+    // tails compare folded (Note BF): "Stone/m" and "stone/M" collide at two parts, so both grow to three
+    assert_eq!(
+        short_names(&["X/Stone/m", "y/stone/M"]),
+        vec!["X/Stone/m", "y/stone/M"]
+    );
+    // ids equal after folding never get a unique tail: both keep the whole id
+    assert_eq!(short_names(&["a/B", "A/b"]), vec!["a/B", "A/b"]);
+    // Final wave Group 8 (ledger 19): a verbatim `\` id splits where folding puts a `/`, and the short keeps its own
+    // separators
+    assert_eq!(
+        short_names(&["arch\\stone\\wall", "arch/stone/floor"]),
+        vec!["stone\\wall", "stone/floor"]
+    );
+    assert_eq!(
+        short_names(&["a\\stone\\m", "b/stone/m"]),
+        vec!["a\\stone\\m", "b/stone/m"],
+        "tails equal after folding grow until they differ"
+    );
+}
+
+/// Final wave Group 6 (ledger 18): each view's `short` is the shortest unique tail of at least two parts, so an id of
+/// three parts never keeps its whole id (the old assert accepted any non-empty tail, the whole id included).
+#[test]
+fn every_view_has_its_short_name() {
+    let d = tempfile::tempdir().unwrap();
+    for id in ["arch/stone/wall", "arch/stone/floor"] {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(8, 8, |_, _| image::Rgb([90u8; 3]))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let v = views(&m);
+    for (id, short) in [
+        ("arch/stone/wall", "stone/wall"),
+        ("arch/stone/floor", "stone/floor"),
+    ] {
+        let got = &v
+            .iter()
+            .find(|v| v.id == id)
+            .unwrap_or_else(|| panic!("a view {id}"))
+            .short;
+        assert_eq!(
+            got, short,
+            "{id}: the shortest unique tail, not the whole id"
+        );
     }
 }

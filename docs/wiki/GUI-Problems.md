@@ -1,6 +1,6 @@
 # Problems
 
-For anyone getting a folder ready to export: the bottom panel's **Problems** tab lists one row per thing that needs you, each with its fix as a button, and keeps what Tessalith did on its own under **Notes**. What a code means is in [Diagnostic codes](Diagnostic-Codes.md).
+Before export, open **Problems** in the bottom panel for issues and their fixes. **Notes** explains Tessalith’s automatic choices. See [Diagnostic codes](Diagnostic-Codes.md) for code meanings.
 
 ## Reading a row
 
@@ -17,7 +17,7 @@ Rows come blockers first, then undecided textures, then warnings, then checks. N
 | Green, a note | **Queued**: a fix that waits for the next export. <!-- D:JO9 --> |
 | Green, on a tile or card | Nothing to decide. |
 
-A row names where it is (a texture, set or file you can click; "Project" when it belongs to no file) and says the action in words. Hover it for the engine's message and code (`LOSS-ALPHA-DATA`), which is what Troubleshooting uses. Its buttons sit right after the sentence: the fix, a second fix if it has one, **Mark as intended**, then **Go to set** on a set row. <!-- D:JO10,JO13 -->
+Click a row’s texture, set or file to open it. “Project” means the row has no file. Hover for the engine message and code (such as `LOSS-ALPHA-DATA`) used in Troubleshooting. After the action sentence come the fix, any second fix, **Mark as intended**, then **Go to set** on set rows. <!-- D:JO10,JO13 -->
 
 ## Problems and Notes
 
@@ -45,7 +45,8 @@ A row you must act on has its fix as a button.
 | A note about a change Tessalith made for you | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
 | `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. On a file you already exported the row then reads *Rebuild Z is on for this file: export again to rewrite it*, a queued note with no button, until the next export. <!-- D:JO9 --> |
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
-| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). <!-- D:JO15 --> |
+| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, or **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). For the set's packed output (`_rmaos`, `_rfaos`) there is no **Remove from set**: the row offers **Clear recipe** ([when](#clear-recipe)) and **Change shader…**, or **Change shader…** alone. <!-- D:JO15,JR10 --> |
+| `PACK-RECIPE-CONFLICT`, `PACK-RECIPE-UNBUILDABLE` | **Clear recipe** ([when](#clear-recipe)), or no button. |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
 | *{file} is shared with a regular set, which reads its alpha as specular; its alpha is not kept* (a note) | **Keep alpha** writes `alpha.policy = "data"` for this normal. [When the button is available](#keep-alpha). |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
@@ -61,7 +62,11 @@ A row you must act on has its fix as a button.
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}**: [Presets and targets](Presets-and-Targets.md#checking-and-installing). |
 | *{n} saved settings name no file in this mode ({mode})* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
-**Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**, **Clear read-only flag** and **Remove aliases from {id}** run on a mouse click only. Enter and Space do nothing on them, so a key press never takes a file out of a set or switches a feature off. <!-- D:JO16 -->
+**Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**, **Clear read-only flag**, **Clear recipe** and **Remove aliases from {id}** run on a mouse click only. Enter and Space do nothing on them, so a key press never takes a file out of a set or switches a feature off. <!-- D:JO16 -->
+
+### Clear recipe
+
+On the `cs` target, **Clear recipe** appears when this set has a recipe other than `auto` on its `_rmaos` or `_rfaos` file in `sdc.toml` and Problems flags the recipe or packed map. It removes `packing.recipe` from both file entries. One Undo restores the values you had. A project or preset recipe can apply next and keep the warning. Otherwise the shader and maps choose the recipe. <!-- D:JR10 -->
 
 ### Keep alpha
 

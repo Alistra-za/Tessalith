@@ -23,7 +23,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 | CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, [Rename](#rename), UV and cubemap, vertex colours and depth, texture locks. |
 
-Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
+A feature's state shows once. Coat, Emissive, Glint and Fuzz have no on or off word of their own in their header: the **Features** tick says it. Subsurface shows its mode, like "Standard", in its header while the group is closed. A feature that is on but blocked gives the reason in amber, like "on, blocked by hair". <!-- D:JR6 --> Matching shows its count, like "2 matches", or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
 
 ## Your textures turn features on
 
@@ -39,6 +39,8 @@ You rarely tick features by hand. Tessalith reads the set's files:
 
 These read "(auto)", with the reason on hover, and go into the JSON. Untick one to store an explicit off, which wins over the file; ↺ removes your choice again. Remove the texture and its auto value goes with it.
 
+On a set that writes a JSON entry, a link to a local map counts as the kind of its destination row (Coat or Fuzz on slot 7). With **Path**, enter the map’s planned DDS path from `textures\` down. You can leave off the leading `textures\`. Letter case for A to Z makes no difference. For example, `pbr\arch\wall_n.dds` matches `textures\pbr\arch\wall_n.dds`. A mod folder before `textures` makes it a different path. If two sets write that game path, the first in the Sets column supplies the file. An external path can fill the JSON slot without turning a feature on. Your explicit off wins. On PBR grass only Subsurface can turn on automatically. <!-- D:JR8,JR14 --> Clearing a slot removes its file’s automatic setting. A value such as emissive scale stays in the project and goes back into the JSON when the feature is active again. <!-- D:JR9 -->
+
 ## Features that can't go together
 
 These are greyed out, with the reason on hover. A switch that's already on stays clickable so you can turn it off.
@@ -51,7 +53,7 @@ A feature that's on without its texture blocks export, so add the texture or tur
 
 ## Values you turned off are kept
 
-Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group reads "off" and "kept, not used", and you can still edit or reset them. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
+Turn Coat, Emissive, Glint or Fuzz off and its values stay. While it has values to keep, the group stays, with "kept, not used" inside it, and you can still edit or reset them; with nothing kept it goes. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
 
 ## Numbers and colours
 

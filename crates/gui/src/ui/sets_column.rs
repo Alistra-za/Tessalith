@@ -16,8 +16,9 @@ use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
-    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
+    badge_text, fill_proposals, kind_text, member_tail, shader_options, slot_shown, view_row,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
+    SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -28,6 +29,7 @@ use engine::codes::Warning;
 use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Drag payload: a texture, by item key.
 #[derive(Debug, Clone)]
@@ -162,9 +164,7 @@ const CARD_EST: f32 = 110.0;
 // shortcut: a helper docked on a chip still counts as an extra member here, so an unmeasured card may be estimated
 // a row too tall (drawing corrects it, FM32); subtract the docked helpers if a scroll jump shows.
 fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
-    let chips = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)).len()
-        + v.missing.len()
-        + v.members.len().saturating_sub(v.slots.len());
+    let chips = view_row(v).len() + v.missing.len() + v.members.len().saturating_sub(v.slots.len());
     chips.div_ceil(chips_per_row(width, frame_x))
 }
 
@@ -266,18 +266,52 @@ fn chip_letter(v: &SetView, k: SlotKind) -> String {
 }
 
 /// An empty slot (or a missing entry, outlined): a dim box with the letter. K11: named by the letter.
-fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -> egui::Response {
+/// `filled` (a linked slot with no thumbnail to show): the box in the filled colours, named by what it returns (built
+/// when read).
+fn letter_box(
+    ui: &mut egui::Ui,
+    letter: &str,
+    outline: Option<egui::Color32>,
+    filled: Option<&dyn Fn() -> String>,
+) -> egui::Response {
+    let r = letter_box_painted(ui, letter, outline, filled.is_some());
+    // an empty chip's name is "<letter>, empty"; a missing entry's outlined "?" keeps its own
+    r.widget_info(|| {
+        let name = match (outline, filled) {
+            (_, Some(f)) => f(),
+            (None, None) => format!("{letter}, empty"),
+            (Some(_), None) => letter.to_string(),
+        };
+        egui::WidgetInfo::labeled(egui::Role::Label, true, name)
+    });
+    r
+}
+
+/// `letter_box`'s drawing with no AccessKit info, for a caller that registers its own (a cleared chip, a typed path's
+/// box): a Label's name would stay behind as the node's value under the caller's Button (final wave Group 5).
+fn letter_box_painted(
+    ui: &mut egui::Ui,
+    letter: &str,
+    outline: Option<egui::Color32>,
+    filled: bool,
+) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(CHIP), egui::Sense::hover());
     let vis = ui.visuals();
     let stroke = match outline {
         Some(c) => egui::Stroke::new(2.0, c),
+        None if filled => vis.widgets.inactive.bg_stroke,
         None => vis.widgets.noninteractive.bg_stroke,
     };
+    let bg = if filled {
+        vis.widgets.inactive.bg_fill
+    } else {
+        vis.extreme_bg_color
+    };
     let p = ui.painter();
-    p.rect_filled(rect, 2.0, vis.extreme_bg_color);
+    p.rect_filled(rect, 2.0, bg);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
     if outline.is_none() {
-        paint_letter(ui, rect, letter, true, f32::INFINITY);
+        paint_letter(ui, rect, letter, !filled, f32::INFINITY);
     } else {
         // The missing entry's "?" stays centred.
         ui.painter().text(
@@ -288,14 +322,38 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
             dim_letter_colour(ui.visuals()),
         );
     }
-    // an empty chip's name is "<letter>, empty"; a missing entry's outlined "?" keeps its own
-    let name = if outline.is_none() {
-        format!("{letter}, empty")
-    } else {
-        letter.to_string()
-    };
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
     r
+}
+
+/// The slot lock's cell on a member chip (`columns::paint_locks`, the one copy of the geometry).
+const LOCK_W: f32 = super::columns::LOCK_GLYPH;
+const LOCK_PAD: f32 = super::columns::LOCK_INSET;
+/// The link mark's top edge below the chip's top.
+const MARK_TOP: f32 = 2.0;
+
+/// Review E1: the mark of a linked slot, two overlapping rings (a chain) in `r`. No glyph: no emoji font is loaded.
+pub(crate) fn link_mark(p: &egui::Painter, r: egui::Rect, c: egui::Color32) {
+    let radius = r.height() * 0.28;
+    let dx = r.width() * 0.2;
+    let stroke = egui::Stroke::new(1.5, c);
+    for sign in [-1.0, 1.0] {
+        p.circle_stroke(r.center() + egui::vec2(sign * dx, 0.0), radius, stroke);
+    }
+}
+
+/// A linked slot's chip name: "{letter}, from set {short}", or "{letter}, path {file}" for a typed path.
+fn linked_chip_name(letter: &str, l: &SlotLink) -> String {
+    match &l.from_short {
+        Some(s) => format!("{letter}, from set {s}"),
+        None => {
+            // a path ending in a separator has no file part: name the whole path
+            let file = match l.path.rsplit(['\\', '/']).next() {
+                Some(f) if !f.is_empty() => f,
+                _ => &l.path,
+            };
+            format!("{letter}, path {file}")
+        }
+    }
 }
 
 /// Note HP: the dimmed letter's colour on an empty chip (read at 4.5:1 on `extreme_bg_color` in both themes).
@@ -429,13 +487,22 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
     )
 }
 
-/// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
-/// Note HP (SC4): when the search lies inside one middle segment, `…/<that segment>/<rest>` is tried right after the id.
-fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
+/// The longest form of a set id that `fits` and keeps `tail` (the view's `short`, the shortest tail no other set
+/// shares): the id, its middle elided, then `…/<tail>`. Note HP (SC4): when the search lies inside one middle
+/// segment, `…/<that segment>/<rest>` is tried right after the id. When nothing fits, `…/<tail>` is returned anyway
+/// (the whole id when the tail is the id, or when `…/<tail>` would be no shorter than it: final wave Group 6, ledger
+/// 187) and the title wraps; two cards never read the same (review E24). The bool says whether the title fits.
+fn fit_title(
+    id: &str,
+    tail: &str,
+    query: &str,
+    mut fits: impl FnMut(&str) -> bool,
+) -> (String, bool) {
     use super::header::elide_middle;
     let len = id.chars().count();
-    if fits(id) {
-        return id.to_string();
+    let whole_fits = fits(id);
+    if whole_fits || tail == id {
+        return (id.to_string(), whole_fits);
     }
     let q = engine::sets::fold_id(query.trim());
     if !q.is_empty() {
@@ -446,38 +513,74 @@ fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
             .find(|&i| engine::sets::fold_id(segs[i]).contains(&q))
         {
             let t = format!("…/{}", segs[i..].join("/"));
-            if fits(&t) {
-                return t;
+            if t.ends_with(tail) && fits(&t) {
+                return (t, true);
             }
         }
     }
-    for n in (1..len).rev() {
-        let t = elide_middle(id, n);
-        if t.contains('/') && fits(&t) {
-            return t;
+    let mut budget = len.saturating_sub(1);
+    while budget > 0 {
+        let t = elide_middle(id, budget);
+        // Every intermediate budget gives the same component suffix.
+        budget = budget.min(t.chars().count()).saturating_sub(1);
+        if !t.contains('/') {
+            break;
+        }
+        if t.ends_with(tail) && fits(&t) {
+            return (t, true);
         }
     }
-    let leaf = id.rsplit('/').next().unwrap_or(id);
-    let leaf_len = leaf.chars().count();
-    if leaf != id {
-        let t = format!("…/{leaf}");
-        if fits(&t) {
-            return t;
-        }
+    let last = format!("…/{tail}");
+    if last.chars().count() < len {
+        let last_fits = fits(&last);
+        (last, last_fits)
+    } else {
+        (id.to_string(), false)
     }
-    for keep in (1..=leaf_len).rev() {
-        let t = format!(
-            "…{}",
-            leaf.chars().skip(leaf_len - keep).collect::<String>()
-        );
-        if fits(&t) {
-            return t;
-        }
-    }
-    "…".to_string()
 }
 
-/// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
+/// The preflight and the label can have different room after egui places the badges.
+struct ShortTitles {
+    forms: Vec<(Arc<egui::RichText>, f32)>,
+    minimum: f32,
+    fallback: Arc<egui::RichText>,
+}
+
+impl ShortTitles {
+    fn new(ui: &egui::Ui, v: &SetView, query: &str, font: &egui::FontId) -> Self {
+        #[cfg(feature = "test-hooks")]
+        super::paint_counts::Work::ShortTitles.built();
+        let mut forms = Vec::<(Arc<egui::RichText>, f32)>::new();
+        // Visit the forms in display order, including the fallback when none fits.
+        let (fallback, _) = fit_title(&v.id, &v.short, query, |text| {
+            if text != v.id && !forms.iter().any(|(form, _)| form.text() == text) {
+                forms.push((
+                    Arc::new(egui::RichText::new(text).strong()),
+                    text_width(ui, text, font),
+                ));
+            }
+            false
+        });
+        let minimum = forms.iter().map(|(_, w)| *w).fold(f32::INFINITY, f32::min);
+        Self {
+            forms,
+            minimum,
+            fallback: Arc::new(egui::RichText::new(fallback).strong()),
+        }
+    }
+
+    fn at(&self, room: f32) -> (Arc<egui::RichText>, bool) {
+        self.forms
+            .iter()
+            .find(|(_, width)| *width <= room)
+            .map_or_else(
+                || (self.fallback.clone(), false),
+                |(form, _)| (form.clone(), true),
+            )
+    }
+}
+
+/// The width of `text` in the small font, as a button or pill would paint it.
 fn small_width(ui: &egui::Ui, text: &str) -> f32 {
     text_width(ui, text, &egui::TextStyle::Small.resolve(ui.style()))
 }
@@ -575,7 +678,7 @@ fn member_chip(
     mk: &str,
     kind: Option<SlotKind>,
     drag: bool,
-    note: Option<&str>,
+    note: Option<&dyn Fn() -> String>,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
@@ -709,6 +812,42 @@ fn clamp_hits(
     out
 }
 
+/// The slot menu of card `k` of `v`, inside a chip's context menu.
+fn slot_menu_ui(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    v: &SetView,
+    k: SlotKind,
+    acts: &mut Vec<Act>,
+) {
+    let entries = model.slot_menu(&v.id, k);
+    // The XPMF maps' slot menu is empty: the chip keeps only "Remove from set".
+    if !entries.is_empty() {
+        let title = match k.game_slot() {
+            Some(n) => format!("Slot {n}: {}", v.slot_text(k)),
+            None => v.slot_text(k).to_string(),
+        };
+        if let Some(a) = bulk_menu(ui, &title, &entries) {
+            acts.push(Act::Slot(a));
+        }
+    }
+}
+
+/// A chip with no member under it (a cleared slot, a linked typed path) gets the slot menu, so a clear or a typed link
+/// can be undone from the card.
+fn slot_box_menu(
+    model: &AppModel,
+    v: &SetView,
+    k: SlotKind,
+    r: &egui::Response,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+) {
+    *member_menu |= r.secondary_clicked();
+    let open = r.context_menu(|ui| slot_menu_ui(ui, model, v, k, acts));
+    *member_menu |= open.is_some();
+}
+
 /// A member chip's menu, drag payload and clicks: click selects, double-click expands, a slot member has the slot
 /// menu, and `drag` offers it for dragging and a "Remove from set" entry.
 #[allow(clippy::too_many_arguments)]
@@ -727,17 +866,7 @@ fn member_acts(
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             if let Some(k) = kind {
-                let entries = model.slot_menu(&v.id, k);
-                // The XPMF maps' slot menu is empty: the chip keeps only "Remove from set".
-                if !entries.is_empty() {
-                    let title = match k.game_slot() {
-                        Some(n) => format!("Slot {n}: {}", v.slot_text(k)),
-                        None => v.slot_text(k).to_string(),
-                    };
-                    if let Some(a) = bulk_menu(ui, &title, &entries) {
-                        acts.push(Act::Slot(a));
-                    }
-                }
+                slot_menu_ui(ui, model, v, k, acts);
             }
             if drag {
                 let off = model.sets_read_only_reason();
@@ -2317,48 +2446,103 @@ fn pill(
                     }
                     // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
                     // (Notes FI13, HP12).
-                    let sp = ui.spacing().item_spacing.x;
-                    let btn = 2.0 * ui.spacing().button_padding.x + sp;
                     let body = egui::TextStyle::Body.resolve(ui.style());
-                    // position slot (as wide as the last number), the ≡ handle, and the gaps around them
-                    let lead =
-                        text_width(ui, &total.to_string(), &egui::FontId::monospace(body.size))
-                            + text_width(ui, "≡", &body)
-                            + 2.0 * sp;
-                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke.width;
-                    let pill = small_width(ui, kind_text(model, v))
-                        + 2.0 * PILL_PAD_X
-                        + 2.0 * stroke
-                        + STATUS_DOT
-                        + sp;
-                    // Note HP12: a whole title shorter than NAME_MIN needs only its own width.
-                    let name_min = NAME_MIN.min(text_width(ui, &v.id, &body));
-                    let mut need = lead + name_min + pill + sp;
-                    if !rows.is_empty() {
-                        need += small_width(ui, &warn_text(rows.len())) + btn;
-                    }
-                    if !checks.is_empty() {
-                        need += small_width(ui, &check_badge_text(&checks).1) + btn;
-                    }
-                    let wide = ui.available_width() >= need;
-                    // Note HN F3: elide the middle so the leaf stays; the node's name is the full id.
-                    let shown_for = |ui: &egui::Ui| {
-                        let font = egui::TextStyle::Body.resolve(ui.style());
-                        let room = ui.available_width();
-                        fit_title(&v.id, &model.sets_filter.search, |t| {
-                            text_width(ui, t, &font) <= room
+                    let query = &model.sets_filter.search;
+                    let title_key = egui::Id::unique((
+                        "card-title",
+                        &v.id,
+                        &v.short,
+                        query,
+                        &body,
+                        ui.pixels_per_point().to_bits(),
+                    ));
+                    let (whole, full_width) = super::paint_cached(ui.ctx(), title_key, || {
+                        #[cfg(feature = "test-hooks")]
+                        super::paint_counts::Work::Title.built();
+                        (
+                            Arc::new(egui::RichText::new(&v.id).strong()),
+                            text_width(ui, &v.id, &body),
+                        )
+                    });
+                    // Only measure shorter forms if the whole title cannot fit.
+                    let shorter = |ui: &egui::Ui| {
+                        super::paint_cached(ui.ctx(), title_key.with("short"), || {
+                            Arc::new(ShortTitles::new(ui, v, query, &body))
                         })
                     };
+                    let fits =
+                        |ui: &egui::Ui, room| full_width <= room || shorter(ui).minimum <= room;
+                    let name_min = NAME_MIN.min(full_width);
+                    let sp = ui.spacing().item_spacing.x;
+                    let btn = 2.0 * ui.spacing().button_padding.x + sp;
+                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke.width;
+                    let kind = kind_text(model, v);
+                    let count = checks
+                        .iter()
+                        .filter(|(_, w)| super::counts_toward_badge(w))
+                        .count();
+                    let heading_key = title_key.with((
+                        total,
+                        kind,
+                        rows.len(),
+                        checks.is_empty(),
+                        count,
+                        egui::TextStyle::Small.resolve(ui.style()),
+                        sp.to_bits(),
+                        btn.to_bits(),
+                        stroke.to_bits(),
+                    ));
+                    let need = super::paint_cached(ui.ctx(), heading_key, || {
+                        let lead =
+                            text_width(ui, &total.to_string(), &egui::FontId::monospace(body.size))
+                                + text_width(ui, "≡", &body)
+                                + 2.0 * sp;
+                        let pill = small_width(ui, kind)
+                            + 2.0 * PILL_PAD_X
+                            + 2.0 * stroke
+                            + STATUS_DOT
+                            + sp;
+                        let mut need = lead + name_min + pill + sp;
+                        if !rows.is_empty() {
+                            need += small_width(ui, &warn_text(rows.len())) + btn;
+                        }
+                        if !checks.is_empty() {
+                            need += small_width(ui, &check_badge_text(&checks).1) + btn;
+                        }
+                        need
+                    });
+                    // The wrap decision and displayed form use the same measured widths.
+                    // One row only when the title that will be shown also fits beside the pill and badges
+                    // (Task 9 review); otherwise it takes its own line at the card's full width.
+                    let wide = ui.available_width() >= need
+                        && fits(ui, ui.available_width() - (need - name_min));
                     let name = |ui: &mut egui::Ui| {
-                        let shown = shown_for(ui);
-                        // Extend: the shown text already fits, so egui never end-cuts the leaf.
-                        let r = ui.add(
-                            egui::Label::new(egui::RichText::new(&shown).strong())
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
+                        let room = ui.available_width();
+                        let (shown, fits) =
+                            super::paint_cached(ui.ctx(), title_key.with(room.to_bits()), || {
+                                #[cfg(feature = "test-hooks")]
+                                super::paint_counts::Work::TitleFit.built();
+                                if full_width <= room {
+                                    (whole.clone(), true)
+                                } else {
+                                    shorter(ui).at(room)
+                                }
+                            });
+                        // Extend: the shown text already fits, so egui never end-cuts the tail. When even the
+                        // tail does not fit, the title wraps instead of cutting further (E24).
+                        let wrap = if fits {
+                            egui::TextWrapMode::Extend
+                        } else {
+                            egui::TextWrapMode::Wrap
+                        };
+                        let r = ui.add(egui::Label::new(shown.clone()).wrap_mode(wrap));
                         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &v.id));
-                        if shown != v.id {
-                            r.on_hover_text(&v.id);
+                        if shown.text() != v.id {
+                            let hover =
+                                super::paint_cached(ui.ctx(), title_key.with("hover"), || {
+                                    Arc::new(egui::RichText::new(&v.id))
+                                });
+                            r.on_hover_text(hover);
                         }
                     };
                     let own_line = ui.horizontal(|ui| {
@@ -2390,10 +2574,8 @@ fn pill(
                             );
                             false
                         } else {
-                            // Beside the position and handle the leaf would be cut: give the title its own line.
-                            let shown = shown_for(ui);
-                            let own = shown != v.id
-                                && !shown.ends_with(v.id.rsplit('/').next().unwrap_or(&v.id));
+                            // Beside the position and handle the tail would not fit: give the title its own line.
+                            let own = !fits(ui, ui.available_width());
                             if !own {
                                 name(ui);
                             }
@@ -2527,6 +2709,77 @@ fn pill(
     }
 }
 
+/// Review E1: the chip of a slot that holds a link: the linked item's thumbnail, or a filled letter box when no item
+/// is known (a typed path); `link_mark` sits at its top centre. `cell` is the slot's kind, letter and link.
+/// Returns the chip's rect.
+#[allow(clippy::too_many_arguments)]
+fn linked_chip<'a>(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    thumbs: &mut ThumbCache,
+    v: &SetView,
+    cell: (SlotKind, &str, &'a SlotLink),
+    sel_items: &HashSet<String>,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+    chipped: &mut HashSet<&'a str>,
+) -> egui::Rect {
+    let (k, letter, l) = cell;
+    // names and hovers are built when read, not per frame
+    let name = || linked_chip_name(letter, l);
+    let hover = || format!("{} linked to {}", v.slot_text(k), l.path);
+    let thumb = l.item.as_deref().and_then(|mk| {
+        chipped.insert(mk);
+        // K13: the item belongs to another set: no drag payload from here.
+        member_chip(
+            ui,
+            model,
+            thumbs,
+            v,
+            mk,
+            Some(k),
+            false,
+            Some(&hover),
+            sel_items,
+            acts,
+            member_menu,
+        )
+    });
+    let rect = match thumb {
+        Some(r) => {
+            paint_letter(ui, r.rect, letter, false, f32::INFINITY);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name()));
+            r.rect
+        }
+        None => {
+            // a typed path: no item to show, so the box takes the slot menu a thumbnail would have, and paints the
+            // slot's locks as a thumbnail does (final wave Group 5)
+            let r = letter_box_painted(ui, letter, None, true).interact(egui::Sense::click());
+            let (locked, pgp) = chip_locks(v, Some(k));
+            super::columns::paint_locks(ui, r.rect, locked, pgp);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name()));
+            ui.ctx()
+                .accesskit_node_builder(r.id, |b| b.set_description(hover()));
+            let r = r.on_hover_ui(|ui| {
+                ui.label(hover());
+            });
+            slot_box_menu(model, v, k, &r, acts, member_menu);
+            r.rect
+        }
+    };
+    // The mark sits at the chip's top centre, between the two lock cells (the slot lock top right, PGPatcher's top
+    // left), so it covers neither them nor the letter (bottom left). A linked chip docks nothing.
+    let side = CHIP - 2.0 * (LOCK_PAD + LOCK_W);
+    let at = egui::Rect::from_min_size(
+        rect.left_top() + egui::vec2(LOCK_PAD + LOCK_W, MARK_TOP),
+        egui::Vec2::splat(side),
+    );
+    // the panel's fill backs the mark so the strong text colour reads over any thumbnail in both themes
+    ui.painter().rect_filled(at, 2.0, ui.visuals().panel_fill);
+    link_mark(ui.painter(), at, ui.visuals().strong_text_color());
+    rect
+}
+
 /// Note HP: the chip row of a card: one chip per slot (an empty one is a letter box), the missing entries, then the
 /// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
 /// (`fixed` comes in holding the combo's).
@@ -2543,25 +2796,67 @@ fn chip_row<'a>(
     member_menu: &mut bool,
     mut fixed: Vec<egui::Rect>,
 ) -> (Vec<DockPlan<'a>>, Vec<egui::Rect>) {
-    let row = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    let row = view_row(v);
     let mut chipped: HashSet<&str> = HashSet::new();
     let mut badged: HashSet<&str> = HashSet::new();
     let mut plans: Vec<DockPlan> = vec![];
     for cell in &row {
         let k = cell.kind;
         let letter = chip_letter(v, k);
+        match slot_shown(v, k) {
+            SlotShown::Linked(l) => {
+                let rect = linked_chip(
+                    ui,
+                    model,
+                    thumbs,
+                    v,
+                    (k, &letter, l),
+                    sel_items,
+                    acts,
+                    member_menu,
+                    &mut chipped,
+                );
+                fixed.push(rect);
+                continue;
+            }
+            // the JSON leaves the slot empty: dim like an empty chip, named for what it is
+            SlotShown::Cleared { item } => {
+                // a click-sensed box with the slot menu, so the clear can be undone from the card
+                let r = letter_box_painted(ui, &letter, None, false).interact(egui::Sense::click());
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        format!("{letter}, cleared"),
+                    )
+                });
+                let hover = || {
+                    let file = model.item(item).map_or(item, |i| i.name.as_str());
+                    format!("{} (cleared): {file}", v.slot_text(k))
+                };
+                ui.ctx()
+                    .accesskit_node_builder(r.id, |b| b.set_description(hover()));
+                let r = r.on_hover_ui(|ui| {
+                    ui.label(hover());
+                });
+                slot_box_menu(model, v, k, &r, acts, member_menu);
+                fixed.push(r.rect);
+                continue;
+            }
+            _ => {}
+        }
         let (mk, from) = match &cell.fill {
             SlotFill::Own { item } => (item, None),
             SlotFill::Borrowed { from, item } => (item, Some(from)),
             SlotFill::Empty => {
-                let r = letter_box(ui, &letter, None)
+                let r = letter_box(ui, &letter, None, None)
                     .on_hover_text(format!("{} (empty)", v.slot_text(k)));
                 fixed.push(r.rect);
                 continue;
             }
         };
         chipped.insert(mk);
-        let note = from.map(|f| format!("borrowed from {f}"));
+        let note = from.map(|f| move || format!("borrowed from {f}"));
         // K13: a borrowed item belongs to another set: no drag payload from here.
         let Some(r) = member_chip(
             ui,
@@ -2571,12 +2866,12 @@ fn chip_row<'a>(
             mk,
             Some(k),
             from.is_none(),
-            note.as_deref(),
+            note.as_ref().map(|n| n as &dyn Fn() -> String),
             sel_items,
             acts,
             member_menu,
         ) else {
-            fixed.push(letter_box(ui, &letter, None).rect);
+            fixed.push(letter_box(ui, &letter, None, None).rect);
             continue;
         };
         let own = fixed.len();
@@ -2605,7 +2900,7 @@ fn chip_row<'a>(
     // K12: an add/remove entry that matches no file.
     // Note DU1: its menu removes the entry (an entry with no files left: Delete set).
     for m in &v.missing {
-        let r = letter_box(ui, "?", Some(RED)).interact(egui::Sense::click());
+        let r = letter_box(ui, "?", Some(RED), None).interact(egui::Sense::click());
         fixed.push(r.rect);
         let text = m.text();
         r.widget_info(|| {
@@ -2637,6 +2932,16 @@ fn chip_row<'a>(
         // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
         let owns = |f: &SlotFill| matches!(f, SlotFill::Own { item } if item == mk);
         let kind = v.slots.iter().find(|(_, f)| owns(f)).map(|(k, _)| *k);
+        // A file the JSON does not write (its slot holds a link, or is cleared) draws no thumbnail: the slot's own
+        // chip speaks for it (review E1). `chip_rows` does not count it either: it fills a slot.
+        if kind.is_some_and(|k| {
+            matches!(
+                slot_shown(v, k),
+                SlotShown::Replaced { .. } | SlotShown::Linked(_) | SlotShown::Cleared { .. }
+            )
+        }) {
+            continue;
+        }
         let Some(item) = model.item(mk) else {
             continue;
         };
@@ -2663,7 +2968,7 @@ fn chip_row<'a>(
             mk,
             kind,
             true,
-            Some(&role),
+            Some(&|| role.clone()),
             sel_items,
             acts,
             member_menu,
@@ -3822,33 +4127,156 @@ mod tests {
             .is_disabled());
     }
 
-    fn fit_at(id: &str, query: &str, n: usize) -> String {
-        fit_title(id, query, |t: &str| t.chars().count() <= n)
+    fn link(path: &str, row: SlotKind) -> SlotLink {
+        SlotLink {
+            path: path.into(),
+            from: None,
+            from_short: None,
+            item: None,
+            kind: None,
+            row: Some(row),
+        }
     }
 
+    /// How many chips `chip_row` draws for `v` (every chip pushes its rect on `fixed`), and what `chip_rows` counts
+    /// for it when a row holds one chip.
+    fn drawn_and_counted(v: &SetView) -> (usize, usize) {
+        let session = std::sync::Arc::new(engine::session::Session::new().expect("a session"));
+        let model = AppModel::new(crate::settings::GuiSettings::default(), None, session);
+        let editing = Editing {
+            on: true,
+            why: "",
+            reorder: false,
+            exporting: false,
+        };
+        let drawn = std::rc::Rc::new(std::cell::Cell::new(0));
+        let out = drawn.clone();
+        let mut thumbs = ThumbCache::default();
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .build_ui(move |ui| {
+                let (_, fixed) = chip_row(
+                    ui,
+                    &model,
+                    &mut thumbs,
+                    v,
+                    &[],
+                    &editing,
+                    &HashSet::new(),
+                    &mut vec![],
+                    &mut false,
+                    vec![],
+                );
+                out.set(fixed.len());
+            });
+        h.run();
+        (drawn.get(), chip_rows(v, 0.0, 0.0))
+    }
+
+    /// Review E1: `chip_rows` counts the chips `chip_row` draws for a linked slot, a cleared one, and a link over an
+    /// own file of its kind. (A unit test has no items in its model, so the trailing members loop draws nothing here:
+    /// that term is pinned by the drawn-equals-counted tests in `tests/set_cards.rs`.)
     #[test]
-    fn fit_title_keeps_a_middle_match() {
-        assert_eq!(
-            fit_at("architecture/stone/banner", "STONE", 15),
-            "…/stone/banner"
+    fn chip_rows_counts_what_chip_row_draws_for_links_and_clears() {
+        let mut linked = SetView::new("k/a".into(), "a".into(), vec!["a/d.png".into()]);
+        linked.linked.insert(1, link("p\\x.dds", SlotKind::Diffuse));
+        // a link over the set's own diffuse
+        linked.slots.insert(
+            SlotKind::Diffuse,
+            SlotFill::Own {
+                item: "a/d.png".into(),
+            },
         );
-        assert_eq!(fit_at("a/bb/stone/leaf", "ston", 13), "…/stone/leaf");
-    }
-
-    #[test]
-    fn fit_title_without_a_middle_match_keeps_hn6() {
-        let id = "architecture/stone/banner";
-        let hn6 = fit_at(id, "", 15);
-        for q in ["", "banner", "arch", "stone/ban"] {
-            assert_eq!(fit_at(id, q, 15), hn6, "query {q:?}");
+        let mut cleared = SetView::new("k/b".into(), "b".into(), vec!["b/n.png".into()]);
+        cleared.slots.insert(
+            SlotKind::Normal,
+            SlotFill::Own {
+                item: "b/n.png".into(),
+            },
+        );
+        cleared
+            .settings
+            .insert("slot2".into(), serde_json::Value::String(String::new()));
+        let mut replaced = SetView::new("k/c".into(), "c".into(), vec!["c/f.png".into()]);
+        replaced.slots.insert(
+            SlotKind::Fuzz,
+            SlotFill::Own {
+                item: "c/f.png".into(),
+            },
+        );
+        replaced.linked.insert(7, link("p\\c.dds", SlotKind::Coat));
+        for v in [&linked, &cleared, &replaced] {
+            let (drawn, counted) = drawn_and_counted(v);
+            assert_eq!(drawn, counted, "{}", v.id);
+            assert_eq!(drawn, 1, "one chip for {}", v.id);
         }
     }
 
     #[test]
-    fn fit_title_with_a_match_that_does_not_fit_falls_through_to_hn6() {
-        // "…/stone/banner" is 14 characters: at 12 the middle match is skipped
+    fn a_typed_path_names_its_file_and_a_trailing_separator_names_the_whole_path() {
+        let l = link("textures\\x\\thing_d.dds", SlotKind::Diffuse);
+        assert_eq!(linked_chip_name("D", &l), "D, path thing_d.dds");
+        let l = link("textures\\x\\", SlotKind::Diffuse);
+        assert_eq!(linked_chip_name("D", &l), "D, path textures\\x\\");
+        let mut l = link("textures\\x\\thing_d.dds", SlotKind::Diffuse);
+        l.from_short = Some("wall".into());
+        assert_eq!(linked_chip_name("D", &l), "D, from set wall");
+    }
+
+    fn fit_at(id: &str, query: &str, n: usize) -> String {
+        let tail = crate::model::sets::short_names(&[id]);
+        fit_title(id, &tail[0], query, |t: &str| t.chars().count() <= n).0
+    }
+
+    #[test]
+    fn fit_title_keeps_a_middle_match() {
+        let id = "textures/architecture/stone/bricks/banner";
+        assert_eq!(fit_at(id, "STONE", 21), "…/stone/bricks/banner");
+        assert_ne!(fit_at(id, "", 21), fit_at(id, "STONE", 21));
+        assert_eq!(fit_at("a/bb/stone/leaf", "ston", 13), "…/stone/leaf");
+    }
+
+    #[test]
+    fn fit_title_without_a_middle_match_keeps_the_tail() {
         let id = "architecture/stone/banner";
+        let plain = fit_at(id, "", 15);
+        assert!(plain.ends_with("stone/banner"), "{plain}");
+        for q in ["", "banner", "arch", "stone/ban"] {
+            assert_eq!(fit_at(id, q, 15), plain, "query {q:?}");
+        }
+    }
+
+    #[test]
+    fn fit_title_with_a_match_that_does_not_fit_falls_through_to_the_tail() {
+        let id = "architecture/stone/old/banner";
         assert_eq!(fit_at(id, "stone", 12), fit_at(id, "", 12));
+        assert_eq!(fit_at(id, "stone", 12), "…/old/banner");
+    }
+
+    #[test]
+    fn fit_title_keeps_the_unique_tail() {
+        let narrow = |s: &str| s.chars().count() <= 8;
+        assert_eq!(
+            fit_title("textures/arch/eye/m", "eye/m", "", narrow),
+            ("…/eye/m".into(), true)
+        );
+        assert_ne!(
+            fit_title("textures/arch/eye/eye", "eye/eye", "", narrow),
+            fit_title("textures/arch/ear/eye", "ear/eye", "", narrow)
+        );
+    }
+
+    #[test]
+    fn fit_title_never_merges_two_ids_under_a_search() {
+        let narrow = |s: &str| s.chars().count() <= 10;
+        // 18 characters each: neither fits whole, so both fall to the tail form, which wraps
+        let a = fit_title("textures/a/stone/m", "a/stone/m", "stone", narrow);
+        let b = fit_title("textures/b/stone/m", "b/stone/m", "stone", narrow);
+        assert_ne!(a, b);
+        assert!(a.0.ends_with("a/stone/m") && b.0.ends_with("b/stone/m"));
+        assert!(!a.1 && !b.1);
     }
 
     #[test]
@@ -3866,10 +4294,31 @@ mod tests {
         assert_eq!(tag_text(None, ""), "—");
     }
 
+    /// Final wave Group 6 (ledger 187): the last resort `…/<tail>` is never as long as the id it stands for.
+    #[test]
+    fn the_tail_form_is_never_longer_than_the_id() {
+        let none = |_: &str| false;
+        // "…/stone/m" is 9 characters, as many as the id: the id is shown
+        assert_eq!(
+            fit_title("x/stone/m", "stone/m", "", none),
+            ("x/stone/m".into(), false)
+        );
+        assert_eq!(
+            fit_title("textures/arch/eye/m", "eye/m", "", none),
+            ("…/eye/m".into(), false)
+        );
+    }
+
     #[test]
     fn fit_title_shows_the_whole_id_when_it_fits() {
         let id = "architecture/stone/banner";
-        assert_eq!(fit_at(id, "stone", 40), id);
+        let calls = std::cell::Cell::new(0);
+        let result = fit_title(id, "stone/banner", "stone", |text| {
+            calls.set(calls.get() + 1);
+            text.chars().count() <= 40
+        });
+        assert_eq!(result, (id.to_string(), true));
+        assert_eq!(calls.get(), 1, "the fitted title carries its measurement");
     }
 
     #[test]

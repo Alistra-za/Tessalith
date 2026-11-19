@@ -285,6 +285,8 @@ fn a_vanilla_member_under_textures_gives_its_game_path() {
     );
 }
 
+/// Ruling 3b-F21 (replaces 3b-F16's prediction): before the new plan lands no path is given (the pick waits for the
+/// plan), and after it lands the path is the one the new plan writes, never the last plan's.
 #[test]
 fn the_game_path_follows_the_current_prefix_not_the_last_plan() {
     let d = tempfile::tempdir().unwrap();
@@ -292,6 +294,8 @@ fn the_game_path_follows_the_current_prefix_not_the_last_plan() {
     idle(&mut m);
     m.set_json_value(ROCK_SET, "rename", Some(json!("stone")));
     // Before the new plan lands.
+    assert_eq!(member_game_path(&m, ROCK), Err(PICK_PLANNING.to_string()));
+    idle(&mut m);
     assert_eq!(
         member_game_path(&m, ROCK).as_deref(),
         Ok(r"textures\pbr\landscape\stone.dds")

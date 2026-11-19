@@ -317,6 +317,15 @@ fn an_unused_input_note_names_the_file_and_the_reason() {
     );
 }
 
+/// Controller ruling (2026-11-18): the code sentence no longer sends the user to the recipe combo, which is gone (A1-1).
+#[test]
+fn the_unused_input_sentence_names_the_shader_and_the_type() {
+    assert_eq!(
+        sdc_gui::model::code_text::code_sentence(engine::codes::Code::PackUnusedInput),
+        "A packing input isn't used by this set — remove it, or change the set's shader or the file's type"
+    );
+}
+
 /// A Note-class code on a last-export File row gets the same note row as a live one (the File loop's Note rule).
 #[test]
 fn a_note_from_the_last_export_is_a_note_row() {
@@ -1597,6 +1606,41 @@ fn the_status_line_scans_its_reasons_once_per_change() {
     assert_eq!(steps(&mut h), n + 3, "another set");
 }
 
+/// Final wave Group 7 (ledger 253, Q6 rank 1): the chip of a set filter resolves its set once per change of the
+/// filter or the views, not on every frame it is drawn.
+#[test]
+fn the_set_filter_chip_resolves_its_set_once_per_change() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{scope_label_lookups, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let rock = rock01(&m);
+    let other = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key != rock.key && !v.key.is_empty())
+        .expect("another set")
+        .clone();
+    m.open_problems(Some(ProblemsFilter::Set(rock.key.clone())));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&format!("Set: {} ×", rock.id));
+    let steps = |h: &mut Harness<'static, AppModel>| {
+        for _ in 0..5 {
+            h.step();
+        }
+        scope_label_lookups(h.state())
+    };
+    let n = steps(&mut h);
+    assert!(n >= 1, "the chip resolved its set");
+    assert_eq!(steps(&mut h), n, "five frames, no change: no lookup");
+    h.state_mut()
+        .open_problems(Some(ProblemsFilter::Set(other.key.clone())));
+    assert_eq!(steps(&mut h), n + 1, "another filter");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+    h.state_mut().invalidate_views();
+    assert_eq!(steps(&mut h), n + 2, "new views");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+}
+
 /// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
 /// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
 #[test]
@@ -2274,7 +2318,7 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     // Controller ruling 2: left to right, the fix, the second fix, then Go to set.
     let xs: Vec<f32> = [
         remove.as_str(),
-        "Change shader for landscape/rock01",
+        "Change shader for landscape/rock01 (SHADER-EXTRA-MAP)",
         "Go to set",
     ]
     .iter()
@@ -2445,7 +2489,7 @@ fn a_missing_map_row_offers_change_shader() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -2463,7 +2507,7 @@ fn a_missing_map_row_offers_change_shader() {
             .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
     );
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -3049,6 +3093,72 @@ fn a_shader_map_label_names_its_slot_card() {
     ] {
         assert_eq!(slot_for_shader_map(label), want, "{label}");
     }
+}
+
+/// Final wave Group 3 (review Important 4, ledger line 124): a SHADER-EXTRA-MAP row that names a packed output other
+/// than the RMAOS slot's (here vanilla's complex `_m`) keeps that member as its Go to set target.
+#[test]
+fn an_extra_packed_output_row_keeps_its_member_target() {
+    use sdc_gui::model::items::ItemKind;
+    use sdc_gui::model::nav::SlotTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    support::complex_material(&mut m, "landscape/rock01");
+    let (key, file) = rock01(&m)
+        .members
+        .iter()
+        .find_map(|k| {
+            let i = m.item(k).filter(|i| i.kind == ItemKind::Packed)?;
+            let f = i.job.as_ref()?.output.file_name()?.to_string_lossy();
+            f.contains("_m.").then(|| (k.clone(), f.into_owned()))
+        })
+        .expect("premise: rock01 packs a complex _m");
+    inject_set(&mut m, &[extra_map(&file)]);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(engine::codes::Code::ShaderExtraMap))
+        .expect("the SHADER-EXTRA-MAP row");
+    assert_eq!(row.target, Some(SlotTarget::Item(key)));
+}
+
+/// Final wave Group 3 (ledger line 255): a Problems set filter belongs to the project it was set in, so opening
+/// another folder drops it.
+#[test]
+fn opening_another_folder_drops_the_set_filter() {
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = rock01(&m).key;
+    let root = m.root.clone().expect("premise: a folder is open");
+    for f in [
+        ProblemsFilter::Set(key.clone()),
+        ProblemsFilter::SetNotes(key.clone()),
+        ProblemsFilter::SetChecks(key.clone()),
+    ] {
+        m.bottom.filter = Some(f.clone());
+        let e = tempfile::tempdir().unwrap();
+        let other = e.path().join("textures");
+        std::fs::create_dir_all(&other).unwrap();
+        m.open_folder(other);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, None, "{f:?} is the old project's");
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        // Reopening the same folder keeps it: its sets are the same sets.
+        m.bottom.filter = Some(f.clone());
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, Some(f.clone()), "{f:?}: same folder");
+    }
+    // A filter that names no set is not the folder's.
+    m.bottom.filter = Some(ProblemsFilter::Notes);
+    let e = tempfile::tempdir().unwrap();
+    m.open_folder(e.path().to_path_buf());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.bottom.filter, Some(ProblemsFilter::Notes));
 }
 
 /// Each set row that names a slot or a file carries it for Go to set; the others carry nothing.
@@ -4900,6 +5010,217 @@ fn a_key_less_sets_filter_follows_a_mixed_case_id() {
     );
     assert_eq!(*rows, *by_key);
     assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
+}
+
+/// Follow-up F7 (Note JR11): a filter opened by a keyed set's key follows the set once it loses every file and has no
+/// key: it lists the key-less set's rows, the same rows as a filter by its id.
+#[test]
+fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
+    use sdc_gui::model::bottom::{filtered, scope_key, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    // A text file no plan item matches: the entry stays and shows as "No file matches" once the image is gone.
+    std::fs::write(root.join("landscape/one.txt"), "notes").unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("landscape/big");
+        s.add_member("landscape/big", "landscape/one.png");
+        s.add_member("landscape/big", "landscape/one.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let find = |m: &sdc_gui::model::AppModel| {
+        sdc_gui::model::sets::set_views(m)
+            .into_iter()
+            .find(|v| v.id == "landscape/big")
+            .expect("the set has a card")
+    };
+    let v = find(&m);
+    assert!(!v.key.is_empty(), "precondition: the set has a key: {v:?}");
+    let f = ProblemsFilter::Set(v.key.clone());
+    m.open_problems(Some(f.clone()));
+    // The set's only real file goes; the other files of the folder stay, so the plan still has items.
+    std::fs::remove_file(root.join("landscape/one.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = find(&m);
+    assert!(
+        v.key.is_empty(),
+        "precondition: every entry is missing, so no key: {v:?}"
+    );
+    // Final wave Group 6 (ledger 259): the rows are those of the filter the model holds, not of the local `f`.
+    let installed = m.bottom.filter.clone();
+    let rows = filtered(&m, installed.as_ref());
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_id = filtered(&m, Some(&ProblemsFilter::Set(scope_key(&v).to_string())));
+    assert!(
+        rows.iter().any(|p| p.text.contains("one.txt")),
+        "the missing entry's row: {texts:?}"
+    );
+    assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+    assert_eq!(installed, Some(f.clone()), "nothing resets the filter");
+    // The chip resolves the key as the list does: it names the set, not the old output-root path.
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("Set: landscape/big").count() > 0,
+        "the chip names the set by its id"
+    );
+}
+
+/// A set filter's rows after the output root changes to `to` (an export folder), for a filter opened on `landscape/leaf`
+/// under `<tmp>/out/textures/sub`. `also` creates a key-less set of that name first.
+fn leaf_filter_after_a_root_change(
+    d: &std::path::Path,
+    to: std::path::PathBuf,
+    also: Option<&str>,
+) -> (Vec<String>, Vec<sdc_gui::model::bottom::Problem>) {
+    use sdc_gui::model::bottom::{filtered, ProblemsFilter};
+    let mut m = pbr_opened(d);
+    let root = m.root.clone().unwrap();
+    choose_export(&mut m, d.join("out/textures/sub"));
+    if let Some(id) = also {
+        std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.add_member(id, "landscape/stray.txt")
+        });
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let views = sdc_gui::model::sets::set_views(&m);
+    let leaf = views
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .expect("the leaf set has a card");
+    assert!(!leaf.key.is_empty(), "precondition: {leaf:?}");
+    if let Some(id) = also {
+        let v = views.iter().find(|v| v.id == id).expect("the key-less set");
+        assert!(v.key.is_empty(), "precondition: {v:?}");
+    }
+    let f = ProblemsFilter::Set(leaf.key.clone());
+    m.open_problems(Some(f.clone()));
+    assert!(
+        !filtered(&m, Some(&f)).is_empty(),
+        "precondition: leaf has rows"
+    );
+    choose_export(&mut m, to);
+    assert!(m.bottom.filter.is_some(), "nothing resets the filter");
+    let ids = sdc_gui::model::sets::set_views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect();
+    let f = m.bottom.filter.clone();
+    (ids, filtered(&m, f.as_ref()).to_vec())
+}
+
+/// Review of Task 12a (plan-mandated): a filter opened by a set's key under one output root keeps listing that set's
+/// rows after the root changes to an ancestor, even when a key-less set's id rebuilds the old key under the new root.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_moves_to_an_ancestor() {
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let nested = "sub/textures/landscape/leaf";
+    let (ids, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("out"), Some(nested));
+    assert!(ids.iter().any(|i| i == nested), "{ids:?}");
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+    assert!(
+        !rows.iter().any(|p| p.text.contains("stray.txt")),
+        "another set's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { id, .. } => id == "landscape/leaf",
+            At::Texture(t) => t == "landscape/leaf.png",
+            _ => false,
+        }),
+        "{texts:?}"
+    );
+}
+
+/// The plain case of the same rekey: an ordinary root change leaves the open filter on its set.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("elsewhere"), None);
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+}
+
+/// A key-less entry's id is typed by the user and read as it stands: one that reads like a key under the old output
+/// root (the folded root, a slash, `wall`) is still an id, so a root change leaves the filter on it and never on the
+/// different set `wall` whose key the rewritten value would be.
+#[test]
+fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+    // The entry's id: what the key of a set `wall` is under the plan's output root now.
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "landscape/stray.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let entry = views.iter().find(|v| v.id == id).expect("the entry's card");
+    assert!(entry.key.is_empty(), "precondition: key-less: {entry:?}");
+    assert!(
+        !views.iter().any(|v| v.id == "wall"),
+        "precondition: no set wall yet"
+    );
+    let selected = "landscape/rock01";
+    m.select_set(&engine::sets::set_key(&m.sets_root(), selected));
+    let f = ProblemsFilter::Set(id.clone());
+    m.open_problems(Some(f.clone()));
+    let before = filtered(&m, Some(&f));
+    assert!(
+        before.iter().any(|p| p.text.contains("stray.txt")),
+        "precondition: the entry's row"
+    );
+    // The different set `wall` comes with the plan the move starts: one file at the top of the folder, too small for
+    // its format, so it has rows; its key under the new root is what a rewritten id would be.
+    image::ImageBuffer::from_fn(3, 3, |x, y| {
+        image::Rgb([(x * 40) as u8, (y * 40) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    choose_export(&mut m, d.path().join("elsewhere"));
+    assert!(
+        sdc_gui::model::sets::set_views(&m)
+            .iter()
+            .any(|v| v.id == "wall" && !v.key.is_empty()),
+        "precondition: set wall has a key now"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(
+        rows.iter().any(|p| p.text.contains("stray.txt")),
+        "the entry's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { key, id: i } => key.is_empty() && *i == id,
+            _ => false,
+        }),
+        "another set's row: {texts:?}"
+    );
+    assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+    assert_eq!(
+        m.selection,
+        sdc_gui::model::Selection::Set(engine::sets::set_key(&m.sets_root(), selected)),
+        "the selected set moves even when the filter names an explicit id"
+    );
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
