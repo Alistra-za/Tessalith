@@ -46,6 +46,7 @@ pub mod set_groups;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
+mod shared_alpha;
 pub mod shell;
 pub mod skin;
 pub mod target_mod;
@@ -536,6 +537,9 @@ pub struct AppModel {
     /// user change in it: while it still holds that state against that saved text, its only unsaved change is
     /// automatic (the recorder's `auto_normal` listing). Any save, reload or open ends it.
     listing_only: Option<(u64, String, String)>,
+    /// Note JS7 (N-33 as the owner narrowed it, N-37): true while the recorder or the fuzz switch writes its automatic
+    /// step; the shared-alpha follow-on rides only the user's own steps.
+    automatic_step: bool,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
     pub multi: bulk::MultiSelection,
@@ -874,6 +878,7 @@ impl AppModel {
             batch_preset: String::new(),
             batch: false,
             listing_only: None,
+            automatic_step: false,
             selection: Selection::None,
             multi: Default::default(),
             bulk: Default::default(),
@@ -3347,16 +3352,40 @@ impl AppModel {
                 p.copy_entry_changes(k, b, others);
             }
         };
+        if self.project.is_none() || self.sets_doc.is_none() {
+            return;
+        }
+        // A batch records one step around all its writes (`batch_edit`): no snapshot per write, and the shared-alpha
+        // follow-on runs once at its end (Note JS7, Task 8b).
+        if self.batch {
+            let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
+                return;
+            };
+            return f(p, s);
+        }
+        // Note JS7 (N-33, N-37): a user's step that plans again runs the shared-alpha follow-on; its starting point is
+        // read before the step. An automatic step (the recorder, the fuzz switch) and a step that does not plan (JSON
+        // hash records, set groups, the crash restore) do not.
+        let start = if replan && !self.automatic_step {
+            shared_alpha::before(self)
+        } else {
+            None
+        };
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
-        // A batch records one step around all its writes (`batch_edit`): no snapshot per write.
-        if self.batch {
-            return f(p, s);
-        }
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
+        let revs = (p.rev(), s.rev());
         f(p, s);
+        let changed = (p.rev(), s.rev()) != revs;
+        // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
+        if let Some(b) = start.as_ref().filter(|_| changed) {
+            self.follow_shared(b);
+        }
+        let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
+            return;
+        };
         let after = Self::snapshot_of(Some(p), Some(s));
         if after == before {
             // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
@@ -3751,6 +3780,9 @@ impl AppModel {
 
     /// Note JI5: the diffuse slot row's alpha type, written to the item's own `alpha.policy` in one step.
     pub fn set_alpha(&mut self, item: &str, p: AlphaPolicy) {
+        if p == AlphaPolicy::Data && self.data_pick_unlists("Alpha", item) {
+            return;
+        }
         let k = item.to_string();
         self.edit("Alpha", move |d| {
             d.set_file_value(&k, "alpha.policy", &json!(p))
@@ -3819,6 +3851,13 @@ impl AppModel {
                 self.weighting_follow
                     .push((item_key.to_string(), w.to_string(), merge));
             }
+            return;
+        }
+        // Note JS7 (N-34): the user's Data on a key the share step listed is the user's own value now.
+        if field == "alpha.policy"
+            && value == json!("data")
+            && self.data_pick_unlists(&format!("Change {field}"), item_key)
+        {
             return;
         }
         let k = item_key.to_string();

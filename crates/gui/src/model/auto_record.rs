@@ -231,11 +231,13 @@ impl AppModel {
         let s = if n == 1 { "" } else { "s" };
         let label = format!("Switch {n} fuzz-map set{s} off Advanced Skin");
         let cleared = keys.clone();
+        self.automatic_step = true;
         self.edit_docs(&label, Some(merge.clone()), true, move |p, _| {
             for k in &cleared {
                 p.clear_file_value(k, "subtype");
             }
         });
+        self.automatic_step = false;
         self.reencode_follow = Some(merge.clone());
         self.fuzz_switch = Some(FuzzSwitch {
             merge,
@@ -499,12 +501,14 @@ impl AppModel {
             // switch's row lists what it joined.
             let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
             let pushes = self.history.pushes;
+            self.automatic_step = true;
             self.edit_docs(&label, Some(k), true, |p, s| {
                 for (k, f, v) in &writes {
                     p.set_file_value(k, f, v);
                 }
                 super::normal_follow::list_normals(p, s, &writes);
             });
+            self.automatic_step = false;
             self.note_listing(sets_clean);
             if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
                 // Final review B I1: a switched file is listed once, by the switch's own line (it names the type the
@@ -522,6 +526,7 @@ impl AppModel {
             return self.history.pushes != pushes;
         }
         let clean_before = !self.prompts_unsaved();
+        self.automatic_step = true;
         let wrote = self.batch_edit(&label, |m| {
             m.edit("Set automatically", |p| {
                 for (k, f, v) in &writes {
@@ -532,6 +537,7 @@ impl AppModel {
                 super::normal_follow::list_normals(p, s, &writes)
             });
         });
+        self.automatic_step = false;
         self.note_listing(sets_clean);
         if wrote {
             let typed = writes.iter().any(|(_, f, _)| *f == "subtype");

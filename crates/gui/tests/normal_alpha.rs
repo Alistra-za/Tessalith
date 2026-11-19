@@ -1180,3 +1180,416 @@ fn data_is_offered_on_a_pbr_normal_and_sticks() {
     let j = m.item(WALL_N).and_then(|i| i.job.clone()).unwrap();
     assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
 }
+
+/// The files of two sets: `textures/pbr/iron.png`, `iron_n.png` (varying alpha), `iron_rmaos.png`: a PBR set;
+/// `textures/armor/steel.png` with its own `steel_n.png`: a regular set.
+fn two_sets_files(dir: &Path) {
+    let pbr = dir.join("textures/pbr");
+    let armor = dir.join("textures/armor");
+    for f in [&pbr, &armor] {
+        std::fs::create_dir_all(f).unwrap();
+    }
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([120u8, 90, 60]))
+        .save(pbr.join("iron.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([90u8, 90, 100]))
+        .save(armor.join("steel.png"))
+        .unwrap();
+    bumpy_n(&pbr.join("iron_n.png"));
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(armor.join("steel_n.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(pbr.join("iron_rmaos.png"))
+        .unwrap();
+}
+
+/// `two_sets_files`, opened as the app opens them.
+fn two_sets(dir: &Path) -> AppModel {
+    two_sets_files(dir);
+    let m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    let ids: Vec<String> = sdc_gui::model::sets::views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect();
+    assert!(
+        ids.iter().any(|i| i == "pbr/iron") && ids.iter().any(|i| i == "armor/steel"),
+        "{ids:?}"
+    );
+    m
+}
+
+const IRON_N: &str = "pbr/iron_n.png";
+
+/// Share `item` into set `into` as the Sets column does: `drop_choice` returns `AskReplace` when the slot is filled
+/// (sets.rs:2936-2946) and `Joined` when it is empty; it never returns `AskChoice` (that is `drop_on_set`'s).
+fn share(m: &mut AppModel, item: &str, into: &str) {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    match m.drop_choice(item, into, DropChoice::Share) {
+        DropOutcome::AskReplace { .. } => m
+            .drop_replace(item, into, DropChoice::Share)
+            .expect("shared"),
+        DropOutcome::Joined => {}
+        other => panic!("{other:?}"),
+    }
+    settle(m);
+}
+
+/// N-10 (a): sharing a PBR set's normal into a regular set writes `alpha.policy = "data"` on it in the share's step.
+/// (b): the regular set picked PBR takes it back in that step; a regular pick writes it again.
+#[test]
+fn a_shared_normal_keeps_its_alpha_while_a_regular_set_uses_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    assert_eq!(held(&m, IRON_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert!(
+        m.undo_label().is_some_and(|l| l.starts_with("Share into")),
+        "one step"
+    );
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec![IRON_N.to_string()]
+    );
+    let j = m.item(IRON_N).and_then(|i| i.job.clone()).unwrap();
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "no regular set uses it now"
+    );
+    m.set_shader("armor/steel", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-10 (b), N-27: the user's Remove on a listed key is files-only and keeps the listing, and a value the user wrote
+/// over the step's is never taken back, Data included.
+#[test]
+fn the_users_alpha_on_a_shared_normal_is_never_taken_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the step wrote it"
+    );
+    let rev = m.sets_doc.as_ref().unwrap().rev();
+    m.set_alpha(IRON_N, AlphaPolicy::Remove);
+    settle(&mut m);
+    assert_eq!(m.sets_doc.as_ref().unwrap().rev(), rev, "files-only");
+    m.set_alpha(IRON_N, AlphaPolicy::Data);
+    settle(&mut m);
+    assert!(
+        m.sets_doc.as_ref().unwrap().auto_data().is_empty(),
+        "the user's Data now"
+    );
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-34 (review 2 Minor 3): picking Data on a key the share step set to `data` makes it the user's: the key leaves
+/// `auto_data` in the pick's step, and the share ending no longer takes it back.
+#[test]
+fn picking_data_on_a_listed_key_makes_it_the_users() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec![IRON_N.to_string()],
+        "precondition: the share step listed it"
+    );
+    m.set_alpha(IRON_N, AlphaPolicy::Data);
+    settle(&mut m);
+    assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+    assert_eq!(m.undo_label(), Some("Alpha"));
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-10: a share into another PBR set writes nothing (only ever in PBR sets: dropped, silently).
+#[test]
+fn a_share_between_pbr_sets_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+}
+
+/// N-10: clearing the regular set's slot 2 ends the last share: `data` goes in that step, and one Undo brings it back.
+#[test]
+fn clearing_the_share_takes_data_back_in_one_step() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(m.undo_label(), Some("Clear slot 2 of armor/steel"));
+    m.undo();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-10 (JN1): a two-hop chain (written as a project from before JN3 holds one) from a regular set through a PBR set
+/// to the owner is a share into a regular set; clearing the regular set's slot ends it.
+#[test]
+fn a_chain_into_a_regular_set_keeps_alpha() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mid = d.path().join("textures/mid");
+    let plate = d.path().join("textures/plate");
+    for f in [&mid, &plate] {
+        std::fs::create_dir_all(f).unwrap();
+    }
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([70u8, 70, 70]))
+        .save(mid.join("bolt.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(mid.join("bolt_rmaos.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([60u8, 60, 80]))
+        .save(plate.join("plate.png"))
+        .unwrap();
+    let mut m = two_sets(d.path());
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("mid/bolt", 2, Some("pbr/iron"));
+        s.set_borrow("plate/plate", 2, Some("mid/bolt"));
+    });
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    m.set_slot_command("plate/plate", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "only a PBR set shares it now"
+    );
+}
+
+/// N-10: the owner picked regular ends the PBR-into-regular share: `data` goes in the pick's step (and the owner's
+/// untouched `pbr_normal` goes back to `normal`, Task 6).
+#[test]
+fn the_owner_turning_regular_takes_data_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.set_shader("pbr/iron", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(held(&m, IRON_N, "subtype"), Some(json!("normal")));
+}
+
+/// Review 2 Important 3: a regular owner whose untouched `normal` a regular set shares; picking PBR on the owner
+/// retypes it `pbr_normal` in that step (Task 6), so "already `data`" is read from the step's new type, not the last
+/// plan's: `data` is written in the "Shader" step.
+#[test]
+fn the_owner_turning_pbr_writes_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.set_shader("pbr/iron", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "subtype"), Some(json!("normal")));
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "a regular owner's normal is not written"
+    );
+    m.set_shader("pbr/iron", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec![IRON_N.to_string()]
+    );
+    assert_eq!(m.undo_label(), Some("Shader"));
+}
+
+/// Review 2 Important 2: removing the owner's Normal-slot file from its set hands it over to the set that shares it
+/// (Note JN5), a regular set, so no regular set shares a PBR owner's normal: `data` goes in the remove's step. (The
+/// handed `pbr_normal` stays `pbr_normal`: spec limit 2.)
+#[test]
+fn removing_the_owners_normal_takes_data_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.remove_member("pbr/iron", IRON_N).unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+}
+
+/// Review 1 Minor 7: an owner normal already planned `data` (a typed `normal`, whose built-in alpha is `data`) gets no
+/// write.
+#[test]
+fn an_owner_normal_already_data_gets_no_write() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.decide(IRON_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+}
+
+/// Review 4 Important 1: an entry whose files are all gone (no files; it borrows `pbr/iron`'s slot 2) reads no
+/// texture, so it neither shares the normal nor holds back the clear when the last regular set stops sharing it.
+#[test]
+fn a_set_with_no_files_does_not_hold_back_a_clear() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("ghost/ghost", 2, Some("pbr/iron"))
+    });
+    settle(&mut m);
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "ghost/ghost" && v.members.is_empty()),
+        "precondition: the entry is shown with no files"
+    );
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+}
+
+/// N-40 (review 5 Minor 1): while a plan is out, a set it does not know yet (here a rename's new id) has no files in
+/// its view, but it is not gone: a second user step made before that plan lands keeps the listed `data` that the set's
+/// pair holds back.
+#[test]
+fn a_set_the_running_plan_does_not_know_is_not_gone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    m.rename_set("armor/steel", "armor/plate").unwrap();
+    assert!(
+        m.full_plan_pending(),
+        "precondition: the rename's plan is still out"
+    );
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "armor/plate" && v.members.is_empty()),
+        "precondition: the new id has no files until the plan lands"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the rename's own step holds it back"
+    );
+    m.set_shader("pbr/iron", Some(Shader::Pbr));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a set the running plan does not know yet is not gone"
+    );
+    settle(&mut m);
+}
+
+/// N-39: a shared owner normal whose analysis is known and whose alpha does not vary has no specular to keep: the
+/// share writes nothing.
+#[test]
+fn a_share_of_a_normal_with_no_varying_alpha_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(d.path().join("textures/pbr/iron_n.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        m.item(IRON_N)
+            .and_then(|i| i.analysis.as_ref())
+            .map(|a| a.alpha != engine::presets::AlphaContent::Varying),
+        Some(true),
+        "precondition: the analysis is known and the alpha does not vary"
+    );
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+}
+
+/// N-37, a pin of the `edit_docs` read of `automatic_step`: the fuzz switch on open is an automatic step through
+/// `edit_docs` (auto_record.rs:234). With accept None the recorder writes nothing, so no batch runs at open and only
+/// that read is reached. A saved `auto_data` key that no regular set shares survives the switch; the user's next step
+/// clears it.
+#[test]
+fn an_automatic_step_never_clears_a_leftover() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/m");
+    std::fs::create_dir_all(&t).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(t.join("rock01.png"))
+        .unwrap();
+    bumpy_n(&t.join("rock01_n.png"));
+    ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+        .save(t.join("rock01_roughness.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Rgb([(x * 4) as u8, 200, 40]))
+        .save(t.join("rock01_fuzz.png"))
+        .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n[files.\"m/rock01_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"m/rock01_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(sdc_gui::settings::GuiSettings::default(), None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.path().join("textures"));
+    settle(&mut m);
+    // The switch plans again after its step.
+    settle(&mut m);
+    assert_eq!(
+        held(&m, "m/rock01.png", "subtype"),
+        None,
+        "precondition: the switch ran"
+    );
+    assert_eq!(
+        held(&m, "m/rock01_n.png", "alpha.policy"),
+        Some(json!("data")),
+        "no automatic step clears it"
+    );
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec!["m/rock01_n.png".to_string()]
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, "m/rock01_n.png", "alpha.policy"),
+        None,
+        "the user's next step re-checks every listed key"
+    );
+}
