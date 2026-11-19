@@ -61,8 +61,8 @@ fn kind_of(choice: PackRecipe) -> Option<RecipeKind> {
 
 /// The `packing.recipe` written on the `[files]` entry `{base}_{suffix}`, `Auto` when none or unreadable: the one
 /// parse `explicit_recipe` and `recipe_written` share (final wave Group 8, ledger 129).
-fn written_recipe(p: &ProjectDoc, base: &str, suffix: &str) -> PackRecipe {
-    p.file_value(&format!("{base}_{suffix}"), "packing.recipe")
+fn written_recipe(value: Option<serde_json::Value>) -> PackRecipe {
+    value
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(PackRecipe::Auto)
 }
@@ -75,10 +75,9 @@ impl AppModel {
         else {
             return PackRecipe::Auto;
         };
-        let (on_rfaos, on_rmaos) = (
-            written_recipe(p, base, "rfaos"),
-            written_recipe(p, base, "rmaos"),
-        );
+        let recipe =
+            |suffix| written_recipe(p.file_value(&format!("{base}_{suffix}"), "packing.recipe"));
+        let (on_rfaos, on_rmaos) = (recipe("rfaos"), recipe("rmaos"));
         if on_rfaos != PackRecipe::Auto {
             return on_rfaos;
         }
@@ -141,9 +140,10 @@ impl AppModel {
             return false;
         };
         self.target == Target::Cs
-            && ["rmaos", "rfaos"]
-                .iter()
-                .any(|s| written_recipe(p, base, s) != PackRecipe::Auto)
+            && ["rmaos", "rfaos"].iter().any(|s| {
+                let value = p.snapshot_file_value(&format!("{base}_{s}"), "packing.recipe");
+                written_recipe(value) != PackRecipe::Auto
+            })
     }
 
     /// Owner A1-4, A1-8: take `packing.recipe` off both packed keys of the set that owns `packed_key` (`_rmaos` and

@@ -52,6 +52,8 @@ An "internal error in …" dialog appears and the window keeps running. A failed
 
 The error goes to `%LOCALAPPDATA%\sdc\logs\crash-<date>-<time>.log`, and your unsaved edits are written beside their files as `sdc.toml.recovery` and `sdc-project.toml.recovery`. The originals aren't touched. When you open the folder again the edits come back as one Undo step, "Restore crash edits", with a toast. <!-- D:FB5 --> If a file doesn't parse, its `.recovery` stays and the banner says where.
 
+An automatic normal type and its ownership list alone need no recovery. If you also edit a texture setting, recovery keeps both dirty files together so Tessalith still knows which types it can change. The close dialog can name just `sdc.toml` in that case. A failed **Save** leaves the list classified as an automatic edit when you retry. <!-- D:JS5 -->
+
 ### The graphics device was lost
 
 The log has a "wgpu device lost" line. It isn't a crash: a message appears with **Restart**, and Tessalith reopens the same folder with your edits restored.

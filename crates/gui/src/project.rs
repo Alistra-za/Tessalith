@@ -248,11 +248,22 @@ pub(crate) fn set_value(t: &mut dyn TableLike, key: &str, mut v: Value) {
 /// engine matches `[files]` keys that way, so a GUI write must reuse a hand-written `Landscape/Rock01_N.png` or
 /// `Landscape/Rock01_N` rather than add a twin).
 pub(crate) fn find_key(t: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(t, key, || {})
+}
+
+/// `find_key` over `[files]`: each pass that compares every key counts as a walk (tests, Note JS7 N8-s).
+fn find_file_key(files: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(files, key, walked)
+}
+
+/// `find_key`, calling `walk` before each pass over every key of `t`.
+fn find_key_walking(t: &dyn TableLike, key: &str, walk: fn()) -> Option<String> {
     if t.contains_key(key) {
         return Some(key.to_owned());
     }
     let lower = key.to_lowercase();
     let by = |want: &str| {
+        walk();
         t.iter()
             .map(|(k, _)| k)
             .find(|k| k.to_lowercase() == want)
@@ -359,10 +370,11 @@ impl ProjectDoc {
 
     /// [`Self::text`] for an undo step: while a blame holds the document, the stashed text it stands for.
     pub fn snapshot_text(&self) -> String {
-        match &self.stash {
-            Some((doc, _)) => doc.to_string(),
-            None => self.f.text(),
-        }
+        self.snapshot_doc().to_string()
+    }
+
+    fn snapshot_doc(&self) -> &DocumentMut {
+        self.stash.as_ref().map_or(&self.f.doc, |(doc, _)| doc)
     }
 
     /// Replace the document with `text` (an undo or redo). It is an unsaved change. A read-only document is left
@@ -416,15 +428,26 @@ impl ProjectDoc {
         self.f.doc.get("files")?.as_table_like()
     }
 
+    /// The existing table a picker edit to `key` would write.
+    pub(crate) fn file_table_key(&self, key: &str) -> Option<String> {
+        find_file_key(self.files()?, key)
+    }
+
     /// The entry for `key`, matched the way the engine matches (case-insensitively), as a table or inline table.
     fn entry(&self, key: &str) -> Option<&dyn TableLike> {
         let files = self.files()?;
-        files.get(&find_key(files, key)?)?.as_table_like()
+        files.get(&find_file_key(files, key)?)?.as_table_like()
     }
 
     /// The entry for `key`, created as `[files."<key>"]` when no spelling of it exists yet. `None` when `[files]`
     /// or the entry is not a table.
     fn entry_mut(&mut self, key: &str) -> Option<&mut dyn TableLike> {
+        self.entry_mut_as(key, true)
+    }
+
+    /// `entry_mut`, with `key` matched as the engine matches it (`resolve`) or taken byte for byte: the table spelled
+    /// `key`, created under that spelling when absent, with no walk over the keys (N8-s).
+    fn entry_mut_as(&mut self, key: &str, resolve: bool) -> Option<&mut dyn TableLike> {
         // Note FC1: a file of comments only holds them as the document's trailing text, which toml_edit writes after
         // a table added here; they go in front of the new entry instead, so the user's first line stays first.
         let mut lead = None;
@@ -447,7 +470,8 @@ impl ProjectDoc {
             t.set_implicit(true);
             Item::Table(t)
         })?;
-        let name = find_key(files, key).unwrap_or_else(|| key.to_owned());
+        let found = resolve.then(|| find_file_key(files, key)).flatten();
+        let name = found.unwrap_or_else(|| key.to_owned());
         sub_table(files, &name, || {
             let mut t = Table::new();
             if let Some(l) = lead {
@@ -467,7 +491,7 @@ impl ProjectDoc {
         else {
             return false;
         };
-        let Some(name) = find_key(files, key) else {
+        let Some(name) = find_file_key(files, key) else {
             return false;
         };
         let Some(gone) = files.remove(&name) else {
@@ -493,14 +517,29 @@ impl ProjectDoc {
     }
 
     pub fn file_value(&self, key: &str, field: &str) -> Option<Json> {
-        let mut item: &Item = self.entry(key)?.get(field.split('.').next()?)?;
-        for part in field.split('.').skip(1) {
-            item = item.get(part)?;
-        }
-        toml_to_json(item)
+        field_value(self.entry(key)?, field)
+    }
+
+    /// For a disabled Problems fix, show the setting the user wrote even while the engine rejects the document.
+    pub(crate) fn snapshot_file_value(&self, key: &str, field: &str) -> Option<Json> {
+        let files = self.snapshot_doc().get("files")?.as_table_like()?;
+        let entry = files.get(&find_file_key(files, key)?)?.as_table_like()?;
+        field_value(entry, field)
     }
 
     pub fn set_file_value(&mut self, key: &str, field: &str, value: &Json) {
+        self.write_file_value(key, field, value, true);
+    }
+
+    /// Note JS7 (N8-s): write `field` into the `[files]` table spelled byte for byte `key`, created under that spelling
+    /// when absent: no case, Unicode or extension-less lookup, so no walk over the keys (`set_file_value` resolves the
+    /// key as the engine matches it). For a caller that has already chosen the table, as the shared-alpha step does
+    /// from its index.
+    pub fn set_exact_file_value(&mut self, key: &str, field: &str, value: &Json) {
+        self.write_file_value(key, field, value, false);
+    }
+
+    fn write_file_value(&mut self, key: &str, field: &str, value: &Json, resolve: bool) {
         if self.read_only() {
             return;
         }
@@ -508,7 +547,7 @@ impl ProjectDoc {
         let parts: Vec<&str> = field.split('.').collect();
         let (last, path) = parts.split_last().expect("split yields one part at least");
         let written = (|| {
-            let mut t = self.entry_mut(key)?;
+            let mut t = self.entry_mut_as(key, resolve)?;
             for part in path {
                 t = sub_table(t, part, dotted_table)?;
             }
@@ -517,8 +556,17 @@ impl ProjectDoc {
         })();
         if written.is_some() {
             self.touch();
-        } else if self.entry(key).is_some_and(|t| t.is_empty()) {
-            // A field path ran into a non-table: do not leave the entry we just created behind.
+            return;
+        }
+        // A field path ran into a non-table: do not leave the entry we just created behind.
+        let left = if resolve {
+            self.entry(key)
+        } else {
+            self.files()
+                .and_then(|f| f.get(key))
+                .and_then(Item::as_table_like)
+        };
+        if left.is_some_and(|t| t.is_empty()) {
             self.drop_entry(key);
         }
     }
@@ -527,29 +575,56 @@ impl ProjectDoc {
         if self.read_only() || self.entry(key).is_none() {
             return;
         }
-        fn remove(t: &mut dyn TableLike, parts: &[&str]) -> bool {
-            if parts.len() == 1 {
-                return t.remove(parts[0]).is_some();
-            }
-            let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
-                return false;
-            };
-            let hit = remove(sub, &parts[1..]);
-            if sub.is_empty() {
-                t.remove(parts[0]);
-            }
-            hit
-        }
         let parts: Vec<&str> = field.split('.').collect();
         if self
             .entry_mut(key)
-            .is_some_and(|entry| remove(entry, &parts))
+            .is_some_and(|entry| remove_field(entry, &parts))
         {
             self.touch();
         }
         if self.entry(key).is_some_and(|t| t.is_empty()) {
             self.remove_file_entry(key);
         }
+    }
+
+    /// Note JS7 (N8-k): remove `field` from the `[files]` table spelled byte for byte `key`, and only while it holds
+    /// `want`: the check and the removal are one operation on that one table, with no case, Unicode or extension-less
+    /// fallback (`clear_file_value` resolves the key as the engine matches it). The table goes when that leaves it
+    /// empty. True when it removed the value.
+    pub fn clear_exact_file_value(&mut self, key: &str, field: &str, want: &Json) -> bool {
+        if self.read_only() {
+            return false;
+        }
+        let parts: Vec<&str> = field.split('.').collect();
+        let Some(entry) = self
+            .f
+            .doc
+            .get_mut("files")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|files| files.get_mut(key))
+            .and_then(Item::as_table_like_mut)
+        else {
+            return false;
+        };
+        let mut item = entry.get(parts[0]);
+        for part in &parts[1..] {
+            item = item.and_then(|i| i.get(part));
+        }
+        if item.and_then(toml_to_json).as_ref() != Some(want) || !remove_field(entry, &parts) {
+            return false;
+        }
+        let empty = entry.is_empty();
+        self.touch();
+        // `drop_entry` takes the exact spelling first, so this is the table just emptied.
+        if empty {
+            self.drop_entry(key);
+        }
+        true
+    }
+
+    /// The `[files]` table spelled byte for byte `key`, as text (N8-k's read-back of the tables a clear must leave).
+    pub fn exact_file_entry_text(&self, key: &str) -> Option<String> {
+        self.files()?.get(key).map(|i| i.to_string())
     }
 
     /// Every value in `key`'s entry by its dotted field name (`cubemap.yaw`), as `file_value` reads it.
@@ -683,6 +758,7 @@ impl ProjectDoc {
     }
 
     pub fn file_keys(&self) -> Vec<String> {
+        walked();
         self.files()
             .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
             .unwrap_or_default()
@@ -801,6 +877,49 @@ impl ProjectDoc {
         *dirty = false;
         Ok(true)
     }
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static KEY_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests (Note JS7, N8-o, N8-s): how many times this thread has walked a document's `[files]` keys: a `file_keys` call,
+/// or a `[files]` key lookup's pass that missed the exact spelling and compared every key. `[inputs]` lookups are not
+/// counted.
+#[cfg(feature = "test-hooks")]
+pub fn key_walks() -> usize {
+    KEY_WALKS.with(std::cell::Cell::get)
+}
+
+/// Count one walk of the `[files]` keys (tests only; nothing in a build without `test-hooks`).
+fn walked() {
+    #[cfg(feature = "test-hooks")]
+    KEY_WALKS.with(|c| c.set(c.get() + 1));
+}
+
+fn field_value(entry: &dyn TableLike, field: &str) -> Option<Json> {
+    let mut parts = field.split('.');
+    let mut item = entry.get(parts.next()?)?;
+    for part in parts {
+        item = item.get(part)?;
+    }
+    toml_to_json(item)
+}
+
+/// Remove the dotted field `parts` from table `t`, and each sub-table that leaves empty; true when it was there.
+fn remove_field(t: &mut dyn TableLike, parts: &[&str]) -> bool {
+    if parts.len() == 1 {
+        return t.remove(parts[0]).is_some();
+    }
+    let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
+        return false;
+    };
+    let hit = remove_field(sub, &parts[1..]);
+    if sub.is_empty() {
+        t.remove(parts[0]);
+    }
+    hit
 }
 
 /// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.

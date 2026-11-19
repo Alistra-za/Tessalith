@@ -1213,10 +1213,9 @@ fn convert_logs_the_set_shader_warnings() {
     assert_eq!(err.matches("wall: SHADER-MISSING-MAP").count(), 1, "{err}");
 }
 
-/// B3-8, B3-12 (Note JP2): FX1 as it is. `sdc convert` logs no Info, so the plain normal's two false warnings go and
-/// nothing replaces them in its log; `sdc inspect` and `inspect --json` show SHADER-NORMAL-SPECULAR.
+/// N-8, N-9 (Note JS4): convert and inspect list no SHADER code for the plain _n; the set's real "needs _rmaos" stays.
 #[test]
-fn a_plain_normal_in_a_pbr_set_is_an_info_that_inspect_shows_and_convert_does_not() {
+fn a_plain_normal_in_a_pbr_set_is_silent_in_convert_and_inspect() {
     let d = tempfile::tempdir().unwrap();
     let a = d.path().join("in/textures/a");
     std::fs::create_dir_all(&a).unwrap();
@@ -1252,7 +1251,6 @@ fn a_plain_normal_in_a_pbr_set_is_an_info_that_inspect_shows_and_convert_does_no
     );
     assert!(!err.contains("needs _n"), "{err}");
     assert!(!err.contains("SHADER-EXTRA-MAP"), "{err}");
-    assert!(!err.contains("SHADER-NORMAL-SPECULAR"), "{err}");
 
     let o = sdc()
         .args(["inspect", "--recursive", "--target", "cs"])
@@ -1262,7 +1260,14 @@ fn a_plain_normal_in_a_pbr_set_is_an_info_that_inspect_shows_and_convert_does_no
         .unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     let out = text(&o.stdout);
-    assert!(out.contains("SHADER-NORMAL-SPECULAR"), "{out}");
+    assert!(!out.contains("SHADER-EXTRA-MAP"), "{out}");
+    // No shader code names the plain _n: the only SHADER line is the _rmaos one.
+    assert!(
+        out.lines()
+            .filter(|l| l.contains("SHADER-"))
+            .all(|l| l.contains("SHADER-MISSING-MAP")),
+        "{out}"
+    );
     assert!(!out.contains("needs _n"), "{out}");
 
     let o = sdc()
@@ -1280,8 +1285,16 @@ fn a_plain_normal_in_a_pbr_set_is_an_info_that_inspect_shows_and_convert_does_no
         .filter_map(|w| w["code"].as_str().map(str::to_string))
         .collect();
     assert!(
-        codes.iter().any(|c| c == "SHADER-NORMAL-SPECULAR"),
-        "{codes:?}"
+        codes.iter().any(|c| c == "SHADER-MISSING-MAP"),
+        "the _rmaos one: {codes:?}"
     );
     assert!(!codes.iter().any(|c| c == "SHADER-EXTRA-MAP"), "{codes:?}");
+    // Any other SHADER code on the set (an info about the plain _n) would fail here too.
+    assert!(
+        codes
+            .iter()
+            .filter(|c| c.starts_with("SHADER-"))
+            .all(|c| c == "SHADER-MISSING-MAP"),
+        "{codes:?}"
+    );
 }

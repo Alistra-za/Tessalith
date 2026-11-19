@@ -1277,10 +1277,9 @@ fn a_borrowed_vanilla_normal_answers_the_pbr_missing_normal() {
     assert_eq!(needs_rows(&m, id, "_n"), 0);
 }
 
-/// B3-3 (Note JP4): a borrowed vanilla normal raises no SHADER-NORMAL-SPECULAR on the borrower (the engine sees own
-/// members only), and HH8's borrow still answers "needs _n".
+/// B3-3: the borrower raises no SHADER-EXTRA-MAP row for its borrowed normal; HH8's borrow still answers needs _n.
 #[test]
-fn a_borrowed_vanilla_normal_raises_no_specular_note() {
+fn a_borrowed_vanilla_normal_raises_no_shader_row() {
     use sdc_gui::model::bottom::{problems, At};
     let d = tempfile::tempdir().unwrap();
     let m = borrow_rock01_normal_as(d.path(), engine::config::Subtype::Normal);
@@ -1291,13 +1290,14 @@ fn a_borrowed_vanilla_normal_raises_no_specular_note() {
     assert!(
         !v.set_warnings
             .iter()
-            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
+            .any(|w| w.code == engine::codes::Code::ShaderExtraMap),
         "{:?}",
         v.set_warnings
     );
-    assert!(!problems(&m).iter().any(|p| p.code
-        == Some(engine::codes::Code::ShaderNormalSpecular)
-        && matches!(&p.at, At::Set { id: i, .. } if i == id)));
+    assert!(!problems(&m)
+        .iter()
+        .any(|p| p.code == Some(engine::codes::Code::ShaderExtraMap)
+            && matches!(&p.at, At::Set { id: i, .. } if i == id)));
     assert_eq!(needs_rows(&m, id, "_n"), 0);
 }
 
@@ -3886,9 +3886,19 @@ fn move_down_on_last_set_changes_nothing() {
     let last = views.last().unwrap().id.clone();
     let sets_dirty = |m: &sdc_gui::model::AppModel| m.sets_doc.as_ref().unwrap().is_dirty();
     let (undo, dirty) = (m.history.undo.len(), sets_dirty(&m));
+    let text = m.sets_doc.as_ref().unwrap().text();
     assert!(!m.reorder_set(&last, views.len()));
     assert_eq!((m.history.undo.len(), sets_dirty(&m)), (undo, dirty));
-    assert!(!dirty, "sdc-project.toml is untouched");
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().text(),
+        text,
+        "the move changes no text"
+    );
+    assert_eq!(
+        text,
+        m.sets_doc.as_ref().unwrap().saved_text(),
+        "sdc-project.toml is untouched"
+    );
     assert!(m.reorder_set(&last, 0), "a real move still moves");
 }
 

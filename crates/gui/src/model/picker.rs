@@ -296,9 +296,10 @@ impl AppModel {
     /// Note BD2). With no usable project file (none open, or one that does not parse) it is the app-wide default in
     /// `gui.toml`, as before.
     pub fn set_export_folder(&mut self, path: std::path::PathBuf) {
+        let user_dirty = self.sets_user_dirty();
         match self.sets_doc.as_mut().filter(|d| !d.read_only()) {
             Some(d) => {
-                let was_dirty = d.is_dirty();
+                let was_dirty = user_dirty;
                 d.set_export_folder(&path);
                 if was_dirty {
                     self.status_line =

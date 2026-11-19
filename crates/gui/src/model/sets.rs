@@ -1281,6 +1281,12 @@ pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Whole member searches for an item's slot lock on this thread.
+    pub static LOCK_SEARCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// `view_reads`' value: slot, sub-type, waiting, game path, job key, the settled job's output.
 pub(crate) type ViewReads<'a> = (
     Option<SlotKind>,
@@ -1531,15 +1537,24 @@ fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     v.shader = s.shader.clone();
     v.set_warnings = s.warnings.clone();
     v.recipes = s.recipes.clone();
-    for mk in &s.members {
+    v.slots = own_fills(m, &s.members);
+    drop_supplied_missing_maps(m, &mut v);
+    v
+}
+
+/// A set's own slot fills, before any borrow: each slot takes the first member whose resolved sub-type fills it
+/// (`slot_of`). The set resolver lends these (`build_views`' `own_slots`), and the shared-alpha follow-on reads the
+/// same fills (Note JS7, N8-b).
+pub(super) fn own_fills(m: &AppModel, members: &[String]) -> BTreeMap<SlotKind, SlotFill> {
+    let mut slots = BTreeMap::new();
+    for mk in members {
         if let Some(slot) = m.item(mk).and_then(slot_of) {
-            v.slots
+            slots
                 .entry(slot)
                 .or_insert(SlotFill::Own { item: mk.clone() });
         }
     }
-    drop_supplied_missing_maps(m, &mut v);
-    v
+    slots
 }
 
 /// The lighting-shader slot (1-based, as `SlotKind::slot_number`) a required map of `Shader::spec` goes in, from
@@ -2645,7 +2660,7 @@ fn replans(key: &str) -> bool {
 pub const SLOT_LOCKED: &str = "slot locked";
 
 /// Why `slot` of `v` takes no change: it is locked (F3a Task 8).
-fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
+pub(super) fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     match slot.and_then(SlotKind::slot_number) {
         Some(n) if v.locks.contains(&n) => {
             Err(format!("slot {n} of {} is locked; unlock it first", v.id))
@@ -2755,9 +2770,16 @@ pub fn pinned_files(m: &AppModel) -> BTreeSet<String> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static LOCK_MAP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The items filling a locked slot of any set (F3a Task 8), with the reason bulk edits skip them: "slot locked" in
 /// the set that owns the texture, else "slot locked in <set>" for a set borrowing it. The own lock wins.
 pub fn locked_items(m: &AppModel) -> BTreeMap<String, String> {
+    #[cfg(test)]
+    LOCK_MAP_BUILDS.set(LOCK_MAP_BUILDS.get() + 1);
     let mut out = BTreeMap::new();
     for v in views(m).iter() {
         for (k, f) in &v.slots {
@@ -3094,7 +3116,9 @@ impl AppModel {
 
     /// Why `item` cannot leave its set: it fills a locked slot there (F3a Task 8).
     pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
-        // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JP3).
+        #[cfg(feature = "test-hooks")]
+        LOCK_SEARCHES.with(|c| c.set(c.get() + 1));
+        // Borrowed from the cached views, not cloned: this runs per drawn row per frame.
         let views = views(self);
         let Some(v) = view_with_member(&views, item) else {
             return Ok(());
@@ -4039,7 +4063,7 @@ impl AppModel {
         let handed = h.clone();
         // Final review B-M7: the `pbr_fuzz` an explicit PBR pick wrote on the fuzz map, and its `auto_pbr` key, go
         // with it in this step: the pick was this set's (a value changed since is the user's and stays).
-        let fuzz_step = is_fuzz_member(item);
+        let fuzz_step = is_fuzz_member(item) && super::shared_alpha::safe_subtype_write(self)(item);
         self.edit_docs(&format!("Remove from {i}"), None, true, move |p, s| {
             let mut auto = s.auto_pbr();
             if fuzz_step && auto.contains(&it) {
@@ -4207,12 +4231,32 @@ impl AppModel {
             return;
         }
         let id = set.to_string();
-        let retype = self.untouched_for_shader(set, shader);
+        // Note JS6: the pick's writes for the set's tangent-space normals are resolved once (`normal_plan`), so each key
+        // gets one final value; R5's other entries stand.
+        let super::normal_follow::NormalPlan {
+            retype,
+            writes: normals,
+            off_auto_pbr,
+            marker_off,
+        } = self.normal_plan(set, shader, self.untouched_for_shader(set, shader));
         // Note FC1 R5: a sub-type the plan recorded on its own and nobody changed takes the chosen shader's type in
         // this step (the CLI never reads the set's shader, so `sdc.toml` must name it). Back to Auto it goes, and the
         // next settled plan records what the plan picks then.
         for (k, _, _) in &retype {
             self.history.auto_written.remove(&(k.clone(), "subtype"));
+        }
+        for (k, _) in &normals {
+            self.history.auto_written.remove(&(k.clone(), "subtype"));
+        }
+        // The follow's marker goes only with a pick that moves the normal away from `pbr_normal`: a normal taken back
+        // here may follow again when the set returns to PBR; a pick that leaves it typed `pbr_normal` keeps the marker,
+        // so an Undo of a follow stays undone.
+        // shortcut: the marker is not in the undo snapshot, so Undo of the pick that took a normal back, then Undo of
+        // the follow, lets the recorder follow again; upgrade with the `subtype` marker, which has the same limit.
+        for k in &marker_off {
+            self.history
+                .auto_written
+                .remove(&(k.clone(), "normal-follow"));
         }
         // Fuzz-9: a value the PBR step clears in this pick was its own, never the user's.
         let step_cleared: HashSet<String> = retype
@@ -4240,9 +4284,17 @@ impl AppModel {
                     auto.push(k.clone());
                 }
             }
+            for (k, st) in &normals {
+                match st {
+                    Some(st) => p.set_file_value(k, "subtype", &serde_json::json!(st)),
+                    None => p.clear_file_value(k, "subtype"),
+                }
+            }
+            auto.retain(|a| !off_auto_pbr.contains(a));
             if auto != before {
                 d.set_auto_pbr(&auto);
             }
+            super::normal_follow::relist(p, d, &normals);
         };
         let Some((item, was, on)) = self.skin_follow(set, shader) else {
             self.edit_docs("Shader", None, true, pick);
@@ -4286,6 +4338,9 @@ impl AppModel {
         // Note DU6-DU7: the shader and the diffuse's sub-type (with Note DQ's recipe follow) are one step.
         self.batch_edit("Shader", |m| {
             m.edit_docs("Shader", None, true, pick);
+            if !super::shared_alpha::safe_subtype_write(m)(&item) {
+                return;
+            }
             if on {
                 m.edit_subtype("Shader", &item, Some(Subtype::SkinAlbedo));
             } else {
@@ -4331,15 +4386,18 @@ impl AppModel {
         let Some(v) = views.iter().find(|v| same_id(&v.id, set)) else {
             return vec![];
         };
-        let now = v.shader.as_ref().map(|p| p.shader);
-        let chosen = v
-            .shader
-            .as_ref()
-            .is_some_and(|p| matches!(p.provenance, engine::shader::ShaderOrigin::Set));
+        let chosen = super::normal_follow::explicit_pick(v);
         // Auto while already on Auto changes nothing.
-        if shader.is_none() && !chosen {
+        if shader.is_none() && chosen.is_none() {
             return vec![];
         }
+        // Between picks the plan can still describe a shader the user has already left.
+        let now = chosen.or_else(|| {
+            v.shader
+                .as_ref()
+                .filter(|p| p.provenance != engine::shader::ShaderOrigin::Set)
+                .map(|p| p.shader)
+        });
         let held = |k: &String| {
             self.project
                 .as_ref()
@@ -4362,6 +4420,10 @@ impl AppModel {
         // Fuzz-9: only a set holding a fuzz map takes the PBR step; one with its own `_f` keeps the fuzz map
         // untyped (Fuzz-4 lists it unused).
         let has_fuzz = v.members.iter().any(fuzz_map);
+        // F16 (Note JQ53): a kept `_f` counts, a kept DDS too, so no `pbr_fuzz` is written. The GUI refuses an export folder
+        // that is or holds the opened folder (HQ3, HQ5) and writes a CS PBR set under `textures\pbr\` (P14), so a kept
+        // `x_f.dds` here is hand-made or an in-place `sdc convert`'s; the map is listed unused, as `sdc convert` into the
+        // same export folder does. Pinned by `fuzz_follow::a_kept_f_beside_the_fuzz_map_is_the_sets_f_in_the_gui_and_the_cli`.
         let has_f = v.members.iter().any(|k| {
             engine::group::split_suffix_with(&stem(k), &self.suffix_aliases)
                 .suffix
@@ -4377,7 +4439,7 @@ impl AppModel {
         // Its way back: Auto after a chosen vanilla shader clears the untouched vanilla types `vanilla_pick` (or the
         // recorder under that shader) wrote, so the next settled plan records what Auto reads (FC1 R5's Auto rule);
         // the generic arm below keeps a value equal to the vanilla plan's pick.
-        let vanilla_back = has_fuzz && chosen && shader.is_none() && now.is_some_and(vanilla);
+        let vanilla_back = has_fuzz && shader.is_none() && chosen.is_some_and(vanilla);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -4401,8 +4463,7 @@ impl AppModel {
         // `has_fuzz` too (re-review t6-r1 N2): a pick that wrote only `pbr_normal`/`pbr_emissive` (diffuse pinned or
         // borrowed, fuzz map kept or hand-roled) lists no such value, while the set still holds its fuzz map.
         let leaves_pbr = (has_fuzz || step_wrote)
-            && chosen
-            && now.is_some_and(Shader::is_pbr_family)
+            && chosen.is_some_and(Shader::is_pbr_family)
             && !shader.is_some_and(Shader::is_pbr_family);
         // Ruling R1: a member in a locked slot keeps its type (the pin guards its encoding), as in `pbr_follow` and
         // DW1.
@@ -4456,8 +4517,7 @@ impl AppModel {
                     return Some((k.clone(), None, false));
                 }
                 // Fuzz-9, Fuzz-27: `member_subtype` maps no `diffuse`, `normal` or `glow` under a PBR-family shader,
-                // so the untouched members take their PBR counterpart here (an untouched `normal` bypasses B3's
-                // Use PBR normal: the pick is the user's act, and leaving it reverts the type).
+                // so the untouched members take their PBR counterpart here (the pick is the user's act, and leaving it reverts the type).
                 if pbr_pick && !locked.contains_key(k) {
                     if let Some(st) =
                         held_type(k).and_then(|st| pbr_member_type(st, diffuse_slot(k)))

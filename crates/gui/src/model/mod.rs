@@ -29,6 +29,7 @@ pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
 pub mod pbr_export;
@@ -45,6 +46,7 @@ pub mod set_groups;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
+mod shared_alpha;
 pub mod shell;
 pub mod skin;
 pub mod target_mod;
@@ -92,7 +94,7 @@ const UNDO_NOTE_FOR: Duration = Duration::from_secs(5);
 
 /// Whether a warning makes a Problems row (a problem or a note): Warning, Error or Blocking severity. Info lines
 /// stay in the texture's own warnings list only, except the few that `build_problems` names (CHK-GREEN-GUESS,
-/// DERIVE-NIF-SUGGEST, SHADER-NORMAL-SPECULAR).
+/// DERIVE-NIF-SUGGEST).
 pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
     use engine::codes::Severity;
     matches!(
@@ -438,8 +440,8 @@ fn read_only_banner(error: &str) -> String {
     )
 }
 
-/// `(evidence_rev, export.revision, export running, history.pushes, scan_stamp)`.
-type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
+/// `(evidence_rev, project.rev(), export.revision, export running, history.pushes, scan_stamp)`.
+type ProblemsKey = (u64, u64, u64, bool, u64, cs_pbr::Stamp);
 
 /// `ViewCache::set_reasons`: (the `problems` build, the set key, the hidden kinds, the reasons).
 pub(crate) type CachedReasons = (
@@ -464,7 +466,7 @@ pub(crate) struct ViewCache {
     pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
-    /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
+    /// Keyed by `ProblemsKey` inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,
     /// Review E2: `bottom::cached_tab_counts`, keyed on the `problems` build it counted (held, so its address is never
     /// reused) and the hidden kinds.
@@ -735,6 +737,15 @@ pub struct AppModel {
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
     batch: bool,
+    /// Note JS5 (N-26): the sets document's `(rev, text, saved_text)` right after an automatic step that began with no
+    /// user change in it: while it still holds that state against that saved text, its only unsaved change is
+    /// automatic (the recorder's `auto_normal` listing). A successful Save, reload or open ends it.
+    listing_only: Option<(u64, String, String)>,
+    /// Note JS7 (N-33 as the owner narrowed it, N-37, N8-h): true while a step that is not the user's own alpha edit
+    /// writes: the recorder's or the fuzz switch's automatic step, and the crash restore, which reinstates both
+    /// documents as the snapshot recorded them. The shared-alpha follow-on and the unlisting ride only the user's own
+    /// steps.
+    automatic_step: bool,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
     pub multi: bulk::MultiSelection,
@@ -973,6 +984,10 @@ pub struct AppModel {
     /// them in the order it wants.
     #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    /// Tests (Note JS7, N8-i): the shared-alpha follow-on's file writes fail, as a `[files]` entry that is not a table
+    /// would make them.
+    #[cfg(feature = "test-hooks")]
+    pub fail_shared_alpha_write: bool,
     #[cfg(feature = "test-hooks")]
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
@@ -1088,6 +1103,8 @@ impl AppModel {
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
+            listing_only: None,
+            automatic_step: false,
             selection: Selection::None,
             multi: Default::default(),
             bulk: Default::default(),
@@ -1219,6 +1236,8 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
             #[cfg(feature = "test-hooks")]
+            fail_shared_alpha_write: false,
+            #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
             opening: None,
@@ -1297,6 +1316,7 @@ impl AppModel {
         let project = ProjectDoc::open(&root);
         self.project = Some(project);
         self.sets_doc = Some(crate::sets_doc::SetsDoc::open(&root));
+        self.listing_only = None;
         self.drop_undo_note();
         // Note FC12: the previous folder's history and selection are kept until this open completes (Cancel).
         let kept = (std::mem::take(&mut self.history), self.selection.clone());
@@ -2550,10 +2570,42 @@ impl AppModel {
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty),
         );
+        // JS7: the outer user batch owns the follow-on. Its starting facts and listed values share one index (N8-o).
+        let (start, held) = self
+            .project
+            .as_ref()
+            .zip(self.sets_doc.as_ref())
+            .filter(|_| !self.automatic_step)
+            .map(|(p, s)| {
+                let listed = !s.auto_data().is_empty();
+                if self.target != engine::config::Target::Cs && !listed {
+                    return (None, None);
+                }
+                let pre = shared_alpha::Tables::of(p);
+                (
+                    shared_alpha::before(self, &pre),
+                    listed.then(|| shared_alpha::listed_without_data(&pre, s)),
+                )
+            })
+            .unwrap_or_default();
         self.batch = true;
         f(self);
         self.batch = false;
-        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        let mut post = None;
+        if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_ref(), self.sets_doc.as_mut())
+        {
+            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), s);
+        }
+        let mut after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        // N8-d: equal text leaves any leftover data for the next user edit, even if a setter moved a revision.
+        if let (Some(b), Some(p)) = (
+            start.as_ref().filter(|_| after != before),
+            self.project.as_ref(),
+        ) {
+            let post = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &post);
+            after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        }
         if after == before {
             // Trace #28: writes that changed nothing leave the documents as clean as they were.
             if let Some(p) = self.project.as_mut() {
@@ -2884,10 +2936,11 @@ impl AppModel {
         if shas == old {
             return;
         }
+        let user_dirty = self.sets_user_dirty();
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = user_dirty;
         let side = d.set_copy_shas(&shas);
         if d.read_only() {
             self.export.notes.push(sidecar_only_note(&side));
@@ -2913,10 +2966,11 @@ impl AppModel {
     /// recorded: the next export then asks before overwriting it.
     fn record_json_sha(&mut self, root: &std::path::Path, key: &str, sha: &str) {
         let root = root.to_path_buf();
+        let user_dirty = self.sets_user_dirty();
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = user_dirty;
         // #43: one record per name; audit 08c-1: keyed by `record_key`, and kept when its file is gone.
         let mut shas = history::records_at(&d.pgp_json_shas(), &root);
         shas.insert(key.to_string(), sha.to_string());
@@ -3699,16 +3753,63 @@ impl AppModel {
                 p.copy_entry_changes(k, b, others);
             }
         };
+        if self.project.is_none() || self.sets_doc.is_none() {
+            return;
+        }
+        // A batch records one step around all its writes (`batch_edit`): no snapshot per write, and the shared-alpha
+        // follow-on runs once at its end (Note JS7, Task 8b).
+        if self.batch {
+            let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
+                return;
+            };
+            return f(p, s);
+        }
+        // Note JS7 (N-33, N-37): a user's step that plans again runs the shared-alpha follow-on; its starting point is
+        // read before the step. An automatic step (the recorder, the fuzz switch) and a step that does not plan (JSON
+        // hash records, set groups, the crash restore) do not.
+        let user = !self.automatic_step;
+        // N8-o: the `[files]` keys are walked at most once per document state: `pre` indexes the project document
+        // before the edit (for the starting point and the list reader), `post` after it (for the unlisting and the
+        // follow-on). Neither is built when no reader needs it.
+        let listed = user
+            && self
+                .sets_doc
+                .as_ref()
+                .is_some_and(|s| !s.auto_data().is_empty());
+        let follows = user && replan && self.target == engine::config::Target::Cs;
+        let pre = (listed || follows)
+            .then(|| self.project.as_ref().map(shared_alpha::Tables::of))
+            .flatten();
+        let start = pre
+            .as_ref()
+            .filter(|_| follows)
+            .and_then(|t| shared_alpha::before(self, t));
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
-        // A batch records one step around all its writes (`batch_edit`): no snapshot per write.
-        if self.batch {
-            return f(p, s);
-        }
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
+        // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
+        let held = pre
+            .as_ref()
+            .filter(|_| listed)
+            .map(|t| shared_alpha::listed_without_data(t, s));
         f(p, s);
+        let mut post = None;
+        if let Some(h) = &held {
+            let t = post.insert(shared_alpha::Tables::of(p));
+            shared_alpha::unlist_user_data(h, t, s);
+        }
+        // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
+        let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
+        // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
+        if let Some(b) = start.as_ref().filter(|_| changed) {
+            let t = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &t);
+        }
+        let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
+            return;
+        };
         let after = Self::snapshot_of(Some(p), Some(s));
         if after == before {
             // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
@@ -3989,6 +4090,8 @@ impl AppModel {
         let before = self.history.undo.len();
         // Only a document whose text really changed counts as restored: `restore` ignores text that does not parse.
         let mut restored = vec![];
+        // Note JS7 (N8-h): the restore reinstates the list as the snapshot recorded it: no unlisting, no follow-on.
+        self.automatic_step = true;
         self.edit_docs(LABEL, None, false, |p, s| {
             if let Some((path, t)) = project {
                 let old = p.text();
@@ -4005,6 +4108,7 @@ impl AppModel {
                 }
             }
         });
+        self.automatic_step = false;
         // shortcut: a file that does not parse as TOML restores nothing, shows no notice and stays on disk (the
         // other document's file, if it restored, is the only one the toast's Undo deletes); give it a notice if one
         // is ever seen.
@@ -4103,6 +4207,9 @@ impl AppModel {
 
     /// Note JI5: the diffuse slot row's alpha type, written to the item's own `alpha.policy` in one step.
     pub fn set_alpha(&mut self, item: &str, p: AlphaPolicy) {
+        if p == AlphaPolicy::Data && self.data_pick_unlists("Alpha", item) {
+            return;
+        }
         let k = item.to_string();
         self.edit("Alpha", move |d| {
             d.set_file_value(&k, "alpha.policy", &json!(p))
@@ -4171,6 +4278,13 @@ impl AppModel {
                 self.weighting_follow
                     .push((item_key.to_string(), w.to_string(), merge));
             }
+            return;
+        }
+        // Note JS7 (N-34): the user's Data on a key the share step listed is the user's own value now.
+        if field == "alpha.policy"
+            && value == json!("data")
+            && self.data_pick_unlists(&format!("Change {field}"), item_key)
+        {
             return;
         }
         let k = item_key.to_string();
@@ -4379,7 +4493,7 @@ impl AppModel {
 
     /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, or the Fuzz-8 switch on open with
     /// the recording that joined it, still the top step. It neither asks on close, open or reload nor marks the title;
-    /// Save stays live and writes it.
+    /// Save stays live and writes it. Note JS5 (N-26): the recorder's `auto_normal` listing is automatic too.
     /// shortcut: a user edit followed by its Undo leaves `pushes` advanced, so that state prompts although the text
     /// equals the automatic state; compare the document with the recording's snapshot if users report it.
     pub fn only_automatic_unsaved(&self) -> bool {
@@ -4388,16 +4502,47 @@ impl AppModel {
             .as_ref()
             .is_some_and(|a| a.clean_before && a.step == self.history.pushes)
             || self.only_switch_unsaved())
-            && !self
-                .sets_doc
-                .as_ref()
-                .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
+            && !self.sets_user_dirty()
             && self.tentative_edits().is_none()
     }
 
     /// Unsaved changes the close, open and reload dialogs ask about: a user's, not only automatic ones (Note FI4).
     pub fn prompts_unsaved(&self) -> bool {
         self.is_dirty() && !self.only_automatic_unsaved()
+    }
+
+    /// Note JS5 (N-26): the sets document's only unsaved change is the recorder's own `auto_normal` listing. The
+    /// saved text must be the one the snapshot was taken against (review 2 Important 1: after a save, an Undo back to
+    /// that text is the user's change).
+    pub fn sets_listing_only(&self) -> bool {
+        self.sets_doc.as_ref().is_some_and(|s| {
+            s.is_dirty()
+                && self
+                    .listing_only
+                    .as_ref()
+                    .is_some_and(|(rev, text, saved)| {
+                        s.saved_text() == saved && (*rev == s.rev() || *text == s.text())
+                    })
+        })
+    }
+
+    /// The sets document holds an unsaved change other than the recorder's listing (the user's, or another
+    /// automatic one).
+    pub fn sets_user_dirty(&self) -> bool {
+        self.sets_doc
+            .as_ref()
+            .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
+            && !self.sets_listing_only()
+    }
+
+    /// Note JS5 (N-26): after an automatic step, remember the sets document as the step left it when it began with no
+    /// user change in it.
+    pub(super) fn note_listing(&mut self, sets_clean: bool) {
+        self.listing_only = self
+            .sets_doc
+            .as_ref()
+            .filter(|s| sets_clean && s.is_dirty())
+            .map(|s| (s.rev(), s.text(), s.saved_text().to_string()));
     }
 
     /// The unsaved `sdc.toml` edits stashed by a blame that is still tentative (the retry plan has not landed), so
@@ -4414,16 +4559,18 @@ impl AppModel {
         let mut out = vec![];
         // Note FI4: automatic types alone are recorded again on the next plan, so a restore never offers them.
         let only_auto = self.only_automatic_unsaved();
+        let listing = self.sets_listing_only();
         if let Some(p) = self.project.as_ref().filter(|p| p.is_dirty() && !only_auto) {
             out.push((p.path().to_path_buf(), p.text()));
         }
         if let (Some(p), Some(text)) = (self.project.as_ref(), self.tentative_edits()) {
             out.push((p.path().to_path_buf(), text));
         }
+        // A files-only user edit needs the recorded types and their ownership listing together on restore.
         if let Some(s) = self
             .sets_doc
             .as_ref()
-            .filter(|s| s.is_dirty() && !s.read_only())
+            .filter(|s| s.is_dirty() && !s.read_only() && !(only_auto && listing))
         {
             out.push((s.path().to_path_buf(), s.text()));
         }
@@ -4620,6 +4767,7 @@ impl AppModel {
         if let Some(s) = self.sets_doc.as_mut() {
             s.reload();
         }
+        self.listing_only = None;
         self.ignored_by_plan = false;
         self.drop_undo_note();
         self.history.clear();
@@ -4672,6 +4820,7 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
+        self.listing_only = None;
         if wrote {
             self.refresh_banner(); // the save removed the saved documents' recovery files
             self.messages.notify(messages::Severity::Info, "Saved");
@@ -4708,11 +4857,15 @@ impl AppModel {
                 };
                 if overwrite {
                     match s.save(true) {
-                        Ok(()) => crate::crash_log::discard_recovery(s.path()),
+                        Ok(()) => {
+                            crate::crash_log::discard_recovery(s.path());
+                            self.listing_only = None;
+                        }
                         Err(e) => self.save_failed(which, &e),
                     }
                 } else {
                     s.reload();
+                    self.listing_only = None;
                     self.drop_undo_note();
                     self.history.clear();
                     self.refresh_banner();
@@ -4868,6 +5021,87 @@ mod tests {
     fn an_idle_model_is_idle() {
         let mut m = bare_model();
         assert!(m.wait_idle(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_settled_recorder_builds_its_normal_facts_once() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("textures");
+        std::fs::create_dir(&root).unwrap();
+        let normal = image::RgbImage::from_pixel(16, 16, image::Rgb([128, 128, 255]));
+        let mut files = String::new();
+        let mut sets = String::from("[project.auto_normal]\n");
+        for i in 0..2_048 {
+            let key = format!("rock{i}_n.png");
+            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
+            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            if i < 16 {
+                normal.save(root.join(key)).unwrap();
+            }
+        }
+        sets.push_str("\n[[sets]]\nid = 'rock0'\nshader = 'pbr'\n");
+        std::fs::write(root.join("sdc.toml"), files).unwrap();
+        std::fs::write(root.join("sdc-project.toml"), sets).unwrap();
+        let mut m = bare_model();
+        m.open_folder(root);
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(m.sets_doc.as_ref().unwrap().auto_normal().len(), 2_048);
+        let candidates = sets::views(&m);
+        assert_eq!(candidates.len(), 16);
+        assert!(candidates.iter().all(|v| v
+            .shader
+            .as_ref()
+            .is_some_and(|p| p.bakes_any_tangent())
+            && matches!(
+                v.slots.get(&sets::SlotKind::Normal),
+                Some(sets::SlotFill::Own { .. })
+            )));
+        let counts = || {
+            [
+                crate::sets_doc::AUTO_NORMAL_READS.get(),
+                crate::project::key_walks(),
+                sets::LOCK_MAP_BUILDS.get(),
+            ]
+        };
+        let before = counts();
+        assert!(
+            !m.record_auto_decisions(),
+            "every normal already has its recorded type"
+        );
+        let after = counts();
+        let builds: [usize; 3] = std::array::from_fn(|i| after[i] - before[i]);
+        assert_eq!(
+            builds,
+            [1, 1, 1],
+            "auto_normal reads, [files] walks and lock maps in one recorder pass"
+        );
+
+        // The next pass has a listed plain normal to promote under the same PBR pick.
+        let key = "rock0_n.png";
+        let sets = m.sets_doc.as_mut().unwrap();
+        let mut listing = sets.auto_normal();
+        listing.insert(key.into(), "normal".into());
+        sets.set_auto_normal(&listing);
+        m.project
+            .as_mut()
+            .unwrap()
+            .set_file_value(key, "subtype", &serde_json::json!("normal"));
+        let reads = crate::sets_doc::AUTO_NORMAL_READS.get();
+        assert!(m.record_auto_decisions());
+        assert_eq!(
+            crate::sets_doc::AUTO_NORMAL_READS.get() - reads,
+            1,
+            "verifying the write reuses the listing"
+        );
+        assert_eq!(
+            m.sets_doc.as_ref().unwrap().auto_normal_word(key),
+            Some("pbr_normal")
+        );
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(key, "subtype"),
+            Some(serde_json::json!("pbr_normal"))
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
     }
 
     /// An opened, planned project on `cs`: a PBR set whose `_rmaos` is packed (rock01, with a prefix, so its outputs

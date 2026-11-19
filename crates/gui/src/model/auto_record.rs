@@ -15,12 +15,13 @@ use engine::policy::{AcceptSuggestions, Provenance};
 use engine::shader::{member_subtype, Shader, ShaderOrigin};
 use engine::suggest::Confidence;
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// The last recording, for its Problems row.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AutoNote {
-    /// The row's text, `{n} types set automatically (High confidence)`; its count is the step label's.
+    /// The row's count is the step label's. A follow-only row names no suggestion confidence.
     pub text: String,
     /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; the
     /// last line explains High confidence when a sub-type was set.
@@ -216,12 +217,14 @@ impl AppModel {
         if !self.switch_fuzz_on_open || self.sdc_toml_writable().is_err() {
             return false;
         }
-        let keys: Vec<String> = self
-            .items
-            .iter()
-            .map(|i| i.key.clone())
-            .filter(|k| self.fuzz_recorded_skin(k))
-            .collect();
+        let keys: Vec<String> = {
+            let safe = super::shared_alpha::safe_subtype_write(self);
+            self.items
+                .iter()
+                .filter(|i| self.fuzz_recorded_skin(&i.key) && safe(&i.key))
+                .map(|i| i.key.clone())
+                .collect()
+        };
         if keys.is_empty() {
             return false;
         }
@@ -231,11 +234,13 @@ impl AppModel {
         let s = if n == 1 { "" } else { "s" };
         let label = format!("Switch {n} fuzz-map set{s} off Advanced Skin");
         let cleared = keys.clone();
+        self.automatic_step = true;
         self.edit_docs(&label, Some(merge.clone()), true, move |p, _| {
             for k in &cleared {
                 p.clear_file_value(k, "subtype");
             }
         });
+        self.automatic_step = false;
         self.reencode_follow = Some(merge.clone());
         self.fuzz_switch = Some(FuzzSwitch {
             merge,
@@ -359,10 +364,10 @@ impl AppModel {
         // recording can write, so a blocked recording keeps it for the next one.
         let retype = std::mem::take(&mut self.history.retype_untouched);
         let mut writes: Vec<(String, &'static str, serde_json::Value)> = vec![];
-        let mut lines = vec![];
-        // The key each line names, so a switch's row can drop the lines of the files its own lines already name.
-        let mut line_keys: Vec<String> = vec![];
-        let mut only_types = true;
+        let tables = std::cell::LazyCell::new(|| super::shared_alpha::Tables::of(doc));
+        let safe =
+            std::cell::LazyCell::new(|| super::shared_alpha::subtype_write_guard(self, &*tables));
+        let mut previous = HashMap::new();
         if !retype.is_empty() {
             let shaders = self.shaders_by_member();
             for (k, old) in retype {
@@ -370,17 +375,72 @@ impl AppModel {
                     .auto_pick(&k, shaders.get(&k).copied())
                     .map(|st| json!(st));
                 if let Some(new) =
-                    new.filter(|n| *n != old && doc.file_value(&k, "subtype") == Some(old.clone()))
+                    new.filter(|n| *n != old && tables.subtype(&k).as_ref() == Some(&old))
                 {
-                    lines.push(format!(
-                        "{}: {} → {}",
-                        file_name(&k),
-                        show_type(&old),
-                        show_type(&new)
-                    ));
-                    line_keys.push(k.clone());
-                    writes.push((k, "subtype", new));
+                    if safe(&k) {
+                        previous.insert(k.clone(), old);
+                        writes.push((k, "subtype", new));
+                    }
                 }
+            }
+        }
+        // Note JS5: a type the list cannot hold is never written: with `sdc-project.toml` read-only the recorder
+        // writes the engine's own types only, as `pbr_follow` skips its propagation then.
+        let sets = self.sets_doc.as_ref().filter(|s| !s.read_only());
+        // Note JS5 (N-17, G1): an untouched normal follows its set's settled pick into PBR, in this step and its row.
+        // The marker keeps an Undo of the step undone, as `auto_written` does below.
+        let mut followed: Vec<String> = vec![];
+        let mut promote = vec![];
+        let listing = std::cell::OnceCell::new();
+        let mut into_pbr = HashSet::new();
+        // shortcut: an automatic pick leaving PBR never reverts its own PBR normal (itself PBR evidence).
+        // Revisit if a set stays in PBR after its other PBR maps are removed.
+        if let Some(s) = sets.filter(|_| self.target == Target::Cs) {
+            let locked = super::sets::locked_items(self);
+            let auto_data =
+                std::cell::LazyCell::new(|| s.auto_data().into_iter().collect::<HashSet<_>>());
+            for v in super::sets::views(self)
+                .iter()
+                .filter(|v| v.shader.as_ref().is_some_and(|p| p.bakes_any_tangent()))
+            {
+                let Some(SlotFill::Own { item: k }) = v.slots.get(&SlotKind::Normal) else {
+                    continue;
+                };
+                if locked.contains_key(k)
+                    || self.item(k).is_none_or(|i| i.kept_dds())
+                    || !super::normal_follow::free_alpha_holders(
+                        tables.alpha(k).into_iter(),
+                        |holder| auto_data.contains(holder),
+                    )
+                {
+                    continue;
+                }
+                // The same free slot can promote a first recording or follow an already listed subtype.
+                into_pbr.insert(k.clone());
+                let Some(word) = listing.get_or_init(|| s.auto_normal()).get(k) else {
+                    continue;
+                };
+                let Some(held) = tables
+                    .subtype(k)
+                    .and_then(|v| super::normal_follow::listed_tangent(word, v))
+                else {
+                    continue;
+                };
+                if held == Subtype::PbrNormal
+                    || previous.contains_key(k)
+                    || self
+                        .history
+                        .auto_written
+                        .contains(&(k.clone(), "normal-follow"))
+                    || !safe(k)
+                {
+                    continue;
+                }
+                let old = json!(held);
+                previous.insert(k.clone(), old.clone());
+                followed.push(k.clone());
+                promote.push(writes.len());
+                writes.push((k.clone(), "subtype", old));
             }
         }
         for i in &self.items {
@@ -402,22 +462,31 @@ impl AppModel {
             ] {
                 let Some(v) = v else { continue };
                 let done = self.history.auto_written.contains(&(i.key.clone(), f));
-                if done || doc.file_value(&i.key, f).is_some() {
+                if done
+                    || tables
+                        .file_key(&i.key)
+                        .and_then(|k| doc.file_value(k, f))
+                        .is_some()
+                {
                     continue;
                 }
-                if f != "alpha.threshold" {
-                    only_types &= f == "subtype";
-                    let v = if f == "subtype" {
-                        show_type(&v)
-                    } else {
-                        show(&v)
-                    };
-                    lines.push(format!("{}: {v}", file_name(&i.key)));
-                    line_keys.push(i.key.clone());
+                if f == "subtype" {
+                    if !safe(&i.key) {
+                        continue;
+                    }
+                    if into_pbr.contains(&i.key)
+                        && matches!(
+                            j.profile.subtype,
+                            Subtype::Normal | Subtype::LandscapeNormal
+                        )
+                    {
+                        promote.push(writes.len());
+                    }
                 }
                 writes.push((i.key.clone(), f, v));
             }
         }
+        drop(safe);
         // Note FI3: after a re-encode step still on top, the recording joins it (`set_reencode`).
         let join = self
             .reencode_follow
@@ -426,59 +495,95 @@ impl AppModel {
         if writes.is_empty() {
             return false;
         }
-        let n = lines.len();
-        let noun = if only_types { "type" } else { "value" };
+        let n = writes
+            .iter()
+            .filter(|(_, f, _)| *f != "alpha.threshold")
+            .count();
+        let noun = if writes.iter().all(|(_, f, _)| *f == "subtype") {
+            "type"
+        } else {
+            "value"
+        };
         let s = if n == 1 { "" } else { "s" };
         let label = format!("Set {n} {noun}{s} automatically");
         for (k, f, _) in &writes {
             self.history.auto_written.insert((k.clone(), f));
         }
-        if let Some(k) = join {
-            // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
-            // switch's row lists what it joined.
-            let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
-            let pushes = self.history.pushes;
-            self.edit_docs(&label, Some(k), true, |p, _| {
-                for (k, f, v) in &writes {
-                    p.set_file_value(k, f, v);
+        let follow_only = followed.len() == writes.len();
+        for k in followed {
+            self.history.auto_written.insert((k, "normal-follow"));
+        }
+        let sets_clean = !self.sets_user_dirty();
+        let pushes = self.history.pushes;
+        let clean_before = !self.prompts_unsaved();
+        self.automatic_step = true;
+        self.edit_docs(&label, join.clone(), true, |p, s| {
+            let mut listing = listing.into_inner().unwrap_or_else(|| s.auto_normal());
+            // A parseable document can still have a scalar `project`. Keep the original type unless the listing took.
+            if !promote.is_empty() {
+                for &idx in &promote {
+                    listing.insert(writes[idx].0.clone(), "pbr_normal".into());
                 }
+                s.set_auto_normal(&listing);
+                for idx in promote {
+                    let (k, _, v) = &mut writes[idx];
+                    if s.auto_normal_word(k) == Some("pbr_normal") {
+                        *v = json!(Subtype::PbrNormal);
+                    }
+                }
+            }
+            // Apply the checked subtype destinations before an alpha edit can create a shared stem table.
+            let types = writes.iter().filter(|(_, f, _)| *f == "subtype");
+            let other = writes.iter().filter(|(_, f, _)| *f != "subtype");
+            for (k, f, v) in types.chain(other) {
+                p.set_file_value(k, f, v);
+            }
+            super::normal_follow::list_normals(p, s, listing, &writes);
+        });
+        self.automatic_step = false;
+        self.note_listing(sets_clean);
+        let lines = writes
+            .iter()
+            .filter(|(_, f, _)| *f != "alpha.threshold")
+            .map(|(k, f, v)| {
+                let name = file_name(k);
+                let line = match *f {
+                    "subtype" => match previous.get(k) {
+                        Some(old) => format!("{name}: {} → {}", show_type(old), show_type(v)),
+                        None => format!("{name}: {}", show_type(v)),
+                    },
+                    _ => format!("{name}: {}", show(v)),
+                };
+                (k, line)
             });
-            if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
-                // Final review B I1: a switched file is listed once, by the switch's own line (it names the type the
-                // file now plans); the recording's lines for other files stay.
-                let own: Vec<String> = lines
-                    .into_iter()
-                    .zip(&line_keys)
-                    .filter(|(_, k)| !sw.keys.contains(k))
-                    .map(|(l, _)| l)
-                    .collect();
-                sw.lines.extend(own);
-                // The joined step is still the switch's (I2).
+        if let Some(k) = join {
+            if let Some(sw) = self.fuzz_switch.as_mut().filter(|sw| sw.merge == k) {
+                // The switch already names each of its own files.
+                sw.lines
+                    .extend(lines.filter(|(k, _)| !sw.keys.contains(k)).map(|(_, l)| l));
                 sw.step = self.history.pushes;
             }
             return self.history.pushes != pushes;
         }
-        let clean_before = !self.prompts_unsaved();
-        let wrote = self.batch_edit(&label, |m| {
-            m.edit("Set automatically", |p| {
-                for (k, f, v) in &writes {
-                    p.set_file_value(k, f, v);
-                }
-            })
-        });
-        if wrote {
-            let typed = writes.iter().any(|(_, f, _)| *f == "subtype");
-            self.auto_note = Some(AutoNote {
-                text: format!("{n} {noun}{s} set automatically (High confidence)"),
-                lines: lines
-                    .into_iter()
-                    .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
-                    .collect(),
-                step: self.history.pushes,
-                clean_before,
-            });
-            self.invalidate_views();
+        if self.history.pushes == pushes {
+            return false;
         }
-        wrote
+        let typed = !follow_only && writes.iter().any(|(_, f, _)| *f == "subtype");
+        let confidence = if follow_only {
+            ""
+        } else {
+            " (High confidence)"
+        };
+        self.auto_note = Some(AutoNote {
+            text: format!("{n} {noun}{s} set automatically{confidence}"),
+            lines: lines
+                .map(|(_, l)| l)
+                .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
+                .collect(),
+            step: self.history.pushes,
+            clean_before,
+        });
+        self.invalidate_views();
+        true
     }
 }

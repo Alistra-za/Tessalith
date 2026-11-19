@@ -390,6 +390,11 @@ pub enum Fix {
     TagAsGrass(String),
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
     StraightAlpha(String),
+    /// Note JS7 (N-10): write `alpha.policy = "data"` for this shared normal.
+    KeepAlpha {
+        table: Result<String, String>,
+        name: String,
+    },
     /// Note FC10 (CV8): remove the stored empty `match{n}` of the set (by id).
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
@@ -407,8 +412,6 @@ pub enum Fix {
     ChangeShader(String),
     /// Review E10 (SUG-CONTRADICTION): the undecided rows' type picker, for this item.
     SetType(String),
-    /// Note JP3 (SHADER-NORMAL-SPECULAR): write subtype = "pbr_normal" for this item.
-    UsePbrNormal(String),
     /// Owner A1 (PACK-RECIPE-CONFLICT, PACK-RECIPE-UNBUILDABLE, SHADER-EXTRA-MAP on a packed output): remove
     /// `packing.recipe` from both packed keys of the set; the planned packed key names it.
     ClearRecipe(String),
@@ -618,6 +621,9 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
 pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
     (
         m.evidence_rev,
+        m.project
+            .as_ref()
+            .map_or(0, crate::project::ProjectDoc::rev),
         m.export.revision,
         m.export.running.is_some(),
         // Note FC3: an `Undo` fix is built only while its step is the top one.
@@ -966,18 +972,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
-    // Note JP3: SHADER-NORMAL-SPECULAR, an Info result, is a note row too: the user acts on it (Use PBR normal).
-    let set_row =
-        |w: &engine::codes::Warning| makes_a_row(w) || w.code == Code::ShaderNormalSpecular;
     for v in views.iter() {
-        for w in v.set_warnings.iter().filter(|w| set_row(w)) {
+        for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
             let shader = || Some(Fix::ChangeShader(v.id.clone()));
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.
             if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
-                let (fix, second_fix, target, text) = match w.code {
+                let (fix, second_fix, target) = match w.code {
                     Code::ShaderExtraMap => {
                         let member = w.data.get("member").and_then(|x| x.as_str()).unwrap_or("");
                         // Owner A1-7: a packed output with a written recipe offers Clear recipe, then Change shader….
@@ -986,7 +989,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                                 Some(Fix::ClearRecipe(k.clone())),
                                 shader(),
                                 Some(SlotTarget::Item(k)),
-                                None,
                             )
                         } else {
                             match extra_member(m, v, w) {
@@ -997,7 +999,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                                     }),
                                     shader(),
                                     Some(SlotTarget::Item(item)),
-                                    None,
                                 ),
                                 // A packed output is skipped by `extra_member`: Change shader… alone, and Go to
                                 // set still outlines its row, whichever packed output it is (final wave Group 3).
@@ -1005,35 +1006,16 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                                     shader(),
                                     None,
                                     packed_member_key(m, v, member).map(SlotTarget::Item),
-                                    None,
                                 ),
                             }
                         }
                     }
-                    // Note JP3 (B3-11): a kept DDS's type cannot drop its alpha, so it gets no button and its own
-                    // sentence; a DDS encoded again (`reencode = true`) gets the button like any source image.
-                    Code::ShaderNormalSpecular => match extra_member(m, v, w) {
-                        Some(item) if m.item(&item).is_some_and(|i| i.kept_dds()) => (
-                            None,
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            Some(code_text::kept_normal_sentence(w)),
-                        ),
-                        Some(item) => (
-                            Some(Fix::UsePbrNormal(item.clone())),
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            None,
-                        ),
-                        None => (None, None, None, None),
-                    },
-                    _ => (None, None, None, None),
+                    _ => (None, None, None),
                 };
                 out.push(Problem {
                     fix,
                     second_fix,
                     target,
-                    text: text.unwrap_or(p.text),
                     ..p
                 });
                 continue;
@@ -1374,6 +1356,25 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    for (k, table) in super::shared_alpha::rows(m, &views) {
+        let Some(i) = m.item(&k) else { continue };
+        out.push(Problem {
+            fix: Some(Fix::KeepAlpha {
+                table,
+                name: keep_alpha_name(&k),
+            }),
+            detail: Some(KEEP_ALPHA_HOVER.into()),
+            ..row(
+                Level::Info,
+                At::Texture(k),
+                format!(
+                    "{} is shared with a regular set, which reads its alpha as specular; its alpha is not kept",
+                    i.name
+                ),
+                None,
+            )
+        });
+    }
     // Note FC10 (CV8): a stored empty `match{n}` (n >= 2; `match1 = ""` turns the diffuse match off) matches nothing.
     for v in views.iter() {
         for n in 2..=8u8 {
@@ -1476,7 +1477,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out
 }
 
-/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's or SHADER-NORMAL-SPECULAR's `data.member` names.
+/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's `data.member` names.
 /// The engine writes the member's output file name (`engine::api` `shader_members`); a source file name is matched too.
 /// A packed output is skipped: it cannot leave its set (controller ruling, 2026-11-18).
 fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
@@ -1536,8 +1537,6 @@ fn extra_map_recipe_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option
 
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
 pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
-/// Note JP3: the button of a SHADER-NORMAL-SPECULAR row, and its undo step's label.
-pub const USE_PBR_NORMAL: &str = "Use PBR normal";
 /// Note HL6: an output the target mod already ships (it wins or loses by load order).
 pub const REPLACES_TARGET: &str = "Replaces {file} of the target mod in the load order";
 
@@ -1549,6 +1548,20 @@ pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal 
 pub const STRAIGHT_ALPHA_HOVER: &str = "OpenEXR stores colour multiplied by alpha, so Tessalith divides it back on \
      load. If this file's colour is not premultiplied (straight alpha), Straight alpha reads it as stored \
      (alpha.exr_straight = true).";
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    pub static KEEP_ALPHA_NAMES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn keep_alpha_name(key: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    KEEP_ALPHA_NAMES.set(KEEP_ALPHA_NAMES.get() + 1);
+    format!("Keep alpha for {key}")
+}
+
+/// Note JS7: the hover of a Keep alpha row.
+pub const KEEP_ALPHA_HOVER: &str =
+    "Write alpha.policy = \"data\" for this normal in sdc.toml, so the regular set's specular stays.";
 
 /// Note FC10 (T8): `(id, other)` of a CFG-PRESET-SKIPPED reason that is an alias clash.
 /// shortcut: parses the engine's message (`presets::check_aliases`); read a `data` field once the engine adds one.

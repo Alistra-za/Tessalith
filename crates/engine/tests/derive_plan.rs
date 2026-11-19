@@ -1698,17 +1698,18 @@ fn plain_steel_n(r: &mut BatchRequest, _: Option<&mut DeriveRequest>) {
     r.overrides = vec![parse_set("file:**/steel_n.png.subtype=normal").unwrap()];
 }
 
-/// B3-4 pin (Note JP1): an own plain `normal` in a PBR set gets no Also `legacy_n`; the derived diffuse lists it.
+/// N-8 (Note JS4): an own plain normal is the PBR set's `_n`, so the Also export writes its `legacy_n` (a new file;
+/// no existing output changes) and the derived diffuse lists no DERIVE-NOT-CONVERTED for it.
 #[test]
-fn an_own_plain_normal_feeds_no_also_legacy_n() {
+fn an_own_plain_normal_feeds_the_also_legacy_n() {
     let d = tempfile::tempdir().unwrap();
     let inputs = d.path().join("in");
     steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
     let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), plain_steel_n);
-    assert!(!kinds(&p).contains(&DeriveKind::LegacyN), "{:?}", kinds(&p));
+    assert!(kinds(&p).contains(&DeriveKind::LegacyN), "{:?}", kinds(&p));
     let diffuse = out_job(&p, "textures/arm/steel.dds").expect("the derived diffuse");
     assert!(
-        diffuse
+        !diffuse
             .warnings
             .iter()
             .any(|w| w.code == Code::DeriveNotConverted
@@ -1718,4 +1719,47 @@ fn an_own_plain_normal_feeds_no_also_legacy_n() {
         "{:?}",
         diffuse.warnings
     );
+}
+
+/// N-8 (Note JS4): with a `pbr_normal` and a plain normal in one PBR set, `legacy_n` reads the `pbr_normal` whichever
+/// sorts first. Before the role widens only the `pbr_normal` fills `_n`, so this passes then too (a pin).
+#[test]
+fn legacy_n_prefers_the_pbr_normal_in_either_order() {
+    for plain_first in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let inputs = d.path().join("in");
+        steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
+        png(
+            &inputs.join("textures/pbr/other/steel_n.png"),
+            16,
+            16,
+            [128, 128, 255, 255],
+        );
+        let (plain, pbr) = if plain_first {
+            ("arm/steel_n.png", "other/steel_n.png")
+        } else {
+            ("other/steel_n.png", "arm/steel_n.png")
+        };
+        let mut r = request(&inputs, &d.path().join("pbr"), Target::Cs);
+        r.overrides = vec![parse_set(&format!("file:**/{plain}.subtype=normal")).unwrap()];
+        r.set_edits = vec![engine::sets::SetEdit::Move {
+            file: "textures/pbr/other/steel_n.png".into(),
+            to: "textures/pbr/arm/steel".into(),
+        }];
+        let (cs, _) = plan(r);
+        let sets = derive_sets(&cs);
+        let s = sets
+            .iter()
+            .find(|s| {
+                s.members
+                    .iter()
+                    .any(|m| slash(m).ends_with("arm/steel.png"))
+            })
+            .expect("the set");
+        assert!(
+            s.normal.as_ref().is_some_and(|n| slash(n).ends_with(pbr)),
+            "plain first {plain_first}: {:?}",
+            s.normal
+        );
+    }
 }

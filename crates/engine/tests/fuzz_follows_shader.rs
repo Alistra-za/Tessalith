@@ -1351,7 +1351,7 @@ fn a_filled_diffuse_in_a_fuzz_only_set_stays_pbr_albedo() {
 
 /// Final review A I2: the shader map check reads a kept DDS member against the set read with `f`. In a Fuzz-1a set a
 /// kept `x.dds` fills `albedo` (no SHADER-EXTRA-MAP for it, no SHADER-MISSING-MAP `albedo`), and a kept `x_n.dds`
-/// fills `_n` with no SHADER-NORMAL-SPECULAR. The control row, a real `_f` in place of the fuzz map, passes either way.
+/// fills `_n` (no SHADER-EXTRA-MAP and no SHADER-MISSING-MAP `_n`). The control row, a real `_f` in place of the fuzz map, passes either way.
 #[test]
 fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
     for fuzz in ["x_fuzz.png", "x_f.png"] {
@@ -1373,7 +1373,10 @@ fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
         std::fs::write(d.path().join("in/x_n.dds"), b"DDS not a real texture").unwrap();
         let (_, w) = set_warnings(&d, "x.png");
         assert!(
-            !w.iter().any(|w| w.code == Code::ShaderNormalSpecular),
+            !w.iter().any(
+                |w| (w.code == Code::ShaderExtraMap && w.data["member"] == "x_n.dds")
+                    || (w.code == Code::ShaderMissingMap && w.data["map"] == "_n")
+            ),
             "{fuzz}: {w:?}"
         );
         patched_equals_fresh(&request(&d), "x.png");
@@ -1561,4 +1564,109 @@ fn a_named_fuzz_output_leaves_a_hand_made_f_the_sets_f_in_place() {
         codes_of(j)
     );
     patched_equals_fresh(&r, "x_fuzz.png");
+}
+
+/// F15 (Note JQ53): an `_f` typed away from `pbr_fuzz` still holds the set's `_f` path, so the fuzz map stays out (it
+/// would clash), and the reason says what that `_f` is instead of calling it the PBR fuzz texture.
+#[test]
+fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
+    check_height_f_reason("[files.\"iron_f.png\"]\nsubtype = \"height\"\n");
+}
+
+#[test]
+fn a_rule_typed_f_is_named_for_its_resolved_subtype() {
+    check_height_f_reason("[[rules]]\nmatch.glob = 'iron_f.png'\nsubtype = 'height'\n");
+}
+
+fn check_height_f_reason(config: &str) {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.png",
+        ],
+        config,
+    );
+    let p = plan(&d);
+    assert_eq!(job(&p, "iron_f.png").profile.subtype, Subtype::Height);
+    assert_eq!(out_name(job(&p, "iron_f.png")), "iron_f.dds");
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png (height) is written at the set's _f path; not converted"
+    );
+}
+
+/// F15 (Note JQ53), a pin: of two `_f` members, the one that writes the PBR fuzz texture is named even when the other
+/// comes first by path. The fuzz map's output is named `iron_fuzz_own.dds`, so a kept `iron_f.dds` is the set's `_f`
+/// (JQ53), and `iron_f.bmp`, typed height, sorts before it.
+#[test]
+fn the_f_that_writes_the_pbr_fuzz_texture_is_named_before_one_typed_away() {
+    check_f_order("[files.\"iron_f.bmp\"]\nsubtype = \"height\"\n");
+}
+
+#[test]
+fn a_rule_typed_f_sorts_after_the_kept_fuzz_dds() {
+    check_f_order("[[rules]]\nmatch.glob = 'iron_f.bmp'\nsubtype = 'height'\n");
+}
+
+fn check_f_order(config: &str) {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.bmp",
+        ],
+        config,
+    );
+    std::fs::write(d.path().join("in/iron_f.dds"), b"DDS made by hand").unwrap();
+    let mut r = in_place(&d, OnExisting::IfChanged);
+    r.output_paths.insert(
+        engine::sets::OutputKey::File("iron_fuzz.png".into()),
+        "iron_fuzz_own.dds".into(),
+    );
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(job(&p, "iron_f.bmp").profile.subtype, Subtype::Height);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.dds is the set's PBR fuzz texture (_f); not converted"
+    );
+}
+
+/// F15 (Note JQ53): an `_f` pair that collides (IN-DUPLICATE) has no job; the reason says it is skipped. (Both
+/// members of such a pair are skipped, so the rule above is only reachable through a kept DDS.)
+#[test]
+fn an_f_that_is_a_duplicate_is_named_as_skipped() {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.png",
+            "iron_f.tga",
+        ],
+        "",
+    );
+    let p = plan(&d);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png, the set's _f, is skipped; not converted"
+    );
+}
+
+/// F15 (Note JQ53): an `_f` that fails to load writes nothing; the reason says so.
+#[test]
+fn an_f_that_fails_to_load_is_named_as_failed() {
+    let d = fixture(&["iron.png", "iron_roughness.png", "iron_fuzz.png"], "");
+    std::fs::write(d.path().join("in/iron_f.png"), b"not a png").unwrap();
+    let p = plan(&d);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png, the set's _f, failed to load; not converted"
+    );
 }

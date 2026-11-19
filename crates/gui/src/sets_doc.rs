@@ -367,6 +367,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AUTO_NORMAL_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl SetsDoc {
     pub fn open(root: &Path) -> SetsDoc {
         let mut d = SetsDoc {
@@ -440,6 +445,11 @@ impl SetsDoc {
     /// Changes on every edit, restore and reload (the set-view cache key).
     pub fn rev(&self) -> u64 {
         self.f.rev
+    }
+
+    /// The text last loaded or saved (`TomlFile::saved_text`): it changes on every save and reload (Note JS5, N-26).
+    pub fn saved_text(&self) -> &str {
+        &self.f.saved_text
     }
 
     pub fn path(&self) -> &Path {
@@ -1025,6 +1035,56 @@ impl SetsDoc {
             "auto_skin",
             (!keys.is_empty()).then_some(Value::InlineTable(t)),
         );
+    }
+
+    /// Note JS5 (N-17, N-27): the tangent-space normal sub-types Tessalith wrote, each with the word it wrote
+    /// (`normal`, `landscape_normal` or `pbr_normal`). A key whose `[files]` sub-type no longer equals it is the
+    /// user's. `[project] auto_normal`.
+    pub fn auto_normal(&self) -> BTreeMap<String, String> {
+        #[cfg(test)]
+        AUTO_NORMAL_READS.set(AUTO_NORMAL_READS.get() + 1);
+        let t = self.f.doc.get("project").and_then(|p| p.get("auto_normal"));
+        t.and_then(Item::as_table_like)
+            .map(|t| {
+                t.iter()
+                    .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The word listed under this exact key, including after a recorder write.
+    pub(crate) fn auto_normal_word(&self, key: &str) -> Option<&str> {
+        self.f
+            .doc
+            .get("project")?
+            .get("auto_normal")?
+            .get(key)?
+            .as_str()
+    }
+
+    pub fn set_auto_normal(&mut self, keys: &BTreeMap<String, String>) {
+        let mut t = toml_edit::InlineTable::new();
+        for (k, v) in keys {
+            t.insert(k.as_str(), Value::from(v.as_str()));
+        }
+        self.set_project(
+            "auto_normal",
+            (!keys.is_empty()).then_some(Value::InlineTable(t)),
+        );
+    }
+
+    /// Note JS7 (N-10, N-27): the owner normals the share step wrote `alpha.policy = "data"` on; one that no longer
+    /// holds `data` is the user's. `[project] auto_data`.
+    pub fn auto_data(&self) -> Vec<String> {
+        strings(self.f.doc.get("project").and_then(|p| p.get("auto_data")))
+    }
+    pub fn set_auto_data(&mut self, keys: &[String]) {
+        let mut arr = Array::new();
+        for k in keys {
+            arr.push(k.as_str());
+        }
+        self.set_project("auto_data", (!keys.is_empty()).then_some(Value::Array(arr)));
     }
 
     /// The `[[sets]]` entries, parsed once per revision (REPORT #9).

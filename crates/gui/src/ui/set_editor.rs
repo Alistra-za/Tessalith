@@ -1369,6 +1369,9 @@ fn row(
             let mut lines = vec![];
             if let Some(from) = &borrowed {
                 lines.push(format!("borrowed from {from}"));
+                if slot == SlotKind::Normal && model.target == Target::Cs {
+                    lines.push("If that set has several normals, the roughness bake can use a different one from the file shown here.".into());
+                }
             }
             if let (false, Some(p)) = (cell.usable, &v.shader) {
                 lines.push(format!("not used by {}", p.shader.label()));

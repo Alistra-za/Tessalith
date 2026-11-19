@@ -549,14 +549,16 @@ pub fn sha256_json<T: Serialize>(v: &T) -> Result<String, serde_json::Error> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(v)?)))
 }
 
-/// The manifest's `profile_sha256` for an output written with `p` (spec §8 `if-changed`). A `pbr_normal`'s
-/// `mips.normal = renormalize_bake` hashes as `renormalize`: whether its set bakes changes none of the `_n`'s own
+/// The manifest's `profile_sha256` for an output written with `p` (spec §8 `if-changed`). A `pbr_normal`'s, and a
+/// `landscape_normal`'s (Note JS2, N-13), `mips.normal = renormalize_bake` hashes as `renormalize`: whether its set bakes changes none of the `_n`'s own
 /// bytes (only its roughness member's), so the bake turning on or off does not re-encode the `_n` (DECISIONS R12,
 /// M4 final review Minor 2). A `normal`'s opt-in gloss bake (Note CL40) hashes the same way, for the same reason. A
 /// `coat_normal`'s self-bake does change its bytes and keeps its own hash.
 pub fn profile_sha256(p: &Profile) -> Result<String, serde_json::Error> {
-    if matches!(p.subtype, Subtype::PbrNormal | Subtype::Normal)
-        && p.mips.normal == NormalMips::RenormalizeBake
+    if matches!(
+        p.subtype,
+        Subtype::PbrNormal | Subtype::Normal | Subtype::LandscapeNormal
+    ) && p.mips.normal == NormalMips::RenormalizeBake
     {
         let mut q = p.clone();
         q.mips.normal = NormalMips::Renormalize;
@@ -663,5 +665,18 @@ mod tests {
                 "{st:?}"
             );
         }
+    }
+
+    /// N-13 (Note JS2): a `landscape_normal` that bakes hashes as one that does not, like `normal` and `pbr_normal`.
+    #[test]
+    fn a_landscape_normals_bake_hashes_as_renormalize() {
+        let reg = PresetRegistry::builtin().unwrap();
+        let mut p = reg
+            .profile("cs-quality", Target::Cs, Subtype::LandscapeNormal)
+            .unwrap();
+        p.mips.normal = NormalMips::Renormalize;
+        let mut q = p.clone();
+        q.mips.normal = NormalMips::RenormalizeBake;
+        assert_eq!(profile_sha256(&p).unwrap(), profile_sha256(&q).unwrap());
     }
 }
