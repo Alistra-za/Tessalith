@@ -24,10 +24,11 @@ use std::collections::{BTreeMap, BTreeSet};
 /// (`known`), each set's automatic shader (a chosen one is read from the documents), its own Normal-slot file before
 /// any borrow (`own_n`, the set resolver's own fills, N8-b), the files in locked slots, the files with no job or a kept
 /// DDS (`inert`), the files the last plan planned `data` (review 1 Minor 7), the files whose analysis is known and
-/// whose alpha does not vary (`flat`, N-39), the sets whose view holds no file (`memberless`), and those of them read
-/// while no plan is out (`empty`, N-40).
+/// whose alpha does not vary (`flat`, N-39), the sets whose view holds no file (`memberless`), those of them read
+/// while no plan is out (`empty`, N-40), and whether a plan is out (`plan_out`).
 #[derive(Default)]
 pub(super) struct Facts {
+    plan_out: bool,
     known: BTreeSet<String>,
     auto: BTreeMap<String, Shader>,
     own_n: BTreeMap<String, String>,
@@ -48,6 +49,7 @@ pub(super) fn facts(m: &AppModel) -> Facts {
     // know yet (New set, Duplicate into, a rename's new id) has none either; nothing counts as empty then, and such
     // sets stay `unsure`.
     let plan_out = m.full_plan_pending();
+    f.plan_out = plan_out;
     for v in views(m).iter() {
         let id = fold_id(&v.id);
         f.known.insert(id.clone());
@@ -106,12 +108,20 @@ pub(super) struct Share {
 /// wins over `f`'s automatic one), and the owner normals of the pairs where a set has no shader yet (`unsure`, review 4
 /// Important 1). A borrower in `gone` (a set whose files are all gone) reads no texture and shares nothing. N8-b: a set
 /// with no files that is not gone (New set, Duplicate into, a rename's new id: the plan has not given it its files) is
-/// not known in the step: as a borrower its pair is `unsure`; on the way to the owner it makes the step `blind`.
+/// not known in the step: as a borrower its pair is `unsure`; on the way to the owner it makes the step `blind`. So does
+/// a borrow target with no view while a plan is out, or one the step itself named (`targets` holds the borrow targets
+/// the step started from): an automatic rename's new id has no entry and no view until its plan lands. A target with
+/// no view that the step started from, read while no plan is out, is gone: the borrow line fills nothing.
 // shortcut: a set with no shader until the next plan (New set, Duplicate into, a rename's `retarget_auto`, a set sent
 // back to Auto, a set with no card) makes its pairs `unsure` (spec limit 4): that owner normal is neither written nor
 // cleared in the step, and other keys are unaffected; after the plan, Task 9's row or a leftover `data` shows the result.
 // A `blind` step clears no listed key at all, since the key the borrow reads is not known.
-pub(super) fn shared_into_regular(f: &Facts, s: &SetsDoc, gone: &BTreeSet<String>) -> Share {
+pub(super) fn shared_into_regular(
+    f: &Facts,
+    s: &SetsDoc,
+    gone: &BTreeSet<String>,
+    targets: &BTreeSet<String>,
+) -> Share {
     let mut borrows = BTreeMap::new();
     let mut chosen = BTreeMap::new();
     for e in s.entries().iter() {
@@ -135,7 +145,11 @@ pub(super) fn shared_into_regular(f: &Facts, s: &SetsDoc, gone: &BTreeSet<String
         let mut cur = first.clone();
         let mut seen = BTreeSet::from([b.clone()]);
         let owner = loop {
-            if !seen.insert(cur.clone()) || !f.known.contains(&cur) {
+            if !seen.insert(cur.clone()) {
+                break None;
+            }
+            if !f.known.contains(&cur) {
+                sh.blind |= f.plan_out || !targets.contains(&cur);
                 break None;
             }
             if unread(&cur) {
@@ -171,11 +185,20 @@ pub(super) fn shared_into_regular(f: &Facts, s: &SetsDoc, gone: &BTreeSet<String
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
-/// owner's Normal-slot file held, and the sets with no file (`empty`).
+/// owner's Normal-slot file held, the sets with no file (`empty`) and the slot-2 borrow targets (`targets`, N8-b).
 pub(super) struct Before {
     shared: BTreeSet<String>,
     sub: BTreeMap<String, Option<Value>>,
     empty: BTreeSet<String>,
+    targets: BTreeSet<String>,
+}
+
+/// The sets the slot-2 borrow lines of `s` name, by folded id.
+fn borrow_targets(s: &SetsDoc) -> BTreeSet<String> {
+    s.entries()
+        .iter()
+        .filter_map(|e| e.borrow.get(&2).map(|l| fold_id(l)))
+        .collect()
 }
 
 pub(super) fn before(m: &AppModel) -> Option<Before> {
@@ -189,10 +212,12 @@ pub(super) fn before(m: &AppModel) -> Option<Before> {
         .values()
         .map(|k| (k.clone(), p.file_value(k, "subtype")))
         .collect();
+    let targets = borrow_targets(s);
     Some(Before {
-        shared: shared_into_regular(&f, s, &f.empty).out,
+        shared: shared_into_regular(&f, s, &f.empty, &targets).out,
         sub,
         empty: f.empty.clone(),
+        targets,
     })
 }
 
@@ -246,7 +271,7 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
     // creates or renames has no view before it, so it is `unsure` instead).
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let sh = shared_into_regular(f, s, &gone);
+    let sh = shared_into_regular(f, s, &gone, &b.targets);
     let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let start = s.auto_data();

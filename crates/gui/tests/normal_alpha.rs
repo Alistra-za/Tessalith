@@ -1807,6 +1807,59 @@ fn renaming_the_lender_keeps_the_shared_normals_data() {
     assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
 }
 
+/// N8-b (finding 3, the automatic rename): a new input name renames the lender's automatic set. `retarget_auto` moves
+/// the regular set's borrow to the new id, which has no entry and no view until the plan lands. A user step made
+/// before then cannot tell which file the borrow reads: it clears nothing, and after the plan the share holds again.
+#[test]
+fn an_automatic_rename_of_the_lender_keeps_the_shared_normals_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    m.set_input_name("pbr/iron", "textures/pbr/plate").unwrap();
+    assert!(
+        m.full_plan_pending(),
+        "precondition: the rename's plan is still out"
+    );
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.id == "armor/steel"
+                && e.borrow.get(&2).map(String::as_str) == Some("pbr/plate")),
+        "precondition: the borrow follows the automatic id"
+    );
+    assert!(
+        !entries.iter().any(|e| e.id == "pbr/plate"),
+        "precondition: no entry under the new id"
+    );
+    assert!(
+        !sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "pbr/plate"),
+        "precondition: no view under the new id until the plan lands"
+    );
+    m.set_shader("armor/steel", Some(Shader::Default));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a step before the plan lands keeps it"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    m.set_shader("armor/steel", None);
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "after the plan the share holds"
+    );
+}
+
 /// N8-b (review Q6): an explicit PBR owner and an explicit PBR borrower. The owner's `pbr_normal` is retyped `height`,
 /// then the borrower is picked Default before the type's plan lands. The last plan still puts the file in the Normal
 /// slot, but the document says it is a height map now: it gets no `data`.
