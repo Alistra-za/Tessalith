@@ -614,6 +614,17 @@ fn auto_after_eye_keeps_the_users_extensionless_subtype() {
     assert_eq!(held(&m, "test/wall_n", "subtype"), Some(json!("glow")));
 }
 
+/// The key of the member that owns the set's Normal slot.
+fn normal_owner(m: &AppModel, id: &str) -> Option<String> {
+    let v = sdc_gui::model::sets::set_views(m)
+        .into_iter()
+        .find(|v| v.id == id)?;
+    match v.slots.get(&sdc_gui::model::sets::SlotKind::Normal) {
+        Some(sdc_gui::model::sets::SlotFill::Own { item }) => Some(item.clone()),
+        _ => None,
+    }
+}
+
 /// The sets document's pick differs from the last plan's: the plan has not seen it yet.
 fn assert_plan_pending(m: &AppModel, id: &str, choice: Shader) {
     let v = sdc_gui::model::sets::set_views(m)
@@ -649,12 +660,31 @@ fn auto_right_after_a_pbr_pick_clears_the_normal() {
 #[test]
 fn a_diffuse_revert_before_the_plan_lands_reads_the_live_pick() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = followed_wall(d.path());
+    let t = wall(d.path());
+    ImageBuffer::from_fn(64, 64, |x, _| Rgb([(x * 4) as u8, 200, 40]))
+        .save(t.join("wall_g.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    add_rmaos(&t, &mut m);
     m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
     settle(&mut m);
+    // The Revert has something to do: a glow map an earlier Switch typed `pbr_emissive`, listed in `auto_pbr`.
+    m.edit_docs("switched", None, true, |p, s| {
+        p.set_file_value("test/wall_g.png", "subtype", &json!("pbr_emissive"));
+        s.set_auto_pbr(&["test/wall_g.png".to_string()]);
+    });
     m.set_shader("test/wall", Some(Shader::Pbr));
     assert_plan_pending(&m, "test/wall", Shader::Pbr);
+    assert_eq!(
+        held(&m, "test/wall_g.png", "subtype"),
+        Some(json!("pbr_emissive"))
+    );
     m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+    assert_ne!(
+        held(&m, "test/wall_g.png", "subtype"),
+        Some(json!("pbr_emissive")),
+        "the Revert ran"
+    );
     assert_eq!(
         facts(&m, WALL_N),
         (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
@@ -737,6 +767,11 @@ fn a_typed_normal_beside_an_msn_survives_picks_and_an_older_listed_one_is_cleare
         let mut m = opened_as_the_app(d.join("textures"), d.join("export"));
         m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
         settle(&mut m);
+        assert_eq!(
+            normal_owner(&m, "test/wall").as_deref(),
+            Some("test/wall_msn.png"),
+            "the `_msn` owns the Normal slot; `_n` is the secondary member"
+        );
         m
     };
     let d = tempfile::tempdir().unwrap();
@@ -786,6 +821,11 @@ fn the_switch_governs_every_free_member_not_only_the_normal_slot() {
         }
         m.open_folder(d.path().join("textures"));
         settle(&mut m);
+        assert_eq!(
+            normal_owner(&m, "test/wall").as_deref(),
+            Some("test/wall_msn.png"),
+            "the `_msn` owns the Normal slot; `_n` is the secondary member"
+        );
         m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
         let (switched, back) = if accept_on {
             (
@@ -982,5 +1022,87 @@ fn an_advanced_skin_pick_without_a_diffuse_types_the_normal_in_its_own_step() {
         facts(&m, WALL_N),
         (Some(json!("pbr_normal")), Some("pbr_normal".into()), false),
         "the pick itself, before any plan"
+    );
+}
+
+/// B3 (N6-j): the engine lowercases both sides, so `alpha.policy` under `TEST/WALL_N` beside a `test/wall_n.png` table
+/// is the user's: the Switch leaves the inferred normal alone (acceptance off) and `auto_pbr` does not gain it.
+#[test]
+fn an_alpha_under_another_case_of_the_key_is_the_users() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"TEST/WALL_N\"]\nalpha.policy = \"data\"\n\n[files.\"test/wall_n.png\"]\nformat = \"bc7\"\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..sdc_gui::settings::GuiSettings::default()
+        },
+        None,
+        session(),
+    );
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.path().join("textures"));
+    settle(&mut m);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), (None, None, false));
+}
+
+/// B7 (N6-j): the user's `glow` and alpha under `TEST/WALL_N`, only `pbr_normal` under `test/wall_n.png`, the key in
+/// both lists, an explicit PBR pick settled, a manual Revert: the key is not untouched, so the legacy loop clears the
+/// `pbr_normal` (the user's `glow` shows through) and the normal rule keeps nothing.
+#[test]
+fn a_revert_clears_a_pbr_normal_whose_alpha_is_the_users_under_another_case() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"TEST/WALL_N\"]\nsubtype = \"glow\"\nalpha.policy = \"data\"\n\n[files.\"test/wall_n.png\"]\nsubtype = \"pbr_normal\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    m.edit_docs("both lists", None, true, |p, s| {
+        assert_eq!(p.file_value(WALL_N, "subtype"), Some(json!("pbr_normal")));
+        s.set_auto_pbr(&[WALL_N.to_string()]);
+        s.set_auto_normal(&std::collections::BTreeMap::from([(
+            WALL_N.to_string(),
+            "pbr_normal".to_string(),
+        )]));
+    });
+    assert_eq!(m.untouched_normal(WALL_N), None, "the alpha is the user's");
+    m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+    assert_eq!(
+        held(&m, WALL_N, "subtype"),
+        Some(json!("glow")),
+        "the legacy loop cleared the pbr_normal and the user's glow shows through"
+    );
+}
+
+/// N-28 (the Switch keeps the module's promise): a `normal` persisted in both lists is `pbr_normal` after the Switch,
+/// listed with that word, and off `auto_pbr`.
+#[test]
+fn the_switch_takes_an_untouched_key_off_auto_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("both lists", None, true, |_, s| {
+        s.set_auto_pbr(&[WALL_N.to_string()])
+    });
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("normal")), Some("normal".into()), true)
+    );
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
     );
 }

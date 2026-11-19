@@ -129,6 +129,8 @@ impl AppModel {
                     for (mk, st, listed) in members {
                         p.set_file_value(&mk, "subtype", &json!(st));
                         if listed {
+                            // An untouched key lives in `auto_normal` only.
+                            auto.retain(|a| *a != mk);
                             relisted.push((mk, Some(st)));
                         } else if !auto.contains(&mk) {
                             auto.push(mk);

@@ -52,29 +52,22 @@ pub(super) fn explicit_pick(v: &super::sets::SetView) -> Option<Shader> {
 /// `data`). The engine applies every `[files]` table that matches the file, so the extension-less spelling counts
 /// too: `alpha.policy` there is the user's. `untouched_normal`, the recorder and the Switch read this one rule.
 pub(super) fn alpha_free(p: &ProjectDoc, s: &SetsDoc, key: &str) -> bool {
-    let read = |k: &str| p.file_value(k, "alpha.policy");
-    // The two spellings are looked up directly (no walk over every `[files]` key): a table spelled without the
-    // extension is a separate one only when `key` has a table of its own.
-    let stem = {
-        let (dir, name) = key.rsplit_once('/').map_or(("", key), |(d, n)| (d, n));
-        name.rsplit_once('.')
-            .filter(|(st, _)| !st.is_empty())
-            .map(|(st, _)| {
-                if dir.is_empty() {
-                    st.to_string()
-                } else {
-                    format!("{dir}/{st}")
-                }
-            })
-    };
-    if let Some(st) = stem.filter(|st| p.has_file_key(key) && p.has_file_key(st)) {
-        if read(&st).is_some() {
-            return false;
+    // The engine applies every `[files]` key that matches the file (`path_key_matches`: any case, the full path or the
+    // extension-less one). Runs per shader pick, diffuse edit and settled plan, never per frame.
+    let holders = p
+        .file_keys()
+        .into_iter()
+        .filter(|k| engine::overrides::path_key_matches(k, key))
+        .filter(|k| p.file_value(k, "alpha.policy").is_some())
+        .count();
+    match holders {
+        0 => true,
+        // The one table `file_value` reads, holding the `data` the share step wrote.
+        1 => {
+            p.file_value(key, "alpha.policy") == Some(json!("data"))
+                && s.auto_data().iter().any(|k| k == key)
         }
-    }
-    match read(key) {
-        None => true,
-        Some(v) => v == json!("data") && s.auto_data().iter().any(|k| k == key),
+        _ => false,
     }
 }
 
