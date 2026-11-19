@@ -6825,6 +6825,29 @@ fn a_file_is_cleaned_up_only_while_it_holds_the_ops_the_session_took() {
             assert!(kept_somewhere, "the other session's edit still exists");
         }),
         (
+            "a carry leaves a plain autosave with the same ops in other bytes",
+            || {
+                // added after mutation l survived: with equal ops no save runs before the carry, so the bytes the carry
+                // reads are not the session's; only the fingerprint tells them apart
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                m.set_nif_export_root(None);
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                let mut other = load(&autosave(&d)).unwrap().unwrap();
+                other.id = Some("0123456789abcdef".into()); // another session's document of the same ops
+                save(&autosave(&d), &other).unwrap();
+                let theirs = std::fs::read(autosave(&d)).unwrap();
+                m.set_project_root(Some(&p));
+                assert_eq!(doc_values(&draft(&p)), [12.5], "premise: carried and saved");
+                assert_eq!(
+                    std::fs::read(autosave(&d)).unwrap(),
+                    theirs,
+                    "not the session's to delete"
+                );
+            },
+        ),
+        (
             "a kept autosave that lost and was replaced since is not moved",
             || {
                 let (d, mut m) = export_session();
