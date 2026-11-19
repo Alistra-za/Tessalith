@@ -375,12 +375,14 @@ struct Written<'a> {
 /// writes a path keeps it.
 fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String, Written<'a>> {
     let mut out = HashMap::new();
+    // The views are being built, so the explicit paths are read over them, not from the cache.
+    let paths = super::sets::engine_inputs_in(m, views).1;
     for v in views {
         for item in &v.members {
             let Some(it) = m.item(item) else {
                 continue;
             };
-            if let Some(p) = output_game_path(m, it) {
+            if let Some(p) = output_game_path(m, views, &paths, it) {
                 out.entry(p.to_ascii_lowercase()).or_insert(Written {
                     from: &v.id,
                     short: &v.short,
