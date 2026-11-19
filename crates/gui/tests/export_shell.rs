@@ -3320,6 +3320,22 @@ fn a_file_an_earlier_copy_makes_feeds_a_later_copy_and_a_profile() {
 }
 
 #[test]
+fn a_directory_at_a_copy_destination_cannot_feed_a_later_copy_or_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, odd, profile) = chained_copies(d.path());
+    let leaf = odd.with_file_name("leaf_n.dds");
+    std::fs::create_dir_all(&leaf).unwrap();
+    m.save().unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert!(leaf.is_dir() && !odd.exists() && !profile.exists());
+    let doc = m.sets_doc.as_ref().unwrap();
+    for path in [&leaf, &odd, &profile, doc.path(), &doc.sidecar_path()] {
+        assert!(!s.changed.contains(path), "{path:?}");
+        assert!(!s.listed.contains(path), "{path:?} in {:?}", s.listed);
+    }
+}
+
+#[test]
 fn a_job_writing_a_borrowers_destination_marks_the_copy_and_both_records() {
     use engine::config::GreenConvention;
     use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};

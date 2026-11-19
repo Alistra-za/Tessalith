@@ -588,10 +588,14 @@ impl AppModel {
                 if by_run {
                     // The owner's DDS comes from this run (its job, or an earlier copy): whether it is copied, and
                     // its bytes, are the run's.
-                    run_records = true;
-                    if may_change(dst, shas.get(&key).map(String::as_str)) {
-                        copies.insert(dst.clone(), true);
+                    match disk_state(dst, shas.get(&key).map(String::as_str)) {
+                        DiskState::Unreadable => continue,
+                        DiskState::New | DiskState::Ours => {
+                            copies.insert(dst.clone(), true);
+                        }
+                        DiskState::Edited => {} // The writer can adopt a readable copy with identical bytes.
                     }
+                    run_records = true;
                     produced.add(dst);
                     continue;
                 }
