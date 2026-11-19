@@ -2098,3 +2098,59 @@ fn a_link_is_recomputed_when_the_plan_moves_its_output_back() {
     let l = link(&m);
     assert_eq!(l.from, None, "the link is recomputed: {l:?}");
 }
+
+/// Ruling 3b-F18 (amends 3b-F3): main a0e2610c refused this project with a collision of an output with itself, and
+/// HEAD exports it. `w` borrows slot 6 from the PBR set `q` and maps its own packed output to its default path
+/// `textures\t\w_rmaos.dds`, with no slot command anywhere. The pack is found by membership (since 2cf3a2e5), so no
+/// collision is reported and the export writes the PGPatcher JSON.
+#[test]
+fn a_pack_displaced_by_a_borrow_and_mapped_to_its_default_path_is_no_collision() {
+    let layout = Layout {
+        name: "w maps its own pack to its default path",
+        files: &[
+            "textures/s/q.png",
+            "textures/s/q_roughness.png",
+            "textures/s/q_ao.png",
+            "textures/t/w_roughness.png",
+            "textures/t/w_ao.png",
+        ],
+        toml: "[[sets]]\nid = \"textures/s/q\"\nshader = \"pbr\"\n[[sets]]\nid = \"textures/t/w\"\n[sets.borrow]\n\
+               slot6 = \"textures/s/q\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"W\"\n\
+               slot6 = \"textures/t/w_rmaos.dds\"\n",
+        albedos: &["textures/s/q.png"],
+        subtypes: &[],
+        out_name: "w_rmaos.dds",
+        slot: 6,
+        real: None,
+        invented: &[],
+        json: &[],
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &layout);
+    let settings = |m: &AppModel| -> Vec<String> {
+        views(m)
+            .iter()
+            .flat_map(|v| v.settings.keys().filter(|k| k.starts_with("slot")).cloned())
+            .collect()
+    };
+    assert!(
+        settings(&m).is_empty(),
+        "premise: no slot command: {:?}",
+        settings(&m)
+    );
+    assert!(
+        block_texts(&m)
+            .iter()
+            .all(|b| !b.contains("both write") && !b.contains("the same file")),
+        "{:?}",
+        block_texts(&m)
+    );
+    export_through(&mut m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let notes = m.export.notes.join("\n");
+    assert!(pgp_json_path(&m).is_file(), "the JSON is written: {notes}");
+    assert!(
+        m.export_root().join("textures/t/w_rmaos.dds").is_file(),
+        "{notes}"
+    );
+}
