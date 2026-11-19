@@ -2729,7 +2729,9 @@ impl PlantedScreen {
             let row = ui.label("a whole row that names itself and its status");
             ui.painter()
                 .circle_filled(row.rect.left_center() + vec2(20.0, 0.0), 4.0, AMBER);
-            let button = ui.add(Button::new("").min_size(vec2(24.0, 24.0)));
+            let button = ui
+                .add(Button::new("").min_size(vec2(24.0, 24.0)))
+                .accessible_name(NAMELESS);
             let centre = button.rect.center();
             ui.painter().circle_filled(centre, 4.0, AMBER);
             Area::new(Id::unique("small named label"))
@@ -2760,7 +2762,8 @@ impl PlantedScreen {
                                 if named {
                                     ui.add_sized(rect.size(), Label::new("corner"));
                                 } else {
-                                    ui.add_sized(rect.size(), Button::new(""));
+                                    ui.add_sized(rect.size(), Button::new(""))
+                                        .accessible_name(NAMELESS);
                                 }
                             })
                         })
@@ -2768,7 +2771,9 @@ impl PlantedScreen {
                 });
             };
             // an unnamed button shows over the amber circle; the named node is clipped to the corner: a hit
-            let button = ui.add(Button::new("").min_size(vec2(24.0, 24.0)));
+            let button = ui
+                .add(Button::new("").min_size(vec2(24.0, 24.0)))
+                .accessible_name(NAMELESS);
             ui.painter().circle_filled(button.rect.center(), 4.0, AMBER);
             corner_node(ui, button.rect, true);
             // a named row shows over the red circle; the unnamed node is clipped to the corner: no hit
@@ -2943,8 +2948,6 @@ impl Entry for PlantedScreen {
                 crate::frame::track_paint(ctx);
             })
             .with_size(size)
-            // the Dots screen plants an unnamed button on purpose: kittest's own name check would stop the run
-            .with_accessibility_check(!matches!(kind, Planted::Dots | Planted::CornerClip))
             .build_ui(move |ui| PlantedScreen::ui(kind, ui));
         h.run_steps(3);
         if let Planted::PointerOverBar = kind {
@@ -2953,9 +2956,19 @@ impl Entry for PlantedScreen {
             )));
             h.run_steps(3);
         }
-        Ok(snapshot(&h))
+        let mut snap = snapshot(&h);
+        // The unnamed buttons are named in the UI, so kittest's own name check stays on, and lose that name here, in the
+        // frame the checker reads.
+        for n in snap.nodes.iter_mut().filter(|n| n.label == NAMELESS) {
+            n.label.clear();
+        }
+        Ok(snap)
     }
 }
+
+/// The name a planted button carries in the UI and loses in its captured frame (`PlantedScreen::at`): an unnamed
+/// button as the checker sees it, while kittest's own name check runs on every frame.
+const NAMELESS: &str = "planted button whose name the frame drops";
 
 const WIDTHS: [&str; 3] = ["1100x800", "1280x800", "1600x900"];
 
