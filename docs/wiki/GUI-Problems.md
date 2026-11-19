@@ -134,7 +134,7 @@ A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.
 
 Counts such as **N undecided** filter the list. Click the chip to clear it. **Checks** shows check rows.
 
-The set filter follows a set when its first file arrives. A matching engine key wins over an id. An empty id shows no rows. A reason that opens Problems shows its card's row in either case. Focus goes to its first action (fix, second fix, **Mark as intended**). With a disabled or missing action, the row takes focus unless Enter or Space would answer it. Then nothing takes focus. <!-- D:JV1,JV2,JV5 -->
+The ordinary filter follows a set when its first file arrives. It prefers matching engine keys over ids and shows no rows for empty ids. A reason that opens Problems shows its card's row in either case. Focus goes to its first action (fix, second fix, **Mark as intended**). With a disabled or missing action, the row takes focus unless Enter or Space would answer it. Then nothing takes focus. <!-- D:JV1,JV2,JV5 -->
 
 ## Hiding kinds of row
 
