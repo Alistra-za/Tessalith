@@ -333,15 +333,34 @@ pub(super) fn unlist_user_data(held: &[(String, Option<Value>)], p: &ProjectDoc,
     s.set_auto_data(&l);
 }
 
+/// N8-d: a value and its list entry are written together or not at all. The list goes first and is read back: one that
+/// cannot be written (`[project]` is not a table) leaves every value alone. A value that then does not take (its
+/// `[files]` entry is not a table) puts its key's entry back as it was.
 fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc) {
+    if c.relist {
+        s.set_auto_data(&c.list);
+        if s.auto_data() != c.list {
+            return;
+        }
+    }
+    let data = Some(json!("data"));
     for k in &c.write {
         p.set_file_value(k, "alpha.policy", &json!("data"));
     }
     for k in &c.clear {
         p.clear_file_value(k, "alpha.policy");
     }
-    if c.relist {
-        s.set_auto_data(&c.list);
+    let mut l = c.list.clone();
+    l.retain(|k| !c.write.contains(k) || p.file_value(k, "alpha.policy") == data);
+    for k in c
+        .clear
+        .iter()
+        .filter(|k| p.file_value(k, "alpha.policy") == data)
+    {
+        l.push(k.clone());
+    }
+    if l != c.list {
+        s.set_auto_data(&l);
     }
 }
 

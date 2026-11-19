@@ -1867,3 +1867,81 @@ fn a_confirmed_data_on_a_listed_key_is_the_users() {
         "ending the share leaves it"
     );
 }
+
+/// N8-d (finding 6): `sdc-project.toml` holds the valid but unusable `project = "bad"`, so `auto_data` cannot be
+/// written. The value and its entry go together or not at all: the share writes no `data` and lists nothing.
+#[test]
+fn a_share_that_cannot_list_writes_no_data() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "project = \"bad\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(
+        !m.sets_doc.as_ref().unwrap().read_only(),
+        "precondition: the file opens for editing"
+    );
+    share(&mut m, IRON_N, "armor/steel");
+    assert!(
+        matches!(
+            sdc_gui::model::sets::set_views(&m)
+                .iter()
+                .find(|v| v.id == "armor/steel")
+                .and_then(|v| v.slots.get(&SlotKind::Normal)),
+            Some(SlotFill::Borrowed { item, .. }) if item == IRON_N
+        ),
+        "precondition: the share happened"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "no data without its entry"
+    );
+    assert!(auto_data(&m).is_empty());
+}
+
+/// N8-d (finding 7): with an unshared listed `data` present, a user's edit that writes the value already held changes
+/// no document: it runs no cleanup and adds no Undo step.
+#[test]
+fn an_edit_that_writes_the_held_value_clears_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nalpha.policy = \"data\"\n\n[files.\"armor/steel.png\"]\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the leftover"
+    );
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "precondition: listed"
+    );
+    let label = m.undo_label().map(str::to_string);
+    m.set_alpha("armor/steel.png", AlphaPolicy::Remove);
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "an equal write clears nothing"
+    );
+    assert_eq!(
+        m.undo_label().map(str::to_string),
+        label,
+        "and adds no Undo step"
+    );
+}

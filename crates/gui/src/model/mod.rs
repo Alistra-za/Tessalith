@@ -3388,14 +3388,14 @@ impl AppModel {
         };
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
-        let revs = (p.rev(), s.rev());
         // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
         let held = user.then(|| shared_alpha::listed_alpha(p, s));
         f(p, s);
         if let Some(h) = &held {
             shared_alpha::unlist_user_data(h, p, s);
         }
-        let changed = (p.rev(), s.rev()) != revs;
+        // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
+        let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
         // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
         if let Some(b) = start.as_ref().filter(|_| changed) {
             self.follow_shared(b);
