@@ -395,9 +395,9 @@ struct ArmedWrite {
     scope_rev: u64,
     /// Where the write would go: `output_root()` and the chosen export folder.
     destination: (PathBuf, Option<PathBuf>),
-    /// Ruling 3c-33: where `output_root()` resolves on disk (`std::fs::canonicalize`; `None` while it does not exist).
-    /// The same path through a retargeted junction is another destination. Read once at the click, once at landing.
-    resolved: Option<PathBuf>,
+    /// Rulings 3c-33 and 3c-40: where `output_root()` resolves on disk. The same path through a retargeted junction is
+    /// another destination. Read once at the click, once at landing.
+    resolved: Resolved,
     /// The target mod's revision: its path is what the overlap blocker reads.
     target_mod_rev: u64,
     /// Re-encode all (`reencode_all`, the header's tick): it changes what the write does with existing outputs and
@@ -405,6 +405,18 @@ struct ArmedWrite {
     reencode_all: bool,
     /// The click already waited through its own source replan (`write_gate`): it never plans again.
     replanned: bool,
+}
+
+/// Ruling 3c-40: an export destination as resolved on disk (`target_mod::resolve_destination`: the canonical nearest
+/// existing ancestor plus the missing components). `None` is an indeterminate read, which equals nothing, itself
+/// included: two failed reads are not the same destination.
+#[derive(Debug, Clone)]
+struct Resolved(Option<PathBuf>);
+
+impl PartialEq for Resolved {
+    fn eq(&self, other: &Self) -> bool {
+        matches!((&self.0, &other.0), (Some(a), Some(b)) if a == b)
+    }
 }
 
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
@@ -2353,7 +2365,7 @@ impl AppModel {
         let output = self.output_root();
         ArmedWrite {
             scope_rev: self.scope_rev,
-            resolved: std::fs::canonicalize(&output).ok(),
+            resolved: Resolved(target_mod::resolve_destination(&output)),
             destination: (output, self.export_folder_chosen()),
             target_mod_rev: self.target_mod_rev,
             reencode_all: self.reencode_all,
@@ -4878,6 +4890,36 @@ mod tests {
     fn an_idle_model_is_idle() {
         let mut m = bare_model();
         assert!(m.wait_idle(Duration::from_secs(1)));
+    }
+
+    /// Ruling 3c-40: a missing destination resolves through its nearest existing parent; a read that fails for another
+    /// reason than "not found" (here an invalid file name) is indeterminate, and an indeterminate resolution equals
+    /// nothing, itself included.
+    #[test]
+    fn an_indeterminate_destination_never_compares_equal() {
+        let d = tempfile::tempdir().unwrap();
+        let missing = d.path().join("missing").join("deeper");
+        assert_eq!(
+            target_mod::resolve_destination(&missing),
+            Some(
+                d.path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("missing")
+                    .join("deeper")
+            )
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            target_mod::resolve_destination(&d.path().join("bad?name").join("x")),
+            None,
+            "an invalid name is not \"not found\""
+        );
+        let unsure = Resolved(None);
+        assert!(unsure != unsure.clone(), "two failed reads are not equal");
+        let sure = Resolved(Some(d.path().to_path_buf()));
+        assert!(sure == sure.clone());
+        assert!(sure != unsure && unsure != sure);
     }
 
     /// An opened, planned project on `cs`: a PBR set whose `_rmaos` is packed (rock01, with a prefix, so its outputs

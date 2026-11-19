@@ -2148,3 +2148,95 @@ fn a_rearmed_click_keeps_the_destination_of_its_click() {
         .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Round 5, ruling 3c-40: a destination that does not exist yet, armed behind a pending plan.
+#[derive(Debug, Clone, Copy)]
+enum Missing {
+    /// `link\new`: `new` exists under neither junction target; `link` is retargeted from `out a` to `out b` while the
+    /// click waits.
+    UnderARetargetedLink,
+    /// A plain new folder, unchanged while the click waits: the ordinary first export writes at once.
+    Unchanged,
+}
+
+fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let (link, a, b) = (
+        d.path().join("export link"),
+        d.path().join("out a"),
+        d.path().join("out b"),
+    );
+    let folder = match case {
+        Missing::UnderARetargetedLink => {
+            std::fs::create_dir_all(&a).unwrap();
+            std::fs::create_dir_all(&b).unwrap();
+            dir_link(&link, &a);
+            link.join("new")
+        }
+        Missing::Unchanged => d.path().join("first export"),
+    };
+    support::choose_export(&mut m, folder.clone());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        !folder.exists(),
+        "{case:?}: guard: the folder does not exist"
+    );
+    m.hold_plan_results = true;
+    m.replan();
+    assert_eq!(
+        m.header_export_text(),
+        "Export 4 files now",
+        "{case:?}: guard"
+    );
+    m.header_export_clicked();
+    assert!(m.export_queued(), "{case:?}: guard: armed");
+    let msgs = held_plan(&mut m);
+    if matches!(case, Missing::UnderARetargetedLink) {
+        std::fs::remove_dir(&link).unwrap();
+        dir_link(&link, &b);
+    }
+    land_plan(&mut m, msgs);
+    let mut wrong = vec![];
+    match case {
+        Missing::UnderARetargetedLink => {
+            if [&a, &b]
+                .iter()
+                .any(|r| r.join("new/textures/g/a.dds").exists())
+                || m.export.summary.is_some()
+            {
+                wrong.push("wrote under the link's new target".to_string());
+            }
+            if m.review.is_none() {
+                wrong.push("no Review is open".into());
+            }
+        }
+        Missing::Unchanged => {
+            if !folder.join("textures/g/a.dds").is_file() || m.review.is_some() {
+                wrong.push(format!("the first export did not write: {:?}", m.dialog));
+            }
+        }
+    }
+    if m.export_queued() {
+        wrong.push("still armed".into());
+    }
+    wrong
+        .into_iter()
+        .map(|w| format!("{case:?}: {w}"))
+        .collect()
+}
+
+/// Round 5, ruling 3c-40 (re-review: two failed resolutions compare equal): the recorded destination is the canonical
+/// nearest existing ancestor plus the missing components, so `link\new` under a retargeted `link` is another
+/// destination: Review opens and nothing is written. An unchanged missing folder still compares equal, so the ordinary
+/// first export into a new folder writes. (A read that fails for another reason than "not found" is the unit test
+/// `model::target_mod::tests`.)
+#[test]
+fn a_missing_destination_is_resolved_through_its_nearest_existing_parent() {
+    let wrong: Vec<String> = [Missing::UnderARetargetedLink, Missing::Unchanged]
+        .into_iter()
+        .flat_map(armed_into_a_missing_folder)
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
