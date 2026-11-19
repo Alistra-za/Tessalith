@@ -283,6 +283,11 @@ impl ProjectDoc {
             .map(|(doc, _)| doc.to_string())
     }
 
+    /// `stashed_edits().is_some()` without building the text.
+    pub fn has_stashed_edits(&self) -> bool {
+        self.stash.as_ref().is_some_and(|(_, dirty)| *dirty)
+    }
+
     /// `set_error` holds the document (Note FC12: undoing the rejected step puts it back first, with `unblame`).
     pub fn blamed(&self) -> bool {
         self.stash.is_some()

@@ -586,6 +586,12 @@ pub struct AppModel {
     /// E7 (test hook): how many times `review_writes` built its list.
     #[cfg(feature = "test-hooks")]
     pub(crate) review_writes_builds: std::cell::Cell<u64>,
+    /// E7 (test hook, ruling 3c-49): how many file-system queries `review_writes` made (a cache hit makes none).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_fs: std::cell::Cell<u64>,
+    /// E7 (ruling 3c-49): moves whenever `set_nif_review_rows` hands over rows that differ (a path, a block, a foreign
+    /// file or an answer), so `review_writes`' key compares a number, not the rows.
+    nif_rows_rev: u64,
     /// The rename dialog's last plan, for drawing only (Note FA).
     rename_cache: std::cell::RefCell<Option<rename::PlanCache>>,
     pub unmatched_keys: Vec<String>,
@@ -958,6 +964,9 @@ impl AppModel {
             review_writes_open: Default::default(),
             #[cfg(feature = "test-hooks")]
             review_writes_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_fs: Default::default(),
+            nif_rows_rev: 0,
             rename_cache: Default::default(),
             sets: vec![],
             sets_root: None,

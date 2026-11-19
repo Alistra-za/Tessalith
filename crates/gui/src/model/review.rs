@@ -152,6 +152,25 @@ pub struct ReviewWrite {
 pub struct ReviewWrites {
     pub outputs: Vec<PathBuf>,
     pub also_updated: Vec<ReviewWrite>,
+    /// Ruling 3c-49: the footer's text for each entry of `also_updated`, built with the list, so a frame formats none.
+    pub labels: Vec<AlsoLabel>,
+    /// The whole "Also updated:" line, for the accessible name and hover of a line cut in the middle.
+    pub whole: String,
+}
+
+/// Note FI5: what a path under the export folder reads as while no folder is chosen (the fallback is never shown).
+pub const NOT_CHOSEN_ROOT: &str = "‹export folder›";
+
+/// E7: how the footer draws one entry of the "Also updated:" line.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlsoLabel {
+    /// The file's name (a folder adds ", all its files": `n` is unknown before the engine plans it, JF1), followed by a
+    /// comma unless it is the last entry.
+    pub text: String,
+    /// The path as shown: under `‹export folder›` while no folder is chosen.
+    pub shown: String,
+    /// The accessible name: "{name} ({shown})".
+    pub name: String,
 }
 
 impl ReviewWrites {
@@ -166,16 +185,29 @@ impl ReviewWrites {
     }
 }
 
-/// What `AppModel::review_writes` reads besides the disk (see `writes_key`).
-#[derive(Clone, PartialEq)]
+/// What `AppModel::review_writes` reads besides the disk (see `writes_key`), as revisions and small values the model
+/// already holds (ruling 3c-49): a lookup compares them in place (`writes_key_is`) and builds nothing.
 pub(super) struct WritesKey {
-    view: super::ViewKey,
-    project_rev: u64,
+    items: u64,
+    inputs: u64,
+    /// `sdc-project.toml`'s revision: the sets, the hash records, the export folder and the Also location.
+    doc: u64,
+    /// `sdc.toml`'s revision: the decisions and the Also ticks.
+    project: u64,
+    target: engine::config::Target,
+    scan: super::cs_pbr::Stamp,
+    scan_db: Option<PathBuf>,
+    known: u64,
+    target_mod: u64,
+    scope: u64,
+    /// The opened folder (the project name of the Also folders and the fallback export folder).
+    root: Option<PathBuf>,
+    /// `gui.toml`'s export folder, used with no project document.
+    settings_export: Option<PathBuf>,
     project_unsaved: bool,
     doc_unsaved: bool,
-    export_root: PathBuf,
     reencode_all: bool,
-    nif_rows: (usize, u64),
+    nif_rows: u64,
     answer: Option<JsonAnswer>,
 }
 
@@ -225,6 +257,39 @@ fn nif_row_written(r: &super::meshes::NifReviewRow) -> bool {
     )
 }
 
+/// E7 (ruling 3c-49): the footer's text for each entry, built with the list. `unchosen`: the fallback export folder
+/// while none is chosen, whose paths read under `‹export folder›` (Note FI5).
+fn also_labels(also: &[ReviewWrite], unchosen: Option<&Path>) -> Vec<AlsoLabel> {
+    let n = also.len();
+    also.iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let file = w.path.file_name().map_or_else(
+                || w.path.display().to_string(),
+                |f| f.to_string_lossy().into_owned(),
+            );
+            let label = if w.hover == HOVER_ALSO_FOLDER {
+                format!("{file}, all its files")
+            } else {
+                file
+            };
+            let shown = match unchosen.and_then(|r| w.path.strip_prefix(r).ok()) {
+                Some(rel) => format!("{NOT_CHOSEN_ROOT}\\{}", rel.display()),
+                None => w.path.display().to_string(),
+            };
+            AlsoLabel {
+                name: format!("{label} ({shown})"),
+                text: if i + 1 < n {
+                    format!("{label},")
+                } else {
+                    label
+                },
+                shown,
+            }
+        })
+        .collect()
+}
+
 fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
@@ -270,19 +335,32 @@ impl AppModel {
         self.review_writes_cache.take();
     }
 
+    /// Tests (ruling 3c-49): how many file-system queries `review_writes` made, building its list or its key.
+    #[cfg(feature = "test-hooks")]
+    pub fn review_writes_fs_queries(&self) -> u64 {
+        self.review_writes_fs.get()
+    }
+
+    /// Counts one file-system query of `review_writes` (test hook).
+    fn writes_fs_query(&self) {
+        #[cfg(feature = "test-hooks")]
+        self.review_writes_fs.set(self.review_writes_fs.get() + 1);
+    }
+
     /// E7: every file the export touches (the DDS and JSON outputs, and the files saved and recorded around them),
     /// for Review's footer. Cached like `review_json`: the `Arc` is rebuilt when the key moves or `REVIEW_JSON_TTL`
-    /// passes (disk state), so a frame whose key is unchanged reads no file.
+    /// passes (disk state). Ruling 3c-49: a hit compares revisions and small values in place, so a frame whose key is
+    /// unchanged asks the disk nothing, hashes nothing and builds no path.
     pub fn review_writes(&self) -> Arc<ReviewWrites> {
-        let key = self.writes_key();
         if let Some(c) = &*self.review_writes_cache.borrow() {
-            if c.key == key && c.at.elapsed() < REVIEW_JSON_TTL {
+            if c.at.elapsed() < REVIEW_JSON_TTL && self.writes_key_is(&c.key) {
                 return c.value.clone();
             }
         }
         #[cfg(feature = "test-hooks")]
         self.review_writes_builds
             .set(self.review_writes_builds.get() + 1);
+        let key = self.writes_key();
         let value = Arc::new(self.build_review_writes(&self.review_json_parts().1));
         *self.review_writes_cache.borrow_mut() = Some(WritesCache {
             key,
@@ -292,40 +370,80 @@ impl AppModel {
         value
     }
 
-    /// Everything `build_review_writes` reads besides the disk. The Also ticks are `sdc.toml` text, so
-    /// `project.rev()` carries them; the view key carries the plan and scope revisions and the output folder.
-    fn writes_key(&self) -> WritesKey {
-        use std::hash::{Hash, Hasher};
-        // The NIF rows the export writes: their paths, whether each is blocked, its foreign file and its answer (ruling
-        // 3c-46: a foreign row answered Keep is not written).
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        for r in &self.nif_rows {
-            r.path.hash(&mut h);
-            r.blocked.is_none().hash(&mut h);
-            r.foreign.hash(&mut h);
-            r.answer.map(|a| a == GuardChoice::Overwrite).hash(&mut h);
+    /// The scope `view_key` carries: the whole-project header reads with the scope off, in caches of its own.
+    fn writes_scope(&self) -> u64 {
+        if self.whole_view.get() {
+            u64::MAX
+        } else {
+            self.scope_rev
         }
+    }
+
+    /// Everything `build_review_writes` reads besides the disk, built on a miss only. `output_root()` follows from
+    /// these: the Also ticks are `sdc.toml` text (`project`), the Also location and the export folder `sdc-project.toml`
+    /// text (`doc`), the folder names the opened folder (`root`) and, with no document, `gui.toml`'s folder.
+    fn writes_key(&self) -> WritesKey {
         WritesKey {
-            view: self.view_key(),
-            project_rev: self
+            items: self.items_rev,
+            inputs: self.inputs_rev,
+            doc: self
+                .sets_doc
+                .as_ref()
+                .map_or(0, crate::sets_doc::SetsDoc::rev),
+            project: self
                 .project
                 .as_ref()
                 .map_or(0, crate::project::ProjectDoc::rev),
+            target: self.target,
+            scan: self.scan_stamp,
+            scan_db: self.scan_db.clone(),
+            known: self.known_rev,
+            target_mod: self.target_mod_rev,
+            scope: self.writes_scope(),
+            root: self.root.clone(),
+            settings_export: self.settings.export_folder.clone(),
             project_unsaved: self.project_unsaved(),
             doc_unsaved: self.sets_unsaved(),
-            export_root: self.export_root(),
             reencode_all: self.reencode_all,
-            nif_rows: (self.nif_rows.len(), h.finish()),
+            nif_rows: self.nif_rows_rev,
             answer: self.review.as_ref().and_then(|r| r.json_answer.clone()),
         }
+    }
+
+    /// `writes_key() == *k`, compared field by field in place: no clone, no file query.
+    fn writes_key_is(&self, k: &WritesKey) -> bool {
+        k.items == self.items_rev
+            && k.inputs == self.inputs_rev
+            && k.doc
+                == self
+                    .sets_doc
+                    .as_ref()
+                    .map_or(0, crate::sets_doc::SetsDoc::rev)
+            && k.project
+                == self
+                    .project
+                    .as_ref()
+                    .map_or(0, crate::project::ProjectDoc::rev)
+            && k.target == self.target
+            && k.scan == self.scan_stamp
+            && k.scan_db == self.scan_db
+            && k.known == self.known_rev
+            && k.target_mod == self.target_mod_rev
+            && k.scope == self.writes_scope()
+            && k.root == self.root
+            && k.settings_export == self.settings.export_folder
+            && k.project_unsaved == self.project_unsaved()
+            && k.doc_unsaved == self.sets_unsaved()
+            && k.reencode_all == self.reencode_all
+            && k.nif_rows == self.nif_rows_rev
+            && k.answer.as_ref() == self.review.as_ref().and_then(|r| r.json_answer.as_ref())
     }
 
     /// `save()` writes `sdc.toml`: it has unsaved edits, or a blame still holds some (Note FP7).
     fn project_unsaved(&self) -> bool {
         self.project
             .as_ref()
-            .is_some_and(crate::project::ProjectDoc::is_dirty)
-            || self.tentative_edits().is_some()
+            .is_some_and(|p| p.is_dirty() || (self.ignored_by_plan && p.has_stashed_edits()))
     }
 
     /// `save()` writes `sdc-project.toml`: unsaved edits in a document that takes them.
@@ -415,6 +533,7 @@ impl AppModel {
             // Then `pbr_export::finish` and `record_json_sha`.
             if let Some((text, _)) = pbr_export::json_text(p, &rows, &mut vec![]) {
                 if self.pgp_writes(p, &text) {
+                    self.writes_fs_query();
                     if std::fs::read(&p.path).map_or(true, |b| b != text.as_bytes()) {
                         json.push((p.path.clone(), true));
                     }
@@ -501,9 +620,10 @@ impl AppModel {
         if let (Some(d), Some(r)) = (doc, &preview) {
             // `save()` writes unsaved edits; `save_record` writes the document's text after a record, which changes the
             // file when that text differs from the file's.
-            let recorded = saves
-                && !d.read_only()
-                && std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes());
+            let recorded = saves && !d.read_only() && {
+                self.writes_fs_query();
+                std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes())
+            };
             if self.sets_unsaved() || recorded {
                 put(d.path().to_path_buf(), HOVER_PROJECT_TOML);
             }
@@ -512,9 +632,10 @@ impl AppModel {
                 put(d.sidecar_path(), HOVER_GENERATED);
             }
         }
+        let out = self.writes_output_root();
         // The engine plans into `export/<root prefix>` (Note HQ1), and its manifest lives there.
         if let Some(root) = &self.root {
-            let planned = engine::discover::effective_output_root(root, &self.output_root());
+            let planned = engine::discover::effective_output_root(root, &out);
             put(planned.join("_sdc").join("manifest.jsonl"), HOVER_MANIFEST);
         }
         copies.sort();
@@ -523,7 +644,6 @@ impl AppModel {
             put(c.components().collect(), HOVER_COPY);
         }
         // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
-        let out = self.output_root();
         for r in self.nif_rows.iter().filter(|r| nif_row_written(r)) {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
                 put(p, HOVER_NIF);
@@ -536,10 +656,25 @@ impl AppModel {
         for f in also_folders {
             put(f, HOVER_ALSO_FOLDER);
         }
+        let unchosen = self
+            .export_folder_chosen()
+            .is_none()
+            .then(|| self.export_root());
+        let labels = also_labels(&also, unchosen.as_deref());
+        let names: Vec<&str> = labels.iter().map(|l| l.name.as_str()).collect();
+        let whole = format!("Also updated: {}", names.join(", "));
         ReviewWrites {
             outputs,
             also_updated: also,
+            labels,
+            whole,
         }
+    }
+
+    /// `output_root()` for `review_writes`, counted as a file-system query (it can stat the opened folder).
+    fn writes_output_root(&self) -> PathBuf {
+        self.writes_fs_query();
+        self.output_root()
     }
 
     /// `finish_json`'s decision for the PGPatcher JSON `text` (ruling 3c-46): `pbr_export::finish` writes a file that is
@@ -577,6 +712,7 @@ impl AppModel {
         src_written: bool,
     ) -> Option<Option<(String, bool)>> {
         use engine::policy::SourceStamp;
+        self.writes_fs_query();
         let key = (
             SourceStamp::of(src),
             SourceStamp::of(dst),
@@ -588,6 +724,7 @@ impl AppModel {
                 return Some(v.clone());
             }
         }
+        self.writes_fs_query();
         let plan = pbr_export::copy_plan(src, dst, key.2.as_deref(), src_written)?;
         self.copy_sha_memo
             .borrow_mut()
@@ -907,6 +1044,10 @@ impl AppModel {
 
     /// Note FC5: the NIF edits Review lists, handed over by `app.rs` each frame.
     pub fn set_nif_review_rows(&mut self, rows: Vec<super::meshes::NifReviewRow>) {
+        // Ruling 3c-49: `review_writes`' key reads this revision, not the rows.
+        if self.nif_rows != rows {
+            self.nif_rows_rev += 1;
+        }
         self.nif_rows = rows;
     }
 

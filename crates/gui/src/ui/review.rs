@@ -9,7 +9,7 @@ use crate::model::code_text::{
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{
-    DiskState, JsonKind, JsonLine, ReviewWrite, ReviewWrites, HOVER_ALSO_FOLDER, NO_EXPORT_FOLDER,
+    DiskState, JsonKind, JsonLine, ReviewWrites, NOT_CHOSEN_ROOT, NO_EXPORT_FOLDER,
 };
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
@@ -21,8 +21,6 @@ use std::sync::Arc;
 
 /// Note FI5: what the Also location reads while no export folder is chosen (the fallback is never shown as a path).
 const NOT_CHOSEN_YET: &str = "the export folder (not chosen yet)";
-/// Note FI5: what a JSON line's path starts with while no export folder is chosen.
-const NOT_CHOSEN_ROOT: &str = "‹export folder›";
 
 /// What a click on an undecided row asks for.
 pub enum RowPick {
@@ -328,64 +326,17 @@ enum Footer<'a> {
     Also(&'a Arc<ReviewWrites>),
 }
 
-/// E7: how an entry of the "Also updated:" line reads: the file's name; a folder adds that all its files are written
-/// (`n` is unknown before the engine plans the folder, JF1).
-fn also_name(w: &ReviewWrite) -> String {
-    let name = w.path.file_name().map_or_else(
-        || w.path.display().to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    if w.hover == HOVER_ALSO_FOLDER {
-        format!("{name}, all its files")
-    } else {
-        name
-    }
-}
-
-/// E7: `path` as the footer shows it: under `‹export folder›` while no folder is chosen (Note FI5: the fallback
-/// `sdc-out` is never shown as a path).
-fn also_path(path: &Path, unchosen: Option<&Path>) -> String {
-    match unchosen.and_then(|r| path.strip_prefix(r).ok()) {
-        Some(rel) => format!("{NOT_CHOSEN_ROOT}\\{}", rel.display()),
-        None => path.display().to_string(),
-    }
-}
-
-/// E7: one entry's hover, built when the pointer is on it: what the file is, then its full path.
-fn also_hover(ui: &mut egui::Ui, w: &ReviewWrite, unchosen: Option<&Path>) {
-    ui.label(w.hover);
-    ui.weak(also_path(&w.path, unchosen));
-}
-
-/// E7: the whole line as one string, for the accessible name and the hover of an elided line. Built once per list,
-/// not per frame (kept in the context beside the list it was built from).
-fn also_whole_text(ui: &egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<&Path>) -> Arc<str> {
-    let id = ui.scope_id().with("also-updated-text");
-    let kept: Option<(Arc<ReviewWrites>, Arc<str>)> = ui.data(|d| d.get_temp(id));
-    if let Some((from, text)) = kept {
-        if Arc::ptr_eq(&from, w) {
-            return text;
+/// E7 (ruling 3c-49): the width of each entry's text and of the `…`, measured once per list and font (kept in the
+/// context beside the list they were measured from), so a frame lays out no text to measure it.
+fn also_widths(ui: &egui::Ui, w: &Arc<ReviewWrites>, font: &egui::FontId) -> Arc<Vec<f32>> {
+    type Kept = (Arc<ReviewWrites>, egui::FontId, Arc<Vec<f32>>);
+    let id = ui.scope_id().with("also-updated-widths");
+    let kept: Option<Kept> = ui.data(|d| d.get_temp(id));
+    if let Some((from, f, widths)) = kept {
+        if Arc::ptr_eq(&from, w) && f == *font {
+            return widths;
         }
     }
-    let names: Vec<String> = w
-        .also_updated
-        .iter()
-        .map(|e| format!("{} ({})", also_name(e), also_path(&e.path, unchosen)))
-        .collect();
-    let text: Arc<str> = format!("Also updated: {}", names.join(", ")).into();
-    ui.data_mut(|d| d.insert_temp(id, (w.clone(), text.clone())));
-    text
-}
-
-/// E7: "Also updated:" and the files' names, each a label with its full path and what it is on hover. A line that
-/// does not fit is cut in the middle: names from both ends, then `…`, whose accessible name and hover hold all of them.
-/// Only the names that are drawn are measured, so a long list costs what shows.
-fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<&Path>) {
-    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-    ui.strong("Also updated:");
-    let list = &w.also_updated;
-    let n = list.len();
-    let font = egui::TextStyle::Body.resolve(ui.style());
     let color = ui.visuals().text_color();
     let width = |s: &str| {
         ui.painter()
@@ -393,25 +344,38 @@ fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<
             .size()
             .x
     };
-    // Every name but the last is followed by a comma.
-    let text = |i: usize| {
-        let t = also_name(&list[i]);
-        if i + 1 < n {
-            format!("{t},")
-        } else {
-            t
-        }
-    };
+    let widths: Arc<Vec<f32>> = Arc::new(
+        w.labels
+            .iter()
+            .map(|l| width(&l.text))
+            .chain(std::iter::once(width("…")))
+            .collect(),
+    );
+    ui.data_mut(|d| d.insert_temp(id, (w.clone(), font.clone(), widths.clone())));
+    widths
+}
+
+/// E7: "Also updated:" and the files' names, each a label with its full path and what it is on hover. A line that
+/// does not fit is cut in the middle: names from both ends, then `…`, whose accessible name and hover hold all of them.
+/// The texts come with the list (`ReviewWrites::labels`), and their widths are measured once per list.
+fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>) {
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    ui.strong("Also updated:");
+    let list = &w.also_updated;
+    let labels = &w.labels;
+    let n = labels.len().min(list.len());
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let widths = also_widths(ui, w, &font);
     let gap = ui.spacing().item_spacing.x;
     let avail = ui.available_width();
-    let marker = width("…") + gap;
+    let marker = widths[widths.len() - 1] + gap;
     let (mut lo, mut hi, mut used) = (0, n, 0.0_f32);
     let mut from_head = true;
     while lo < hi {
         // The other end is tried when this one does not fit: a short name there may still.
         let fit = [from_head, !from_head].into_iter().find_map(|head| {
             let i = if head { lo } else { hi - 1 };
-            let w_i = width(&text(i)) + gap;
+            let w_i = widths[i] + gap;
             let reserve = if hi - lo == 1 { 0.0 } else { marker };
             (used + w_i + reserve <= avail).then_some((head, w_i))
         });
@@ -427,28 +391,24 @@ fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<
         from_head = !head;
     }
     let one = |ui: &mut egui::Ui, i: usize| {
-        let e = &list[i];
-        let r = ui.label(text(i));
-        r.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::Role::Label,
-                true,
-                format!("{} ({})", also_name(e), also_path(&e.path, unchosen)),
-            )
+        let (e, l) = (&list[i], &labels[i]);
+        let r = ui.label(l.text.as_str());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &l.name));
+        r.on_hover_ui(|ui| {
+            ui.label(e.hover);
+            ui.weak(l.shown.as_str());
         });
-        r.on_hover_ui(|ui| also_hover(ui, e, unchosen));
     };
     for i in 0..lo {
         one(ui, i);
     }
     if lo < hi {
-        let whole = also_whole_text(ui, w, unchosen);
         let r = ui.label("…");
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &*whole));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &w.whole));
         r.on_hover_ui(|ui| {
-            for e in list {
-                ui.label(also_name(e));
-                ui.weak(format!("{} {}", e.hover, also_path(&e.path, unchosen)));
+            for (e, l) in list.iter().zip(labels) {
+                ui.label(l.text.trim_end_matches(','));
+                ui.weak(format!("{} {}", e.hover, l.shown));
             }
         });
     }
@@ -847,8 +807,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                     ui.label(json_line_text(l, fallback.as_deref()));
                                 }
                                 Footer::Also(w) => {
-                                    let fallback = (!folder_chosen).then(|| m.export_root());
-                                    also_updated_line(ui, w, fallback.as_deref());
+                                    also_updated_line(ui, w);
                                 }
                             });
                         }

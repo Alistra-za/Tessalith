@@ -2741,18 +2741,45 @@ fn a_nif_record_moved_aside_counts_under_the_listed_record() {
 
 #[test]
 fn review_writes_is_cached() {
+    use sdc_gui::model::meshes::export::GuardChoice;
     use std::sync::Arc;
     let d = tempfile::tempdir().unwrap();
     let mut m = support::pbr_opened_chosen_decided(d.path());
+    // Ruling 3c-49: with an Also tick, `output_root()` asks the disk, so a key that read it would on every lookup.
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let rows = vec![support::nif_row("meshes\\x.nif", Some([7; 32]))];
+    m.set_nif_review_rows(rows.clone());
     m.header_export_clicked();
     let a = m.review_writes();
     let b = m.review_writes();
     assert!(Arc::ptr_eq(&a, &b), "two calls in a row share one list");
-    let builds = m.review_writes_builds();
+    assert_eq!(
+        a.labels.len(),
+        a.also_updated.len(),
+        "the footer's text comes with the list"
+    );
+    let (builds, queries) = (m.review_writes_builds(), m.review_writes_fs_queries());
+    assert!(queries > 0, "guard: a build asks the disk");
     for _ in 0..50 {
+        // app.rs hands the NIF rows over every frame.
+        m.set_nif_review_rows(rows.clone());
         let _ = m.review_writes();
     }
-    assert_eq!(m.review_writes_builds(), builds, "a frame reads no file");
+    assert_eq!(m.review_writes_builds(), builds, "a frame builds no list");
+    assert_eq!(
+        m.review_writes_fs_queries(),
+        queries,
+        "a frame asks the disk nothing"
+    );
+    // The NIF answer is in the key (ruling 3c-46): Keep takes the NIF off the list.
+    let mut keep = rows[0].clone();
+    keep.answer = Some(GuardChoice::KeepTheirs);
+    m.set_nif_review_rows(vec![keep]);
+    assert!(
+        !Arc::ptr_eq(&a, &m.review_writes()),
+        "a new answer builds a new list"
+    );
     m.replan();
     assert!(m.wait_idle(Duration::from_secs(120)));
     let c = m.review_writes();
@@ -2847,20 +2874,20 @@ fn reviews_footer_holds_the_also_updated_line_and_every_control_at_1100() {
     let h = review_harness_at(m, size);
     assert!(h.state().review_gate().is_err(), "guard: a blocker reason");
     assert_the_footer_holds_its_controls(&h, "blocked");
-    // Planning: decisions just made, the plan still running.
+    // Planning: decisions just made, the plan held until the test lets it land, so this state is always checked.
     let d = tempfile::tempdir().unwrap();
     let mut m = support::pbr_opened(d.path());
+    m.hold_plan_results = true;
     m.decide(
         "landscape/leaf.png",
         sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
     );
     m.open_review();
-    let h = review_harness_at(m, size);
-    if h.state().full_plan_pending() {
-        assert_the_footer_holds_its_controls(&h, "planning");
-    } else {
-        eprintln!("the plan settled before the first frame: the Planning state is not covered");
-    }
+    let mut h = review_harness_at(m, size);
+    assert!(h.state().full_plan_pending(), "guard: the plan is held");
+    assert_the_footer_holds_its_controls(&h, "planning");
+    let held = held_plan(h.state_mut());
+    land_plan(h.state_mut(), held);
 }
 
 #[test]
