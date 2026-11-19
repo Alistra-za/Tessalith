@@ -1539,16 +1539,16 @@ fn a_stored_slot_command_keeps_a_record_fill_out_as_on_main() {
         m.set_json_value(REC_LEAF, "slot4", Some(json!(cmd)));
         assert!(m.wait_idle(std::time::Duration::from_secs(60)));
         let after = at(&m);
+        // The whole maps, with only the record's slot-4 fill taken out: any other slot that went would fail here.
+        let mut slots = v.slots.clone();
+        assert!(slots.remove(&SlotKind::Height).is_some(), "premise");
         assert_eq!(
-            after.slots.get(&SlotKind::Height),
-            None,
+            after.slots, slots,
             "{cmd:?}: the record fill goes, as on main"
         );
-        assert!(
-            !after.filled.contains_key(&4),
-            "{cmd:?}: {:?}",
-            after.filled
-        );
+        let mut filled = v.filled.clone();
+        assert!(filled.remove(&4).is_some(), "premise: {:?}", v.filled);
+        assert_eq!(after.filled, filled, "{cmd:?}: the record fills");
         assert_eq!(
             entry(&m, REC_LEAF).get("parallax"),
             None,
