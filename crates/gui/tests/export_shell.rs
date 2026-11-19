@@ -1701,3 +1701,255 @@ fn the_export_action_follows_the_header() {
     assert!(h.state().review.is_some());
     assert!(h.state().export.running.is_none());
 }
+
+/// Round 5, ruling 3c-37: every function that can arm, queue or start a texture export.
+#[derive(Debug, Clone, Copy)]
+enum Entry {
+    /// `header_export_clicked`; the palette's "export" action calls it too.
+    Header,
+    /// The header click deferred a frame for a focused field (`ui::after_commit`), drained by the next frame.
+    HeaderDeferred,
+    /// `export_from_review`.
+    ReviewExport,
+    /// Review's Export deferred a frame, drained by the next frame.
+    ReviewExportDeferred,
+    ExportSet,
+    ExportGroup,
+    /// Export N sets, the sets menu's entry.
+    ExportNSets,
+    /// The legacy model entry `export_clicked` (`export_go`).
+    Legacy,
+}
+
+/// Round 5, ruling 3c-37: what waits for a landing, delivered with a dialog open.
+#[derive(Debug, Clone, Copy)]
+enum Queued {
+    /// `export_after_plan` (the legacy entry, queued).
+    Legacy,
+    /// `Continue::Review` (Review's Export, queued).
+    Review,
+    /// The armed write (a header "now" click, queued).
+    Armed,
+    /// Review's Export queued, then a header "now" click armed: both wait for the same landing.
+    ArmedAndReview,
+}
+
+fn dialog_warnings(m: &AppModel) -> usize {
+    m.messages
+        .entries()
+        .filter(|e| {
+            e.text
+                .starts_with("Export not started: answer the open dialog")
+        })
+        .count()
+}
+
+/// The setup of every 3c-37 row: a clean project, opted out, a scoped Review for g/u open (so a re-scope shows), in a
+/// harness so a deferred click can be drained by a frame.
+fn dialog_row_setup(d: &std::path::Path, entry: Option<Entry>) -> Harness<'static, AppModel> {
+    let mut m = support::opened_chosen_decided(d);
+    match entry {
+        Some(Entry::ExportGroup) => {
+            m.move_to_group(
+                &["g/a".to_string()],
+                sdc_gui::model::set_groups::GroupTarget::New("Pair".into()),
+            )
+            .expect("grouped");
+            assert!(m.wait_idle(Duration::from_secs(60)));
+        }
+        Some(Entry::ExportNSets) => {
+            let (a, u) = (key_of(&m, "g/a"), key_of(&m, "g/u"));
+            m.click_set(&a, false, false);
+            m.click_set(&u, true, false);
+        }
+        _ => {}
+    }
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut h = harness(m);
+    h.run();
+    h
+}
+
+/// The outcome checks shared by every 3c-37 row, once the dialog is answered and everything landed.
+fn dialog_row_wrong(
+    m: &AppModel,
+    d: &std::path::Path,
+    scope: Option<sdc_gui::model::export_scope::ExportScope>,
+    warned: usize,
+) -> Vec<String> {
+    let mut wrong = vec![];
+    if !nothing_written(d) || m.export.running.is_some() || m.export.summary.is_some() {
+        wrong.push("wrote after the dialog was answered".to_string());
+    }
+    if m.export_queued() {
+        wrong.push("something is still queued or armed".into());
+    }
+    if m.export_scope().cloned() != scope {
+        wrong.push(format!(
+            "the scope changed: {:?} -> {:?}",
+            scope,
+            m.export_scope()
+        ));
+    }
+    if dialog_warnings(m) != warned + 1 {
+        wrong.push(format!("{} warnings", dialog_warnings(m) - warned));
+    }
+    wrong
+}
+
+/// One entry run with an error dialog open, the dialog answered, then the pending plan landed (`pending`) or nothing
+/// more (a settled clean plan). Lists what is wrong (empty: right).
+fn entry_under_a_dialog(entry: Entry, pending: bool) -> Vec<String> {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = dialog_row_setup(d.path(), Some(entry));
+    let m = h.state_mut();
+    if pending {
+        m.hold_plan_results = true;
+        m.replan();
+        assert!(m.full_plan_pending(), "{entry:?}: guard: pending");
+    }
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "{entry:?}: guard: the scoped Review is open"
+    );
+    let scope = m.export_scope().cloned();
+    let warned = dialog_warnings(m);
+    m.dialog = Some(Dialog::Error("a question".into()));
+    match entry {
+        Entry::Header => m.header_export_clicked(),
+        Entry::HeaderDeferred => m
+            .after_commit
+            .push(Box::new(AppModel::header_export_clicked)),
+        Entry::ReviewExport => m.export_from_review(),
+        Entry::ReviewExportDeferred => m.after_commit.push(Box::new(AppModel::export_from_review)),
+        Entry::ExportSet => {
+            let k = key_of(m, "g/a");
+            m.export_sets([k].into(), "Export set g/a".into());
+        }
+        Entry::ExportGroup => m.export_group("Pair"),
+        Entry::ExportNSets => {
+            let entry = m
+                .set_menu()
+                .into_iter()
+                .find(|e| e.action == sdc_gui::model::bulk::MenuAction::ExportSets)
+                .expect("the Export N sets entry");
+            assert!(m.run_menu(entry.action).is_none());
+        }
+        Entry::Legacy => m.export_clicked(),
+    }
+    if matches!(entry, Entry::HeaderDeferred | Entry::ReviewExportDeferred) {
+        h.step();
+    }
+    let m = h.state_mut();
+    assert!(m.after_commit.is_empty(), "{entry:?}: guard: the click ran");
+    let mut wrong = vec![];
+    if m.export_queued() || m.export.running.is_some() {
+        wrong.push("armed, queued or started under the dialog".to_string());
+    }
+    m.dialog = None;
+    if pending {
+        let msgs = held_plan(m);
+        land_plan(m, msgs);
+    } else {
+        assert!(m.wait_idle(Duration::from_secs(60)));
+    }
+    wrong.extend(dialog_row_wrong(m, d.path(), scope, warned));
+    wrong
+        .into_iter()
+        .map(|w| format!("{entry:?} (pending {pending}): {w}"))
+        .collect()
+}
+
+/// A queue set behind a pending plan (`read`: a scan-finished read instead), then an error dialog opens and the plan
+/// (or the read) lands under it. The dialog is answered afterwards. Lists what is wrong (empty: right).
+fn queue_delivered_under_a_dialog(queued: Queued, read: bool) -> Vec<String> {
+    let d = tempfile::tempdir().unwrap();
+    let dbdir = tempfile::tempdir().unwrap();
+    let mut h = dialog_row_setup(d.path(), None);
+    let m = h.state_mut();
+    if read {
+        let db = dbdir.path().join("scan.db");
+        drop(modscan::store::Store::open(&db).unwrap());
+        m.scan_db = Some(db);
+        m.refresh_mesh_votes(false);
+        assert!(m.votes_pending(), "{queued:?}: guard: a read is pending");
+    } else {
+        m.hold_plan_results = true;
+        m.replan();
+    }
+    assert!(m.full_plan_pending(), "{queued:?}: guard: pending");
+    match queued {
+        Queued::Legacy => m.export_clicked(),
+        Queued::Review => m.export_from_review(),
+        Queued::Armed => m.header_export_clicked(),
+        Queued::ArmedAndReview => {
+            m.export_from_review();
+            m.header_export_clicked();
+        }
+    }
+    assert!(m.export_queued(), "{queued:?}: guard: queued");
+    let scope = m.export_scope().cloned();
+    let warned = dialog_warnings(m);
+    m.dialog = Some(Dialog::Error("a question".into()));
+    if read {
+        let end = std::time::Instant::now() + Duration::from_secs(60);
+        while m.votes_pending() {
+            assert!(std::time::Instant::now() < end, "the read never landed");
+            m.poll();
+        }
+    } else {
+        let msgs = held_plan(m);
+        for x in msgs {
+            m.handle_held(x);
+        }
+        m.hold_plan_results = false;
+    }
+    assert!(
+        m.dialog.is_some(),
+        "{queued:?}: guard: delivered under the dialog"
+    );
+    m.dialog = None;
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    dialog_row_wrong(m, d.path(), scope, warned)
+        .into_iter()
+        .map(|w| format!("{queued:?} (read {read}): {w}"))
+        .collect()
+}
+
+/// Round 5, ruling 3c-37 (re-review: Review's Export dispatched through an open dialog): one dialog rule at every
+/// entry. Each entry runs with an error dialog open, twice (a plan pending; a settled clean plan); the dialog is
+/// answered before the plan lands. Each queue is delivered with the dialog open, by a plan and by a scan-finished read
+/// (the "settled" case does not apply to a delivery). Every row: nothing written, nothing queued or armed, the scope
+/// unchanged, the warning once.
+#[test]
+fn an_open_dialog_stops_every_export_entry() {
+    let entries = [
+        Entry::Header,
+        Entry::HeaderDeferred,
+        Entry::ReviewExport,
+        Entry::ReviewExportDeferred,
+        Entry::ExportSet,
+        Entry::ExportGroup,
+        Entry::ExportNSets,
+        Entry::Legacy,
+    ];
+    let queues = [
+        Queued::Legacy,
+        Queued::Review,
+        Queued::Armed,
+        Queued::ArmedAndReview,
+    ];
+    let mut wrong: Vec<String> = vec![];
+    for e in entries {
+        for pending in [true, false] {
+            wrong.extend(entry_under_a_dialog(e, pending));
+        }
+    }
+    for q in queues {
+        for read in [false, true] {
+            wrong.extend(queue_delivered_under_a_dialog(q, read));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

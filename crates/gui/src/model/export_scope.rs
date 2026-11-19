@@ -103,12 +103,12 @@ impl AppModel {
     /// It runs as the header's Export does (E3): through Review, or at once when the project opted out and
     /// nothing needs the user's eyes under this scope; the scope ends when Review closes or the export ends.
     pub fn export_sets(&mut self, keys: BTreeSet<String>, label: String) {
-        // Note HF10: the menus are off while an export runs; changing the scope then would recount its lists.
-        if self.export.running.is_some() {
+        // Rulings 3c-32, 3c-37: first, before the scope changes.
+        if self.dialog_drops_click() {
             return;
         }
-        // Ruling 3c-32: before the scope changes.
-        if self.dialog_drops_click() {
+        // Note HF10: the menus are off while an export runs; changing the scope then would recount its lists.
+        if self.export.running.is_some() {
             return;
         }
         let keys = self.with_hosts(keys);

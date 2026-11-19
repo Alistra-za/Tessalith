@@ -819,6 +819,10 @@ impl AppModel {
     /// Review's Export (R3): `export_clicked`'s front half (a plan in flight → wait; changed sources → plan again and
     /// wait), then `Continue::Review`: the guards and the gate again before the export. Never on a stale plan.
     pub fn export_from_review(&mut self) {
+        // Ruling 3c-37: before anything is queued or started.
+        if self.dialog_drops_click() {
+            return;
+        }
         // Note GH8: Review's Export also works with no project (it writes the NIF edits alone).
         if self.review.is_none() {
             return;

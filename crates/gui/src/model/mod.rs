@@ -1477,24 +1477,37 @@ impl AppModel {
             self.replan();
         } else {
             // DECISIONS AF4: an Export (the header's or Review's) clicked during this scan-finished read starts now,
-            // never on a later plan. Both are taken together, as in `finish_plan`; the export the user clicked wins.
-            let (clicked, continued) = (
-                std::mem::take(&mut self.export_after_plan),
-                self.continue_after_plan.take(),
-            );
+            // never on a later plan. E3: this branch re-planned nothing and handed nothing over, so the read it ends
+            // is the settle.
+            self.deliver_queued(true);
+        }
+    }
+
+    /// What waited for a landing (`export_after_plan`, Review's `Continue`, the armed write) is delivered here, from
+    /// the plan that really settles (`finish_plan`) or the scan-finished read that changed nothing (`votes_landed`;
+    /// `read`). All three are taken together, so a leftover one cannot fire on a later, unrelated plan. Ruling 3c-37
+    /// (audit 08f-1): an open dialog drops them all with one warning. Otherwise the export the user clicked wins, then
+    /// Review's, and the armed write goes through `write_gate` (`settle_queued`) once nothing is pending.
+    fn deliver_queued(&mut self, read: bool) {
+        let (clicked, continued) = (
+            std::mem::take(&mut self.export_after_plan),
+            self.continue_after_plan.take(),
+        );
+        let queued = clicked || continued.is_some() || self.armed.is_some();
+        if queued && self.dialog_drops_click() {
+            self.disarm_write();
+        } else {
             match continued {
-                _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
-                    self.queued_export_dropped()
-                }
+                // Note HF10: through `export_go`; the scope stays.
                 _ if clicked => self.export_go(),
                 // A plan may still be in flight, or sources changed: the same front half as Review's Export.
-                Some(how) => self.continue_review(how),
+                Some(how) if read => self.continue_review(how),
+                Some(how) => self.run_continue(how),
                 None => {}
             }
-            // E3: this branch re-planned nothing and handed nothing over, so the read it ends is the settle.
-            if !self.full_plan_pending() {
-                self.settle_queued();
-            }
+        }
+        if !self.full_plan_pending() {
+            self.settle_queued();
         }
     }
 
@@ -2169,6 +2182,10 @@ impl AppModel {
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
     /// are flagged and the plan is made again first, so the export starts from fresh plans (M3a spec §7).
     pub fn export_clicked(&mut self) {
+        // Ruling 3c-37: before the scope is cleared.
+        if self.dialog_drops_click() {
+            return;
+        }
         // Note HF9: a plain Export is the whole project, whatever Review was opened for.
         self.set_scope(None);
         self.export_go();
@@ -2184,9 +2201,12 @@ impl AppModel {
         self.export_decided();
     }
 
-    /// E3 (rulings 3c-27, 3c-32): an Export click that meets an open dialog (a click deferred a frame for a focused
-    /// field, Note FC8, runs before `actions::keys`' modal guard) is dropped with the warning, before anything is
-    /// armed, queued or opened and before any scope changes. True when it dropped the click.
+    /// E3 (rulings 3c-27, 3c-32, 3c-37): an Export click that meets an open dialog (a click deferred a frame for a
+    /// focused field, Note FC8, runs before `actions::keys`' modal guard) is dropped with the warning, before anything
+    /// is armed, queued or opened and before any scope changes. True when it dropped the click. The first step of
+    /// every function that can arm, queue or start a texture export: `header_export_clicked`, `export_sets`,
+    /// `export_from_review`, `export_clicked` and `export_go`, `export_decided`, `write_gate`, and `deliver_queued`
+    /// for what waited for a landing.
     pub(super) fn dialog_drops_click(&mut self) -> bool {
         if self.dialog.is_none() {
             return false;
@@ -2336,6 +2356,10 @@ impl AppModel {
     }
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
     fn export_go(&mut self) {
+        // Ruling 3c-37.
+        if self.dialog_drops_click() {
+            return;
+        }
         self.status_note = None;
         if self.root.is_none() {
             return;
@@ -3260,26 +3284,8 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
-        // Both flags are taken together so a leftover one cannot fire on a later, unrelated plan; the export the
-        // user clicked wins.
-        let (clicked, continued) = (
-            std::mem::take(&mut self.export_after_plan),
-            self.continue_after_plan.take(),
-        );
-        match continued {
-            // Audit 08f-1 holds for Review's queued Export too: never over an open question.
-            _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
-                self.queued_export_dropped()
-            }
-            // Note HF10: through `export_go`, as the scan-finished read does; the scope stays.
-            _ if clicked => self.export_go(),
-            Some(how) => self.run_continue(how),
-            None => {}
-        }
         // E3: this is the plan that really settles (every re-plan above returned early).
-        if !self.full_plan_pending() {
-            self.settle_queued();
-        }
+        self.deliver_queued(false);
     }
 
     /// Audit 08f-1: an export queued behind a plan never starts over an open question (its answer could open
