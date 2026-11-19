@@ -5,7 +5,7 @@ use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
     cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts,
+    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts, KEEP_ALPHA_HOVER,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -707,6 +707,23 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
+        Fix::KeepAlpha(k) => {
+            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
+            let why = off.map(str::to_string).or_else(|| m.leaves_locked(k).err());
+            let b = ui.add_enabled(why.is_none(), egui::Button::new("Keep alpha"));
+            b.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::Role::Button,
+                    why.is_none(),
+                    format!("Keep alpha for {file}"),
+                )
+            });
+            match why {
+                Some(why) => b.on_disabled_hover_text(why),
+                None => b.on_hover_text(KEEP_ALPHA_HOVER),
+            }
+            .clicked()
+        }
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
             ui,
@@ -1302,6 +1319,11 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
+        Fix::KeepAlpha(k) => {
+            if let Err(why) = model.keep_alpha(&k) {
+                model.status_line = why;
+            }
+        }
     }
 }
 

@@ -1282,6 +1282,11 @@ fn a_share_replacing_an_automatic_normal_writes_nothing_in_its_step() {
         "a step that changed the borrower's membership writes nothing"
     );
     assert!(auto_data(&m).is_empty(), "and lists nothing");
+    assert_eq!(
+        keep_rows(&m, IRON_N),
+        1,
+        "the landed Replace offers Keep alpha"
+    );
     m.set_shader("armor/steel", Some(Shader::Pbr));
     settle(&mut m);
     m.set_shader("armor/steel", Some(Shader::Default));
@@ -1544,6 +1549,7 @@ fn an_owner_normal_already_data_gets_no_write() {
     share(&mut m, IRON_N, "armor/steel");
     assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
     assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+    assert_eq!(keep_rows(&m, IRON_N), 0, "the plan already keeps the alpha");
 }
 
 /// Review 4 Important 1: an entry whose files are all gone (no files; it borrows `pbr/iron`'s slot 2) reads no
@@ -1633,6 +1639,7 @@ fn a_share_of_a_normal_with_no_varying_alpha_writes_nothing() {
     share(&mut m, IRON_N, "armor/steel");
     assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
     assert!(m.sets_doc.as_ref().unwrap().auto_data().is_empty());
+    assert_eq!(keep_rows(&m, IRON_N), 0);
 }
 
 /// N-37, a pin of the `edit_docs` read of `automatic_step`: the fuzz switch on open is an automatic step through
@@ -2399,6 +2406,15 @@ fn an_unsure_key_is_not_written() {
         held(&m, IRON_N, "alpha.policy"),
         None,
         "an unsure key gets no data"
+    );
+    settle(&mut m);
+    // While the next plan is out the empty borrower is unsure again, but the regular borrow is known.
+    m.replan();
+    assert!(m.full_plan_pending());
+    assert_eq!(
+        keep_rows(&m, IRON_N),
+        1,
+        "the known borrower still reads the normal"
     );
     settle(&mut m);
 }
@@ -3476,4 +3492,246 @@ fn an_alias_batch_drops_a_stale_entry_before_the_user_reuses_its_spelling() {
         Some(json!("data")),
         "ending the share leaves the user's data"
     );
+}
+
+/// How many Keep alpha rows name `key`.
+fn keep_rows(m: &AppModel, key: &str) -> usize {
+    use sdc_gui::model::bottom::{problems, Fix};
+    problems(m)
+        .iter()
+        .filter(|r| r.fix == Some(Fix::KeepAlpha(key.into())))
+        .count()
+}
+
+/// A share as an older Tessalith left it (shared into the regular set, no `data`, nothing listed), saved, and opened
+/// again as the app opens a folder: nothing is written on open.
+fn old_share(dir: &Path) -> AppModel {
+    let mut m = two_sets(dir);
+    share(&mut m, IRON_N, "armor/steel");
+    m.edit_docs("seed", None, true, |p, s| {
+        p.clear_file_value(IRON_N, "alpha.policy");
+        s.set_auto_data(&[]);
+    });
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None, "precondition");
+    assert!(m.save().is_ok());
+    drop(m);
+    let m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "nothing is written on open"
+    );
+    m
+}
+
+const KEEP_SENTENCE: &str =
+    "iron_n.png is shared with a regular set, which reads its alpha as specular; its alpha is not kept";
+
+fn keep_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
+    let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    h.run();
+    h
+}
+
+/// N-10: a project opened with a share already in that state shows one Note row on the shared normal; Keep alpha
+/// (Enter works) writes `data` as one step named "Keep alpha", and the row goes.
+#[test]
+fn an_old_share_gets_a_keep_alpha_row() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::bottom::{problems, Fix};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_share(d.path());
+    let rows: Vec<_> = problems(&m)
+        .iter()
+        .filter(|r| r.fix == Some(Fix::KeepAlpha(IRON_N.into())))
+        .cloned()
+        .collect();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_note());
+    assert_eq!(rows[0].shown(), KEEP_SENTENCE);
+    m.open_problems(None);
+    let mut h = keep_harness(m);
+    h.get_by_role_and_label(
+        eframe::egui::accesskit::Role::Button,
+        "Keep alpha for iron_n.png",
+    )
+    .focus();
+    h.run();
+    h.key_press(eframe::egui::Key::Enter);
+    h.step();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert_eq!(held(h.state(), IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(h.state().undo_label(), Some("Keep alpha"));
+    assert_eq!(keep_rows(h.state(), IRON_N), 0);
+}
+
+/// N-10, review 1 Minor 8: with the owner's Normal slot locked, the share step writes nothing; the row shows Keep
+/// alpha off with the lock's reason, and the model refuses it too.
+#[test]
+fn keep_alpha_is_off_on_a_locked_slot() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.set_slot_lock("pbr/iron", 2, true).unwrap();
+    settle(&mut m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the share step skips a locked owner"
+    );
+    assert!(m.keep_alpha(IRON_N).is_err());
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    m.open_problems(None);
+    let h = keep_harness(m);
+    let b = h.get_by_role_and_label(
+        eframe::egui::accesskit::Role::Button,
+        "Keep alpha for iron_n.png",
+    );
+    assert!(b.accesskit_node().is_disabled());
+}
+
+/// N-10: an alpha policy the user wrote is the user's choice: no row.
+#[test]
+fn the_users_own_alpha_gets_no_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_share(d.path());
+    m.set_alpha(IRON_N, AlphaPolicy::Remove);
+    settle(&mut m);
+    assert_eq!(keep_rows(&m, IRON_N), 0);
+}
+
+/// Review 3 Important 2: a regular owner's recorded `normal` is shared into a regular set (no write: the owner is not
+/// PBR); an `_rmaos` arrives, and the recorder's automatic step retypes it `pbr_normal`. No automatic step writes
+/// `data`; the row shows it.
+#[test]
+fn a_shared_recorded_normal_that_follows_its_owner_into_pbr_gets_the_row() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = two_sets(d.path());
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    share(&mut m, WALL_N, "armor/steel");
+    assert_eq!(
+        held(&m, WALL_N, "alpha.policy"),
+        None,
+        "a regular owner's normal is not written"
+    );
+    add_rmaos(&t, &mut m);
+    assert_eq!(
+        held(&m, WALL_N, "subtype"),
+        Some(json!("pbr_normal")),
+        "the recorder's follow pass"
+    );
+    assert_eq!(
+        held(&m, WALL_N, "alpha.policy"),
+        None,
+        "no automatic step writes it"
+    );
+    assert_eq!(keep_rows(&m, WALL_N), 1);
+}
+
+/// N-33 narrowed: the sharer's diffuse decided `pbr_albedo` turns it PBR only at the plan that decision causes; no
+/// step runs after the plan, so the leftover `data` stays (spec limit 3) and no row shows (its planned alpha is
+/// `data`). The user's next step clears it.
+#[test]
+fn a_diffuse_decision_that_turns_the_sharer_pbr_leaves_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.decide("armor/steel.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec![IRON_N.to_string()]
+    );
+    assert_eq!(keep_rows(&m, IRON_N), 0);
+    m.set_shader("pbr/iron", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the next user step re-checks every listed key"
+    );
+}
+
+/// N-33 narrowed: a PBR sharer whose diffuse is decided back to `diffuse` is a regular set only after the plan; no
+/// step writes `data` then, and the row shows it.
+#[test]
+fn a_sharer_that_leaves_pbr_by_its_diffuse_gets_the_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.decide("armor/steel.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None, "PBR into PBR");
+    m.decide("armor/steel.png", Answer::Subtype(Subtype::Diffuse));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+}
+
+#[test]
+fn a_rejoined_borrower_offers_keep_alpha_for_its_shared_normal() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.remove_member("armor/steel", "armor/steel.png").unwrap();
+    settle(&mut m);
+    m.set_shader("pbr/iron", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the empty borrower reads nothing"
+    );
+    assert_eq!(keep_rows(&m, IRON_N), 0);
+
+    m.back_to_automatic_set(&["armor/steel.png".to_string()])
+        .unwrap();
+    settle(&mut m);
+    assert!(sdc_gui::model::sets::views(&m)
+        .iter()
+        .any(|v| v.id == "armor/steel" && v.members.iter().any(|k| k == "armor/steel.png")));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the rejoin abstained"
+    );
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+    m.keep_alpha(IRON_N).unwrap();
+    settle(&mut m);
+    assert!(auto_data(&m).is_empty());
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+#[test]
+fn a_users_remove_in_a_matching_stem_table_gets_no_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_share(d.path());
+    m.edit_docs("stem policy", None, true, |p, _| {
+        p.set_file_value("pbr/iron_n", "alpha.policy", &json!("remove"));
+    });
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the full-name table has only the type"
+    );
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        Some(json!("remove"))
+    );
+    assert_eq!(keep_rows(&m, IRON_N), 0);
 }

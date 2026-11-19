@@ -386,6 +386,8 @@ pub enum Fix {
     TagAsGrass(String),
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
     StraightAlpha(String),
+    /// Note JS7 (N-10): write `alpha.policy = "data"` for this shared normal.
+    KeepAlpha(String),
     /// Note FC10 (CV8): remove the stored empty `match{n}` of the set (by id).
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
@@ -1301,6 +1303,22 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    for k in super::shared_alpha::row_keys(m) {
+        let Some(i) = m.item(&k) else { continue };
+        out.push(Problem {
+            fix: Some(Fix::KeepAlpha(k.clone())),
+            detail: Some(KEEP_ALPHA_HOVER.into()),
+            ..row(
+                Level::Info,
+                At::Texture(k),
+                format!(
+                    "{} is shared with a regular set, which reads its alpha as specular; its alpha is not kept",
+                    i.name
+                ),
+                None,
+            )
+        });
+    }
     // Note FC10 (CV8): a stored empty `match{n}` (n >= 2; `match1 = ""` turns the diffuse match off) matches nothing.
     for v in views.iter() {
         for n in 2..=8u8 {
@@ -1434,6 +1452,9 @@ pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal 
 pub const STRAIGHT_ALPHA_HOVER: &str = "OpenEXR stores colour multiplied by alpha, so Tessalith divides it back on \
      load. If this file's colour is not premultiplied (straight alpha), Straight alpha reads it as stored \
      (alpha.exr_straight = true).";
+/// Note JS7: the hover of a Keep alpha row.
+pub const KEEP_ALPHA_HOVER: &str =
+    "Write alpha.policy = \"data\" for this normal in sdc.toml, so the regular set's specular stays.";
 
 /// Note FC10 (T8): `(id, other)` of a CFG-PRESET-SKIPPED reason that is an alias clash.
 /// shortcut: parses the engine's message (`presets::check_aliases`); read a `data` field once the engine adds one.

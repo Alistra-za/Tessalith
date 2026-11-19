@@ -201,6 +201,32 @@ pub(super) fn shared_into_regular(
     sh
 }
 
+/// Note JS7 (N-10, N-38): a confirmed regular borrower is enough for a Note, even if another borrow is unsure.
+pub(super) fn row_keys(m: &AppModel) -> Vec<String> {
+    let (Target::Cs, Some(p), Some(s)) = (m.target, &m.project, &m.sets_doc) else {
+        return vec![];
+    };
+    let targets = borrow_targets(s);
+    if targets.is_empty() {
+        return vec![];
+    }
+    let f = facts(m);
+    let shared = shared_into_regular(&f, s, &f.empty, &targets, &BTreeSet::new());
+    let tables = Tables::of(p);
+    shared
+        .out
+        .into_iter()
+        .filter(|k| {
+            !f.inert.contains(k)
+                && !f.planned_data.contains(k)
+                && tables.alpha(k).is_empty()
+                && m.item(k)
+                    .and_then(|i| i.analysis.as_ref())
+                    .is_some_and(|a| a.alpha == AlphaContent::Varying)
+        })
+        .collect()
+}
+
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
 /// owner's Normal-slot file held, the sets with no file (`empty`), the slot-2 borrow targets (`targets`, N8-b), and
 /// for N8-f: whether the views' members are what the documents say (`fresh`), the sets document's membership fields
@@ -741,6 +767,17 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
 }
 
 impl AppModel {
+    /// Note JS7: the user's Data pick stays theirs when the last regular borrower goes away.
+    pub fn keep_alpha(&mut self, key: &str) -> Result<(), String> {
+        if let Some(why) = self.fix_off().or_else(|| self.leaves_locked(key).err()) {
+            return Err(why);
+        }
+        self.edit_docs("Keep alpha", None, true, |d, _| {
+            d.set_file_value(key, "alpha.policy", &json!("data"));
+        });
+        Ok(())
+    }
+
     /// Note JS7 (N-10, N-33): the follow-on at the end of a user's step on cs, inside the step, from its starting
     /// point; `post` is the step's index of the project document after the edit (N8-o).
     pub(super) fn follow_shared(&mut self, b: &Before, post: &Tables) {
