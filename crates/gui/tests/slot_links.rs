@@ -1459,3 +1459,24 @@ fn on_a_target_with_no_json_a_stored_clear_leaves_the_own_file_as_it_is() {
     let h = harness(m);
     assert!(h.query_by_label_contains("Left out of the JSON").is_none());
 }
+
+/// R5: with slot 1 linked, the JSON names the linked albedo, so the mesh keeps nothing and the no-albedo Info row is
+/// not raised.
+#[test]
+fn with_a_linked_slot_1_the_no_albedo_info_is_not_raised() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let keeps = |m: &AppModel| {
+        sdc_gui::model::bottom::problems(m)
+            .iter()
+            .any(|p| p.text.starts_with("No albedo in this set"))
+    };
+    assert!(keeps(&m), "premise");
+    link(&mut m, 1, WALL_ALBEDO);
+    assert_eq!(
+        entry(&m, LEAF)["slot1"],
+        json!(member_game_path(&m, WALL_ALBEDO).unwrap()),
+        "the JSON names the linked albedo"
+    );
+    assert!(!keeps(&m));
+}

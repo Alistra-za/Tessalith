@@ -144,9 +144,10 @@ fn slots_of(
 }
 
 /// Note HL5: the diffuse path of a no-albedo JSON set whose slot 1 is empty: the mapping's slot 1, else the set's base
-/// path. `None` for any other set. The Problems row (Note HL6) names the same path.
+/// path. `None` for any other set, and when the set writes `slot1` itself (a link, a typed path or a clear): the JSON
+/// names that, so the mesh keeps nothing (review E1, Task 15a). The Problems row (Note HL6) names the same path.
 pub(super) fn no_albedo_slot1(v: &SetView) -> Option<String> {
-    if !v.json || v.pbr || slot_filled(v, 1) {
+    if !v.json || v.pbr || slot_filled(v, 1) || slot_string(&v.settings, 1).is_some() {
         return None;
     }
     let stored = v
