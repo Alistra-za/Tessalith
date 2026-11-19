@@ -57,6 +57,83 @@ fn harness_with(
     h
 }
 
+#[test]
+fn texture_follow_reuses_one_resolution_across_frames() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_on(pbr_opened(d.path()), egui::vec2(1400.0, 900.0), |m| {
+        m.select_item("landscape/rock01.png");
+        m.settings.set_settings_open = true;
+    });
+    h.get_by_label(FRAME_LABEL);
+    let active = h.state().0.resolved_selection();
+    assert_eq!(active.view().unwrap().id, "landscape/rock01");
+    let n = h.state().0.selection_builds.get();
+    let work = sdc_gui::model::identity_work();
+    for _ in 0..5 {
+        h.step();
+        let (m, state) = h.state_mut();
+        state.set3d.poll(m);
+    }
+    assert_eq!(
+        h.state().0.selection_builds.get(),
+        n,
+        "idle texture follow rebuilt identity"
+    );
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "member owner was searched or copied"
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &active,
+        &h.state().0.resolved_selection()
+    ));
+    assert_eq!(
+        h.state().1.set3d.fp.as_ref().unwrap().label,
+        "landscape/rock01"
+    );
+}
+
+#[test]
+fn helper_follow_reuses_its_owner_in_the_settings_window() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_on(pbr_opened(d.path()), egui::vec2(1400.0, 900.0), |m| {
+        let key = "landscape/rock01_roughness.png";
+        assert!(m.item(key).unwrap().helper.is_some());
+        m.select_item(key);
+        m.settings.set_settings_open = true;
+    });
+    h.get_by_label(FRAME_LABEL);
+    h.get_by_label("rock01_roughness.png settings");
+    let active = h.state().0.resolved_selection();
+    assert_eq!(active.view().unwrap().id, "landscape/rock01");
+    let n = h.state().0.selection_builds.get();
+    let work = sdc_gui::model::identity_work();
+    for _ in 0..5 {
+        h.step();
+        let (m, state) = h.state_mut();
+        state.set3d.poll(m);
+    }
+    assert_eq!(
+        h.state().0.selection_builds.get(),
+        n,
+        "idle texture follow rebuilt identity"
+    );
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "member owner was searched or copied"
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &active,
+        &h.state().0.resolved_selection()
+    ));
+    assert_eq!(
+        h.state().1.set3d.fp.as_ref().unwrap().label,
+        "landscape/rock01"
+    );
+}
+
 fn outer(h: &H, id: &str) -> Option<egui::Rect> {
     sdc_gui::ui::panel_ids::panel_rect(&h.ctx, id)
 }
@@ -133,7 +210,8 @@ fn a_member_keeps_the_3d_view_and_2d_shows_its_normal_view() {
     let mut h = harness(d.path(), false, 1400.0, true);
     h.get_by_label(FRAME_LABEL);
     let m = &h.state().0;
-    let set = sdc_gui::model::set_preview::followed_set(m).unwrap();
+    let active = m.resolved_selection();
+    let set = &active.view().expect("keyed fixture").key;
     let member = m
         .items
         .iter()
@@ -190,7 +268,8 @@ fn a_member_selected_first_opens_its_sets_3d_view() {
     let d = tempfile::tempdir().unwrap();
     let mut name = String::new();
     let h = harness_with(d.path(), false, 1400.0, true, |m| {
-        let set = sdc_gui::model::set_preview::followed_set(m).unwrap();
+        let active = m.resolved_selection();
+        let set = &active.view().expect("keyed fixture").key;
         let i = m
             .items
             .iter()
@@ -282,6 +361,40 @@ fn in_3d_the_viewport_takes_most_of_the_centre() {
         // The compact layout: no heading, no second path line.
         assert!(h.query_by_label("Set preview (3D)").is_none());
     }
+}
+
+#[test]
+fn the_3d_settings_edit_the_selected_document_card() {
+    let d = tempfile::tempdir().unwrap();
+    let id = "landscape/other";
+    let mut h = harness_on(
+        key_less_json_sets(d.path()),
+        egui::vec2(1400.0, 900.0),
+        |m| {
+            m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
+            m.settings.set_settings_open = true;
+        },
+    );
+    h.get_by_label(FRAME_LABEL);
+    h.get_by_label("TruePBR settings");
+    h.get(
+        egui_kittest::kittest::by()
+            .role(egui::accesskit::Role::CheckBox)
+            .label("Emissive"),
+    )
+    .click();
+    settle(&mut h);
+    let entries = h.state().0.sets_doc.as_ref().unwrap().entries();
+    let value = |id: &str| {
+        entries
+            .iter()
+            .find(|e| e.id == id)
+            .unwrap()
+            .settings
+            .get("emissive")
+    };
+    assert_eq!(value(id), Some(&serde_json::json!(true)));
+    assert_eq!(value("landscape/empty"), None);
 }
 
 #[test]

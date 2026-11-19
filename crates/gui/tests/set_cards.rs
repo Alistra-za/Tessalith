@@ -809,7 +809,7 @@ fn a_go_to_set_in_the_same_frame_wins_over_a_tab_reveal() {
     .next()
     .expect("the stand-in")
     .focus();
-    h.state_mut().0.nav.reveal_set = Some(far);
+    h.state_mut().0.nav.reveal_set = Some(sdc_gui::model::SetTarget::Key(far));
     h.step();
     h.run();
     assert!(

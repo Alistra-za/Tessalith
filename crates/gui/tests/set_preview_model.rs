@@ -14,6 +14,70 @@ use sdc_gui::pgp::writer::EntryInput;
 use std::time::{Duration, Instant};
 use support::*;
 
+#[test]
+fn preview_follow_polls_the_second_borrowers_fingerprint() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, expected) = preview_borrower(d.path());
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    s.shown = true;
+    s.poll_at(&m, Instant::now());
+    assert_eq!(
+        s.fp.as_ref().map(|f| (f.label.as_str(), f.entry.as_ref())),
+        Some(("landscape/other", Some(&expected))),
+        "follow must deliver the second candidate"
+    );
+}
+
+#[test]
+fn an_enabled_material_layer_reuses_its_owner_between_checks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01.png");
+    m.add_cs_block("landscape/rock01", sdc_gui::model::cs_pbr::Kind::Mato);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    s.set_mato_layer(true);
+    let now = Instant::now();
+    s.shown = true;
+    s.poll_at(&m, now);
+    assert!(s.mato_available() && s.mato_layer);
+    let checks = s.checks;
+    let reads = sdc_gui::model::sets::root_reads();
+    s.shown = true;
+    s.poll_at(&m, now);
+    assert_eq!(s.checks, checks);
+    assert_eq!(
+        sdc_gui::model::sets::root_reads(),
+        reads,
+        "unchanged layer rebuilt its view key"
+    );
+}
+
+fn preview_borrower(dir: &std::path::Path) -> (AppModel, EntryInput) {
+    let mut m = key_less_json_sets(dir);
+    let id = "landscape/other";
+    m.set_json_value(id, "roughness_scale", Some(serde_json::json!(0.25)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let entries = json_entries(&m);
+    let candidate = |id: &str| entries.iter().find(|(v, _)| v.id == id).unwrap().1.clone();
+    let expected = candidate(id);
+    assert_ne!(candidate("landscape/empty"), expected);
+    m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
+    (m, expected)
+}
+
+#[test]
+fn the_second_key_less_set_supplies_its_own_candidate_to_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, expected) = preview_borrower(d.path());
+    let id = "landscape/other";
+    let fp = fingerprint(&m, sdc_gui::model::SetTarget::Id(id.into()));
+    assert_eq!(
+        fp.as_ref().map(|f| (f.label.as_str(), f.entry.as_ref())),
+        Some((id, Some(&expected))),
+        "second borrower's fingerprint"
+    );
+}
+
 fn rock(m: &AppModel) -> (SetView, EntryInput) {
     json_entries(m)
         .into_iter()
@@ -1130,7 +1194,7 @@ fn a_scanned_mesh_is_listed_and_an_unreadable_one_falls_back_to_the_sphere() {
         })
     ));
     assert_eq!(
-        s.choice.get(&key),
+        s.choice.get(&sdc_gui::model::SetTarget::Key(key.clone())),
         Some(&MeshChoice::Builtin(Builtin::Cube))
     );
 }

@@ -1642,7 +1642,7 @@ pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) ->
 /// set's member items.
 struct Scope {
     key: String,
-    id: String,
+    id: Option<String>,
     members: HashSet<String>,
 }
 
@@ -1650,7 +1650,7 @@ impl Scope {
     fn of(v: &sets::SetView) -> Self {
         Scope {
             key: v.key.clone(),
-            id: v.id.clone(),
+            id: Some(v.id.clone()),
             members: v.members.iter().cloned().collect(),
         }
     }
@@ -1770,7 +1770,7 @@ fn scope(m: &AppModel, s: &str) -> Scope {
         Some(v) => Scope::of(v),
         None => Scope {
             key: s.to_string(),
-            id: String::new(),
+            id: None,
             members: HashSet::new(),
         },
     }
@@ -1781,7 +1781,7 @@ fn scope(m: &AppModel, s: &str) -> Scope {
 fn in_set(p: &Problem, s: &Scope) -> bool {
     match &p.at {
         At::Set { key, id } if s.key.is_empty() => {
-            !s.id.is_empty() && key.is_empty() && *id == s.id
+            key.is_empty() && s.id.as_deref() == Some(id.as_str())
         }
         At::Set { key, .. } => *key == s.key,
         At::Texture(t) => s.members.contains(t),
@@ -1810,17 +1810,18 @@ pub enum ReasonGo {
 /// whose slot the set editor draws a row for goes to that slot's **Assign…**; every other row goes to itself in
 /// Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
-    with_counted_rows(m, key, |v, rows| {
-        let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
-        rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
-    })
-    .unwrap_or_default()
+    with_counted_rows(m, key, reasons_for_view).unwrap_or_default()
+}
+
+fn reasons_for_view(v: &sets::SetView, rows: Vec<&Problem>) -> Vec<Reason> {
+    let drawn: Vec<_> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
+    rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
 }
 
 /// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
 /// per `problems()` build, scope key `key` (see `scope_key`) and hidden kinds, as `cached_tab_counts`. The set views
 /// it reads live in the same cache cell, which is emptied when they change.
-pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
+pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
     let hidden = m.hidden_kinds();
@@ -1829,14 +1830,14 @@ pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
         .borrow()
         .set_reasons
         .as_ref()
-        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == key && *h == hidden)
+        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == &v.id && *h == hidden)
     {
         return r.clone();
     }
     #[cfg(feature = "test-hooks")]
     m.reason_scans.set(m.reason_scans.get() + 1);
-    let r = Arc::new(set_reasons(m, key));
-    m.views.borrow_mut().set_reasons = Some((all, key.to_string(), hidden, r.clone()));
+    let r = Arc::new(with_view_rows(m, v, reasons_for_view).unwrap_or_default());
+    m.views.borrow_mut().set_reasons = Some((all, v.id.clone(), hidden, r.clone()));
     r
 }
 
@@ -1863,6 +1864,14 @@ fn with_counted_rows<T>(
 ) -> Option<T> {
     let views = sets::views(m);
     let v = view_of(&views, &m.sets_root(), key)?;
+    with_view_rows(m, v, f)
+}
+
+fn with_view_rows<T>(
+    m: &AppModel,
+    v: &sets::SetView,
+    f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
+) -> Option<T> {
     if set_ready_in(&flagged(m), v) {
         return None;
     }

@@ -393,6 +393,9 @@ pub struct SetView {
     pub locks: BTreeSet<u8>,
     /// The texture set record the set is mapped to (`SetEntry::txst`), for the card line and the menu.
     pub txst: Option<TxstMap>,
+    pub(crate) output_name: Option<String>,
+    pub(crate) cs_txst: Option<Box<super::cs_pbr::CsBlock>>,
+    pub(crate) cs_mato: Option<Box<super::cs_pbr::CsBlock>>,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
     /// The id's last parts that tell it from every other set (see [`short_names`]). Set by `build_views`; a view
@@ -617,6 +620,13 @@ pub enum Tails {
 }
 
 impl SetView {
+    pub(crate) fn cs_block(&self, kind: super::cs_pbr::Kind) -> Option<&super::cs_pbr::CsBlock> {
+        match kind {
+            super::cs_pbr::Kind::Txst => self.cs_txst.as_deref(),
+            super::cs_pbr::Kind::Mato => self.cs_mato.as_deref(),
+        }
+    }
+
     /// The tails this set's member names read (see [`Tails`]).
     pub fn tails(&self) -> Tails {
         if self.skin || self.shared {
@@ -689,6 +699,9 @@ impl SetView {
             set_warnings: vec![],
             locks: BTreeSet::new(),
             txst: None,
+            output_name: None,
+            cs_txst: None,
+            cs_mato: None,
             recipes: vec![],
             short: String::new(),
             linked: BTreeMap::new(),
@@ -1166,12 +1179,21 @@ fn mirrored_stem(read: &str) -> String {
 
 /// Every set, in display order (audit 7, DECISIONS Note Y7): built once per change of its inputs.
 pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
-    super::cached(
+    if let Some(views) = m.warm_views() {
+        return views;
+    }
+    let views = super::cached(
         m,
         |c| c.views.clone(),
         |c, v| c.views = Some(v),
         || Arc::new(build_views(m)),
-    )
+    );
+    m.views.borrow_mut().root_inputs = Some((
+        m.project.as_ref().map(|p| (p.rev(), p.read_only())),
+        m.sets_doc.as_ref().map(|d| d.read_only()),
+        m.settings.export_folder.clone(),
+    ));
+    views
 }
 
 #[cfg(test)]
@@ -1462,6 +1484,8 @@ fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> 
 
 /// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).
 pub(crate) fn has_card(m: &AppModel, key: &str) -> bool {
+    #[cfg(feature = "test-hooks")]
+    super::count_identity_work();
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     m.sets
         .iter()
@@ -1626,6 +1650,9 @@ fn entry_view(
     v.shader_choice = e.shader;
     v.locks = e.lock.clone();
     v.txst = e.txst.clone();
+    v.output_name.clone_from(&e.output_name);
+    v.cs_txst = e.cs_txst.clone().map(Box::new);
+    v.cs_mato = e.cs_mato.clone().map(Box::new);
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
@@ -2941,6 +2968,8 @@ impl AppModel {
 
     /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
     pub(crate) fn set_key_of_item(&self, item: &str) -> Option<String> {
+        #[cfg(feature = "test-hooks")]
+        super::count_identity_work();
         self.set_of_item(item).map(|v| v.key)
     }
 
@@ -4518,6 +4547,8 @@ impl AppModel {
 
     /// F3b: set `set`'s `output_name`, if it has one (on a CS PBR set it is ignored; the set editor says so).
     pub fn output_name_of(&self, set: &str) -> Option<String> {
+        #[cfg(feature = "test-hooks")]
+        super::count_identity_work();
         let entries = self.sets_doc.as_ref()?.entries();
         entry_of(&entries, set)?.output_name.clone()
     }

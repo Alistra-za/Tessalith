@@ -140,12 +140,44 @@ impl AppModel {
             .find(|g| g.sets.iter().any(|s| same_id(s, set_id)))
     }
 
-    /// The ids of the selected sets, in the order they were selected (a set with no view has none).
+    pub(super) fn selected_set_views<'a>(&self, all: &'a [SetView]) -> Vec<&'a SetView> {
+        if !self.in_bulk()
+            && matches!(
+                self.selection,
+                super::Selection::Set(_) | super::Selection::SetId(_)
+            )
+        {
+            return self
+                .resolved_selection()
+                .index
+                .and_then(|i| all.get(i))
+                .into_iter()
+                .collect();
+        }
+        let keys = self.selected_sets();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let mut by_key = HashMap::new();
+        for v in all.iter().filter(|v| !v.key.is_empty()) {
+            by_key.entry(v.key.as_str()).or_insert(v);
+        }
+        keys.iter()
+            .filter_map(|k| by_key.get(k.as_str()).copied())
+            .collect()
+    }
+
+    /// The ids of the selected sets, in selection order.
     pub fn selected_set_ids(&self) -> Vec<String> {
-        let views = set_views(self);
-        self.selected_sets()
-            .iter()
-            .filter_map(|k| views.iter().find(|v| v.key == *k).map(|v| v.id.clone()))
+        if !matches!(
+            self.selection,
+            super::Selection::Set(_) | super::Selection::SetId(_)
+        ) {
+            return Vec::new();
+        }
+        self.selected_set_views(&super::sets::views(self))
+            .into_iter()
+            .map(|v| v.id.clone())
             .collect()
     }
 

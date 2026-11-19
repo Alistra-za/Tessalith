@@ -267,35 +267,41 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
         .filter(|v| exports_json(m, v))
-        .map(|full| {
-            let bare;
-            let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
-            let v = if commands && !writes_entry(m, full) {
-                bare = SetView {
-                    settings: without_slot_commands(&full.settings),
-                    ..full.clone()
-                };
-                &bare
-            } else {
-                full
-            };
-            let slots = slots_of(v, &views, &paths, m);
-            let mut settings = crate::model::auto_flags::resolved_for(
-                v.json,
-                feature_slots(v),
-                &v.settings,
-                &crate::model::auto_flags::hint(m, v),
-            );
-            lock_empty_slots(v, &slots, &mut settings);
-            let e = EntryInput {
-                settings,
-                slots,
-                derived_match: v.derived_match.clone().unwrap_or_default(),
-                section: false,
-            };
-            (full.clone(), e)
-        })
+        .map(|full| (full.clone(), candidate_input(m, full, &views, &paths)))
         .collect()
+}
+
+pub(super) fn candidate_input(
+    m: &AppModel,
+    full: &SetView,
+    views: &[SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+) -> EntryInput {
+    let bare;
+    let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
+    let v = if commands && !writes_entry(m, full) {
+        bare = SetView {
+            settings: without_slot_commands(&full.settings),
+            ..full.clone()
+        };
+        &bare
+    } else {
+        full
+    };
+    let slots = slots_of(v, views, paths, m);
+    let mut settings = crate::model::auto_flags::resolved_for(
+        v.json,
+        feature_slots(v),
+        &v.settings,
+        &crate::model::auto_flags::hint(m, v),
+    );
+    lock_empty_slots(v, &slots, &mut settings);
+    EntryInput {
+        settings,
+        slots,
+        derived_match: v.derived_match.clone().unwrap_or_default(),
+        section: false,
+    }
 }
 
 /// `s` less its string `slot1`-`slot8` (links and clears).

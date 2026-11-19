@@ -4142,14 +4142,16 @@ fn missing_normal() -> (tempfile::TempDir, AppModel, String) {
 /// `ui::draw` reads it when the 3D panel can show), and the column it was given.
 struct Editor {
     m: AppModel,
-    key: String,
     thumbs: sdc_gui::ui::thumbs::ThumbCache,
     cmds: sdc_gui::ui::slot_commands::SlotCmdState,
     drops: sdc_gui::ui::sets_column::DropState,
     column: egui::Rect,
 }
 
-fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Editor> {
+fn editor_harness(mut m: AppModel, key: String, width: f32) -> Harness<'static, Editor> {
+    if !matches!(&m.selection, sdc_gui::model::Selection::Set(k) if k == &key) {
+        m.select_set(&key);
+    }
     Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -4163,10 +4165,11 @@ fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Edit
                 };
                 let r = ui.allocate_ui(egui::vec2(width, ui.available_height()), |ui| {
                     ui.set_width(width);
+                    let active = e.m.resolved_selection();
                     sdc_gui::ui::set_editor::draw(
                         ui,
                         &mut e.m,
-                        &e.key,
+                        &active,
                         &mut e.thumbs,
                         &mut e.cmds,
                         &mut e.drops,
@@ -4177,7 +4180,6 @@ fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Edit
             },
             Editor {
                 m,
-                key,
                 thumbs: Default::default(),
                 cmds: Default::default(),
                 drops: Default::default(),
@@ -5203,6 +5205,379 @@ fn key_less_sets(dir: &std::path::Path) -> AppModel {
     m
 }
 
+fn wall_cards(dir: &std::path::Path) -> (AppModel, String) {
+    let root = dir.join("textures");
+    std::fs::create_dir(&root).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    std::fs::write(root.join("wall-note.txt"), "notes").unwrap();
+    let mut m = AppModel::new(Default::default(), None, session());
+    m.open_folder(root);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    choose_export(&mut m, dir.join("export"));
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "wall-note.txt");
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(sdc_gui::model::sets::views(&m).len(), 2);
+    assert_eq!(view_by_id(&m, "wall").key, id);
+    assert!(view_by_id(&m, &id).key.is_empty());
+    (m, id)
+}
+
+fn card_selected(h: &Harness<'static, AppModel>, id: &str) -> bool {
+    h.get_by_label_contains(&format!("Set {id}, position"))
+        .accesskit_node()
+        .is_selected()
+        == Some(true)
+}
+
+#[test]
+fn a_key_less_set_selected_by_its_id_opens_its_own_editor() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    assert!(sdc_gui::ui::set_editor_shown(&m, false));
+    let mut h = harness(m);
+    h.run();
+    let reasons: Vec<_> = h
+        .query_all_by_label_contains("go to the fix")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("two.txt") && !reasons[0].contains("one.txt"));
+    assert!(card_selected(&h, "landscape/other"));
+    assert!(!card_selected(&h, "landscape/empty"));
+}
+
+#[test]
+fn the_key_shaped_document_cards_editor_shows_its_own_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = wall_cards(d.path());
+    m.select_set(&id);
+    let mut h = harness(m);
+    h.run();
+    assert!(!h.query_all_by_label_contains("go to the fix").any(|n| n
+        .accesskit_node()
+        .label()
+        .is_some_and(|s| s.contains("wall-note.txt"))));
+    pick_id(h.state_mut(), &id);
+    h.run();
+    assert!(h.query_all_by_label_contains("go to the fix").any(|n| n
+        .accesskit_node()
+        .label()
+        .is_some_and(|s| s.contains("wall-note.txt"))));
+}
+
+#[test]
+fn output_rename_uses_only_the_selected_borrower() {
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    for id in ["landscape/empty", "landscape/other"] {
+        assert!(
+            m.renames_outputs(&view_by_id(&m, id)),
+            "{id} qualifies for Outputs"
+        );
+    }
+    pick_id(&mut m, "landscape/other");
+    assert_eq!(m.rename_keys(RenameMode::Outputs), ["landscape/other"]);
+    assert!(m.rename_keys(RenameMode::Inputs).is_empty());
+    assert_eq!(m.selected_set_total(), 1);
+    let mut h = harness(m);
+    h.run();
+    h.key_press(egui::Key::F2);
+    h.run();
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = &h.state().dialog else {
+        panic!("F2 on the second borrower must open Rename");
+    };
+    assert_eq!(dlg.mode, RenameMode::Outputs);
+    assert_eq!(dlg.keys, ["landscape/other"]);
+}
+
+#[test]
+fn f2_on_a_texture_in_an_output_eligible_set_renames_the_input() {
+    use sdc_gui::model::{rename::RenameMode, Dialog};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let item = "landscape/rock01.png";
+    m.select_item(item);
+    assert!(!m.rename_keys(RenameMode::Outputs).is_empty());
+    let mut h = harness(m);
+    h.run();
+    h.key_press(egui::Key::F2);
+    h.run();
+    let Some(Dialog::Rename(dlg)) = &h.state().dialog else {
+        panic!("expected Rename")
+    };
+    assert_eq!(dlg.mode, RenameMode::Inputs);
+    assert_eq!(dlg.keys, [item]);
+}
+
+#[test]
+fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
+    use sdc_gui::model::bottom::{filtered, problems, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rel = "landscape/empty-id.txt";
+    std::fs::write(m.root.as_ref().unwrap().join(rel), "notes").unwrap();
+    m.edit_docs("t", None, true, |_, doc| {
+        doc.create_set("");
+        doc.add_member("", rel);
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "").key.is_empty());
+    assert!(problems(&m)
+        .iter()
+        .any(|p| matches!(&p.at, At::Set { key, id }
+        if key.is_empty() && id.is_empty())
+            && p.text.contains("empty-id.txt")));
+    pick_id(&mut m, "");
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().selection, id_selection(""));
+    assert!(filtered(h.state(), Some(&ProblemsFilter::Set(String::new()))).is_empty());
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    let reasons: Vec<_> = h
+        .query_all_by_label_contains("go to the fix")
+        .filter(|n| centre.contains(n.rect().center()))
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("empty-id.txt"), "{reasons:?}");
+    assert!(!h
+        .query_all_by_label("Ready: nothing in this set needs you.")
+        .any(|n| centre.contains(n.rect().center())));
+}
+
+#[test]
+fn a_key_gain_returns_the_scrolled_editor_to_its_top() {
+    use sdc_gui::model::{CentreTab, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    let mut h = harness_at(m, egui::vec2(1400.0, 420.0));
+    h.run();
+    let offset = |h: &Harness<'static, AppModel>| {
+        h.ctx
+            .data(|d| d.get_temp::<f32>(egui::Id::unique("set-editor-observed-offset")))
+            .expect("2D editor drew its scroll area")
+    };
+    assert_eq!(offset(&h), 0.0);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    h.query_all_by_label("Advanced TruePBR settings")
+        .find(|n| centre.x_range().contains(n.rect().center().x))
+        .unwrap()
+        .scroll_to_me();
+    h.run();
+    assert!(offset(&h) > 0.0, "precondition: the editor scrolled");
+    h.state_mut().open_json_editor();
+    h.run();
+    assert_eq!(h.state().centre_tab, CentreTab::Json);
+    give_a_file(h.state_mut(), "landscape/empty", "landscape/one.png");
+    h.run();
+    let v = view_by_id(h.state(), "landscape/empty");
+    assert!(!v.key.is_empty());
+    assert_eq!(h.state().selection, Selection::Set(v.key));
+    assert_eq!(h.state().centre_tab, CentreTab::Selection);
+    assert_eq!(offset(&h), 0.0);
+}
+
+#[test]
+fn choosing_a_keyed_set_over_a_texture_opens_its_editor() {
+    use sdc_gui::model::{CentreTab, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rock = view_by_id(&m, "landscape/rock01").key;
+    m.expand("landscape/rock01.png");
+    m.select_set(&rock);
+    assert!(m.expanded.is_none());
+    assert_eq!(m.selection, Selection::Set(rock));
+    assert_eq!(m.centre_front(), CentreTab::Selection);
+    assert!(m.reveal_centre);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Also export");
+}
+
+#[test]
+fn a_key_less_editor_resolves_once_per_view_revision() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    let mut h = harness(m);
+    h.run();
+    let before = h.state().resolved_selection();
+    assert_eq!(before.view().unwrap().id, "landscape/other");
+    assert!(before.view().unwrap().key.is_empty());
+    let n = h.state().selection_builds.get();
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n,
+        "idle editor rebuilt identity"
+    );
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "editor copied or searched for its set"
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &before,
+        &h.state().resolved_selection()
+    ));
+    pick_id(h.state_mut(), "landscape/empty");
+    h.run();
+    let next = h.state().resolved_selection();
+    assert_eq!(next.view().unwrap().id, "landscape/empty");
+    assert_eq!(h.state().selection_builds.get(), n + 1);
+    h.state_mut().invalidate_views();
+    h.run_steps(5);
+    let fresh = h.state().resolved_selection();
+    assert!(!std::sync::Arc::ptr_eq(&next.views, &fresh.views));
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n + 2,
+        "one build for replacement views"
+    );
+    pick_id(h.state_mut(), "missing-card");
+    h.run_steps(5);
+    assert!(h.state().resolved_selection().view().is_none());
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n + 3,
+        "cache a missing target too"
+    );
+}
+
+#[test]
+fn the_selected_headers_output_name_tracks_document_edits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    m.edit_docs("t", None, true, |_, doc| {
+        doc.set_output_name(id, Some("other-output"))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    pick_id(&mut m, id);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("Output name \"other-output\" is ignored");
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(sdc_gui::model::identity_work(), work);
+    h.state_mut().clear_output_name(id);
+    h.step();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert!(h.query_by_label_contains("other-output").is_none());
+}
+
+#[test]
+fn the_records_header_counts_the_selected_borrowers_blocks() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    m.add_cs_block(id, Kind::Txst);
+    m.add_cs_block(id, Kind::Mato);
+    pick_id(&mut m, id);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("2 records");
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "the records header searched for its blocks"
+    );
+    pick_id(h.state_mut(), "landscape/empty");
+    h.run();
+    h.get_by_label("0 records");
+}
+
+#[test]
+fn a_warmed_partial_keeps_the_other_cards_member_storage() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_set(&view_by_id(&m, "landscape/rock01").key);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().hold_plan_results = true;
+    h.state_mut().set_field(
+        "landscape/leaf.png",
+        "alpha.policy",
+        serde_json::json!("cutout"),
+    );
+    h.run_steps(2);
+    let m = h.state_mut();
+    let member_ptr = |m: &AppModel| m.resolved_selection().view().unwrap().members[0].as_ptr();
+    let before = member_ptr(m);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        m.poll();
+        if let Some(msg) = m
+            .take_held()
+            .into_iter()
+            .find(|msg| matches!(msg, WorkerMsg::Partial { seq, .. } if *seq > m.applied_seq))
+        {
+            m.handle_held(msg);
+            break;
+        }
+        assert!(std::time::Instant::now() < until);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!m.partial_pending);
+    assert_eq!(before, member_ptr(m), "the splice cloned an unchanged set");
+}
+
+#[test]
+fn advanced_reads_the_material_edit_in_the_same_frame() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    pick_id(&mut m, id);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
+    h.run();
+    h.get_by_label("Advanced TruePBR settings").click();
+    h.run();
+    let observed = |h: &Harness<'static, AppModel>| {
+        h.ctx
+            .data(|d| d.get_temp::<bool>(egui::Id::unique("advanced-observed-parallax")))
+    };
+    assert_eq!(observed(&h), Some(false));
+    h.get_by_label("Parallax").click();
+    for _ in 0..3 {
+        h.step();
+        if view_by_id(h.state(), id).settings.get("parallax") == Some(&serde_json::json!(true)) {
+            assert_eq!(observed(&h), Some(true), "Advanced drew the pre-edit view");
+            return;
+        }
+    }
+    panic!("Material did not commit Parallax");
+}
+
+#[test]
+fn repeated_selection_reads_do_not_construct_owned_view_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    let active = m.resolved_selection();
+    let start = sdc_gui::model::sets::root_reads();
+    for _ in 0..5 {
+        assert!(std::sync::Arc::ptr_eq(&active, &m.resolved_selection()));
+    }
+    assert_eq!(sdc_gui::model::sets::root_reads(), start);
+}
+
 fn pick_id(m: &mut AppModel, id: &str) {
     m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
 }
@@ -5378,7 +5753,7 @@ fn deleting_a_selected_key_less_set_selects_no_other_set() {
 
 /// B3-16, B3-17 (Note JP5; F6 N1): a key-less set is named by its id. Each of two key-less sets lists and reasons
 /// its own missing entry and not the other's, through the model, for both sets; the empty string names no set. The
-/// editor opens the first key-less set for the empty key (selection by key is Plan 3b's, F2): its status line reads
+/// editor opens the chosen key-less set by document id: its status line reads
 /// "Not ready:" with its own reason, not "no files yet".
 #[test]
 fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
@@ -5429,7 +5804,7 @@ fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
     } else {
         ("two.txt", "one.txt")
     };
-    m.go_to_set("", None);
+    m.go_to_target(sdc_gui::model::SetTarget::Id(first.clone()), None);
     let mut h = harness(m);
     h.run();
     assert!(h.query_by_label(NO_FILES_YET).is_none(), "it has a row");
@@ -5800,7 +6175,7 @@ fn a_key_less_sets_reason_opens_its_own_rows() {
     use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
     let d = tempfile::tempdir().unwrap();
     let mut m = key_less_sets(d.path());
-    // The editor opens the first key-less set for the empty key (selection by key, B3-20).
+    // Open the chosen document card by id.
     let first = sdc_gui::model::sets::set_views(&m)
         .into_iter()
         .find(|v| v.key.is_empty())
@@ -5811,7 +6186,7 @@ fn a_key_less_sets_reason_opens_its_own_rows() {
     } else {
         ("two.txt", "one.txt")
     };
-    m.go_to_set("", None);
+    m.go_to_target(sdc_gui::model::SetTarget::Id(first.clone()), None);
     let mut h = harness(m);
     h.run();
     h.get_by_label_contains("— go to the fix").click();
@@ -5870,7 +6245,10 @@ fn a_set_with_no_entry_says_no_files_yet_on_its_status_line() {
     );
     assert!(no_files_yet(&flagged(&m), &v));
     assert!(set_reasons(&m, "landscape/empty").is_empty());
-    m.go_to_set("", None);
+    m.go_to_target(
+        sdc_gui::model::SetTarget::Id("landscape/empty".into()),
+        None,
+    );
     let mut h = harness(m);
     h.run();
     h.get_by_label(NO_FILES_YET);

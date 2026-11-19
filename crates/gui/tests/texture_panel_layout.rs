@@ -693,7 +693,7 @@ type H3 = Harness<'static, (AppModel, sdc_gui::ui::State)>;
 /// AG132: a set member selected in the 3D view shows its settings in the floating window, at its default size.
 fn window_harness(dir: &std::path::Path) -> H3 {
     use sdc_gui::model::pbr_export::json_entries;
-    use sdc_gui::model::set_preview::{followed_set, SetPreview, DEFAULT_CAP};
+    use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
     let mut m = pbr_opened_plain(dir);
     let key = json_entries(&m)
         .into_iter()
@@ -703,7 +703,8 @@ fn window_harness(dir: &std::path::Path) -> H3 {
         .key;
     m.select_set(&key);
     m.settings.set_view_3d = true;
-    let set = followed_set(&m).unwrap();
+    let active = m.resolved_selection();
+    let set = &active.view().expect("keyed fixture").key;
     let item = m
         .items
         .iter()

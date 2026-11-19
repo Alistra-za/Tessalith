@@ -540,7 +540,7 @@ fn nothing_opens_the_set_of_a_no_set_texture() {
     }));
     // The panel follows no set when the texture is selected.
     m.select_item(NORMAL);
-    assert_eq!(sdc_gui::model::set_preview::followed_set(&m), None);
+    assert!(m.resolved_selection().target.is_none());
     // The Review "Go to set" and Problems rows take their set key from a view: every key is a card's.
     let keys: Vec<String> = set_views(&m).iter().map(|v| v.key.clone()).collect();
     for b in sdc_gui::model::pbr_export::export_blocks(&m).iter() {

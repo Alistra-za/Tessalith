@@ -118,7 +118,7 @@ fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
 
 /// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
 fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
-    let reasons = cached_set_reasons(model, scope_key(v));
+    let reasons = cached_set_reasons(model, v);
     // A set the export blocks on has the card's red dot (`sets_column`), whatever its words say.
     let blocked = export_blocks(model).iter().any(|i| i.set_id == v.id);
     let mut act = None;
@@ -264,17 +264,20 @@ pub struct View {
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
-    key: &str,
+    active: &crate::model::ResolvedSelection,
     thumbs: &mut ThumbCache,
     cmds: &mut SlotCmdState,
     drops: &mut DropState,
     view: View,
 ) {
-    let all = views(model);
-    // Review E10: Go to set's outline, on the slot rows only (the 3D view and a set gone from the plan drop it).
-    let rows_drawn = !view.three_d && all.iter().any(|v| v.key == key);
-    super::row_reveal::take(ui.ctx(), &mut model.nav, key, rows_drawn);
-    let Some(v) = all.iter().find(|v| v.key == key) else {
+    let selected = active.view();
+    super::row_reveal::take(
+        ui.ctx(),
+        &mut model.nav,
+        active.target.as_ref(),
+        selected.filter(|_| !view.three_d).map(|v| v.id.as_str()),
+    );
+    let Some(v) = selected else {
         ui.weak("This set is no longer in the plan.");
         return;
     };
@@ -318,7 +321,7 @@ pub fn draw(
     if view.to_top {
         area = area.vertical_scroll_offset(0.0);
     }
-    area.show(ui, |ui| {
+    let out = area.show(ui, |ui| {
         head(ui, model, v, view);
         outputs(ui, model, v);
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
@@ -336,10 +339,19 @@ pub fn draw(
             .response
             .on_disabled_hover_text(&why);
         });
-        under_grid(ui, model, v);
+        under_grid(ui, v);
         ui.add_space(6.0);
         tabs(ui, model, v, view.noise_uv);
     });
+    #[cfg(feature = "test-hooks")]
+    ui.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::unique("set-editor-observed-offset"),
+            out.state.clamped_offset().y,
+        )
+    });
+    #[cfg(not(feature = "test-hooks"))]
+    let _ = out;
     super::row_reveal::end(ui.ctx());
     // The slot rows took a waiting Assign… focus, or it has no Assign… to go to (a filled slot): either way it is gone.
     ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
@@ -423,7 +435,7 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     });
     // F3b: the set's output name, or why it is ignored.
     let mut clear_name = false;
-    if let Some(n) = model.output_name_of(&v.id) {
+    if let Some(n) = &v.output_name {
         ui.horizontal_wrapped(|ui| {
             if model.renames_outputs(v) {
                 ui.colored_label(
@@ -625,9 +637,13 @@ fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f
     // settings; `pgp_panel` (a PBR Landscape set's) draws both halves itself.
     let split = json && !(model.target == Target::Cs && crate::model::sets::is_pbr_landscape(v));
     if split {
-        super::pgp_fields::panel_main(ui, model, &v.id);
+        super::pgp_fields::panel_main(
+            ui,
+            model,
+            &super::pgp_fields::context_of(model, &v.id, Some(v)),
+        );
         super::cs_pbr::section(ui, model, v);
-        super::pgp_fields::panel_advanced(ui, model, &v.id);
+        super::pgp_fields::advanced_of(ui, model, v);
     } else if json {
         super::cs_pbr::pgp_panel(ui, model, v);
     }
@@ -680,11 +696,11 @@ fn slot_note(ui: &mut egui::Ui, drops: &DropState, set: &str) {
 }
 
 /// The recipe lines and what matches nothing (the set's problems are on the status line, review E4).
-fn under_grid(ui: &mut egui::Ui, model: &AppModel, v: &SetView) {
-    let Some(set) = model.sets.iter().find(|s| s.key == v.key) else {
+fn under_grid(ui: &mut egui::Ui, v: &SetView) {
+    if v.key.is_empty() {
         return;
-    };
-    for r in &set.recipes {
+    }
+    for r in &v.recipes {
         ui.add_space(4.0);
         recipe(ui, r);
     }
@@ -1331,7 +1347,7 @@ fn row(
             egui::StrokeKind::Outside,
         );
     }
-    super::row_reveal::on_row(ui, &v.key, slot, item_key.as_deref(), rect);
+    super::row_reveal::on_row(ui, &v.id, slot, item_key.as_deref(), rect);
     RowWidths {
         widths: [slot_w, THUMB, format_w, flags_w, status_w],
         base_widths: [slot_w, THUMB, format_base_w, flags_w, status_w],

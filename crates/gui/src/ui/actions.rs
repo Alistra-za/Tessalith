@@ -501,7 +501,8 @@ pub static ACTIONS: &[Action] = &[
         |m, _| {
             use crate::model::rename::RenameMode;
             // Note HJ1: no PGPatcher PBR set in the selection → Inputs.
-            let sets = !m.selected_sets().is_empty() && !m.rename_keys(RenameMode::Outputs).is_empty();
+            let sets = matches!(m.selection, crate::model::Selection::Set(_) | crate::model::Selection::SetId(_))
+    && !m.rename_keys(RenameMode::Outputs).is_empty();
             m.open_rename(if sets {
                 RenameMode::Outputs
             } else {

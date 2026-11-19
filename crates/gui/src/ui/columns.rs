@@ -348,8 +348,9 @@ pub struct ColumnStats {
     pub vram: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct StatsKey {
+    views: std::sync::Weak<Vec<crate::model::sets::SetView>>,
     items: u64,
     filter: crate::model::Filter,
     search: String,
@@ -362,7 +363,29 @@ struct StatsKey {
 
 /// `changed on disk` and `undecided` stay uncounted here: they are one cheap pass and move without the items revision.
 pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStats> {
+    let views = crate::model::sets::views(model);
+    let id = egui::Id::unique("column-stats");
+    type Stats = Option<(StatsKey, Arc<ColumnStats>)>;
+    if let Some(stats) = ctx.data_mut(|d| {
+        let cache = d.get_temp_mut_or_insert_with::<Stats>(id, || None);
+        cache
+            .as_ref()
+            .filter(|(k, _)| {
+                k.views.as_ptr() == Arc::as_ptr(&views)
+                    && k.items == model.items_rev()
+                    && k.filter == model.filter
+                    && k.search == model.search
+                    && k.sort == model.prefs.sort
+                    && k.selection == model.selection
+                    && k.selection_rev == model.multi.selection_rev
+                    && k.sizes == model.sizes_rev()
+            })
+            .map(|(_, stats)| stats.clone())
+    }) {
+        return stats;
+    }
     let key = StatsKey {
+        views: Arc::downgrade(&views),
         items: model.items_rev(),
         filter: model.filter.clone(),
         search: model.search.clone(),
@@ -371,22 +394,16 @@ pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStat
         selection_rev: model.multi.selection_rev,
         sizes: model.sizes_rev(),
     };
-    let id = egui::Id::unique("column-stats");
-    if let Some((k, s)) = ctx.data(|d| d.get_temp::<(StatsKey, Arc<ColumnStats>)>(id)) {
-        if k == key {
-            return s;
-        }
-    }
     let items = model.selected_items();
     // Asking for the sizes can start a header job; the key above then changes when it lands.
     let vram = model.vram_text(&items);
     let s = Arc::new(ColumnStats {
         summary: model.selection_summary(false),
         chosen: items.into_iter().collect(),
-        sets: model.selected_sets().into_iter().collect(),
+        sets: model.selected_set_ids().into_iter().collect(),
         vram,
     });
-    ctx.data_mut(|d| d.insert_temp(id, (key, s.clone())));
+    ctx.data_mut(|d| d.insert_temp(id, Some((key, s.clone()))));
     s
 }
 

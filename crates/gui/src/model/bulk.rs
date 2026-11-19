@@ -270,6 +270,9 @@ impl AppModel {
     /// F3a D1: "12 selected", or "12 selected (4 hidden by filter)", for the column of that kind while two or
     /// more are selected there.
     pub fn selection_summary(&self, sets: bool) -> Option<String> {
+        if !self.in_bulk() {
+            return None;
+        }
         let keys = self.selected(sets);
         if keys.len() < 2 {
             return None;

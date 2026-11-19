@@ -6,7 +6,7 @@ use super::items::ItemKind;
 use super::rename::{
     input_output, lower, plan_rename, split_ext, split_path, RenameDialog, RenameMode, RenameRow,
 };
-use super::sets::{member_tail, views, SlotFill, SlotKind};
+use super::sets::{member_tail, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
 use engine::sets::{fold_id, same_id};
 use std::ops::Range;
@@ -95,8 +95,14 @@ impl AppModel {
     /// The current input name of set `set_id` and the suffix its own diffuse keeps under any name: the diffuse's game
     /// path without extension, split (Note HC3: `body_albedo` is the name `body` and `_albedo`).
     fn input_name_parts(&self, set_id: &str) -> Option<(String, String)> {
+        #[cfg(feature = "test-hooks")]
+        super::count_identity_work();
         let views = views(self);
         let v = views.iter().find(|v| same_id(&v.id, set_id))?;
+        self.input_name_parts_of(v)
+    }
+
+    pub(crate) fn input_name_parts_of(&self, v: &SetView) -> Option<(String, String)> {
         let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Diffuse) else {
             return None;
         };
@@ -122,11 +128,19 @@ impl AppModel {
     /// The plan for giving set `set_id` the input name `chosen` (a game path such as `textures/landscape/rock02`,
     /// with or without `.dds`), or why it cannot have it.
     pub fn input_name_plan(&self, set_id: &str, chosen: &str) -> Result<InputNamePlan, String> {
-        let v = views(self)
+        let views = views(self);
+        let v = views
             .iter()
             .find(|v| same_id(&v.id, set_id))
-            .cloned()
             .ok_or("the set is no longer in the plan")?;
+        self.input_name_plan_of(v, chosen)
+    }
+
+    pub(crate) fn input_name_plan_of(
+        &self,
+        v: &SetView,
+        chosen: &str,
+    ) -> Result<InputNamePlan, String> {
         let Some(SlotFill::Own { item: diffuse }) = v.slots.get(&SlotKind::Diffuse) else {
             return Err("the set has no diffuse of its own to name it by".into());
         };
@@ -153,7 +167,12 @@ impl AppModel {
         let chosen = lower(chosen.trim()).replace('\\', "/");
         let chosen = super::known_paths::strip_dds(&chosen).trim_matches('/');
         // Note HC3: the diffuse keeps its suffix, so a name typed with it must not double it.
-        let tail = lower(&self.input_name_tail(set_id));
+        let tail = lower(
+            &self
+                .input_name_parts_of(v)
+                .map(|(_, tail)| tail)
+                .unwrap_or_default(),
+        );
         let chosen = chosen.strip_suffix(tail.as_str()).unwrap_or(chosen);
         if chosen.is_empty() {
             return Err("type or pick a path".into());

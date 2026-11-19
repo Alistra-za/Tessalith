@@ -64,7 +64,7 @@ fn draw(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, card: bool) {
     // Layout v2 A3 (A12): the records panel counts its blocks in the header; the card has no header value.
     let n = [Kind::Txst, Kind::Mato]
         .into_iter()
-        .filter(|k| m.cs_block(&v.id, *k).is_some())
+        .filter(|k| v.cs_block(*k).is_some())
         .count();
     let s = if n == 1 { "" } else { "s" };
     let head = (!card).then(|| egui::RichText::new(format!("{n} record{s}")).weak());
@@ -80,18 +80,26 @@ fn draw(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, card: bool) {
                 acts.push(Act::Refresh);
             }
             if card {
-                shared(ui, m, v, &mut acts);
+                shared(ui, v, &mut acts);
             }
             for kind in [Kind::Txst, Kind::Mato] {
                 ui.separator();
                 let always = card && kind == Kind::Txst;
-                match m.cs_block(&v.id, kind) {
+                match v.cs_block(kind) {
                     None if !always => {
                         if ui.button(format!("Add {}", kind.label())).clicked() {
                             acts.push(if card { Act::AddMato } else { Act::Add(kind) });
                         }
                     }
-                    b => block(ui, m, v, kind, &b.unwrap_or_default(), card, &mut acts),
+                    b => block(
+                        ui,
+                        m,
+                        v,
+                        kind,
+                        b.unwrap_or(&CsBlock::default()),
+                        card,
+                        &mut acts,
+                    ),
                 }
             }
         },
@@ -115,10 +123,11 @@ fn draw(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, card: bool) {
 }
 
 /// Note BM16: the shared fields, shown with the texture set's value and written to every block that follows it.
-fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
+fn shared(ui: &mut egui::Ui, v: &SetView, acts: &mut Vec<Act>) {
     ui.separator();
     ui.strong(SHARED);
-    let b = m.cs_block(&v.id, Kind::Txst).unwrap_or_default();
+    let default = CsBlock::default();
+    let b = v.cs_block(Kind::Txst).unwrap_or(&default);
     let mut own = vec![];
     for f in fields(Kind::Txst)
         .iter()
@@ -133,13 +142,13 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
 }
 
 /// Note BM16: a material object's shared field: "shared (above)" with Unsync, or its own row with Sync.
-fn mato_shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut Vec<Act>) {
-    let txst = m.cs_block(&v.id, Kind::Txst);
+fn mato_shared(ui: &mut egui::Ui, v: &SetView, b: &CsBlock, acts: &mut Vec<Act>) {
+    let txst = v.cs_block(Kind::Txst);
     for f in fields(Kind::Mato)
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
-        if mato_synced(txst.as_ref(), b, f.name) {
+        if mato_synced(txst, b, f.name) {
             ui.horizontal_wrapped(|ui| {
                 ui.weak(format!("{}: shared (above)", field_label(f.name)));
                 if ui
@@ -216,7 +225,7 @@ fn block(
         field_row(ui, kind, f, b.values.get(f.name), acts);
     }
     if card && kind == Kind::Mato {
-        mato_shared(ui, m, v, b, acts);
+        mato_shared(ui, v, b, acts);
     }
     if hidden > 0 {
         ui.weak(format!("{hidden} {HIDDEN_ROWS}"));
@@ -537,7 +546,7 @@ pub const PGP_PANEL_NOTE: &str =
 /// slots and the unmapped keys stay editable).
 pub fn pgp_panel(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     if model.target != engine::config::Target::Cs || !is_pbr_landscape(v) {
-        return super::pgp_fields::panel(ui, model, &v.id);
+        return super::pgp_fields::panel_of(ui, model, v);
     }
     let on = model.pgp_written(v);
     let title = if on { PGP_PANEL } else { PGP_PANEL_OFF };
@@ -553,7 +562,7 @@ pub fn pgp_panel(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
             } else {
                 PGP_PANEL_OFF_NOTE
             });
-            super::pgp_fields::panel(ui, model, &v.id);
+            super::pgp_fields::panel_of(ui, model, v);
         },
     );
 }

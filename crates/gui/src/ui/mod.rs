@@ -153,15 +153,21 @@ pub fn draw_with_scan(
     // Under the header and the scan row, before the columns (R7).
     bottom::draw(ui, model, &mut state.drawer, false);
     // Note FB7: a new selection (or preview) brings the selection back to the front of the centre.
-    let seen = (model.selection.clone(), model.expanded.clone());
-    let seen_id = egui::Id::unique("centre-tab-seen");
-    if ui
-        .data(|d| d.get_temp::<(Selection, Option<String>)>(seen_id))
-        .is_some_and(|s| s != seen)
-    {
+    let changed = ui.data_mut(|d| {
+        let prev = d.get_temp_mut_or_insert_with(egui::Id::unique("centre-tab-seen"), || {
+            (model.selection.clone(), model.expanded.clone())
+        });
+        if prev.0 == model.selection && prev.1 == model.expanded {
+            false
+        } else {
+            prev.0.clone_from(&model.selection);
+            prev.1.clone_from(&model.expanded);
+            true
+        }
+    });
+    if changed {
         model.centre_tab = CentreTab::Selection;
     }
-    ui.data_mut(|d| d.insert_temp(seen_id, seen));
     // The 2D | 3D switch (AB4, AG78): in 3D the set's 3D view takes the centre in place of the set editor's body.
     let three_d = state.set3d.enabled && set_preview::wanted(model);
     let selection_in_front = model.centre_front() == CentreTab::Selection;
@@ -319,8 +325,8 @@ pub fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
         && model.expanded.is_none()
         && !model.in_bulk()
         && (three_d
-            || matches!(&model.selection, Selection::Set(key)
-                if crate::model::sets::views(model).iter().any(|v| v.key == *key)))
+            || matches!(&model.selection, Selection::Set(_) | Selection::SetId(_))
+                && model.resolved_selection().index.is_some())
 }
 
 /// A11: with no folder, one big Open folder…, the recent folders and the drop hint.
@@ -359,24 +365,18 @@ fn start_screen(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// What the centre's scroll area showed last (Note FI6).
-#[derive(Clone, PartialEq)]
-enum CentreShown {
-    Item(String),
-    Set(String),
-    Bulk,
-}
-
-/// True on the frame the centre shows something other than it showed before: that area opens at its top. Call it
-/// once per frame.
-fn switched_to(ctx: &egui::Context, now: CentreShown) -> bool {
-    let id = egui::Id::unique("centre-shown");
-    let before = ctx.data(|d| d.get_temp::<CentreShown>(id));
-    let changed = before.as_ref() != Some(&now);
-    if changed {
-        ctx.data_mut(|d| d.insert_temp(id, now));
-    }
-    changed
+fn switched_to(ctx: &egui::Context, now: Option<&Selection>) -> bool {
+    ctx.data_mut(|d| {
+        let seen = d.get_temp_mut_or_insert_with::<Option<Option<Selection>>>(
+            egui::Id::unique("centre-shown"),
+            || None,
+        );
+        if seen.as_ref().is_some_and(|old| old.as_ref() == now) {
+            return false;
+        }
+        *seen = Some(now.cloned());
+        true
+    })
 }
 
 /// The centre: a docked Presets, JSON editor or Settings tab in front (Note FB7, JI1), else the preview of an expanded
@@ -402,19 +402,19 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
     state.preview = preview::PreviewUi::default();
     // F3a D2/D3: two or more textures or sets.
     if model.in_bulk() {
-        let top = switched_to(ui.ctx(), CentreShown::Bulk);
+        let top = switched_to(ui.ctx(), None);
         bulk_panel::draw(ui, model, top);
         return;
     }
-    let selection = model.selection.clone();
-    match selection {
-        // AG87: on 3D, any member of a set opens or keeps that set's 3D view (`three_d` needs `followed_set`), its own
+    let active = model.resolved_selection();
+    match &active.selection {
+        // AG87: on 3D, any member of a set opens or keeps that set's 3D view when 3D follows its set, its own
         // settings in the settings window (AG132).
         Selection::Item(key) if three_d => {
-            let name = model.item(&key).map_or(key.clone(), |i| i.name.clone());
             ui.horizontal_wrapped(|ui| {
                 set_preview::view_switch(ui, model);
-                ui.heading(&name);
+                let name = model.item(key).map_or(key.as_str(), |i| i.name.as_str());
+                ui.heading(name);
                 // AG132: its own settings are in the settings window, with the set's.
                 set_preview::settings_toggle(ui, model);
             });
@@ -427,22 +427,22 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-texture")
                 .auto_shrink([false, false]);
-            if switched_to(ui.ctx(), CentreShown::Item(key.clone())) {
+            if switched_to(ui.ctx(), Some(&active.selection)) {
                 area = area.vertical_scroll_offset(0.0);
             }
-            area.show(ui, |ui| settings_panel::draw(ui, model, &key, false));
+            area.show(ui, |ui| settings_panel::draw(ui, model, key, false));
         }
-        Selection::Set(key) => {
+        Selection::Set(_) | Selection::SetId(_) => {
             let view = set_editor::View {
                 switch: state.set3d.enabled,
                 three_d,
-                to_top: switched_to(ui.ctx(), CentreShown::Set(key.clone())),
+                to_top: switched_to(ui.ctx(), Some(&active.selection)),
                 noise_uv: three_d.then(|| state.set3d.mato_noise_uv_scale()).flatten(),
             };
             set_editor::draw(
                 ui,
                 model,
-                &key,
+                &active,
                 &mut state.thumbs,
                 &mut state.slot_cmds,
                 &mut state.drops,
@@ -452,7 +452,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
                 set_preview::draw(ui, model, &mut state.set3d);
             }
         }
-        Selection::None | Selection::SetId(_) => {
+        Selection::None => {
             ui.centered_and_justified(|ui| ui.label("Select a texture or a set."));
         }
     }

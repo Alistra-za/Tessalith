@@ -540,6 +540,38 @@ fn filter_matches_names_wrong_rows_and_flags_hide_all_and_no_change() {
 }
 
 #[test]
+fn one_set_open_resolves_a_key_less_selection() {
+    use sdc_gui::model::SetTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    let (_, run) = oracles::ORACLES
+        .iter()
+        .find(|(n, _)| *n == "one_set_open")
+        .unwrap();
+    m.select_target(SetTarget::Id("landscape/other".into()));
+    assert_eq!(run(&m), Ok(None));
+    let id = "landscape/other";
+    m.sets_filter.search = "rock01".into();
+    let state = state::state_json(&m);
+    assert_eq!(state["selection"], "set:landscape/other");
+    assert_eq!(state["selected_sets"], serde_json::json!([id]));
+    assert_eq!(state["sets"][id]["selected"], true);
+    assert_eq!(state["sets"]["landscape/empty"]["selected"], false);
+    assert_eq!(state["sets"][id]["visible"], false);
+    let (_, hidden) = oracles::ORACLES
+        .iter()
+        .find(|(n, _)| *n == "selected_set_kept_while_hidden")
+        .unwrap();
+    assert_eq!(hidden(&m), Ok(None));
+    m.select_target(SetTarget::Id("Landscape/Other".into()));
+    assert_eq!(state::state_json(&m)["selection"], "set:landscape/other");
+    m.select_target(SetTarget::Id("missing-card".into()));
+    assert!(run(&m).is_err());
+    assert!(hidden(&m).is_err());
+    assert_eq!(state::state_json(&m)["selection"], "set:missing-card");
+}
+
+#[test]
 fn one_set_open_decides_on_the_selection() {
     let run = |m: &sdc_gui::model::AppModel| {
         let (_, f) = oracles::ORACLES
