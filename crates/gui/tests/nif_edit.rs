@@ -6893,6 +6893,17 @@ fn a_file_is_cleaned_up_only_while_it_holds_the_ops_the_session_took() {
     ]);
 }
 
+/// Sets the modified time of `p` `secs` seconds ahead of now (a file dated in the future).
+fn ahead(p: &Path, secs: u64) {
+    let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs);
+    std::fs::File::options()
+        .write(true)
+        .open(p)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
 /// Project `p` with one edit (12.5) saved in its draft by the open session. Returns (d, m, p).
 fn saved_in_p() -> (tempfile::TempDir, MeshesModel, std::path::PathBuf) {
     let (d, mut m, p) = session_in_project("p", None);
@@ -7028,6 +7039,100 @@ fn a_kept_autosave_that_cannot_be_checked_is_not_absent() {
     assert!(m.edit.is_none(), "with access back, Close saves and ends");
     m.open_edit();
     assert_eq!(vals(&m), [7.5], "the reverted op is not restored");
+}
+
+/// Review round 4 (Critical "Export X in A, copy that record to export folder B ...", Important "Open P with an older
+/// kept loser ..." and "Give kept, draft and plain successively later future timestamps ...", ruling E6-Q): a
+/// remembered fingerprint belongs to the one pathname it was taken from, and a remembered loser is kept.
+#[test]
+fn ownership_is_of_one_pathname() {
+    let mut rows: Vec<(&str, fn())> = vec![
+        (
+            "export X in A, copy that record to export folder B, add Y, select B, undo Y and X, then Export",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                let (a, b) = (export_root(&d), d.path().join(r"mods\Other"));
+                assert_eq!(export(&mut m), Ok(1), "X recorded in A");
+                std::fs::create_dir_all(nif_doc(&b).parent().unwrap()).unwrap();
+                std::fs::copy(nif_doc(&a), nif_doc(&b)).unwrap();
+                let theirs = std::fs::read(nif_doc(&b)).unwrap();
+                gloss(&mut m, 13.5);
+                m.set_nif_export_root(Some(b.clone()));
+                assert!(m.undo_edit() && m.undo_edit());
+                assert!(m.edit.as_ref().unwrap().doc.ops.is_empty(), "premise: no ops");
+                let r = export(&mut m);
+                assert_eq!(
+                    std::fs::read(nif_doc(&b)).unwrap(),
+                    theirs,
+                    "B's record still has its bytes: {r:?}"
+                );
+                assert!(!b.join(r"meshes\x.nif").exists(), "no NIF in B: {r:?}");
+                let why = r.unwrap_err();
+                assert!(why.contains("holds other edits"), "the export says why: {why}");
+            },
+        ),
+        (
+            "give kept, draft and plain successively later future timestamps, then carry the winning plain edit into \
+             P and quit",
+            || {
+                let (d, mut m) = export_session();
+                let (p, k) = three_versions(&d, &mut m);
+                ahead(&k, 3600);
+                ahead(&draft(&p), 7200);
+                ahead(&autosave(&d), 10800);
+                m.set_project_root(Some(&p));
+                assert_eq!(vals(&m), [12.5], "premise: the live edit is the newest");
+                drop(m); // quit
+                let mut m = restart(&d, &p);
+                m.open_edit();
+                assert_eq!(vals(&m), [12.5], "the carried ops load");
+            },
+        ),
+    ];
+    rows.extend(windows_rows_q());
+    table(&rows);
+}
+
+/// E6-Q's rows that need Windows (a share-mode lock).
+#[cfg(windows)]
+fn windows_rows_q() -> Vec<(&'static str, fn())> {
+    vec![(
+        "open P with an older kept loser, replace the loser with another edit, make P's draft unreplaceable, edit \
+         and Close",
+        a_replaced_kept_loser_stays_at_its_name,
+    )]
+}
+
+#[cfg(not(windows))]
+fn windows_rows_q() -> Vec<(&'static str, fn())> {
+    vec![]
+}
+
+/// E6-Q's kept-fallback row: the fallback writer compares the remembered loser for its pathname, as the cleanup does.
+#[cfg(windows)]
+fn a_replaced_kept_loser_stays_at_its_name() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    let k = kept(&d, &id_of(&p));
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 9.5)).unwrap();
+    make_old(&k);
+    m.open_edit();
+    assert_eq!(vals(&m), [7.5], "premise: the draft won");
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 99.5)).unwrap();
+    let replaced = std::fs::read(&k).unwrap();
+    let lock = hold(&draft(&p), 1);
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let (bytes, aside, open) = (
+        std::fs::read(&k).unwrap(),
+        moved_aside_from(&k),
+        m.edit.is_some(),
+    );
+    drop(lock);
+    assert_eq!(bytes, replaced, "its bytes are still at its name");
+    assert!(aside.is_empty(), "nothing moved aside: {aside:?}");
+    assert!(open, "the leave is refused: nowhere took the edit");
 }
 
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit

@@ -72,10 +72,11 @@ pub struct NifEdit {
     /// The ops of the record at `record_path` when the session does not know it as its own (`record_fp` None) and it
     /// holds any; the export does not replace it unless they begin the session's ops (rulings E6-A, E6-F).
     foreign_record: Option<Vec<DocOp>>,
-    /// Ruling E6-F: the fingerprint of the record this session knows as its own: read while it held nothing the
-    /// session lacked (its ops empty or the first of the session's), or written by this session's export. An equal
-    /// draft id is not ownership.
-    record_fp: Option<String>,
+    /// Rulings E6-F, E6-Q: the record this session knows as its own, as (the pathname, the fingerprint of its bytes):
+    /// adopted there (its ops are the session's) or written there by this session's export. It is compared only with
+    /// the file at that pathname: a fingerprint taken in one export folder says nothing in another. An equal draft id
+    /// is not ownership.
+    record_fp: Option<(PathBuf, String)>,
     /// The record's (length, modified time) when last read, so a moved or changed record is read again while it blocks.
     record_meta: Option<(u64, Option<std::time::SystemTime>)>,
     /// Both empty without an export folder: export is blocked with `NO_EXPORT_FOLDER`.
@@ -731,8 +732,11 @@ fn pick_from(
             Recovery::Won(fp) => {
                 p.plain = Some(fp);
                 p.draft_won = false;
-                // a kept autosave the plain one beat is moved aside at the next save, like one the draft beat
-                p.kept_older = p.kept.take();
+                // a kept autosave the plain one beat is moved aside at the next save, like one the draft beat; ruling
+                // E6-Q: a loser the draft already beat stays remembered (never overwritten with None)
+                if let Some(k) = p.kept.take() {
+                    p.kept_older = Some(k);
+                }
             }
             Recovery::Unreadable(why) => p.unreadable = Some(why),
             Recovery::Older | Recovery::Stays => {}
@@ -1055,11 +1059,13 @@ impl NifEdit {
             return;
         };
         self.record_source = Some(r.source.sha256.clone());
-        // ruling E6-L: the fingerprint is the session's when these are its ops (it takes the record's export state as
-        // its own) or the bytes it wrote there; a record that only begins the session's ops loses nothing (not
-        // foreign) but is not the session's either
-        let ours = Some(&fp) == self.record_fp.as_ref() || same_ops(&r.ops, &self.doc.ops);
-        self.record_fp = ours.then_some(fp);
+        // rulings E6-L, E6-Q: the fingerprint is the session's when these are its ops (it takes the record's export
+        // state as its own) or the bytes it wrote at this very pathname; a record that only begins the session's ops
+        // loses nothing (not foreign, the Export running now may replace it) but gives no ownership
+        let path = self.record_path.clone().unwrap_or_default();
+        let ours = self.record_fp.as_ref() == Some(&(path.clone(), fp.clone()))
+            || same_ops(&r.ops, &self.doc.ops);
+        self.record_fp = ours.then_some((path, fp));
         self.foreign_record = (!starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
         self.doc.export = r.export;
         self.derive_export();
@@ -1132,8 +1138,11 @@ impl NifEdit {
     /// bytes this session knows as its own (`record_fp`), or holds nothing the session's ops lack. Else the reason.
     fn record_write_block(&self) -> Option<String> {
         let p = self.record_path.as_deref()?;
-        if self.record_fp.is_some() && edit_doc::is_known(p, self.record_fp.as_deref()) {
-            return None;
+        // ruling E6-Q: the remembered bytes count only at the pathname they were taken from
+        if let Some((_, fp)) = self.record_fp.as_ref().filter(|(at, _)| at == p) {
+            if edit_doc::is_known(p, Some(fp)) {
+                return None;
+            }
         }
         match edit_doc::load(p) {
             Ok(None) => None,
@@ -1394,7 +1403,7 @@ impl NifEdit {
         self.nif_drift = false; // the NIF just written is the one the record now names
         self.up_to_date = true;
         self.foreign_record = None;
-        self.record_fp = fp;
+        self.record_fp = self.record_path.clone().zip(fp);
         self.record_meta = self.record_path.as_deref().and_then(file_meta);
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
@@ -1611,12 +1620,14 @@ impl NifEdit {
             return;
         }
         // ruling E6-D: the older kept autosave goes to `<sha>.<id>.<secs>.toml`; a failed move is tried by the next save
-        // ruling E6-L: only while it still holds the bytes it lost with; other bytes there are not the session's
+        // ruling E6-L: only while it still holds the bytes it lost with; other bytes there are not the session's. Ruling
+        // E6-Q: those stay where they are and stay remembered, so the kept fallback never writes over them either
         if let Some((k, fp)) = self.kept_older.take() {
-            if k.is_file()
-                && edit_doc::is_known(&k, Some(&fp))
-                && !self.move_aside(&k, "The kept autosave")
-            {
+            let keep = match edit_doc::is_known(&k, Some(&fp)) {
+                true => k.is_file() && !self.move_aside(&k, "The kept autosave"),
+                false => true,
+            };
+            if keep {
                 self.kept_older = Some((k, fp));
             }
         }
@@ -1671,6 +1682,16 @@ impl NifEdit {
             return Err("there is no autosave folder".into());
         };
         let k = edit_doc::kept_autosave_path(dir, &self.data_path, id);
+        // ruling E6-Q: the loser this session remembers at this name, as the cleanup does: replaced since, it is not
+        // the session's to move or write over, and the write is refused
+        if let Some((_, fp)) = self.kept_older.as_ref().filter(|(at, _)| *at == k) {
+            if !edit_doc::is_known(&k, Some(fp)) {
+                return Err(format!(
+                    "{} holds edits of this NIF that this session did not open; they are left where they are",
+                    k.display()
+                ));
+            }
+        }
         let known = self
             .kept_fp
             .clone()
