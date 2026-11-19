@@ -230,12 +230,12 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     } else {
         size.y
     };
-    // Once per frame: the text, the accent and the hover all read the same answer.
-    let now = model.header_writes_now();
-    let ready = model.accent_for(now);
-    let mut export = egui::Button::new(egui::RichText::new(model.export_text(now)).strong())
+    // Once per frame (ruling 3c-28): the text, the accent and the hover all read the same answer.
+    let answer = model.header_answer();
+    let now = answer.now;
+    let mut export = egui::Button::new(egui::RichText::new(model.export_text(&answer)).strong())
         .min_size(egui::vec2(size.x, button_h));
-    if ready {
+    if answer.accent {
         export = export.fill(ui.visuals().selection.bg_fill);
     }
     ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Center), |ui| {
@@ -248,7 +248,7 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
                 return;
             }
             // Note FC5 (supersedes CZ6's hover): NIF edits are Review rows, so the Meshes view's line is gone.
-            ui.label(export_hover(model));
+            ui.label(export_hover_for(model, now));
             if !now {
                 let nifs = model.nif_review_rows().len();
                 // A clean project that opens Review (the default) has nothing open to name.
@@ -301,6 +301,11 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
 /// Export's hover (A12): "{n} files, {m} problems" ("1 file, 1 problem" for one, `counted`); with an "Also export
 /// as" tick on, "{n} files + Vanilla folder, {m} problems" (Note JF1: the count is the PBR folder's).
 pub fn export_hover(model: &AppModel) -> String {
+    export_hover_for(model, model.header_writes_now())
+}
+
+/// [`export_hover`] for the write-now answer the header already has this frame.
+fn export_hover_for(model: &AppModel, now: bool) -> String {
     let n = crate::model::bottom::flagged(model).ready_rows;
     let files = counted(model.export_files(), "file", "files");
     let n = counted(n, "problem", "problems");
@@ -310,7 +315,7 @@ pub fn export_hover(model: &AppModel) -> String {
         format!("{files}, {n}")
     };
     // E3: the button reads "Export {n} files now": say why a click writes.
-    if model.header_writes_now() {
+    if now {
         text.push_str(
             "\nWrites at once: Review is off for this project. Turn it back on in Settings.",
         );

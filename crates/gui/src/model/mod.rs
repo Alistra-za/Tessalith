@@ -374,10 +374,8 @@ pub(crate) struct ViewKey {
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
-/// E3: the whole-project header answer `(writes_without_review, export_files)` and the keys it was read under.
+/// E3: the whole project's keyed header terms and the keys they were read under.
 type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
-/// E3: whether the whole project's PGPatcher JSON is edited, the view key and the time it was read.
-type WholeJson = (ViewKey, Instant, Option<review::JsonLine>);
 
 /// E3 (rulings 3c-26, 3c-30): what a waiting whole-project click was made against. When its plan lands, any of these
 /// that moved sends it to Review instead of writing: a safe answer for a change no clear site knows about. An input
@@ -594,6 +592,9 @@ pub struct AppModel {
     pub(crate) reason_scans: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
+    /// E3 (ruling 3c-28): evaluations of the write-now rule (`writes_rule`); see `review::rule_reads`.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) rule_reads: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
     #[cfg(feature = "test-hooks")]
     pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
@@ -696,10 +697,11 @@ pub struct AppModel {
     /// E3 (ruling 3c-14): set while the whole-project header answer is computed, so `export_scope()` reads `None` and
     /// every scope-keyed cache takes a slot of its own (`view_key`). Never set across a call that can return.
     whole_view: std::cell::Cell<bool>,
-    /// E3: the whole-project `(writes_without_review, export_files)` while a scope is set, by the inputs it reads.
+    /// E3: the whole project's keyed header terms while a scope is set (`review::WholeTerms`).
     whole_cache: std::cell::RefCell<Option<WholeAnswer>>,
-    /// E3: the whole project's PGPatcher JSON state while a scope is set, re-read once per `REVIEW_JSON_TTL`.
-    whole_json: std::cell::RefCell<Option<WholeJson>>,
+    /// E3 (ruling 3c-28): the whole project's filesystem-derived header terms while a scope is set, re-read once per
+    /// `REVIEW_JSON_TTL` (`review::WholeDisk`). Drawing only.
+    whole_disk: std::cell::RefCell<Option<review::WholeDisk>>,
     /// Review's Export was clicked while a plan or scan read was in flight: the export continues when it lands.
     continue_after_plan: Option<Continue>,
     /// The user chose to cancel the running export and then close or open: done when the export has ended.
@@ -941,6 +943,8 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
+            rule_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
             stale_drops: Default::default(),
             #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
@@ -973,7 +977,7 @@ impl AppModel {
             landing: 0,
             whole_view: std::cell::Cell::new(false),
             whole_cache: std::cell::RefCell::new(None),
-            whole_json: std::cell::RefCell::new(None),
+            whole_disk: std::cell::RefCell::new(None),
             continue_after_plan: None,
             after_export: None,
             pending_json: None,
@@ -2278,9 +2282,7 @@ impl AppModel {
         // The count is read only when the label can use it (a write-now answer): the default, opted-in-never project
         // pays nothing per plan.
         // Whole-project, whatever scope an open Review has (ruling 3c-14: the header's answer is never a scope's).
-        let writes = self.whole_writes();
-        (self.settled_writes_now, self.settled_export_files) =
-            (writes, if writes { self.whole_files() } else { 0 });
+        (self.settled_writes_now, self.settled_export_files) = self.whole_writes_now();
     }
 
     /// E3: `hold_settled` at a settled-to-pending transition, never inside a landing worker result (a landed

@@ -265,6 +265,12 @@ impl AppModel {
         if !self.also_runs() {
             return None;
         }
+        self.toml_unwritable_now()
+    }
+
+    /// Why `sdc.toml` cannot be saved now (one metadata read), whatever the scope; `None`: writable. The whole-project
+    /// header's drawing cache reads it (ruling 3c-28), Review through `also_toml_unwritable`.
+    pub(super) fn toml_unwritable_now(&self) -> Option<String> {
         self.sdc_toml_writable()
             .err()
             .map(|_| TOML_READ_ONLY.to_string())
@@ -273,8 +279,18 @@ impl AppModel {
     /// Review's Also rows, in A9's order: the read-only `sdc.toml`, the cs mode (TA20), the location (TA19), the
     /// `[export]` values. The first `Err` is the button's reason.
     pub fn also_gate(&self) -> Result<(), String> {
-        if let Some(why) = self.review.as_ref().and_then(|r| r.toml_unwritable.clone()) {
-            return Err(why);
+        self.also_gate_with(
+            self.review
+                .as_ref()
+                .and_then(|r| r.toml_unwritable.as_deref()),
+        )
+    }
+
+    /// `also_gate` for a writability reading the caller took (`None`: writable): Review's own, taken when it opened,
+    /// or the whole-project header's (ruling 3c-28).
+    pub(super) fn also_gate_with(&self, toml_unwritable: Option<&str>) -> Result<(), String> {
+        if let Some(why) = toml_unwritable {
+            return Err(why.to_string());
         }
         if self.target != Target::Cs {
             return Err(NEEDS_CS.into());

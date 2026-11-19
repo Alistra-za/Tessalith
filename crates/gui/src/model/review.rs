@@ -13,13 +13,35 @@ use std::time::{Duration, Instant};
 /// sleeping past it.
 pub const REVIEW_JSON_TTL: Duration = Duration::from_secs(1);
 
-/// E3 (ruling 3c-24): the whole project's keyed terms, held while a scope is set: the export file count, the export\n/// blockers (the gate's one set-view walk), the undecided count and the counted Problems rows. Nothing else is held.
+/// E3 (rulings 3c-24, 3c-28): the whole project's keyed terms, held while a scope is set: the export file count, the
+/// export blocker count, the undecided count and the counted Problems rows (see `AppModel::whole_terms`).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WholeTerms {
     files: usize,
     blocks: usize,
     undecided: usize,
     problem_rows: bool,
+}
+
+/// E3 (ruling 3c-28): the whole project's filesystem-derived display terms while a scope is set, in one drawing cache:
+/// re-read once per `REVIEW_JSON_TTL` and whenever the view key moves. The write decision never reads it.
+pub(super) struct WholeDisk {
+    key: super::ViewKey,
+    at: Instant,
+    /// The whole project's PGPatcher JSON line (one file read, a hash when edited).
+    pgp: Option<JsonLine>,
+    /// Why `sdc.toml` cannot be saved (`None`: writable), read whatever the scope: a tick runs on a whole-project
+    /// export.
+    toml_unwritable: Option<String>,
+}
+
+/// E3 (ruling 3c-28): what the header's Export button shows this frame, computed once (`AppModel::header_answer`):
+/// whether a click writes at once, the file count its label names, and whether it draws the accent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeaderAnswer {
+    pub now: bool,
+    pub files: usize,
+    pub accent: bool,
 }
 
 /// Note FB1: the gate's reason, and the Blockers row's text, while no export folder is chosen.
@@ -90,6 +112,12 @@ pub fn disk_state(path: &Path, recorded: Option<&str>) -> DiskState {
     }
 }
 
+/// E3 (ruling 3c-28): how many times the write-now rule has been evaluated (a frame of the header evaluates it once).
+#[cfg(feature = "test-hooks")]
+pub fn rule_reads(m: &AppModel) -> u64 {
+    m.rule_reads.get()
+}
+
 fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
@@ -104,11 +132,11 @@ impl AppModel {
         self.show_tab(BottomTab::Review);
     }
 
-    /// Tests: end `review_json`'s cache now, as `REVIEW_JSON_TTL` passing would.
+    /// Tests: end `review_json`'s cache and the header's drawing cache now, as `REVIEW_JSON_TTL` passing would.
     #[cfg(feature = "test-hooks")]
     pub fn expire_review_json(&self) {
         self.review_json_cache.take();
-        self.whole_json.take();
+        self.whole_disk.take();
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
@@ -288,7 +316,13 @@ impl AppModel {
     pub fn review_gate(&self) -> Result<(usize, usize), String> {
         self.gate_check(
             || pbr_export::export_blocks(self).len(),
-            self.also_runs(),
+            || {
+                if self.also_runs() {
+                    self.also_gate()
+                } else {
+                    Ok(())
+                }
+            },
             || self.unanswered_overwrites(),
         )?;
         Ok(if self.root.is_none() {
@@ -298,13 +332,13 @@ impl AppModel {
         })
     }
 
-    /// The gate's checks in A9's order. The caller says where its keyed term (the export blockers) comes from, whether
-    /// an Also export runs, and where the unanswered overwrites come from: the whole-project header reads the same
-    /// checks with its own sources (`whole_gate`), everything else live.
+    /// The gate's checks in A9's order. The caller says where its keyed term (the export blockers) comes from, what the
+    /// Also check answers (`Ok` when no Also export runs), and where the unanswered overwrites come from: the
+    /// whole-project header reads the same checks with its own sources (`whole_gate`), everything else live.
     fn gate_check(
         &self,
         blocks: impl FnOnce() -> usize,
-        also: bool,
+        also: impl FnOnce() -> Result<(), String>,
         unanswered: impl Fn() -> Vec<String>,
     ) -> Result<(), String> {
         if self.root.is_none() {
@@ -348,9 +382,7 @@ impl AppModel {
             return Err(format!("Fix {} first", counted(n, "blocker", "blockers")));
         }
         // Note CN: the Also rows, after the blocks and before the overwrite questions (A9); nothing writes (7.1, 7.2).
-        if also {
-            self.also_gate()?;
-        }
+        also()?;
         // Note FC5: then every overwrite question (supersedes CA7's "no choice made: asked after the export").
         if let Some(name) = unanswered().first() {
             return Err(format!("Answer Keep or Overwrite for {name}"));
@@ -368,11 +400,11 @@ impl AppModel {
             .review_json()
             .into_iter()
             .find(|l| l.kind == JsonKind::PgPatcher);
-        self.unanswered_with(pgp)
+        self.unanswered_with(pgp.as_ref())
     }
 
     /// `unanswered_overwrites` for a PGPatcher JSON line the caller read (the whole-project header reads its own).
-    fn unanswered_with(&self, pgp: Option<JsonLine>) -> Vec<String> {
+    fn unanswered_with(&self, pgp: Option<&JsonLine>) -> Vec<String> {
         let answered = self.review.as_ref().and_then(|r| r.json_answer.as_ref());
         let name = |p: &Path| {
             p.file_name().map_or_else(
@@ -500,6 +532,8 @@ impl AppModel {
         also: bool,
         problem_rows: impl FnOnce() -> bool,
     ) -> bool {
+        #[cfg(feature = "test-hooks")]
+        self.rule_reads.set(self.rule_reads.get() + 1);
         self.export_without_review()
             && !self.full_plan_pending()
             && files() > 0
@@ -517,18 +551,23 @@ impl AppModel {
     /// no key). Once per dispatch, never per frame.
     pub(super) fn writes_without_review_fresh(&self) -> bool {
         self.review_json_cache.take();
-        self.whole_json.take();
+        // Not read by the decision; dropped so the next frame draws what the click saw.
+        self.whole_disk.take();
         pbr_export::drop_blocks(self);
         self.writes_without_review()
     }
 
-    /// E3 (ruling 3c-24): the whole project's keyed terms while a scope is set, read through `with_whole_view` once
-    /// per change of what they read (the view key and the problems key), so the per-frame cost is one key compare.
-    /// Nothing else is held (see `whole_pair`, `whole_gate`).
-    fn whole_terms(&self) -> WholeTerms {
-        let key = (self.view_key(), super::bottom::problems_inner(self));
+    /// E3 (rulings 3c-24, 3c-28): the whole project's keyed terms while a scope is set, read through `with_whole_view`
+    /// once per change of the view key or the Problems key, so a stable frame pays a key compare: the export file
+    /// count, the undecided count, the counted Problems rows and the export blocker count.
+    /// The blocker count is as fresh as `export_blocks`' own cache, which the header has always read with no scope set:
+    /// its target-mod overlap part resolves the folders on disk, so after a junction is retargeted with no project
+    /// change it can be stale, with a scope or without. That is display only: the write decision drops that cache
+    /// (ruling 3c-27).
+    fn whole_terms(&self, view: &super::ViewKey) -> WholeTerms {
+        let problems = super::bottom::problems_inner(self);
         if let Some((v, p, t)) = &*self.whole_cache.borrow() {
-            if (v, p) == (&key.0, &key.1) {
+            if (v, p) == (view, &problems) {
                 return *t;
             }
         }
@@ -538,124 +577,162 @@ impl AppModel {
             undecided: self.undecided(),
             problem_rows: self.has_problem_rows(),
         });
-        *self.whole_cache.borrow_mut() = Some((key.0, key.1, t));
+        *self.whole_cache.borrow_mut() = Some((view.clone(), problems, t));
         t
     }
 
-    /// E3: the whole project's PGPatcher JSON line, re-read once per `REVIEW_JSON_TTL` (one file read) and whenever
-    /// the view key moves: the 1 s cache is for drawing only (ruling 3c-18); a write reads fresh. It has a slot of its
-    /// own because `review_json`'s cache holds the scope's lines.
-    fn whole_pgp_line(&self) -> Option<JsonLine> {
-        let key = self.view_key();
-        if let Some((k, at, line)) = &*self.whole_json.borrow() {
-            if *k == key && at.elapsed() < REVIEW_JSON_TTL {
-                return line.clone();
-            }
+    /// E3 (ruling 3c-28): `f` over the whole project's filesystem-derived display terms (`WholeDisk`), re-read when
+    /// `REVIEW_JSON_TTL` has passed or the view key moved: one PGPatcher JSON read and one `sdc.toml` stat per second
+    /// at most while a scope is set. For drawing only; the write decision reads neither through it.
+    fn with_whole_disk<T>(&self, view: &super::ViewKey, f: impl FnOnce(&WholeDisk) -> T) -> T {
+        let fresh = self
+            .whole_disk
+            .borrow()
+            .as_ref()
+            .is_some_and(|w| w.key == *view && w.at.elapsed() < REVIEW_JSON_TTL);
+        if !fresh {
+            let pgp = self.with_whole_view(|| self.pgp_json_line());
+            let toml_unwritable = self.toml_unwritable_now();
+            *self.whole_disk.borrow_mut() = Some(WholeDisk {
+                key: view.clone(),
+                at: Instant::now(),
+                pgp,
+                toml_unwritable,
+            });
         }
-        let line = self.with_whole_view(|| self.pgp_json_line());
-        *self.whole_json.borrow_mut() = Some((key, Instant::now(), line.clone()));
-        line
+        f(self.whole_disk.borrow().as_ref().expect("filled above"))
     }
 
-    /// The whole project's gate, every part live except the keyed blocker count and the 1 s JSON line: the same
-    /// checks as `review_gate`, with the Also check of the whole project (a tick runs on a whole-project export, a
-    /// scope or not) and the JSON line of the whole project.
-    fn whole_gate(&self) -> Result<(), String> {
-        if self.export_scope().is_none() {
+    /// The whole project's gate as the header draws it (rulings 3c-21, 3c-28). With no scope it is `review_gate`.
+    /// Under one: the same checks, with the keyed blocker count, and the whole project's Also check (a tick runs on a
+    /// whole-project export) and PGPatcher JSON line from the drawing cache; every other part live.
+    fn whole_gate(&self, whole: Option<&(super::ViewKey, WholeTerms)>) -> Result<(), String> {
+        let Some((view, t)) = whole else {
             return self.review_gate().map(|_| ());
-        }
-        let t = self.whole_terms();
-        self.gate_check(
-            || t.blocks,
-            self.also_on(),
-            || self.unanswered_with(self.whole_pgp_line()),
-        )
+        };
+        self.with_whole_disk(view, |w| {
+            self.gate_check(
+                || t.blocks,
+                || {
+                    if self.also_on() {
+                        self.also_gate_with(w.toml_unwritable.as_deref())
+                    } else {
+                        Ok(())
+                    }
+                },
+                || self.unanswered_with(w.pgp.as_ref()),
+            )
+        })
     }
-    /// E3 (ruling 3c-14): `(writes_without_review, export_files)` of the whole project, whatever scope an open Review
-    /// was made for (a header click clears the scope first). With no scope it is the live pair. With one, the
-    /// expensive terms are the held `whole_terms` and the JSON term has its own 1 s cache; everything volatile
-    /// (opt-out, pending plan or read, NIF rows, Also tick) is read live by `writes_rule`, so no held answer can
-    /// outlive what it read.
-    fn whole_pair(&self) -> (bool, usize) {
-        if self.export_scope().is_none() {
-            return (self.writes_without_review(), self.export_files());
-        }
-        let t = self.whole_terms();
-        let writes = self.writes_rule(
+
+    /// E3 (ruling 3c-14): `writes_without_review` of the whole project, whatever scope an open Review was made for (a
+    /// header click clears the scope first). With no scope it is the live rule. With one, the expensive terms are the
+    /// keyed `whole_terms` and the JSON term comes from the drawing cache; everything volatile (opt-out, pending plan
+    /// or read, NIF rows, Also tick) is read live by `writes_rule`. `gate_ok` is the caller's, so a frame reads the
+    /// gate once for the rule and the accent.
+    fn whole_rule(
+        &self,
+        whole: Option<&(super::ViewKey, WholeTerms)>,
+        gate_ok: impl FnOnce() -> bool,
+    ) -> bool {
+        let Some((view, t)) = whole else {
+            return self.writes_rule(
+                || self.export_files(),
+                gate_ok,
+                || self.undecided(),
+                || {
+                    self.review_json()
+                        .iter()
+                        .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
+                },
+                self.also_runs(),
+                || self.has_problem_rows(),
+            );
+        };
+        self.writes_rule(
             || t.files,
-            || self.whole_gate().is_ok(),
+            gate_ok,
             || t.undecided,
             || {
-                self.whole_pgp_line()
-                    .is_some_and(|l| l.state == DiskState::Edited)
+                self.with_whole_disk(view, |w| {
+                    w.pgp.as_ref().is_some_and(|l| l.state == DiskState::Edited)
+                })
             },
             self.also_on(),
             || t.problem_rows,
-        );
-        (writes, t.files)
+        )
     }
 
-    /// The gate as the header reads it: the whole project's (ruling 3c-21), as the label's answer is.
-    fn whole_gate_ok(&self) -> bool {
-        self.whole_gate().is_ok()
+    /// The whole project's view key and keyed terms while a scope is set; `None` without one (everything is live).
+    fn whole(&self) -> Option<(super::ViewKey, WholeTerms)> {
+        self.export_scope().is_some().then(|| {
+            let view = self.view_key();
+            let t = self.whole_terms(&view);
+            (view, t)
+        })
     }
 
-    /// `whole_pair().0`, without counting files when there is no scope.
-    pub(super) fn whole_writes(&self) -> bool {
-        if self.export_scope().is_none() {
-            self.writes_without_review()
-        } else {
-            self.whole_pair().0
+    /// E3: what `hold_settled` keeps: the whole project's write-now answer and, only when it is true, its file count
+    /// (the default project, which never writes at once, counts nothing per plan).
+    pub(super) fn whole_writes_now(&self) -> (bool, usize) {
+        let whole = self.whole();
+        let whole = whole.as_ref();
+        let writes = self.whole_rule(whole, || self.whole_gate(whole).is_ok());
+        let files = match (writes, whole) {
+            (false, _) => 0,
+            (true, Some((_, t))) => t.files,
+            (true, None) => self.export_files(),
+        };
+        (writes, files)
+    }
+
+    /// E3 (rulings 3c-14, 3c-17, 3c-21, 3c-28): the header's Export button for this frame, computed once and passed
+    /// down. While a plan is pending the label is the last settled answer and count, so it never flips mid-plan (a
+    /// partial plan lands without settling); else the live rule of the whole project. The accent shows when a click
+    /// has something to write or review: the write-now answer or an open whole-project gate, and a count above zero
+    /// (the label's files plus NIF edits). The rule and the gate are each read at most once.
+    pub fn header_answer(&self) -> HeaderAnswer {
+        let nifs = self.nif_rows.len();
+        let pending = self.full_plan_pending();
+        if pending && self.settled_writes_now {
+            let files = self.settled_export_files;
+            return HeaderAnswer {
+                now: true,
+                files,
+                accent: files + nifs > 0,
+            };
+        }
+        let whole = self.whole();
+        let whole = whole.as_ref();
+        let gate = std::cell::OnceCell::new();
+        let gate_ok = || *gate.get_or_init(|| self.whole_gate(whole).is_ok());
+        // Pending with a held Review answer: the rule would read false (pending) too, so it is not read.
+        let now = !pending && self.whole_rule(whole, gate_ok);
+        let files = whole.map_or_else(|| self.export_files(), |(_, t)| t.files);
+        HeaderAnswer {
+            now,
+            files,
+            accent: (now || gate_ok()) && files + nifs > 0,
         }
     }
 
-    /// `whole_pair().1`.
-    pub(super) fn whole_files(&self) -> usize {
-        if self.export_scope().is_none() {
-            self.export_files()
-        } else {
-            self.whole_pair().1
-        }
-    }
-
-    /// E3: the header label's write-now state. While a plan is pending it is the last settled answer, so the
-    /// label never flips mid-plan (a partial plan lands without settling); else the live rule, whole project.
+    /// `header_answer().now`.
     pub fn header_writes_now(&self) -> bool {
-        if self.full_plan_pending() {
-            self.settled_writes_now
-        } else {
-            self.whole_writes()
-        }
+        self.header_answer().now
     }
 
-    /// The file count the header label shows: the settled one while a write-now label is held, else the live one;
-    /// the whole project's in both.
-    fn header_files(&self, now: bool) -> usize {
-        if now && self.full_plan_pending() {
-            self.settled_export_files
-        } else {
-            self.whole_files()
-        }
-    }
-
-    /// E3 (ruling 3c-17): the header draws the accent only when a click has something to write or review: the
-    /// write-now answer or an open gate, and a count above zero (the label's files plus NIF edits).
+    /// `header_answer().accent`.
     pub fn header_accent(&self) -> bool {
-        self.accent_for(self.header_writes_now())
-    }
-
-    /// [`Self::header_accent`] for a `now` the caller already has (the header asks once per frame).
-    pub fn accent_for(&self, now: bool) -> bool {
-        (now || self.whole_gate_ok()) && self.header_files(now) + self.nif_rows.len() > 0
+        self.header_answer().accent
     }
 
     /// E3: the header's Export button: `Review {n} files…`, or `Export {n} files now` when a click writes.
     pub fn header_export_text(&self) -> String {
-        self.export_text(self.header_writes_now())
+        self.export_text(&self.header_answer())
     }
 
-    /// [`Self::header_export_text`] for a `now` the caller already has (the header asks once per frame).
-    pub fn export_text(&self, now: bool) -> String {
+    /// [`Self::header_export_text`] for the answer the header already has (it asks once per frame).
+    pub fn export_text(&self, a: &HeaderAnswer) -> String {
         // Final review M5: with no folder open there is no count to give ("Review 0 files" greeted a new user).
         if self.root.is_none() {
             // Note FI18 (GH handoff item 3): pending NIF edits are counted as in FI7; there are no files to name.
@@ -665,17 +742,11 @@ impl AppModel {
             };
         }
         // Only the held write-now label keeps the settled count; the Review label reads the decisions live.
-        if now {
-            return format!(
-                "Export {} now",
-                counted(self.header_files(true), "file", "files")
-            );
+        if a.now {
+            return format!("Export {} now", counted(a.files, "file", "files"));
         }
         let rows = self.nif_rows.len();
-        let mut t = format!(
-            "Review {}",
-            counted(self.header_files(false), "file", "files")
-        );
+        let mut t = format!("Review {}", counted(a.files, "file", "files"));
         // Note FI7: `Review` writes nothing, so it counts every pending NIF edit.
         if rows > 0 {
             t.push_str(&format!(" + {}", nif_edits(rows)));

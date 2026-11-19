@@ -1001,6 +1001,95 @@ fn the_click_reads_the_export_blockers_fresh() {
     assert!(m.review.is_some(), "the overlap blocker opens Review");
 }
 
+/// Round 3, ruling 3c-28 (re-review B5): the header computes its answer once per frame, also on the clean, settled,
+/// write-now frame under a scope where it used to evaluate the rule three times (label, accent count, label count).
+#[test]
+fn the_header_evaluates_the_write_now_rule_once_per_frame() {
+    use sdc_gui::model::review::rule_reads;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        h.state().header_export_text(),
+        "Export 4 files now",
+        "guard"
+    );
+    for scoped in [true, false] {
+        let before = rule_reads(h.state());
+        h.step();
+        assert_eq!(
+            rule_reads(h.state()) - before,
+            1,
+            "one evaluation per frame (scoped: {scoped})"
+        );
+        h.state_mut().close_review();
+        h.run();
+    }
+}
+
+/// A file made read-only for one test; writable again on drop, so the temp dir can go.
+struct ReadOnlyFile(std::path::PathBuf);
+
+impl ReadOnlyFile {
+    fn set(path: std::path::PathBuf) -> Self {
+        let mut p = std::fs::metadata(&path).unwrap().permissions();
+        p.set_readonly(true);
+        std::fs::set_permissions(&path, p).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for ReadOnlyFile {
+    fn drop(&mut self) {
+        if let Ok(m) = std::fs::metadata(&self.0) {
+            let mut p = m.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            p.set_readonly(false);
+            let _ = std::fs::set_permissions(&self.0, p);
+        }
+    }
+}
+
+/// Round 3, ruling 3c-28 (re-review B3): the whole project's Also check is scope-blind in every part. With a tick and
+/// a read-only `sdc.toml`, whole-project Review's gate is closed; the header under a scoped Review shows the same (no
+/// accent), though the scoped Review took no writability reading (a tick does not run on a scoped export).
+#[test]
+fn a_scoped_review_header_reads_the_sdc_toml_writability_of_the_whole_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.also_on(), "guard: the tick took: {}", m.status_line);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.save().unwrap();
+    let toml = m.root.clone().unwrap().join("sdc.toml");
+    assert!(toml.is_file(), "guard: sdc.toml is on disk");
+    let k = key_of(&m, "g/u");
+    m.export_sets([k].into(), "Export set g/u".into());
+    assert!(
+        m.header_accent(),
+        "guard: writable, the whole project's gate is open"
+    );
+    m.close_review();
+    let _ro = ReadOnlyFile::set(toml);
+    m.open_review();
+    assert_eq!(
+        m.review_gate(),
+        Err(sdc_gui::model::also::TOML_READ_ONLY.to_string()),
+        "guard: whole-project Review is closed by the read-only sdc.toml alone"
+    );
+    m.close_review();
+    let k = key_of(&m, "g/u");
+    m.export_sets([k].into(), "Export set g/u".into());
+    assert!(m.export_scope().is_some(), "guard: scoped");
+    m.expire_review_json(); // the 1 s drawing cache passing
+    assert!(
+        !m.header_accent(),
+        "the header shows what whole-project Review decides: closed"
+    );
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);
