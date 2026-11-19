@@ -1549,9 +1549,10 @@ fn covers(a: &Allowed, h: &Hit) -> bool {
             .all(|((name, px), (hname, hpx))| name == hname && (px - hpx).abs() <= PX_TOLERANCE)
 }
 
-/// The final failure list: every collected error, every hit no entry consumed, every entry not consumed in full.
-/// Entries are consumed one hit at a time; empty when the walk passes.
-pub fn verdict(walked: &Walked, allowed: &[Allowed]) -> Vec<String> {
+/// The final failure list: every collected error, every hit no entry consumed, every entry not consumed in full, and
+/// every `authored` text no screen painted (`stale_authored`). Entries are consumed one hit at a time; empty when the
+/// walk passes.
+pub fn verdict(walked: &Walked, allowed: &[Allowed], authored: &[&str]) -> Vec<String> {
     let mut left: Vec<usize> = allowed.iter().map(|a| a.count).collect();
     let mut out = walked.errors.clone();
     for h in &walked.hits {
@@ -1576,6 +1577,7 @@ pub fn verdict(walked: &Walked, allowed: &[Allowed]) -> Vec<String> {
             ));
         }
     }
+    out.extend(stale_authored(walked, authored));
     out
 }
 
@@ -1603,8 +1605,7 @@ fn the_walk_finds_nothing_new_on_any_screen() {
             println!("BAR {b}");
         }
     }
-    let mut bad = verdict(&walked, ALLOWED);
-    bad.extend(stale_authored(&walked, AUTHORED));
+    let bad = verdict(&walked, ALLOWED, AUTHORED);
     assert!(bad.is_empty(), "{bad:#?}");
     assert_eq!(
         walked.visits.len(),
@@ -1717,7 +1718,7 @@ fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
         calls.push((screen.to_string(), (size.x, size.y)));
         real_checker(screen, size, snap)
     });
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     println!("{bad:#?}");
     let mut want_calls = vec![];
     for name in ["start screen", "test-only faulty screen"] {
@@ -1841,7 +1842,7 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
         calls.push((screen.to_string(), (size.x, size.y)));
         real_checker(screen, size, snap)
     });
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     let mut want_calls = vec![];
     for name in ["start screen", "test-only cut-text screen"] {
         for size in SIZES {
@@ -2020,7 +2021,7 @@ fn a_cut_text_must_keep_its_whole_value_exactly() {
 fn a_failed_visit_is_collected_and_the_walk_goes_on() {
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(Broken), Box::new(Faulty)];
     let walked = walk(&mut list, &mut real_checker);
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     assert!(
         bad.iter()
             .any(|m| m == "test-only broken screen at 1100x800: did not go idle"),
@@ -2078,7 +2079,7 @@ fn an_entry_whose_open_panics_is_collected_and_the_walk_goes_on() {
     };
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(ScreenEntry::new(&BOOM)), the_start_screen()];
     let walked = walk(&mut list, &mut real_checker);
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     assert!(
         SIZES.iter().all(|s| bad.iter().any(|m| m
             .starts_with(&format!("test-only exploding screen at {}x{}: ", s.x, s.y))
@@ -2172,13 +2173,13 @@ fn an_allowed_hit_must_match_exactly_and_is_consumed_one_for_one() {
         hit("window_edge", "tag", 1, 107.0),
     ]);
     let exact = [entry("tag", 0, 1, 91.0), entry("tag", 1, 1, 108.0)];
-    assert!(verdict(&two, &exact).is_empty());
+    assert!(verdict(&two, &exact, &[]).is_empty());
     // the two rows exchange their overflows: both entries are wrong
     let swapped = [entry("tag", 0, 1, 108.0), entry("tag", 1, 1, 91.0)];
-    assert_eq!(verdict(&two, &swapped).len(), 4);
+    assert_eq!(verdict(&two, &swapped, &[]).len(), 4);
     // one fixed: the other entry is stale
     let one = walked(vec![hit("window_edge", "tag", 0, 92.0)]);
-    let stale = verdict(&one, &exact);
+    let stale = verdict(&one, &exact, &[]);
     assert_eq!(stale.len(), 1, "{stale:?}");
     assert!(stale[0].contains("did not come"), "{stale:?}");
     // a third hit: unmatched
@@ -2187,24 +2188,24 @@ fn an_allowed_hit_must_match_exactly_and_is_consumed_one_for_one() {
         hit("window_edge", "tag", 0, 92.0),
         hit("window_edge", "tag", 1, 107.0),
     ]);
-    let extra = verdict(&three, &exact);
+    let extra = verdict(&three, &exact, &[]);
     assert_eq!(extra.len(), 1, "{extra:?}");
     // one entry with a count of two is consumed twice
     let both = walked(vec![
         hit("window_edge", "tag", 0, 92.0),
         hit("window_edge", "tag", 0, 92.5),
     ]);
-    assert!(verdict(&both, &[entry("tag", 0, 2, 92.0)]).is_empty());
-    assert_eq!(verdict(&both, &[entry("tag", 0, 3, 92.0)]).len(), 1);
-    assert_eq!(verdict(&both, &[entry("tag", 0, 1, 92.0)]).len(), 1);
+    assert!(verdict(&both, &[entry("tag", 0, 2, 92.0)], &[]).is_empty());
+    assert_eq!(verdict(&both, &[entry("tag", 0, 3, 92.0)], &[]).len(), 1);
+    assert_eq!(verdict(&both, &[entry("tag", 0, 1, 92.0)], &[]).len(), 1);
     // other size, px off by 10, a name that is only part of the widget's
     let mut moved = entry("tag", 0, 1, 92.0);
     moved.size = (1280.0, 800.0);
     let h = walked(vec![hit("window_edge", "tag", 0, 92.0)]);
-    assert_eq!(verdict(&h, &[moved]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 102.0)]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("ta", 0, 1, 92.0)]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 94.0)]).len(), 0);
+    assert_eq!(verdict(&h, &[moved], &[]).len(), 2);
+    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 102.0)], &[]).len(), 2);
+    assert_eq!(verdict(&h, &[entry("ta", 0, 1, 92.0)], &[]).len(), 2);
+    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 94.0)], &[]).len(), 0);
 }
 
 /// Same-named hits of one frame are numbered from the top, whatever order they were found in.
@@ -2224,13 +2225,13 @@ fn same_named_hits_are_numbered_from_the_top() {
     );
 }
 
-/// An AUTHORED entry no screen paints is a failure naming it; one that is painted is not.
+/// An AUTHORED entry no screen paints is a failure of the verdict naming it; one that is painted is not.
 #[test]
 fn an_authored_text_no_screen_paints_is_stale() {
     let mut w = walked(vec![]);
     w.painted_ellipsis_texts.insert("Settings…".to_string());
-    assert!(stale_authored(&w, &["Settings…"]).is_empty());
-    let stale = stale_authored(&w, &["Settings…", "Gone…"]);
+    assert!(verdict(&w, &[], &["Settings…"]).is_empty());
+    let stale = verdict(&w, &[], &["Settings…", "Gone…"]);
     assert_eq!(stale.len(), 1, "{stale:?}");
     assert!(stale[0].contains("\"Gone…\""), "{stale:?}");
 }
@@ -2497,7 +2498,7 @@ fn a_key_that_writes_a_file_or_starts_an_export_fails_the_walk() {
         calls.push((screen.to_string(), (size.x, size.y)));
         real_checker(screen, size, snap)
     });
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     let mut want_calls = vec![];
     for name in ["start screen", "test-only key-fault screen"] {
         for size in SIZES {
@@ -3118,7 +3119,7 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
         calls.push((screen.to_string(), (size.x, size.y)));
         real_checker(screen, size, snap)
     });
-    let bad = verdict(&walked, &[]);
+    let bad = verdict(&walked, &[], &[]);
     let mut want_calls = vec![];
     for e in &list {
         for size in SIZES {
@@ -3765,7 +3766,7 @@ fn an_entry_for_a_bar_names_its_bar_and_its_widgets() {
     };
     let list: &'static [(&'static str, f32)] = &[("Button:A", 4.0), ("Link:B", 3.5)];
     let allow = [allowed("scroll bar 1 of 2 in the x panel", list)];
-    let ok = |hits: Vec<Hit>| verdict(&walked(hits), &allow).is_empty();
+    let ok = |hits: Vec<Hit>| verdict(&walked(hits), &allow, &[]).is_empty();
     assert!(ok(vec![bar_hit(
         "scroll bar 1 of 2 in the x panel",
         &[("Button:A", 4.0), ("Link:B", 3.5)]
@@ -3808,5 +3809,5 @@ fn an_error_is_never_allowed() {
         presses: vec![],
         bars: vec![],
     };
-    assert_eq!(verdict(&w, &[]).len(), 1);
+    assert_eq!(verdict(&w, &[], &[]).len(), 1);
 }
