@@ -2573,7 +2573,8 @@ fn a_member_pick_after_a_failed_replan_is_refused() {
     // Export's own checks find nothing to wait for here: no plan is out and the inputs are the failed plan's.
     assert!(!m.full_plan_pending(), "premise: no plan is out");
     assert!(m.inputs_settled(), "premise: Export's inputs check passes");
-    const FAILED: &str = "The last plan failed: pick a file once a new plan has finished";
+    // Ruling 3b-F25: no plan is running, so the reason says the plan must run again.
+    const FAILED: &str = "The plan must run again first: pick a file once a new plan has finished";
     assert_eq!(
         pick_row(&m, SlotKind::Diffuse, &producer)
             .disabled

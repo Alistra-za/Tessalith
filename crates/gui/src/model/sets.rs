@@ -2732,10 +2732,12 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
 /// Why a member outside a `textures` folder cannot be linked (F3a Task 8).
 pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 
-/// Ruling 3b-F21: why a From another set row is off while the plan is out (`AppModel::pick_waits`).
+/// Ruling 3b-F21: why a From another set row is off while a plan or a scan-database read runs (`AppModel::pick_waits`).
 pub const PICK_PLANNING: &str = "Planning: pick a file once the plan has finished";
-/// Ruling 3b-F21: why a From another set row is off after a plan failed for good (`AppModel::pick_waits`).
-pub const PICK_PLAN_FAILED: &str = "The last plan failed: pick a file once a new plan has finished";
+/// Ruling 3b-F25: why a From another set row is off when no plan runs but the plan on screen is out of date or failed
+/// (`AppModel::pick_waits`). A proposed string, for the owner to word.
+pub const PICK_PLAN_AGAIN: &str =
+    "The plan must run again first: pick a file once a new plan has finished";
 
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
 /// backslashes, `.dds`): where its settled job writes it (`written_game_location`). Ruling 3b-F21: only on a settled

@@ -2156,8 +2156,10 @@ impl AppModel {
     /// Ruling 3b-F21: why a From another set pick may not store a member's path now, or `None`. It waits on what Export
     /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
     /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
-    /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it.
-    /// Uncached: the click re-checks with it (`member_game_path`); the menu rows read `pick_waits_cached`.
+    /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it. A running
+    /// plan or read reads "Planning…" (`PICK_PLANNING`); the other two say the plan must run again (`PICK_PLAN_AGAIN`,
+    /// ruling 3b-F25). Uncached: the click re-checks with it (`member_game_path`); the menu rows read
+    /// `pick_waits_cached`.
     pub fn pick_waits(&self) -> Option<&'static str> {
         if self.full_plan_pending() {
             return Some(sets::PICK_PLANNING);
@@ -2165,18 +2167,12 @@ impl AppModel {
         self.settled_wait()
     }
 
-    /// `pick_waits` once no plan or scan read is out: the inputs comparison (it builds `EngineInputs`) and the failed
-    /// flag.
+    /// `pick_waits` once no plan or scan read is out: a failed plan, or the inputs comparison (it builds
+    /// `EngineInputs`). Ruling 3b-F25: both say the plan must run again, as no plan is running to wait for.
     fn settled_wait(&self) -> Option<&'static str> {
         #[cfg(feature = "test-hooks")]
         sets::count_settled_check();
-        if self.inputs_unsettled() {
-            Some(sets::PICK_PLANNING)
-        } else if self.plan_failed {
-            Some(sets::PICK_PLAN_FAILED)
-        } else {
-            None
-        }
+        (self.plan_failed || self.inputs_unsettled()).then_some(sets::PICK_PLAN_AGAIN)
     }
 
     /// Ruling 3b-F24: `pick_waits` for the From another set rows, drawn every frame a slot menu is open. A running plan

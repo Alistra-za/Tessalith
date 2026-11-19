@@ -1157,6 +1157,38 @@ fn a_stored_slot_key_keeps_the_record_normal_out_of_the_engine_inputs() {
     }
 }
 
+/// Ruling 3b-F25: the slot2 edit above changes the engine's borrowed normal but plans nothing (`set_json_value` plans
+/// again only for `match*`, `path_contains` and `rename`), so the plan on screen is out of date with no plan running.
+/// A From another set row then says the plan must run again, not "Planning", and the click refuses with the same.
+#[test]
+fn with_the_plan_out_of_date_and_none_running_a_member_pick_says_it_must_plan_again() {
+    use sdc_gui::model::bulk::MenuAction;
+    use serde_json::json;
+    const AGAIN: &str = "The plan must run again first: pick a file once a new plan has finished";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_json_value(M, "slot2", Some(json!("")));
+    idle(&mut m);
+    assert!(!m.full_plan_pending(), "premise: no plan is running");
+    assert!(!m.inputs_settled(), "premise: the plan is out of date");
+    let rows: Vec<_> = set_views(&m)
+        .iter()
+        .flat_map(|v| {
+            SlotKind::ALL
+                .iter()
+                .filter(|k| k.game_slot().is_some())
+                .flat_map(|k| m.slot_menu(&v.id, *k))
+                .collect::<Vec<_>>()
+        })
+        .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+        .collect();
+    assert!(!rows.is_empty(), "premise: a member is offered");
+    for e in &rows {
+        assert_eq!(e.disabled.as_deref(), Some(AGAIN), "{e:?}");
+    }
+    assert_eq!(m.run_menu(rows[0].action.clone()), Some(AGAIN.to_string()));
+}
+
 #[test]
 fn a_record_slot_nothing_writes_is_supplied() {
     let d = tempfile::tempdir().unwrap();
