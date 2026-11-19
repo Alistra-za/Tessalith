@@ -1,5 +1,6 @@
-//! The NIF edit document (spec §5, plan A15): the op list that rides with one source NIF, stored as TOML next to the
-//! exported file, plus the in-memory undo stack the editor uses. No egui types.
+//! The NIF edit document (spec §5, plan A15): the op list that rides with one source NIF, stored as TOML in the
+//! project's draft (or the app's autosave with no project) and, as the record of an export, next to the exported file;
+//! plus the in-memory undo stack the editor uses. No egui types.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -168,6 +169,12 @@ pub fn new_id(data_path: &str) -> String {
     h[..16].to_string()
 }
 
+/// Ruling E6-E: an id read from a file is used only when it has `new_id`'s form, 16 ASCII hex characters; it becomes
+/// part of a file name (`kept_autosave_path`), so anything else is no id.
+pub fn valid_id(id: &str) -> bool {
+    id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Where a NIF edit's draft lives with a project: `<project>\_sdc\nif-edits\<win>.sdc-nifedit.toml`.
 pub fn draft_path(project: &Path, data_path: &str) -> Result<PathBuf, String> {
     Ok(project
@@ -185,8 +192,9 @@ pub fn doc_path(edit_mod: &Path, data_path: &str) -> Result<PathBuf, String> {
         .join(format!("{}.sdc-nifedit.toml", win(data_path)?)))
 }
 
-/// Where an edit without an export folder autosaves (Note GD5 (c)): `<dir>\nif-edits\<SHA-256 of the lowercase data
-/// path>.toml`; `dir` is the scan store's folder, `%LOCALAPPDATA%\sdc` in the app.
+/// Where an edit with no project open saves its draft, the plain autosave (Review E6, Note GD5 (c)):
+/// `<dir>\nif-edits\<SHA-256 of the lowercase data path>.toml`; `dir` is the scan store's folder, `%LOCALAPPDATA%\sdc`
+/// in the app. The export folder plays no part.
 pub fn autosave_path(dir: &Path, data_path: &str) -> Result<PathBuf, String> {
     let key = win(data_path)?.to_ascii_lowercase();
     Ok(dir
@@ -198,6 +206,7 @@ pub fn autosave_path(dir: &Path, data_path: &str) -> Result<PathBuf, String> {
 /// holds the edits a project switch could not save into the project, keyed on the draft's id so no other draft's
 /// file is touched.
 pub fn kept_autosave_path(dir: &Path, data_path: &str, id: &str) -> PathBuf {
+    debug_assert!(valid_id(id), "an unchecked draft id: {id}");
     let key = win(data_path)
         .unwrap_or_else(|_| data_path.replace('/', "\\"))
         .to_ascii_lowercase();
@@ -218,36 +227,120 @@ pub fn save(path: &Path, doc: &EditDoc) -> Result<(), String> {
 }
 
 /// `save` into a project: refuses when `root` is not an existing folder (a renamed, moved or deleted project is never
-/// re-created at its old path) and only then creates `_sdc\nif-edits\…` under it.
+/// re-created at its old path), then makes the folders under it one level at a time with the non-recursive
+/// `create_dir`, so a root that went away in between fails the first one, and checks the root again just before the
+/// write (whose own parent creation then finds them made). Ruling E6-E2: the root going away between that last check
+/// and the rename is a window std cannot close; it is accepted.
 pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<(), String> {
+    let gone = || format!("{} no longer exists", root.display());
     if !root.is_dir() {
-        return Err(format!("{} no longer exists", root.display()));
+        return Err(gone());
     }
-    save(path, doc)
+    write_hook("root checked");
+    let under = path
+        .parent()
+        .and_then(|p| p.strip_prefix(root).ok())
+        .ok_or_else(|| format!("{} is not under {}", path.display(), root.display()))?;
+    let mut dir = root.to_path_buf();
+    for c in under.components() {
+        dir.push(c);
+        match std::fs::create_dir(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && dir.is_dir() => {}
+            Err(_) if !root.is_dir() => return Err(gone()),
+            Err(e) => return Err(format!("{}: {e}", dir.display())),
+        }
+    }
+    if !root.is_dir() {
+        return Err(gone());
+    }
+    engine::dds::write_atomic(path, doc.to_text().as_bytes())
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Writes `doc` to a file that does not exist yet: the name is reserved with `create_new` (so a file another session
-/// wrote is never replaced), then the document is written over the reservation. An empty reservation left by a failed
-/// write is removed.
+/// Writes `doc` to a file that does not exist yet, never replacing one (ruling E6-E): a temporary beside it is written
+/// and synced, then linked to the name with `hard_link`, which fails when the name exists (a file another session
+/// wrote there meanwhile stays as it is), and the temporary is removed. On a volume without hard links the document is
+/// written through the handle `create_new` returned (it still never replaces a file, but a crash can leave it short).
+/// Ruling E6-E2: two Tessalith instances working one kept autosave at the same moment are not coordinated beyond this.
 pub fn save_new(path: &Path, doc: &EditDoc) -> Result<(), String> {
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    use std::io::Write as _;
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let bytes = doc.to_text();
+    static TMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let (tmp, mut f) = loop {
+        let n = TMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = dir.join(format!(".sdc-kept-{}-{n}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("{}: {e}", tmp.display())),
+        }
+    };
+    let written = f.write_all(bytes.as_bytes()).and_then(|()| f.sync_all());
+    drop(f);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err(e));
     }
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    engine::dds::write_atomic(path, doc.to_text().as_bytes()).map_err(|e| {
-        let _ = std::fs::remove_file(path); // the empty reservation only
-        format!("{}: {e}", path.display())
-    })
+    write_hook("kept written");
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp); // the name holds the bytes now, or the link failed
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(err(e)),
+        Err(_) => {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(err)?;
+            let written = f.write_all(bytes.as_bytes()).and_then(|()| f.sync_all());
+            drop(f);
+            written.map_err(|e| {
+                let _ = std::fs::remove_file(path); // the file this call made
+                err(e)
+            })
+        }
+    }
 }
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
     static LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WRITE_HOOK: std::cell::RefCell<Option<WriteHook>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A test's stand-in for another process acting in a write's window (ruling E6-E's tests).
+#[cfg(feature = "test-hooks")]
+pub type WriteHook = Box<dyn FnMut(&'static str)>;
+
+/// Runs `f` on this thread at each named point of a draft or kept autosave write: "root checked" (`save_in`, after
+/// the project folder was found) and "kept written" (`save_new`, before the file takes its name). None removes it.
+#[cfg(feature = "test-hooks")]
+pub fn set_write_hook(f: Option<WriteHook>) {
+    WRITE_HOOK.with(|h| *h.borrow_mut() = f);
+}
+
+fn write_hook(stage: &'static str) {
+    #[cfg(feature = "test-hooks")]
+    WRITE_HOOK.with(|h| {
+        if let Some(f) = h.borrow_mut().as_mut() {
+            f(stage);
+        }
+    });
+    #[cfg(not(feature = "test-hooks"))]
+    let _ = stage;
 }
 
 /// How many `EditDoc::ops_hash` this thread computed (Note GD23's test: idle frames hash nothing).

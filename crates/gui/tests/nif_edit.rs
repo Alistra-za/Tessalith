@@ -5652,6 +5652,129 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
     assert_eq!(glossiness(&m), source_value, "the source's value is back");
 }
 
+/// Review E6 (Important 5, ruling E6-E): a draft id read from disk is used only when it is 16 hex characters; any
+/// other is no id (a new one in memory), so it never becomes part of a kept autosave's file name.
+#[test]
+fn a_draft_id_from_disk_is_used_only_when_it_is_16_hex_characters() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let mut doc = load(&draft(&a)).unwrap().unwrap();
+    doc.id = Some(r"x\..\..\escape".into());
+    save(&draft(&a), &doc).unwrap();
+    m.open_edit();
+    gloss(&mut m, 13.5);
+    let id = m.edit.as_ref().unwrap().doc.id.clone().unwrap();
+    assert!(
+        id.len() == 16 && id.bytes().all(|c| c.is_ascii_hexdigit()),
+        "{id}"
+    );
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    assert!(!d.path().join("escape.toml").exists());
+    assert_eq!(doc_values(&kept(&d, &id)), [12.5, 13.5]);
+}
+
+/// Ruling E6-E: a project folder that goes away after `save_in` checked it is not made again by the save: the folders
+/// under it are made one level at a time, and the first fails.
+#[test]
+fn a_project_folder_removed_during_the_save_is_not_made_again() {
+    let (d, mut m) = export_session();
+    let a = project_folder(&d, "a");
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    let gone = a.clone();
+    sdc_gui::model::meshes::edit_doc::set_write_hook(Some(Box::new(move |stage| {
+        if stage == "root checked" {
+            let _ = std::fs::remove_dir_all(&gone);
+        }
+    })));
+    gloss(&mut m, 12.5);
+    sdc_gui::model::meshes::edit_doc::set_write_hook(None);
+    assert!(!a.exists(), "the removed project is not made again");
+    assert!(m.error.is_some(), "the save says it failed");
+    assert!(
+        m.edit.as_ref().unwrap().touched(),
+        "and the edit is unsaved"
+    );
+}
+
+/// Ruling E6-E: the kept autosave is published without a replace: a file that takes its name while it is written
+/// (another Tessalith) is never replaced.
+#[test]
+fn a_kept_autosave_never_replaces_a_file_that_takes_its_name() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    std::fs::remove_dir_all(&a).unwrap();
+    let k = kept(&d, &id);
+    let theirs = k.clone();
+    sdc_gui::model::meshes::edit_doc::set_write_hook(Some(Box::new(move |stage| {
+        if stage == "kept written" {
+            std::fs::write(&theirs, b"another instance's").unwrap();
+        }
+    })));
+    m.set_project_root(Some(&b));
+    sdc_gui::model::meshes::edit_doc::set_write_hook(None);
+    assert_eq!(std::fs::read(&k).unwrap(), b"another instance's");
+    assert!(m.edit.is_some(), "no save worked: the session stays");
+    assert_eq!(op_values(&m)[0].1, 12.5);
+}
+
+/// Review E6 (Important 7, ruling E6-E): an export whose draft save fails stops before the NIF and says so.
+#[test]
+fn an_export_stops_when_the_draft_cannot_be_saved() {
+    let (d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    tick(&mut m, 40.5); // a drag not saved yet
+    read_only(&draft(&p), true);
+    let r = export(&mut m);
+    read_only(&draft(&p), false);
+    let why = r.unwrap_err();
+    assert!(why.contains("could not be saved"), "{why}");
+    assert!(!exported(&d).exists(), "no NIF written");
+    assert!(!nif_doc(&export_root(&d)).exists());
+}
+
+/// Review E6 (Important 7, ruling E6-E): when the NIF is written and its record is not, the export is not reported as
+/// done: the export state stays where it was and the row stays pending with the reason. The next export of the same
+/// edit replaces the NIF it wrote itself without asking (the bytes are the same).
+#[test]
+fn an_export_whose_record_fails_is_not_reported_as_done() {
+    let (d, mut m, _p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let rec = nif_doc(&export_root(&d));
+    let blocker = export_root(&d).join(".sdc");
+    std::fs::write(&blocker, b"a file").unwrap(); // the record's folder cannot be made
+    let r = export(&mut m);
+    let why = r.unwrap_err();
+    assert!(why.contains("is in place, but its record"), "{why}");
+    assert!(exported(&d).is_file(), "the NIF was written");
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        e.doc.export.sha256, None,
+        "the export state is not advanced"
+    );
+    assert!(e.pending() && !e.up_to_date);
+    assert!(
+        !m.messages.iter().any(|l| l.starts_with("Exported ")),
+        "{:?}",
+        m.messages
+    );
+    std::fs::remove_file(&blocker).unwrap();
+    assert_eq!(review_row(&m).foreign, None, "its own bytes: no question");
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(load(&rec).unwrap().unwrap().export.sha256.is_some());
+}
+
 /// Sets the modified time of `p` to that of `like`.
 fn same_time(p: &Path, like: &Path) {
     let t = std::fs::metadata(like).unwrap().modified().unwrap();

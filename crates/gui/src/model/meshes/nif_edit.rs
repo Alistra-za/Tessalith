@@ -686,7 +686,7 @@ fn recover_from(
         );
         return (saved, vec![line], Recovery::Older);
     }
-    match edit_doc::load(a) {
+    match edit_doc::load(a).map(checked) {
         Ok(Some(mut mine)) => {
             let line = match &saved {
                 None => format!(
@@ -712,6 +712,15 @@ fn recover_from(
             (saved, vec![line], Recovery::Stays)
         }
     }
+}
+
+/// Ruling E6-E: a document read from disk keeps its id only when it has `new_id`'s form (`edit_doc::valid_id`);
+/// otherwise it has none (a new one is made in memory), so a crafted id never reaches `kept_autosave_path`.
+fn checked(d: Option<EditDoc>) -> Option<EditDoc> {
+    d.map(|mut d| {
+        d.id = d.id.filter(|i| edit_doc::valid_id(i));
+        d
+    })
 }
 
 /// The same ops in the same order; their statuses are worked out again on every apply, so they are not compared.
@@ -755,7 +764,7 @@ impl NifEdit {
         };
         let saved = match draft_path.as_os_str().is_empty() {
             true => None,
-            false => edit_doc::load(&draft_path)?,
+            false => checked(edit_doc::load(&draft_path)?),
         };
         let had_doc = saved.is_some();
         // Note GD11: with a project, a newer kept autosave of the draft's id (a switch that could not save into the
@@ -935,14 +944,12 @@ impl NifEdit {
         }
     }
 
-    /// Writes the record of the export (the document as it stands, with its export entry) to the export folder; only
-    /// `write_out` calls it (ruling E6-A). Nothing without one. A failure goes to `error`.
-    fn write_record(&mut self) {
-        let Some(p) = self.record_path.clone() else {
-            return;
-        };
-        if let Err(e) = edit_doc::save(&p, &self.doc) {
-            self.error = Some(e);
+    /// Writes `record` (the document as exported, with its new export entry) to the export folder; only `write_out`
+    /// calls it (ruling E6-A). Ok with no folder.
+    fn write_record(&self, record: &EditDoc) -> Result<(), String> {
+        match &self.record_path {
+            Some(p) => edit_doc::save(p, record),
+            None => Ok(()),
         }
     }
 
@@ -1106,9 +1113,16 @@ impl NifEdit {
                 return ExportOutcome::Blocked(why);
             }
         }
-        // the draft first, when a drag was not flushed: the NIF is written from what the draft holds
+        // the draft first, when a drag was not flushed: the NIF is written from what the draft holds, and not at all
+        // when the draft cannot be saved (ruling E6-E)
         if self.unsaved {
             self.save();
+            if self.unsaved {
+                let why = self.error.take().unwrap_or_default();
+                return ExportOutcome::Blocked(format!(
+                    "the edits could not be saved, so nothing was exported: {why}"
+                ));
+            }
         }
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
             return ExportOutcome::Blocked(format!("Cannot write {}: {e}", path.display()));
@@ -1116,14 +1130,25 @@ impl NifEdit {
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        self.doc.export = ExportRec {
+        let export = ExportRec {
             sha256: Some(edit_doc::sha256_hex(&out)),
             at: Some(at),
             ops_hash: Some(self.doc.ops_hash()),
         };
+        // Ruling E6-E: the export counts once its record is saved; until then the state stays (the row pending)
+        let record = EditDoc {
+            export: export.clone(),
+            ..self.doc.clone()
+        };
+        if let Err(e) = self.write_record(&record) {
+            return ExportOutcome::Blocked(format!(
+                "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
+                path.display()
+            ));
+        }
+        self.doc.export = export;
         self.up_to_date = true;
         self.foreign_record = None;
-        self.write_record();
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
             rerun_pgpatcher: self.copies.iter().any(|c| c.derived),
@@ -1558,7 +1583,7 @@ impl NifEdit {
             return Err(format!("{} no longer exists", project.display()));
         }
         let draft = edit_doc::draft_path(project, &self.data_path)?;
-        let theirs = edit_doc::load(&draft)?;
+        let theirs = checked(edit_doc::load(&draft)?);
         let picked = pick_draft(
             theirs.clone(),
             &draft,
@@ -2371,7 +2396,8 @@ impl MeshesModel {
         self.nif_export_root.clone()
     }
 
-    /// Note GD5 (c): where an edit of `path` autosaves while no export folder is chosen (beside the scan store).
+    /// Note GD5 (c), Review E6: the plain autosave of `path` (beside the scan store), the draft while no project is
+    /// open; with a project, the folder its kept autosaves go to. The export folder plays no part.
     fn autosave_of(&self, path: &str) -> Option<PathBuf> {
         let dir = self.store_path.as_ref()?.parent()?;
         edit_doc::autosave_path(dir, path).ok()
