@@ -778,6 +778,7 @@ fn opening_a_project_says_what_it_dropped_and_keeps_the_other_draft_whole() {
     gloss(&mut m, 12.5);
     let proj = project_folder(&d, "proj");
     let p = draft_in(&proj);
+    make_old(&p); // ruling E6-D: the live edit is the newer, so it is the one carried
     m.messages.clear();
     m.set_project_root(Some(&proj));
     assert!(
@@ -5649,6 +5650,180 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
     );
     assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
     assert_eq!(glossiness(&m), source_value, "the source's value is back");
+}
+
+/// Sets the modified time of `p` to that of `like`.
+fn same_time(p: &Path, like: &Path) {
+    let t = std::fs::metadata(like).unwrap().modified().unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(p)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
+/// Project `p` with its own draft of x.nif (7.5), then a session with no project with one edit (12.5) saved in the
+/// plain autosave. Returns (P's draft bytes, the autosave's bytes).
+fn live_edit_beside_a_project_draft(
+    d: &tempfile::TempDir,
+    m: &mut MeshesModel,
+    p: &Path,
+) -> (Vec<u8>, Vec<u8>) {
+    let theirs = project_with_a_draft(m, p);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(m, 12.5);
+    (theirs, std::fs::read(autosave(d)).unwrap())
+}
+
+/// Review E6 (Important 4, ruling E6-D): opening a project whose draft is newer than the live edit (in its autosave)
+/// opens the project's draft, as `open` would; the live edit stays in the autosave, and neither file is written.
+#[test]
+fn opening_a_project_with_a_newer_draft_opens_that_draft() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    let (theirs, mine) = live_edit_beside_a_project_draft(&d, &mut m, &p);
+    make_old(&autosave(&d));
+    let mine_time = std::fs::metadata(autosave(&d)).unwrap().modified().unwrap();
+    m.messages.clear();
+    m.set_project_root(Some(&p));
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "the newer draft wins"
+    );
+    assert_eq!(std::fs::read(draft(&p)).unwrap(), theirs);
+    assert_eq!(std::fs::read(autosave(&d)).unwrap(), mine);
+    assert_eq!(
+        std::fs::metadata(autosave(&d)).unwrap().modified().unwrap(),
+        mine_time,
+        "the autosave was not written"
+    );
+    assert!(
+        m.messages
+            .iter()
+            .any(|l| l.starts_with("Older edits of meshes/x.nif stay autosaved in ")),
+        "{:?}",
+        m.messages
+    );
+}
+
+/// Ruling E6-D, Note GD24: at equal times the project's draft wins, as at open.
+#[test]
+fn opening_a_project_with_a_draft_of_the_same_time_opens_that_draft() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    let (theirs, mine) = live_edit_beside_a_project_draft(&d, &mut m, &p);
+    same_time(&autosave(&d), &draft(&p));
+    m.set_project_root(Some(&p));
+    assert_eq!(op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(), [7.5]);
+    assert_eq!(std::fs::read(draft(&p)).unwrap(), theirs);
+    assert_eq!(std::fs::read(autosave(&d)).unwrap(), mine);
+}
+
+/// Ruling E6-D: the project's kept autosave of its draft's id takes part, as at open: newer than the draft, it opens.
+#[test]
+fn opening_a_project_checks_its_kept_autosave() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    let (theirs, mine) = live_edit_beside_a_project_draft(&d, &mut m, &p);
+    let id = id_of(&p);
+    let mut k = load(&draft(&p)).unwrap().unwrap();
+    if let Op::SetField { value, .. } = &mut k.ops[0].op {
+        *value = Value::F32(9.5f32.to_bits());
+    }
+    save(&kept(&d, &id), &k).unwrap();
+    make_old(&draft(&p));
+    make_old(&autosave(&d));
+    m.set_project_root(Some(&p));
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [9.5],
+        "the kept autosave is the newest"
+    );
+    assert_eq!(std::fs::read(draft(&p)).unwrap(), theirs);
+    assert_eq!(
+        std::fs::read(autosave(&d)).unwrap(),
+        mine,
+        "the live edit stays"
+    );
+}
+
+/// Ruling E6-D: a carried edit takes the project draft's id (so its kept autosave and a renamed project still
+/// match), and a new one when the project has no draft.
+#[test]
+fn a_carried_edit_takes_the_project_drafts_id() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    live_edit_beside_a_project_draft(&d, &mut m, &p);
+    let theirs = id_of(&p);
+    make_old(&draft(&p));
+    m.set_project_root(Some(&p));
+    assert_eq!(op_values(&m)[0].1, 12.5, "premise: the live edit is newer");
+    assert_eq!(id_of(&p), theirs);
+    // with no draft in the project, the carried edit gets an id of its own
+    let q = project_folder(&d, "q");
+    m.set_project_root(None);
+    gloss(&mut m, 13.5);
+    let live = load(&autosave(&d)).unwrap().unwrap().id.unwrap();
+    m.set_project_root(Some(&q));
+    assert_eq!(op_values(&m)[0].1, 13.5, "premise: carried");
+    assert_ne!(id_of(&q), live, "a new id");
+}
+
+/// Ruling E6-D: a kept autosave older than the project's draft does not open, and the next save moves it to
+/// `<sha>.<id>.<secs>.toml`, bytes unchanged.
+#[test]
+fn an_older_kept_autosave_is_moved_aside_by_the_next_save() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    let id = id_of(&p);
+    let mut k = load(&draft(&p)).unwrap().unwrap();
+    if let Op::SetField { value, .. } = &mut k.ops[0].op {
+        *value = Value::F32(9.5f32.to_bits());
+    }
+    save(&kept(&d, &id), &k).unwrap();
+    make_old(&kept(&d, &id));
+    let old = std::fs::read(kept(&d, &id)).unwrap();
+    m.open_edit();
+    assert_eq!(op_values(&m)[0].1, 7.5, "the newer draft opens");
+    gloss(&mut m, 13.5);
+    assert!(!kept(&d, &id).exists(), "its name is free again");
+    let aside = moved_aside_from(&kept(&d, &id));
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(std::fs::read(&aside[0]).unwrap(), old);
+}
+
+/// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
+/// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
+/// that empty state, unsaved, and the project's draft is kept aside at its first save.
+#[test]
+fn a_recovered_empty_autosave_stays_when_a_project_is_opened() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    let theirs = project_with_a_draft(&mut m, &p);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(m.undo_edit());
+    m.close_edit();
+    assert!(load(&autosave(&d)).unwrap().unwrap().ops.is_empty());
+    make_old(&draft(&p));
+    m.open_edit(); // no project: the empty autosave, no history
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.ops.is_empty() && !e.history.can_undo() && !e.history.can_redo());
+    m.set_project_root(Some(&p));
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.ops.is_empty(), "the recovered empty state stays");
+    assert!(e.touched(), "unsaved");
+    assert_eq!(e.draft_path, draft(&p));
+    m.edit_with(|e| e.flush());
+    assert!(load(&draft(&p)).unwrap().unwrap().ops.is_empty());
+    let aside = kept_beside(&draft(&p));
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(std::fs::read(&aside[0]).unwrap(), theirs);
 }
 
 /// Project `a`'s session of x.nif with one edit (12.5) that can be saved nowhere: after the NIF opened, `a\_sdc` and

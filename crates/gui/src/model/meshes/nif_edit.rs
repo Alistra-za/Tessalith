@@ -87,6 +87,10 @@ pub struct NifEdit {
     /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded; only that one is replaced by
     /// it, and the first save into the project draft deletes it.
     kept_autosave: Option<PathBuf>,
+    /// Ruling E6-D: the kept autosave of the draft's id that lost to the newer draft at open; the first draft save
+    /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
+    /// are kept.
+    kept_older: Option<PathBuf>,
     /// `retarget_error` says no save worked when the session was to end (a project switch, or ruling E6-C's other
     /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
@@ -597,23 +601,90 @@ fn keep_base(op: &mut Op, old: &Op) {
     }
 }
 
+/// What `pick_draft` decided.
+struct Picked {
+    /// The document that opens (None: the project has none and no autosave won).
+    doc: Option<EditDoc>,
+    /// GD11's lines for Messages.
+    lines: Vec<String>,
+    /// The kept autosave of the draft's id won: the session holds it.
+    kept: Option<PathBuf>,
+    /// The kept autosave of the draft's id lost to the draft: the next save moves it aside (ruling E6-D).
+    kept_older: Option<PathBuf>,
+    /// The plain autosave won.
+    plain: bool,
+}
+
+/// Note GD11, ruling E6-D: the one recovery decision, for `open` in a project and for the live carry-over into one
+/// (`NifEdit::retarget`). The project's draft `saved` against the kept autosave of its id, then (when that one did
+/// not win) against the plain autosave `autosave`: each time the newer wins, the draft at equal times (GD24).
+fn pick_draft(
+    saved: Option<EditDoc>,
+    draft_path: &Path,
+    autosave: Option<&Path>,
+    data_path: &str,
+) -> Picked {
+    let mut p = Picked {
+        doc: saved,
+        lines: vec![],
+        kept: None,
+        kept_older: None,
+        plain: false,
+    };
+    let k = p
+        .doc
+        .as_ref()
+        .and_then(|d| d.id.as_deref())
+        .zip(autosave.and_then(autosave_dir))
+        .map(|(i, dir)| edit_doc::kept_autosave_path(dir, data_path, i))
+        .filter(|k| k.is_file());
+    if let Some(k) = k {
+        let (s, l, r) = recover_from(p.doc.take(), draft_path, &k, data_path);
+        p.doc = s;
+        p.lines.extend(l);
+        match r {
+            Recovery::Won => p.kept = Some(k),
+            Recovery::Older => p.kept_older = Some(k),
+            Recovery::Stays => {}
+        }
+    }
+    if let Some(a) = autosave.filter(|a| p.kept.is_none() && a.is_file()) {
+        let (s, l, r) = recover_from(p.doc.take(), draft_path, a, data_path);
+        p.doc = s;
+        p.lines.extend(l);
+        p.plain = r == Recovery::Won;
+    }
+    p
+}
+
+/// What `recover_from` did with an autosave.
+#[derive(PartialEq)]
+enum Recovery {
+    /// It is the document.
+    Won,
+    /// The draft is newer (or as new): the autosave stays as it is.
+    Older,
+    /// It is gone or does not load: it stays for the user.
+    Stays,
+}
+
 /// Note GD11: with a project open, an autosave `a` of the NIF (the plain one, or the kept one of the draft's id) that
 /// is newer than the project's draft (or the project has none) is offered: it is the document, and the session owns
 /// it (its first save in the project removes it). An older one stays, named in Messages. The draft's id stays the
-/// document's. Returns (document, Messages lines, recovered).
+/// document's. Returns (document, Messages lines, what happened to `a`).
 fn recover_from(
     saved: Option<EditDoc>,
     draft_path: &Path,
     a: &Path,
     data_path: &str,
-) -> (Option<EditDoc>, Vec<String>, bool) {
+) -> (Option<EditDoc>, Vec<String>, Recovery) {
     let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     if saved.is_some() && mtime(a) <= mtime(draft_path) {
         let line = format!(
             "Older edits of {data_path} stay autosaved in {}.",
             a.display()
         );
-        return (saved, vec![line], false);
+        return (saved, vec![line], Recovery::Older);
     }
     match edit_doc::load(a) {
         Ok(Some(mut mine)) => {
@@ -632,13 +703,13 @@ fn recover_from(
             if let Some(id) = saved.and_then(|s| s.id) {
                 mine.id = Some(id);
             }
-            (Some(mine), vec![line], true)
+            (Some(mine), vec![line], Recovery::Won)
         }
-        Ok(None) => (saved, vec![], false),
+        Ok(None) => (saved, vec![], Recovery::Stays),
         // never deleted or overwritten: it stays for the user, and the project's draft opens
         Err(e) => {
             let line = format!("The autosave {} does not load and stays: {e}", a.display());
-            (saved, vec![line], false)
+            (saved, vec![line], Recovery::Stays)
         }
     }
 }
@@ -688,31 +759,21 @@ impl NifEdit {
         };
         let had_doc = saved.is_some();
         // Note GD11: with a project, a newer kept autosave of the draft's id (a switch that could not save into the
-        // project) or else a newer plain autosave is offered; with none the draft is the autosave itself.
+        // project) or else a newer plain autosave is offered (`pick_draft`); with none the draft is the autosave.
         let mut saved = saved;
         let mut open_lines = vec![];
         let mut recovered = false;
         let mut kept_autosave = None;
+        let mut kept_older = None;
         let mut owns_autosave = project.is_none() && autosave.is_some();
         if project.is_some() {
-            let k = saved
-                .as_ref()
-                .and_then(|d| d.id.as_deref())
-                .zip(autosave.and_then(autosave_dir))
-                .map(|(i, dir)| edit_doc::kept_autosave_path(dir, data_path, i))
-                .filter(|k| k.is_file());
-            if let Some(k) = k {
-                let (s, l, r) = recover_from(saved, &draft_path, &k, data_path);
-                (saved, recovered) = (s, r);
-                open_lines.extend(l);
-                kept_autosave = r.then_some(k);
-            }
-            if let Some(a) = autosave.filter(|a| !recovered && a.is_file()) {
-                let (s, l, r) = recover_from(saved, &draft_path, a, data_path);
-                (saved, recovered) = (s, r);
-                open_lines.extend(l);
-                owns_autosave = r;
-            }
+            let p = pick_draft(saved, &draft_path, autosave, data_path);
+            saved = p.doc;
+            open_lines = p.lines;
+            recovered = p.kept.is_some() || p.plain;
+            kept_autosave = p.kept;
+            kept_older = p.kept_older;
+            owns_autosave = p.plain;
         }
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
         // the id every draft save writes (`write_draft` writes `doc`); a draft without one gets it with its next edit
@@ -748,6 +809,7 @@ impl NifEdit {
             // Note GD25: a recovered autosave replaced the project's draft, which this session never shows
             doc_unseen: recovered && had_doc,
             kept_autosave,
+            kept_older,
             switch_failed: false,
             switch_wording: false,
             switch_saved: false,
@@ -1266,6 +1328,12 @@ impl NifEdit {
         if self.project.is_none() {
             return;
         }
+        // ruling E6-D: the older kept autosave goes to `<sha>.<id>.<secs>.toml`; a failed move is tried by the next save
+        if let Some(k) = self.kept_older.take().filter(|k| k.is_file()) {
+            if !self.move_aside(&k, "The kept autosave") {
+                self.kept_older = Some(k);
+            }
+        }
         let mut gone = vec![];
         if let Some(a) = self.autosave.clone().filter(|_| self.owns_autosave) {
             self.owns_autosave = false;
@@ -1476,17 +1544,37 @@ impl NifEdit {
         }
     }
 
-    /// Note GD5 (c), GD11: a project is opened while this edit is touched and its draft is still the autosave. The
-    /// document stays in memory and moves to the project's draft (`edit_doc::draft_path`); the caller saves it there.
-    /// A draft the project already holds is never loaded over it: it is kept aside by that save (Notes GD19, GD25).
-    /// Returns the lines for Messages; Err (nothing moved, the reason) when the project is not a folder or its
+    /// Note GD5 (c), GD11: a project is opened while this edit is touched and its draft is still the autosave, which
+    /// the caller has made durable (`MeshesModel::may_end_edit`), so its time is the live edit's. Ruling E6-D: the
+    /// decision `open` makes (`pick_draft`) runs against the project's draft and the kept autosave of its id. When the
+    /// autosave wins, the document stays in memory and moves to the project's draft (`edit_doc::draft_path`), taking
+    /// the draft's id (a new one when the project has none); the caller saves it there, and a draft the project
+    /// already holds is kept aside by that save (Notes GD19, GD25). Ok(None) when the project's draft or kept autosave
+    /// wins: nothing moved, and the caller opens the NIF in the project, where `open` makes the same decision (the
+    /// live edit stays in the autosave). Err (nothing moved, the reason) when the project is not a folder or its
     /// draft does not load, so it is never overwritten.
-    pub fn retarget(&mut self, project: &Path) -> Result<Vec<String>, String> {
+    pub fn retarget(&mut self, project: &Path) -> Result<Option<Vec<String>>, String> {
         if !project.is_dir() {
             return Err(format!("{} no longer exists", project.display()));
         }
         let draft = edit_doc::draft_path(project, &self.data_path)?;
         let theirs = edit_doc::load(&draft)?;
+        let picked = pick_draft(
+            theirs.clone(),
+            &draft,
+            self.autosave.as_deref(),
+            &self.data_path,
+        );
+        if !picked.plain {
+            return Ok(None);
+        }
+        self.kept_older = picked.kept_older;
+        self.doc.id = Some(
+            theirs
+                .as_ref()
+                .and_then(|t| t.id.clone())
+                .unwrap_or_else(|| edit_doc::new_id(&self.data_path)),
+        );
         let mut lines = vec![];
         if theirs.is_some() {
             lines.push(format!(
@@ -1503,7 +1591,7 @@ impl NifEdit {
         self.drag = None;
         self.history.break_merge();
         self.unsaved = true;
-        Ok(lines)
+        Ok(Some(lines))
     }
 
     /// The export folder changed: the session keeps its draft and takes the new folder's record (`export`); nothing
@@ -2246,21 +2334,28 @@ impl MeshesModel {
             return;
         }
         if let (None, Some(p), true) = (&e.project, to, e.touched()) {
-            e.end_drag();
+            // ruling E6-D: the live edit is durable in its autosave first, so the decision reads its time
+            if !self.may_end_edit(true) {
+                self.pending_root = Some(to.map(Path::to_path_buf));
+                return;
+            }
+            let Some(e) = self.edit.as_mut() else { return };
             match e.retarget(p) {
-                Ok(lines) => {
+                Ok(Some(lines)) => {
                     self.messages.extend(lines);
                     e.save();
+                    return;
                 }
+                Ok(None) => {} // the project's own edits are newer: the NIF opens there, below
                 // never overwritten: the edits stay in the autosave, and the draft is not opened over them
                 Err(why) => {
                     self.error = Some(format!(
                         "Could not move the edits of {} into the project: {why}. They stay in the autosave.",
                         e.data_path
                     ));
+                    return;
                 }
             }
-            return;
         }
         if !self.may_end_edit(true) {
             self.pending_root = Some(to.map(Path::to_path_buf));
