@@ -20,7 +20,7 @@ use engine::config::Target;
 use engine::sets::{same_id, OutputKey};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -671,6 +671,13 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
         .collect()
 }
 
+/// Run-row identity and the exact path the job writes. Only the latter is a filesystem path.
+#[derive(Debug, Clone)]
+pub struct JsonDependency {
+    pub job_key: String,
+    pub output: PathBuf,
+}
+
 /// What an export about to start writes once it has ended: the PGPatcher JSON and the vanilla copies.
 #[derive(Debug, Clone)]
 pub struct PendingJson {
@@ -678,13 +685,12 @@ pub struct PendingJson {
     /// A4), else the export folder, as `PendingCs.root` and `PendingCm.root`.
     pub root: PathBuf,
     pub path: PathBuf,
-    /// Set id, the job keys its entry depends on, and the entry.
-    pub entries: Vec<(String, Vec<String>, EntryInput)>,
+    /// Set id, the local outputs its entry depends on, and the entry.
+    pub entries: Vec<(String, Vec<JsonDependency>, EntryInput)>,
     /// Borrowed-slot copies for vanilla: (owner output, borrower path, owner job key), paths absolute (P4).
     pub copies: Vec<(PathBuf, PathBuf, String)>,
-    /// Note HF9: on a run that leaves sets out, the plan's output root: a dep with no row passes when its file is
-    /// there. `None`: every dep needs its row, as before.
-    pub untouched_root: Option<PathBuf>,
+    /// Note HF9: a run that leaves sets out accepts an untouched dependency present on disk.
+    pub leaves_sets_out: bool,
     /// 3b-F7: entries of sets outside the run that their own checks refuse, as (set id, why); `finish` notes each as
     /// "not in JSON" and writes the rest.
     pub held: Vec<(String, String)>,
@@ -745,13 +751,13 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             path: PathBuf::new(),
             entries: vec![],
             copies,
-            untouched_root: m.untouched_root(),
+            leaves_sets_out: m.leaves_sets_out(),
             held: vec![],
         });
     }
     // Review E1 (Task 15a): the local files the JSON names (`json_files`): a link that names a set's output is a dep as
     // a borrow is; an own or borrowed file a `slotN` overrides is none (the set still converts its own).
-    let deps = |v: &SetView| -> Vec<String> {
+    let deps = |v: &SetView| {
         json_files(v)
             .filter_map(|f| match f {
                 JsonFile::Fill(_, fill) => fill.item(),
@@ -759,9 +765,11 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
                 JsonFile::External(_) => None,
             })
             .filter_map(|item| {
-                m.item(item)
-                    .map(|i| i.job_key.clone())
-                    .filter(|j| !j.is_empty())
+                let i = m.item(item).filter(|i| !i.job_key.is_empty())?;
+                Some(JsonDependency {
+                    job_key: i.job_key.clone(),
+                    output: i.job.as_ref()?.output.clone(),
+                })
             })
             .collect()
     };
@@ -810,35 +818,22 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
         entries,
         copies: vec![],
         root,
-        untouched_root: m.untouched_root(),
+        leaves_sets_out: m.leaves_sets_out(),
         held,
     })
 }
 
-fn exported(rows: &[Row], key: &str) -> Result<(), String> {
+/// Note HF9: a dependency must succeed in this run, or be left untouched with its exact output on disk.
+fn dep_ok(p: &PendingJson, rows: &[Row], key: &str, output: &Path) -> Result<(), String> {
     match rows.iter().find(|r| r.job_key.eq_ignore_ascii_case(key)) {
         Some(Row {
             state: RowState::Done { .. } | RowState::UpToDate,
             ..
         }) => Ok(()),
         Some(r) => Err(r.state.label()),
+        None if p.leaves_sets_out && output.is_file() => Ok(()),
+        None if p.leaves_sets_out => Err("not exported yet".into()),
         None => Err("not exported".into()),
-    }
-}
-
-/// Note HF9: one dep of an entry: written or up to date in this run, or, on a run that leaves sets out, untouched by it
-/// and on disk ("leave it alone" keeps an entry whose source changed since).
-fn dep_ok(p: &PendingJson, rows: &[Row], key: &str) -> Result<(), String> {
-    let touched = rows.iter().any(|r| r.job_key.eq_ignore_ascii_case(key));
-    match &p.untouched_root {
-        Some(root) if !touched => {
-            if root.join(key).is_file() {
-                Ok(())
-            } else {
-                Err("not exported yet".into())
-            }
-        }
-        _ => exported(rows, key),
     }
 }
 
@@ -853,7 +848,7 @@ pub fn copy_files(
 ) {
     for (src, dst, owner_key) in &p.copies {
         if !owner_key.is_empty() {
-            if let Err(why) = dep_ok(p, rows, owner_key) {
+            if let Err(why) = dep_ok(p, rows, owner_key, src) {
                 notes.push(format!("could not copy {} ({why})", src.display()));
                 continue;
             }
@@ -903,7 +898,7 @@ pub fn finish(
     for (id, deps, e) in &p.entries {
         match deps
             .iter()
-            .map(|k| dep_ok(p, rows, k))
+            .map(|d| dep_ok(p, rows, &d.job_key, &d.output))
             .find_map(Result::err)
         {
             None => kept.push(e.clone()),

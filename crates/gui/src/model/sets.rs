@@ -1248,7 +1248,7 @@ pub fn root_reads() -> (u64, u64) {
 /// call, never per member.
 pub(crate) fn output_roots(m: &AppModel) -> [PathBuf; 2] {
     let export = m.export_root();
-    [m.output_root_in(&m.also_config(), &export), export]
+    [m.output_root_in(&export), export]
 }
 
 /// Tests: how many whole `build_views` builds ran (a splice is not one).

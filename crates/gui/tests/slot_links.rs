@@ -2247,7 +2247,7 @@ fn the_output_index_holds_where_each_file_is_written() {
         let deps = |m: &AppModel| {
             sdc_gui::model::pbr_export::prepare(m)
                 .and_then(|p| p.entries.into_iter().find(|(id, _, _)| id == CONSUMER))
-                .map(|(_, deps, _)| deps)
+                .map(|(_, deps, _)| deps.into_iter().map(|d| d.job_key).collect::<Vec<_>>())
                 .unwrap_or_default()
         };
         let key = format!("slot{}", layout.slot);
@@ -2705,6 +2705,39 @@ fn a_pack_displaced_by_a_borrow_and_mapped_to_its_default_path_is_no_collision()
     );
 }
 
+#[test]
+fn an_excluded_borrower_names_the_pack_written_under_its_lenders_legacy_name() {
+    let layout = LAYOUTS
+        .iter()
+        .find(|l| l.out_name == "w_rmaos.dds")
+        .unwrap();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), layout);
+    // Export the consumer's albedo before giving it the borrow and leaving it out.
+    m.export_group("Consumer");
+    if m.review.is_some() {
+        m.export_from_review();
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("Legacy name and borrow", None, true, |_, s| {
+        s.set_txst("textures/t/w", None);
+        s.set_output_name("textures/t/w", Some("w"));
+        s.set_borrow(CONSUMER, 6, Some("textures/t/w"));
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let written = r"textures\t\w_rmaos.dds";
+    assert!(!m.export_root().join("textures/t/w_rmaos.dds").exists());
+    let (entry, notes) = exported_entry(&mut m, r"c\con.dds");
+    let entry = entry.unwrap_or_else(|| panic!("consumer missing: {notes}"));
+    assert_eq!(
+        entry["slot6"],
+        json!(written),
+        "the excluded consumer's pack"
+    );
+    let named = entry["slot6"].as_str().unwrap().replace('\\', "/");
+    assert!(m.export_root().join(named).is_file(), "{notes}");
+}
+
 // ---- Task 15a fix round 4 (ruling 3b-F21): a member pick stores only a settled path ----
 
 /// The reason a From another set row gives while the plan is out (ruling 3b-F21).
@@ -2764,6 +2797,78 @@ const MAPLE: Layout = Layout {
     invented: &[],
     json: &[],
 };
+
+#[test]
+fn a_fresh_scoped_export_after_a_terminal_remap_failure_is_refused() {
+    use sdc_gui::model::Dialog;
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &MAPLE);
+    let path = r"textures\z\new.dds";
+    m.set_json_value(CONSUMER, "slot1", Some(json!(path)));
+    let mut map = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .txst
+        .clone()
+        .unwrap();
+    map.slots.insert(1, path.into());
+    m.hold_plan_results = true;
+    m.map_record("arch/leaf", map).unwrap();
+    m.handle_held(WorkerMsg::Planned {
+        generation: m.generation(),
+        result: Err(PlanFailure {
+            message: "remap failed".into(),
+            config: false,
+        }),
+    });
+    m.dialog = None;
+    assert!(m.inputs_settled() && !m.full_plan_pending());
+    assert_eq!(writer_of(&m, "body.dds"), "arch/leaf.png");
+    m.export_group("Consumer");
+    assert!(
+        matches!(&m.dialog, Some(Dialog::Error(why)) if why.contains("plan failed")),
+        "the fresh export must explain the failed plan: {:?}",
+        m.dialog
+    );
+    assert!(m.export.running.is_none() && m.review.is_none() && !m.export_queued());
+    assert!(!pgp_json_path(&m).exists());
+    m.dialog = None;
+    m.open_review();
+    m.export_from_review();
+    assert!(matches!(&m.dialog, Some(Dialog::Error(why)) if why.contains("plan failed")));
+    assert!(m.export.running.is_none() && !m.export_queued());
+}
+
+#[test]
+fn a_queued_group_export_includes_the_mirrored_host_at_the_new_root() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &LAYOUTS[0]);
+    let path = r"textures\p\plain.dds";
+    m.set_json_value(CONSUMER, "slot1", Some(json!(path)));
+    let fresh = d.path().join("fresh");
+    m.set_export_folder(fresh.clone());
+    m.export_group("Consumer");
+    assert!(m.export_queued());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    if m.review.is_some() {
+        m.export_from_review();
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    assert!(
+        fresh.join("textures/p/plain.dds").is_file(),
+        "the queued export missed the mirrored host: {:?}",
+        m.export.notes
+    );
+    let doc: Value = serde_json::from_slice(&std::fs::read(pgp_json_path(&m)).unwrap()).unwrap();
+    assert!(doc["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["match1"] == r"c\con.dds" && e["slot1"] == path));
+}
 
 /// Ruling 3b-F21: while another set's edit is planning, the mapped fuzz member's row is off with the planning reason
 /// and a pick stores nothing (f8fbe807 offered and stored the asked-for `textures\z\rock_fuzz.dds`, a file the export
@@ -2874,7 +2979,7 @@ fn a_member_pick_after_a_failed_replan_is_refused() {
     });
     // The user closes the error.
     m.dialog = None;
-    // Export's own checks find nothing to wait for here: no plan is out and the inputs are the failed plan's.
+    // No plan is out and the request inputs still match. Only the terminal failure makes these jobs stale.
     assert!(!m.full_plan_pending(), "premise: no plan is out");
     assert!(m.inputs_settled(), "premise: Export's inputs check passes");
     // Ruling 3b-F25: no plan is running, so the reason says the plan must run again.

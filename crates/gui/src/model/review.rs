@@ -514,6 +514,9 @@ impl AppModel {
 
     /// The front half of Review's Export, also run when a scan-finished read it waited for lands.
     pub(super) fn continue_review(&mut self) {
+        if self.refuse_failed_export_plan() {
+            return;
+        }
         if self.planning.is_some() || self.votes_pending.is_some() {
             self.continue_after_plan = Some(Continue::Review);
             return;

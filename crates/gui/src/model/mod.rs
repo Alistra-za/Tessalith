@@ -2090,10 +2090,21 @@ impl AppModel {
         self.export_go();
     }
 
+    /// A failed replan leaves the previous jobs on screen. Both Export buttons need a successful plan.
+    fn refuse_failed_export_plan(&mut self) -> bool {
+        if self.root.is_some() && self.plan_failed {
+            self.dialog = Some(Dialog::Error(
+                "The last plan failed. Reopen the folder to plan it again before exporting.".into(),
+            ));
+            return true;
+        }
+        false
+    }
+
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
     fn export_go(&mut self) {
         self.status_note = None;
-        if self.root.is_none() {
+        if self.root.is_none() || self.refuse_failed_export_plan() {
             return;
         }
         // A plan is in flight (just opened, or an edit): the items on screen are the previous plan's, so the checks
@@ -2107,6 +2118,7 @@ impl AppModel {
             self.replan();
             return;
         }
+        self.expand_scope_hosts();
         self.export_checks();
     }
 
@@ -2174,7 +2186,7 @@ impl AppModel {
     /// Ruling 3b-F21: why a From another set pick may not store a member's path now, or `None`. It waits on what Export
     /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
     /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
-    /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it. A running
+    /// plan failed for good (`plan_failed`), as Export does: the items are then the plan before it. A running
     /// plan or read reads "Planning…" (`PICK_PLANNING`); the other two say the plan must run again (`PICK_PLAN_AGAIN`,
     /// ruling 3b-F25). Uncached: the click re-checks with it (`member_game_path`); the menu rows read
     /// `pick_waits_cached`.
@@ -4693,6 +4705,66 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(60)));
         assert_eq!(m.target, Target::Cs);
         m
+    }
+
+    #[test]
+    fn a_warm_assign_menu_copies_no_skipped_set_ids() {
+        use crate::project::SKIPPED_IDS_COPIED;
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_also_settings(|c| c.skip = (0..3000).map(|n| format!("sets/{n}")).collect());
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let menu = || m.slot_menu("landscape/rock01", sets::SlotKind::Diffuse);
+        assert!(menu()
+            .iter()
+            .any(|e| matches!(e.action, bulk::MenuAction::SlotLink { .. })));
+        SKIPPED_IDS_COPIED.set(0);
+        assert_eq!(m.also_config().skip.len(), 3000);
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "the probe observes a whole configuration copy"
+        );
+        menu();
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "a cache hit copied skip entries"
+        );
+    }
+
+    #[test]
+    fn reselecting_the_same_folder_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let before = m.pick_key();
+        m.set_export_folder(m.export_root());
+        assert!(!m.inputs_unsettled());
+        assert!(
+            before != m.pick_key(),
+            "reselecting the folder must invalidate the row cache"
+        );
+    }
+
+    #[test]
+    fn terminal_failure_with_equal_inputs_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_export_folder(m.export_root());
+        let pending = m.pick_key();
+        m.handle(WorkerMsg::Planned {
+            generation: m.generation,
+            result: Err(PlanFailure {
+                message: "failed".into(),
+                config: false,
+            }),
+        });
+        assert!(!m.inputs_unsettled() && !m.full_plan_pending());
+        assert!(
+            pending != m.pick_key(),
+            "terminal failure must invalidate the row cache"
+        );
+        assert_eq!(m.pick_waits_cached(), Some(sets::PICK_PLAN_AGAIN));
     }
 
     /// Final fix I1: the indexed `engine_inputs` and `output_candidates` equal the linear scans they replaced, on a
