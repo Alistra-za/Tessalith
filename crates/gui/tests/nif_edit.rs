@@ -5447,6 +5447,7 @@ fn a_removed_project_folder_keeps_the_edit_on_a_switch() {
     std::fs::remove_dir_all(&a).unwrap();
     m.messages.clear();
     m.set_project_root(Some(&b));
+    m.set_nif_export_root(m.nif_export_root.clone()); // the next frame moves the session's lines to Messages
     assert!(!a.exists(), "the removed folder is not made again");
     assert_eq!(
         doc_values(&kept(&d, &id)),
@@ -5461,11 +5462,9 @@ fn a_removed_project_folder_keeps_the_edit_on_a_switch() {
         m.messages
     );
     assert_eq!(std::fs::read(draft(&b)).unwrap(), b_bytes);
-    assert_eq!(
-        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
-        [7.5],
-        "the session is B's"
-    );
+    // ruling E6-K (replaces "the session is B's"): no open finds a kept autosave of a removed project, so the
+    // session stays, its edit kept on disk and open here
+    assert_eq!(vals(&m), [12.5], "the session stays");
 }
 
 /// Ruling r3-2: the fallback is keyed on the draft's id; another draft's kept autosave and the plain autosave stay.
@@ -5532,6 +5531,11 @@ fn another_project_never_loads_a_kept_autosave_that_is_not_its_own() {
     let id = id_of(&a);
     std::fs::remove_dir_all(&a).unwrap();
     m.set_project_root(Some(&b));
+    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave); undone to no ops the session
+    // matches the removed project (nothing) and the switch finishes
+    assert_eq!(vals(&m), [12.5], "premise: the switch waits");
+    assert!(m.undo_edit());
+    m.set_project_root(Some(&b));
     let a_kept = std::fs::read(kept(&d, &id)).unwrap();
     let values = |m: &MeshesModel| op_values(m).iter().map(|v| v.1).collect::<Vec<_>>();
     assert_eq!(values(&m), [7.5], "B's session holds B's ops only");
@@ -5597,16 +5601,14 @@ fn when_both_saves_fail_the_edit_stays_open_and_export_is_blocked() {
         std::fs::metadata(&blocker).unwrap().modified().unwrap(),
         stamp
     );
-    // the autosave folder works again: the next edit tries again, keeps the edits and ends the session
+    // the autosave folder works again: the next edit tries again and keeps the edits. Ruling E6-K (replaces "B
+    // opens"): the finished retry asks to end the session once more (the second attempt), and no open finds a removed
+    // project's kept autosave, so the session stays
     std::fs::remove_file(&blocker).unwrap();
     gloss(&mut m, 13.5);
-    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 2);
     assert_eq!(doc_values(&kept(&d, &id)), [12.5, 13.5]);
-    assert_eq!(
-        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
-        [7.5],
-        "B opens"
-    );
+    assert_eq!(vals(&m), [12.5, 13.5], "the session stays");
 }
 
 /// Recursively copies `from` to `to` (a project folder).
@@ -5640,6 +5642,18 @@ fn a_copied_project_never_replaces_the_kept_autosave_of_its_original() {
     m.set_project_root(Some(&b));
     let k = kept(&d, &id);
     assert_eq!(doc_values(&k), [7.5, 12.5], "A's edit is kept");
+    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave); undone to no ops the session
+    // matches the removed project and ends, its last state in the kept autosave
+    assert!(m.undo_edit() && m.undo_edit());
+    m.set_project_root(Some(&b));
+    assert!(
+        m.edit.as_ref().unwrap().draft_path.starts_with(&b),
+        "premise: the NIF opened in B"
+    );
+    assert!(
+        load(&k).unwrap().unwrap().ops.is_empty(),
+        "A's last state is kept"
+    );
     let a_edit = std::fs::read(&k).unwrap();
     // A2's own draft is the newer file, so its session does not take the original's kept autosave
     make_old(&k);
@@ -6068,6 +6082,18 @@ fn reverting_to_no_ops_over_a_draft_with_ops_is_saved_before_leaving() {
     m.edit_with(|e| e.revert(0));
     let x = m.selected_nif.unwrap();
     m.select_nif(y_nif(&m));
+    // Review round 3 (B5, ruling E6-K): checked before the unlock. The draft the next open picks cannot be read, so
+    // the leave is refused even though its kept autosave save worked, and that save holds the revert.
+    assert_eq!(
+        m.selected_nif,
+        Some(x),
+        "the selection stays: the draft cannot be read"
+    );
+    assert!(m.edit.is_some());
+    assert!(
+        load(&k).unwrap().unwrap().ops.is_empty(),
+        "the kept autosave holds the revert"
+    );
     drop(lock);
     m.select_nif(x);
     m.open_edit();
@@ -6112,6 +6138,130 @@ fn matching_the_older_draft_is_not_durable_when_a_newer_kept_autosave_wins() {
         "the revert holds"
     );
     assert_eq!(doc_values(&draft(&p)), [7.5]);
+}
+
+/// The session's op values.
+fn vals(m: &MeshesModel) -> Vec<f32> {
+    op_values(m).iter().map(|v| v.1).collect()
+}
+
+/// Ruling E6-K's check after a leave: the session on `x` is still open with `want`, or a fresh open of `x` loads
+/// `want` (the leave made those ops what the next open loads).
+fn still_open_or_loads(m: &mut MeshesModel, x: Option<i64>, want: &[f32]) {
+    if m.edit.is_some() && m.selected_nif == x {
+        assert_eq!(vals(m), want, "still open with the current ops");
+        return;
+    }
+    if m.selected_nif != x {
+        m.select_nif(x.unwrap());
+    }
+    m.open_edit();
+    assert_eq!(vals(m), want, "a fresh open loads the current ops");
+}
+
+/// Runs each named row; a failing row is reported by name and the others still run.
+fn table(rows: &[(&str, fn())]) {
+    let failed: Vec<&str> = rows
+        .iter()
+        .filter(|(_, row)| std::panic::catch_unwind(row).is_err())
+        .map(|(name, _)| *name)
+        .collect();
+    assert!(failed.is_empty(), "rows failed: {failed:?}");
+}
+
+/// Holds `f` open the way another program can: readable, not replaceable, movable or deletable (`share` 1), or not
+/// even readable (`share` 0).
+#[cfg(windows)]
+fn hold(f: &Path, share: u32) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(share)
+        .open(f)
+        .unwrap()
+}
+
+/// Review round 3 (Critical 1 and round-one B3, ruling E6-K): a session is dropped only when, at the drop and after
+/// the leave's saves, the next open would load its ops; when it cannot tell, it is not dropped. Each row ends with the
+/// session still open or a fresh open loading the current ops.
+#[cfg(windows)]
+#[test]
+fn a_session_is_dropped_only_when_the_next_open_loads_its_ops() {
+    table(&[
+        ("a save that worked earlier is no permission later", || {
+            let (d, mut m) = export_session();
+            let a = unsaveable_edit(&d, &mut m);
+            let x = m.selected_nif;
+            m.close_edit();
+            assert!(m.edit.is_some(), "premise: refused");
+            std::fs::remove_file(a.join("_sdc")).unwrap(); // the project folder is repaired
+            gloss(&mut m, 13.5);
+            assert!(draft(&a).exists(), "premise: the retry saved the draft");
+            assert!(m.edit.is_some(), "premise: the session goes on");
+            std::fs::remove_file(draft(&a)).unwrap();
+            m.select_nif(y_nif(&m));
+            still_open_or_loads(&mut m, x, &[12.5, 13.5]);
+        }),
+        (
+            "a draft dated in the future wins over the kept autosave",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                project_with_a_draft(&mut m, &p);
+                let x = m.selected_nif;
+                m.open_edit();
+                let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+                std::fs::File::options()
+                    .write(true)
+                    .open(draft(&p))
+                    .unwrap()
+                    .set_modified(later)
+                    .unwrap();
+                let lock = hold(&draft(&p), 1);
+                gloss(&mut m, 12.5);
+                m.close_edit();
+                drop(lock);
+                still_open_or_loads(&mut m, x, &[7.5, 12.5]);
+            },
+        ),
+        (
+            "a draft with no id cannot lead the next open to the kept autosave",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                project_with_a_draft(&mut m, &p);
+                let x = m.selected_nif;
+                let mut legacy = load(&draft(&p)).unwrap().unwrap();
+                legacy.id = None;
+                save(&draft(&p), &legacy).unwrap();
+                m.open_edit();
+                let lock = hold(&draft(&p), 1);
+                gloss(&mut m, 12.5);
+                m.close_edit();
+                drop(lock);
+                still_open_or_loads(&mut m, x, &[7.5, 12.5]);
+            },
+        ),
+        (
+            "a newer kept autosave that cannot be read is not an answer",
+            || {
+                let (d, mut m) = export_session();
+                let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| {
+                    let mut two = doc.clone();
+                    two.ops.push(with_value(doc, 9.5).ops.remove(0));
+                    two
+                });
+                let x = m.selected_nif;
+                assert_eq!(vals(&m), [7.5, 9.5], "premise: the kept autosave opened");
+                let draft_lock = hold(&draft(&p), 1);
+                m.edit_with(|e| e.revert(1));
+                let kept_lock = hold(&k, 0);
+                m.close_edit();
+                drop((draft_lock, kept_lock));
+                still_open_or_loads(&mut m, x, &[7.5]);
+            },
+        ),
+    ]);
 }
 
 /// Review round 2 (Important B3, ruling E6-G): a project session whose ops sit in the plain autosave it recovered (the
@@ -6552,13 +6702,11 @@ fn a_drag_after_a_failed_switch_tries_the_saves_again() {
     let tries = m.switch_save_attempts_for_test();
     std::fs::remove_file(&blocker).unwrap();
     tick(&mut m, 40.5);
-    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
+    // the tick's retry, then (ruling E6-K) the finished retry's own leave check, which stays: no open finds a
+    // removed project's kept autosave
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 2);
     assert_eq!(doc_values(&kept(&d, &id)), [12.5, 40.5]);
-    assert_eq!(
-        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
-        [7.5],
-        "B opens"
-    );
+    assert_eq!(vals(&m), [12.5, 40.5], "the session stays");
 }
 
 /// Review E6 (Important 8, ruling E6-C): a return to the session's own project that cannot save there keeps the
