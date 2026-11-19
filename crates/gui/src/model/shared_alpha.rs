@@ -7,7 +7,6 @@
 //! never runs in an automatic step (`AppModel::automatic_step`). A listed key the user moved to another value no
 //! longer counts (the edit stays files-only); a user's Data pick takes the key off (N-34). What a step cannot see (a
 //! set's automatic shader and its Normal-slot member are the last plan's) is Task 9's Note row.
-use super::normal_follow::holders;
 use super::normal_follow::tangent;
 use super::sets::{locked_items, own_fills, views, SlotFill, SlotKind};
 use super::AppModel;
@@ -18,7 +17,7 @@ use engine::presets::AlphaContent;
 use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// From the views (rebuilt when the sets document changed) and the last plan, by folded set id: the sets shown
 /// (`known`), each set's automatic shader (a chosen one is read from the documents), its own Normal-slot file before
@@ -320,37 +319,141 @@ fn already_data(f: &Facts, pre: Option<&Option<Value>>, p: &ProjectDoc, k: &str)
     }
 }
 
-/// N8-e: the `[files]` table the share step writes `data` into for file `key`, and so the exact string it lists: the
-/// table spelled `key`, else the one `find_key` picks among its full-name spellings in another case (the first in
-/// `[files]` order), else a new `[files."<key>"]`. `None` when the file's only table is spelled without the extension:
-/// `set_file_value` would write there, where a `data` is the user's (no write; Task 9's row shows it).
-fn write_table(keys: &[String], key: &str) -> Option<String> {
-    if keys.iter().any(|k| k == key) {
-        return Some(key.to_string());
-    }
-    let lower = key.to_lowercase();
-    if let Some(k) = keys.iter().find(|k| k.to_lowercase() == lower) {
-        return Some(k.clone());
-    }
-    (!keys
-        .iter()
-        .any(|k| engine::overrides::path_key_matches(k, key)))
-    .then(|| key.to_string())
+/// The forms a `[files]` key is compared with for project-relative path `rel`, as `engine::overrides::KeyForms` makes
+/// them (its fields are the engine's own): the path lower-cased, and lower-cased without the last extension of its
+/// file name when that leaves a non-empty stem. A key names the file when its lower-cased spelling is one of them.
+fn forms(rel: &str) -> (String, Option<String>) {
+    let full = rel.to_lowercase();
+    let (dir, name) = full.rsplit_once('/').unwrap_or(("", full.as_str()));
+    let stem = match name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => Some(if dir.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{dir}/{stem}")
+        }),
+        _ => None,
+    };
+    (full, stem)
 }
 
-/// N8-e: the `alpha.policy` of the table spelled byte for byte `entry` (a list entry): no case or Unicode twin, no
-/// extension-less table, no fallback.
+/// N8-j: the `[files]` tables of one document state, built in one pass over its keys: each table's spelling with its
+/// `alpha.policy` and `subtype`, indexed by the lower-cased spelling. A file's matching tables are then two lookups (its
+/// two `forms`), never a walk over every key.
+pub(super) struct Tables {
+    rows: Vec<(String, Option<Value>, Option<Value>)>,
+    by_lower: HashMap<String, Vec<usize>>,
+    /// Tests: the rows a lookup examined.
+    #[cfg(test)]
+    visits: std::cell::Cell<usize>,
+}
+
+impl Tables {
+    pub(super) fn of(p: &ProjectDoc) -> Tables {
+        let mut t = Tables {
+            rows: vec![],
+            by_lower: HashMap::new(),
+            #[cfg(test)]
+            visits: Default::default(),
+        };
+        for k in p.file_keys() {
+            let row = (
+                k.clone(),
+                p.file_value(&k, "alpha.policy"),
+                p.file_value(&k, "subtype"),
+            );
+            t.by_lower
+                .entry(k.to_lowercase())
+                .or_default()
+                .push(t.rows.len());
+            t.rows.push(row);
+        }
+        t
+    }
+
+    /// The tables that match file `key` as the engine matches them, in `[files]` order.
+    fn matching(&self, key: &str) -> Vec<&(String, Option<Value>, Option<Value>)> {
+        let (full, stem) = forms(key);
+        let mut at: Vec<usize> = std::iter::once(full)
+            .chain(stem)
+            .filter_map(|f| self.by_lower.get(&f))
+            .flatten()
+            .copied()
+            .collect();
+        at.sort_unstable();
+        at.dedup();
+        #[cfg(test)]
+        self.visits.set(self.visits.get() + at.len());
+        at.into_iter().map(|i| &self.rows[i]).collect()
+    }
+
+    /// The spellings of the tables that hold an `alpha.policy` for file `key`, with it.
+    fn alpha(&self, key: &str) -> BTreeMap<String, Value> {
+        self.matching(key)
+            .into_iter()
+            .filter_map(|(k, a, _)| Some((k.clone(), a.clone()?)))
+            .collect()
+    }
+
+    /// N8-b: every sub-type a table of file `key` holds is a tangent-space normal (none held: the plan's type stands).
+    fn typed_normal(&self, key: &str) -> bool {
+        self.matching(key).into_iter().all(|(_, _, st)| {
+            st.as_ref().is_none_or(|v| {
+                serde_json::from_value::<Subtype>(v.clone())
+                    .ok()
+                    .is_some_and(tangent)
+            })
+        })
+    }
+
+    /// N8-e: the `[files]` table the share step writes `data` into for file `key`, and so the exact string it lists:
+    /// the table spelled `key`, else the one `find_key` picks among its full-name spellings in another case (the
+    /// first in `[files]` order), else a new `[files."<key>"]`. `None` when the file's only table is spelled without
+    /// the extension: `set_file_value` would write there, where a `data` is the user's (no write; Task 9's row).
+    fn write_table(&self, key: &str) -> Option<String> {
+        let tables = self.matching(key);
+        if tables.iter().any(|(k, ..)| k == key) {
+            return Some(key.to_string());
+        }
+        let lower = key.to_lowercase();
+        if let Some((k, ..)) = tables.iter().find(|(k, ..)| k.to_lowercase() == lower) {
+            return Some(k.clone());
+        }
+        tables.is_empty().then(|| key.to_string())
+    }
+
+    /// N8-e: the `alpha.policy` of the table spelled byte for byte `entry` (a list entry): no case or Unicode twin,
+    /// no extension-less table, no fallback.
+    fn exact_alpha(&self, entry: &str) -> Option<Value> {
+        let at = self.by_lower.get(&entry.to_lowercase())?;
+        at.iter()
+            .map(|i| &self.rows[*i])
+            .find(|(k, ..)| k == entry)
+            .and_then(|(_, a, _)| a.clone())
+    }
+}
+
+/// N8-e: the `alpha.policy` of the table spelled byte for byte `entry`, read from the document (a few keys after a
+/// write: `has_file_key` and an exact `file_value` are lookups, not walks).
 fn exact_alpha(p: &ProjectDoc, entry: &str) -> Option<Value> {
     p.has_file_key(entry)
         .then(|| p.file_value(entry, "alpha.policy"))
         .flatten()
 }
 
-/// Whether list entry `entry` names one of `items` (item keys), as the engine matches a `[files]` key to a file.
-fn names_any(entry: &str, items: &BTreeSet<String>) -> bool {
+/// The forms of every key in `items`, so a list entry is matched to them by one lookup (`names`).
+fn all_forms(items: &BTreeSet<String>) -> HashSet<String> {
     items
         .iter()
-        .any(|i| engine::overrides::path_key_matches(entry, i))
+        .flat_map(|i| {
+            let (full, stem) = forms(i);
+            std::iter::once(full).chain(stem)
+        })
+        .collect()
+}
+
+/// Whether list entry `entry` names one of the files whose `all_forms` are `forms`.
+fn names(entry: &str, forms: &HashSet<String>) -> bool {
+    forms.contains(&entry.to_lowercase())
 }
 
 /// What one run changes (Note JS7).
@@ -388,51 +491,47 @@ fn changes(
     let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let start = s.auto_data();
-    // N8-a: alpha is read as Task 6 reads it, from every `[files]` table that matches the file (read once per run).
-    let keys = p.file_keys();
-    let alpha = |k: &str| holders(p, &keys, k, "alpha.policy");
-    // N8-b: the document wins over the last plan: a file a `[files]` table types as anything but a tangent-space
-    // normal is not an owner normal, whatever slot the last plan put it in.
-    let typed_normal = |k: &str| {
-        holders(p, &keys, k, "subtype").iter().all(|h| {
-            p.file_value(h, "subtype")
-                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
-                .is_some_and(tangent)
-        })
-    };
+    // N8-a, N8-j: alpha is read as Task 6 reads it, from every `[files]` table that matches the file; the tables are
+    // read in one pass over the keys, and each file asks two lookups.
+    let tables = Tables::of(p);
     // N8-f: a key any borrower makes unsure is not written either.
     for k in now.difference(&b.shared).filter(|k| !unsure.contains(*k)) {
         // N-39: a known alpha that does not vary has nothing to keep; an unknown one is kept (the safe side).
+        // N8-b: the document wins over the last plan: a file a `[files]` table types as anything but a tangent-space
+        // normal is not an owner normal, whatever slot the last plan put it in.
         let free = !f.inert.contains(k)
             && !f.flat.contains(k)
             && !f.locked.contains(k)
-            && alpha(k).is_empty()
-            && typed_normal(k);
+            && tables.alpha(k).is_empty()
+            && tables.typed_normal(k);
         if free && !already_data(f, b.sub.get(k), p, k) {
             // N8-e: the entry is the exact table written.
-            if let Some(t) = write_table(&keys, k) {
+            if let Some(t) = tables.write_table(k) {
                 c.write.push(t);
             }
         }
     }
+    let (locked, now_f, unsure_f) = (all_forms(&f.locked), all_forms(now), all_forms(unsure));
     for k in &start {
         // N8-e: only the `data` the share step wrote: the table spelled exactly as the entry; a `data` in any other
         // table is the user's.
-        let ours = exact_alpha(p, k) == data && !names_any(k, &f.locked);
+        let ours = tables.exact_alpha(k) == data && !names(k, &locked);
         // N8-b: in a `blind` step a borrow may read any of them.
-        if ours && !names_any(k, now) && !names_any(k, unsure) && !sh.blind {
+        if ours && !names(k, &now_f) && !names(k, &unsure_f) && !sh.blind {
             c.clear.push(k.clone());
         }
     }
     if !c.write.is_empty() || !c.clear.is_empty() {
         // N-27: stale entries (no longer `data`) are pruned only on this, Tessalith's own, write.
+        let cleared: HashSet<&String> = c.clear.iter().collect();
         let mut l: Vec<String> = start
             .iter()
-            .filter(|k| !c.clear.contains(k) && exact_alpha(p, k) == data)
+            .filter(|k| !cleared.contains(k) && tables.exact_alpha(k) == data)
             .cloned()
             .collect();
+        let mut kept: HashSet<String> = l.iter().cloned().collect();
         for k in &c.write {
-            if !l.contains(k) {
+            if kept.insert(k.clone()) {
                 l.push(k.clone());
             }
         }
@@ -445,28 +544,18 @@ fn changes(
 /// Each list entry with the `alpha.policy` of every `[files]` table that matches its file, by the table's spelling.
 pub(super) type ListedAlpha = Vec<(String, BTreeMap<String, Value>)>;
 
-/// The `alpha.policy` of every table among `keys` that matches file `entry`, by spelling.
-fn tables_alpha(p: &ProjectDoc, keys: &[String], entry: &str) -> BTreeMap<String, Value> {
-    holders(p, keys, entry, "alpha.policy")
-        .into_iter()
-        .filter_map(|t| {
-            let v = p.file_value(&t, "alpha.policy")?;
-            Some((t, v))
-        })
-        .collect()
-}
-
-/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step.
+/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step (one
+/// pass over the `[files]` keys, N8-j).
 pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> ListedAlpha {
     let listed = s.auto_data();
     if listed.is_empty() {
         return vec![];
     }
-    let keys = p.file_keys();
+    let tables = Tables::of(p);
     listed
         .into_iter()
         .map(|e| {
-            let t = tables_alpha(p, &keys, &e);
+            let t = tables.alpha(&e);
             (e, t)
         })
         .collect()
@@ -482,11 +571,12 @@ pub(super) fn unlist_user_data(held: &ListedAlpha, p: &ProjectDoc, s: &mut SetsD
         return;
     }
     let data = json!("data");
-    let keys = p.file_keys();
-    let mine: Vec<&String> = held
+    let tables = Tables::of(p);
+    let mine: HashSet<&String> = held
         .iter()
         .filter(|(e, before)| {
-            tables_alpha(p, &keys, e)
+            tables
+                .alpha(e)
                 .iter()
                 .any(|(t, v)| *v == data && before.get(t) != Some(&data))
         })
@@ -570,5 +660,80 @@ impl AppModel {
             s.set_auto_data(&l);
         });
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `forms` gives exactly the keys `engine::overrides::path_key_matches` accepts.
+    #[test]
+    fn forms_match_as_the_engine_matches() {
+        let rels = [
+            "pbr/iron_n.png",
+            "PBR/Ärz_N.PNG",
+            "iron_n.png",
+            "a/.hidden",
+            "a/b.c.png",
+            "noext",
+            "a/b/",
+        ];
+        let keys = [
+            "pbr/iron_n.png",
+            "PBR/IRON_N.PNG",
+            "pbr/iron_n",
+            "pbr/iron",
+            "pbr\\iron_n.png",
+            "pbr/ärz_n.png",
+            "pbr/ärz_n",
+            "iron_n",
+            "a/.hidden",
+            "a/",
+            "a/b.c",
+            "a/b",
+            "noext",
+            "a/b/",
+        ];
+        for rel in rels {
+            let (full, stem) = forms(rel);
+            for key in keys {
+                let k = key.to_lowercase();
+                let ours = k == full || stem.as_deref() == Some(k.as_str());
+                assert_eq!(
+                    ours,
+                    engine::overrides::path_key_matches(key, rel),
+                    "{key} vs {rel}"
+                );
+            }
+        }
+    }
+
+    /// N8-j: on a project with 10,000 `[files]` keys and 2,000 listed entries, the tables are read in one pass and
+    /// each entry's lookup examines only its own matching tables, never every key.
+    #[test]
+    fn the_holder_facts_are_built_once() {
+        let d = tempfile::tempdir().unwrap();
+        let mut text = String::new();
+        for i in 0..10_000 {
+            text.push_str(&format!(
+                "[files.\"d/f{i:05}.png\"]\nalpha.policy = \"data\"\n"
+            ));
+        }
+        std::fs::write(d.path().join("sdc.toml"), text).unwrap();
+        let p = ProjectDoc::open(d.path());
+        assert!(!p.read_only(), "{:?}", p.error());
+        let t = Tables::of(&p);
+        assert_eq!(t.rows.len(), 10_000, "one row per key: one pass");
+        let listed: Vec<String> = (0..2_000).map(|i| format!("d/f{:05}.png", i * 5)).collect();
+        for e in &listed {
+            assert_eq!(t.alpha(e).len(), 1, "{e}");
+            assert_eq!(t.exact_alpha(e), Some(json!("data")));
+        }
+        assert_eq!(
+            t.visits.get(),
+            2_000,
+            "each lookup examines its own table only"
+        );
     }
 }
