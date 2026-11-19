@@ -88,8 +88,8 @@ fn name_faults<S>(h: &Harness<'_, S>) -> (Vec<String>, Vec<(String, Vec<Role>)>)
     (hover, dup)
 }
 
-/// The screens `audit_names` is called on. An allowlist entry names one of them, so an entry for a screen that is
-/// not audited (a typo, a removed checkpoint) fails the self-test instead of passing unseen.
+/// The screen names `audit_names` accepts. An audit call or an allowlist entry that names a screen outside this list
+/// fails; a name that stays here after its audit call is deleted is not caught.
 const SCREENS: &[&str] = &[
     "textures view with filters",
     "set editor",
@@ -368,7 +368,8 @@ fn a_shared_name_is_a_fault_unless_splitters_alone_or_a_slider_and_its_box() {
     assert!(shared_name_is_a_fault(&[Button, Button]));
 }
 
-/// Every allowlist entry names an audited screen, so an entry for a screen no test audits fails here.
+/// Every allowlist entry names a screen in `SCREENS`, so an entry for a screen outside it (a typo) fails here. Whether
+/// an audit call still names that screen is not checked.
 #[test]
 fn every_allowlist_entry_names_an_audited_screen() {
     let screens = HOVER_ONLY_ALLOWED
@@ -378,7 +379,7 @@ fn every_allowlist_entry_names_an_audited_screen() {
     let unknown: Vec<&str> = screens.filter(|s| !SCREENS.contains(s)).collect();
     assert!(
         unknown.is_empty(),
-        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo, or a screen no longer audited; fix or delete the entry): {unknown:?}"
+        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo; fix the entry's screen or delete the entry): {unknown:?}"
     );
 }
 

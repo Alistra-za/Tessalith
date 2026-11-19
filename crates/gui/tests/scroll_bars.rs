@@ -1,7 +1,8 @@
 //! Note JI7 (egui-ui-rules 3.2): the centre's three scrolling panels, the texture panel, the bulk panel and the set
-//! editor, draw their vertical scroll bar with no pointer over them. egui gives a bar no AccessKit node, so these read
-//! the paint: the bar's background and handle are filled rects at the centre's right edge, transparent while the
-//! default floating style is dormant.
+//! editor, draw their vertical scroll bar with no pointer over them. A shown bar has a `Role::ScrollBar` AccessKit node
+//! (`egui_gotchas::a_scroll_bar_has_an_accesskit_node`), but its opacity is paint-only, so these read the paint: the
+//! bar's background and handle are filled rects at the centre's right edge, transparent while the default floating
+//! style is dormant.
 mod support;
 use eframe::egui;
 use egui_kittest::kittest::Queryable;
@@ -34,29 +35,6 @@ fn centre(h: &H) -> egui::Rect {
 /// centre's right edge. (rect, fill alpha).
 fn bar_rects(h: &H) -> Vec<(egui::Rect, u8)> {
     bar_rects_in(h, centre(h))
-}
-
-/// `bar_rects` at the right edge of `c`, any panel.
-fn bar_rects_in(h: &H, c: egui::Rect) -> Vec<(egui::Rect, u8)> {
-    fn walk(s: &egui::Shape, out: &mut Vec<(egui::Rect, u8)>) {
-        match s {
-            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
-            egui::Shape::Rect(r) => out.push((r.rect, r.fill.a())),
-            _ => {}
-        }
-    }
-    let mut all = vec![];
-    for s in &h.output().shapes {
-        walk(&s.shape, &mut all);
-    }
-    all.into_iter()
-        .filter(|(r, _)| {
-            r.width() <= 12.0
-                && r.height() >= 20.0
-                && r.max.x <= c.max.x + 0.5
-                && r.max.x >= c.max.x - 20.0
-        })
-        .collect()
 }
 
 /// The panel's content runs past the centre's bottom (so a bar is due), and a bar is painted there, visible, with no
@@ -185,7 +163,7 @@ fn assert_column_bar_at_rest(h: &H, id: &str, what: &str) {
         .map(|(r, _)| *r)
         .max_by(|a, b| a.height().total_cmp(&b.height()))
         .unwrap();
-    let hovered = track.max.x - sdc_gui::look::thin_scroll().bar_width;
+    let bar_width = sdc_gui::look::thin_scroll().bar_width;
     for n in h
         .query_all_by_role(egui::accesskit::Role::Button)
         .chain(h.query_all_by_role(egui::accesskit::Role::Image))
@@ -200,11 +178,8 @@ fn assert_column_bar_at_rest(h: &H, id: &str, what: &str) {
             continue;
         }
         let label = n.accesskit_node().label().unwrap_or_default();
-        let limit = if label.starts_with("Set ") {
-            track.min.x
-        } else {
-            hovered
-        };
+        // a set card is a "Set ..." button in the Sets column
+        let limit = bar_clearance(id == "sets" && label.starts_with("Set "), track, bar_width);
         assert!(
             r.max.x <= limit + 0.5,
             "{label:?} {r:?} reaches the {what}'s bar {track:?}"
