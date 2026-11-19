@@ -5595,11 +5595,10 @@ fn when_both_saves_fail_the_edit_stays_open_and_export_is_blocked() {
         stamp
     );
     // the autosave folder works again: the next edit tries again and keeps the edits. Ruling E6-K (replaces "B
-    // opens"): the finished retry asks to end the session once more (the second attempt), and no open finds a removed
-    // project's kept autosave, so the session stays
+    // opens"): no open finds a removed project's kept autosave, so the session stays and the switch waits
     std::fs::remove_file(&blocker).unwrap();
     gloss(&mut m, 13.5);
-    assert_eq!(m.switch_save_attempts_for_test(), tries + 2);
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
     assert_eq!(doc_values(&kept(&d, &id)), [12.5, 13.5]);
     assert_eq!(vals(&m), [12.5, 13.5], "the session stays");
 }
@@ -6603,6 +6602,28 @@ fn a_carried_edit_lives_in_the_project_whatever_the_plain_autosave_does() {
             m.open_edit();
             assert_eq!(vals(&m), [12.5]);
         }),
+        (
+            "a carry whose draft cannot be written keeps the plain autosave and says why",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                let mine = std::fs::read(autosave(&d)).unwrap();
+                std::fs::write(p.join("_sdc"), b"a file").unwrap(); // the project's draft cannot be written
+                m.set_project_root(Some(&p));
+                assert_eq!(vals(&m), [12.5], "the carried session stays");
+                assert_eq!(
+                    std::fs::read(autosave(&d)).unwrap(),
+                    mine,
+                    "the plain autosave stays"
+                );
+                let why = m.edit.as_ref().unwrap().export_block().unwrap_or_default();
+                assert!(why.starts_with("Could not save the edits of"), "{why}");
+                m.close_edit();
+                assert!(m.edit.is_some(), "not durable in P: the leave is refused");
+            },
+        ),
         ("the plain autosave is deleted", || {
             let (d, mut m) = export_session();
             carried_into_p(&d, &mut m);
@@ -7011,11 +7032,28 @@ fn a_drag_after_a_failed_switch_tries_the_saves_again() {
     let tries = m.switch_save_attempts_for_test();
     std::fs::remove_file(&blocker).unwrap();
     tick(&mut m, 40.5);
-    // the tick's retry, then (ruling E6-K) the finished retry's own leave check, which stays: no open finds a
-    // removed project's kept autosave
-    assert_eq!(m.switch_save_attempts_for_test(), tries + 2);
+    // the tick's retry (one attempt); ruling E6-K: the session stays, as no open finds a removed project's kept
+    // autosave
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
     assert_eq!(doc_values(&kept(&d, &id)), [12.5, 40.5]);
     assert_eq!(vals(&m), [12.5, 40.5], "the session stays");
+    // the switch waits (E6-K): each further tick saves once, and Messages name the kept autosave once
+    for v in [41.5, 42.5, 43.5] {
+        tick(&mut m, v);
+    }
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 4);
+    m.set_nif_export_root(m.nif_export_root.clone()); // the next frame moves the session's lines to Messages
+    let named = m
+        .messages
+        .iter()
+        .filter(|l| l.contains("They are kept in"))
+        .count();
+    assert_eq!(named, 1, "{:?}", m.messages);
+    assert_eq!(
+        doc_values(&kept(&d, &id)),
+        [12.5, 43.5],
+        "the drag's last tick is kept"
+    );
 }
 
 /// Review E6 (Important 8, ruling E6-C): a return to the session's own project that cannot save there keeps the

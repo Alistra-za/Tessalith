@@ -97,6 +97,8 @@ pub struct NifEdit {
     /// bytes (`kept_fp`); it is replaced or deleted (after the first project save) only while it holds them.
     kept_autosave: Option<PathBuf>,
     kept_fp: Option<String>,
+    /// The last "kept in" line `save_kept` put in Messages, so a waiting switch does not repeat it on every change.
+    kept_line: Option<String>,
     /// Ruling E6-D: the kept autosave of the draft's id that lost to the newer draft at open; the first draft save
     /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
     /// are kept.
@@ -911,6 +913,7 @@ impl NifEdit {
             plain_fp,
             kept_autosave,
             kept_fp,
+            kept_line: None,
             kept_older,
             switch_failed: false,
             switch_wording: false,
@@ -1647,12 +1650,17 @@ impl NifEdit {
         self.kept_autosave = Some(k.clone());
         self.kept_fp = Some(fp);
         let project = self.project.as_deref().unwrap_or(Path::new(""));
-        self.open_lines.push(format!(
+        let line = format!(
             "Could not save the edits of {} to {}: {draft_err}. They are kept in {}.",
             edit_doc::win(&self.data_path).unwrap_or_else(|_| self.data_path.clone()),
             project.display(),
             k.display()
-        ));
+        );
+        // a switch that waits (ruling E6-K) saves here on every change: Messages name the file once per reason
+        if self.kept_line.as_ref() != Some(&line) {
+            self.open_lines.push(line.clone());
+            self.kept_line = Some(line);
+        }
         Ok(())
     }
 
@@ -2575,7 +2583,16 @@ impl MeshesModel {
         if e.project == to && e.saved_in_draft() {
             return;
         }
-        // ruling E6-K: a refused end keeps the switch waiting for the next retry
+        // ruling E6-K: the retry just saved; when the next open still would not load the edits the switch keeps
+        // waiting, in the failed state, without saving the same edits a second time
+        if let Err(w) = e.durable_leaving(Some(&to)) {
+            let why =
+                format!("they were saved, but opening this NIF again would not load them ({w})");
+            let switching = e.switch_wording;
+            e.set_switch_failed(&why, switching);
+            self.pending_root = Some(to);
+            return;
+        }
         if !self.reopen_keeping_selection(to.as_deref()) {
             self.pending_root = Some(to);
         }
@@ -2652,6 +2669,12 @@ impl MeshesModel {
                         e.unsaved = false;
                     } else {
                         e.save();
+                        if e.unsaved {
+                            // the reason stays on the footer and the export until a save into P works
+                            let why = e.error.take().unwrap_or_default();
+                            e.set_switch_failed(&why, true);
+                            self.error = e.retarget_error.clone();
+                        }
                     }
                     return;
                 }
