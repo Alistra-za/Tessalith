@@ -27,6 +27,8 @@ Click a reason to go to its fix:
 
 One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
 
+If you borrow the **Normal** slot from a set with two normals, the row can show one file while [your roughness bake uses the other](Texture-Packing.md#variance-and-gloss-bake).
+
 - Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
 - Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
@@ -48,7 +50,7 @@ Picking **Auto** or a shader outside the PBR family takes back what that pick wr
 
 ### Picking a shader for a normal
 
-The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type so Tessalith can record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. <!-- D:JS5,JS6 -->
+The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. Tessalith skips an automatic type change if its `[files]` entry would also change another texture. <!-- D:JS5,JS6 -->
 
 ## Slot menus
 

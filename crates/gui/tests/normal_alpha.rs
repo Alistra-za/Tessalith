@@ -4226,6 +4226,13 @@ fn ending_a_share_keeps_data_if_a_second_input_now_matches_the_listed_table() {
         saved.file_value(IRON_N, "alpha.policy"),
         Some(json!("data"))
     );
+    let sets = sdc_gui::sets_doc::SetsDoc::open(&root);
+    assert!(sets.entries().iter().all(|e| !e.borrow.contains_key(&2)));
+    assert_eq!(
+        sets.auto_data(),
+        [IRON_N],
+        "Unshare keeps the exact listed key on disk"
+    );
 }
 
 #[test]

@@ -41,11 +41,11 @@ Fold the sets you've finished into a group, so the column shows only what you're
 
 On Community Shaders, a regular set reads specular from its normal’s alpha. When your edit first makes a regular set share a PBR, PBR Grass, PBR Landscape or Advanced Skin set’s normal through the Normal slot, Tessalith can write `alpha.policy = "data"` in the same Undo step. <!-- D:JS7 -->
 
-- The current plan and your edit must identify the owner, borrowers and their shaders. Replacing the borrower’s own normal changes its membership, so that Share leaves alpha alone.
-- The normal must be unlocked and have a conversion job, with varying alpha or analysis still to come. Tessalith skips a kept DDS, a planned **Data** value and any alpha policy you set for the file.
+- The current plan and your edit must identify the owner, borrowers and their shaders. If two set IDs differ only in case, the first entry supplies the share. Replacing the borrower’s own normal changes its membership, so that Share leaves alpha alone.
+- The file must be a tangent-space normal in the plan, with varying alpha or analysis still to come. A model-space normal (`msn`) in the same slot keeps its own alpha settings. Pinning the Normal slot on the set that owns the file protects it even if that set shows another borrowed normal. Tessalith skips a kept DDS, a planned **Data** value and any alpha policy you set for the file.
 - Both project files must be writable. Tessalith uses the exact full filename, a single case-insensitive full-name match, or a new full name when no table matches. An extensionless match alone, ambiguous full names or a key that also matches another input prevent the write.
 
-When the plan finds shared specular that would be lost, check [Keep alpha in Problems](GUI-Problems.md#keep-alpha).
+Clearing the last regular share can take back the automatic **Data**. If the owner’s slot is pinned or the entry also controls another input, Tessalith keeps both the value and its ownership record. Choosing **Data** yourself claims only the entry you edited. When the plan finds shared specular that would be lost, check [Keep alpha in Problems](GUI-Problems.md#keep-alpha).
 
 ## Reordering and deleting sets
 
