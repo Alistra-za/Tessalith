@@ -2254,22 +2254,42 @@ impl AppModel {
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty),
         );
-        // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's batch.
-        // N8-o: one index of the project document before the batch and one after it, only when a key is listed.
-        let held = self
+        // JS7: the outer user batch owns the follow-on. Its starting facts and listed values share one index (N8-o).
+        let (start, held) = self
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .filter(|(_, s)| !self.automatic_step && !s.auto_data().is_empty())
-            .map(|(p, s)| shared_alpha::listed_alpha(&shared_alpha::Tables::of(p), s));
+            .filter(|_| !self.automatic_step)
+            .map(|(p, s)| {
+                let listed = !s.auto_data().is_empty();
+                if self.target != engine::config::Target::Cs && !listed {
+                    return (None, None);
+                }
+                let pre = shared_alpha::Tables::of(p);
+                (
+                    shared_alpha::before(self, &pre),
+                    listed.then(|| shared_alpha::listed_alpha(&pre, s)),
+                )
+            })
+            .unwrap_or_default();
         self.batch = true;
         f(self);
         self.batch = false;
+        let mut post = None;
         if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_ref(), self.sets_doc.as_mut())
         {
-            shared_alpha::unlist_user_data(h, &shared_alpha::Tables::of(p), s);
+            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), s);
         }
-        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        let mut after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        // N8-d: equal text leaves any leftover data for the next user edit, even if a setter moved a revision.
+        if let (Some(b), Some(p)) = (
+            start.as_ref().filter(|_| after != before),
+            self.project.as_ref(),
+        ) {
+            let post = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &post);
+            after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        }
         if after == before {
             // Trace #28: writes that changed nothing leave the documents as clean as they were.
             if let Some(p) = self.project.as_mut() {

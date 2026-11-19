@@ -2403,10 +2403,9 @@ fn an_unsure_key_is_not_written() {
     settle(&mut m);
 }
 
-/// N8-h (round 2, B4): Reset all removes a listed key's own table, which held only `remove`; the `data` that the
-/// extension-less table already held shows through. The step wrote no `data`: the entry stays listed (N-27).
+/// N8-p: Reset all drops the absent full-name entry and leaves the stem table's Data in place.
 #[test]
-fn a_reset_that_uncovers_data_leaves_the_entry() {
+fn a_reset_that_uncovers_data_drops_the_stale_entry_in_the_same_step() {
     let d = tempfile::tempdir().unwrap();
     two_sets_files(d.path());
     std::fs::write(
@@ -2431,11 +2430,11 @@ fn a_reset_that_uncovers_data_leaves_the_entry() {
         !m.project.as_ref().unwrap().has_file_key(IRON_N),
         "precondition: the reset removed the table"
     );
-    assert_eq!(
-        auto_data(&m),
-        vec![IRON_N.to_string()],
-        "a reset is files-only"
-    );
+    assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
+    assert!(auto_data(&m).is_empty(), "Reset all drops the stale entry");
+    m.undo();
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("remove")));
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
 }
 
 /// N8-h (B4), a pin of the batch compare: a bulk Data on a six-file cube is copied to its other face entries in the
@@ -3311,4 +3310,134 @@ fn a_stale_entry_leaves_the_list_while_its_share_is_live() {
         "the stale entry leaves the list though the share is live"
     );
     assert_eq!(held(&m, UPPER, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-10 (batch): the sharer picked Advanced Skin (a batch step: the pick and its diffuse's `skin_albedo`) is no
+/// longer a regular set, so `data` goes in that step.
+#[test]
+fn an_advanced_skin_pick_on_the_sharer_takes_data_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.set_shader("armor/steel", Some(Shader::AdvancedSkin));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, "armor/steel.png", "subtype"),
+        Some(json!("skin_albedo")),
+        "the batch path ran"
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(m.undo_label(), Some("Shader"));
+}
+
+/// N-33 as the owner narrowed it (N-36 withdrawn), a pin: an automatic step never runs the follow-on, and a leftover
+/// listed `data` stays until the user's next step. A saved `auto_data` key that no regular set shares survives the
+/// open, whose recorder step (a batch) records the new files' types; the user's next step clears it.
+#[test]
+fn only_a_users_step_clears_a_leftover() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(
+        m.undo_label().is_some_and(|l| l.ends_with("automatically")),
+        "the recorder's step ran: {:?}",
+        m.undo_label()
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "no automatic step clears it"
+    );
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().auto_data(),
+        vec![IRON_N.to_string()]
+    );
+    // Review 4 Minor 1: a user batch that changes neither document (a bulk Reset of a field no texture holds) runs no
+    // follow-on.
+    m.apply_bulk_edit(
+        &["armor/steel.png".to_string()],
+        "mips.filter",
+        sdc_gui::model::bulk::BulkOp::Clear,
+    );
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a batch that changed nothing clears nothing"
+    );
+    m.set_shader("armor/steel", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the user's next step re-checks every listed key"
+    );
+}
+
+/// N8-t: an input-name batch drops stale ownership even though changing aliases suppresses file edits.
+#[test]
+fn an_alias_batch_drops_a_stale_entry_before_the_user_reuses_its_spelling() {
+    use sdc_gui::model::sets::SlotCommand;
+    const UPPER: &str = "PBR/IRON_N.PNG";
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::copy(t.join("armor/steel.png"), t.join("armor/pebble.png")).unwrap();
+    let open = || opened_as_the_app(t.clone(), d.path().join("export"));
+    let mut m = open();
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    m.save().unwrap();
+    drop(m);
+
+    let file = t.join("sdc.toml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let respelled = text.replace(IRON_N, UPPER);
+    assert_ne!(respelled, text);
+    std::fs::write(&file, respelled).unwrap();
+    let mut m = open();
+    assert!(!m.project.as_ref().unwrap().has_file_key(IRON_N));
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    m.set_input_name("armor/pebble", "textures/armor/stone")
+        .unwrap();
+    assert!(m.read_as_of("armor/pebble.png").is_some());
+    assert!(
+        auto_data(&m).is_empty(),
+        "the stale entry leaves in the alias batch"
+    );
+    assert_eq!(held(&m, UPPER, "alpha.policy"), Some(json!("data")));
+    settle(&mut m);
+    m.save().unwrap();
+    drop(m);
+
+    let mut text = std::fs::read_to_string(&file).unwrap();
+    text.push_str("\n[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n");
+    std::fs::write(file, text).unwrap();
+    let mut m = open();
+    assert!(auto_data(&m).is_empty(), "the alias batch saved the list");
+    let borrows_iron = |m: &AppModel| {
+        m.sets_doc.as_ref().unwrap().entries().iter().any(|e| {
+            e.id == "armor/steel" && e.borrow.get(&2).map(String::as_str) == Some("pbr/iron")
+        })
+    };
+    assert!(borrows_iron(&m));
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    assert!(!borrows_iron(&m));
+    assert!(m.project.as_ref().unwrap().has_file_key(IRON_N));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "ending the share leaves the user's data"
+    );
 }
