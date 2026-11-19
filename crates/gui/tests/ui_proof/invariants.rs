@@ -334,9 +334,9 @@ fn is_set_card(snap: &Snapshot, n: &Node) -> bool {
         })
 }
 
-/// Every shown scroll bar is visible with no pointer in the window, and no interactive widget comes within the bar's
-/// width of its track (the room the bar takes when hovered), except a set card, which only has to stop short of the
-/// track itself (`support::bar_clearance`).
+/// Every shown scroll bar is visible with no pointer in the window, and no interactive widget's visible rect comes
+/// within the bar's width of its track (the room the bar takes when hovered), except a set card, which only has to stop
+/// short of the track itself (`support::bar_clearance`).
 // shortcut: vertical bars only (every bar of the shipped screens is one: a horizontal one is an error until this reads
 // it), and the widgets beside the bar are the nodes the snapshot lists as interactive; upgrade with the first
 // horizontal bar the app gets.
@@ -431,12 +431,15 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
         // overshoot (`members`), which the entry in ALLOWED pins.
         let mut under: Vec<(String, f32)> = vec![];
         for n in &snap.nodes {
+            // what is judged is what is shown: the control's rect cut by its clip where the snapshot knows it (the
+            // visible interaction rect), so a control a clip ends before the reserve is clear of it
+            let seen = n.clip.map_or(n.rect, |c| n.rect.intersect(c));
             if !n.interactive
                 || n.role == "ScrollBar"
-                || !n.rect.is_positive()
-                || n.rect.max.y <= track.min.y
-                || n.rect.min.y >= track.max.y
-                || n.rect.min.x >= track.max.x
+                || !seen.is_positive()
+                || seen.max.y <= track.min.y
+                || seen.min.y >= track.max.y
+                || seen.min.x >= track.max.x
             {
                 continue;
             }
@@ -446,7 +449,7 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
                 n.label.clone()
             };
             let limit = bar_clearance(is_set_card(snap, n), track, bar_width);
-            if n.rect.max.x <= limit + 0.5 {
+            if seen.max.x <= limit + 0.5 {
                 continue;
             }
             // A Splitter is a panel's resize handle, egui's own widget on the panel edge: it lies across the foot of the
@@ -460,13 +463,13 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
                 Some(_) => {}
                 None => {
                     errors.push(format!(
-                        "{owner}: the interactive {} {label:?} at {:?} overlaps the scroll bar {track:?} and has no egui layer, so whether it floats over the area or sits in it cannot be told",
-                        n.role, n.rect
+                        "{owner}: the interactive {} {label:?} at {seen:?} overlaps the scroll bar {track:?} and has no egui layer, so whether it floats over the area or sits in it cannot be told",
+                        n.role
                     ));
                     continue;
                 }
             }
-            under.push((format!("{}:{label}", n.role), n.rect.max.x - limit));
+            under.push((format!("{}:{label}", n.role), seen.max.x - limit));
         }
         if !under.is_empty() {
             under.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
@@ -495,6 +498,15 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
     hits
 }
 
+/// Whether the disc at `centre` with `radius` and the rect `q` share a positive area: `q` has a positive area and a
+/// point nearer the centre than the radius. The one predicate for a dot's visibility in its clip and for a node shown
+/// over it: a rect that only touches the disc's edge, or holds only a corner of its bounding square, shares none.
+fn disc_meets(centre: eframe::egui::Pos2, radius: f32, q: Rect) -> bool {
+    let dx = (q.min.x - centre.x).max(0.0).max(centre.x - q.max.x);
+    let dy = (q.min.y - centre.y).max(0.0).max(centre.y - q.max.y);
+    q.is_positive() && dx.hypot(dy) < radius
+}
+
 /// Every filled circle in a status colour (`ui::status::RED`, `AMBER`, `GREEN`) lies under a named node: the innermost
 /// node of the circle's own layer whose rect holds the whole circle has a non-empty
 /// accessible name. A text input's value is no name; a Label's text is (the snapshot folds it into `label`). The
@@ -518,11 +530,10 @@ fn status_dots_have_names(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
         };
         // A node holds the WHOLE circle: a node's rect is its widget's full rect, not cut by a clip (frame.rs takes it from
         // the AccessKit bounds, which egui sets from `Response::rect`, response.rs `fill_accesskit_node_common`), so a
-        // circle that a clip cuts part of is judged like any other. A circle clipped away entirely shows nothing and is
-        // not judged.
+        // circle that a clip cuts part of is judged like any other. A circle whose disc its clip hides entirely shows
+        // nothing and is not judged (the disc, not its bounding square: a clip on the square's corner shows nothing).
         let bounds = Rect::from_center_size(d.center, Vec2::splat(2.0 * d.radius));
-        let shown = bounds.intersect(d.clip);
-        if !shown.is_positive() {
+        if !disc_meets(d.center, d.radius, d.clip) {
             continue;
         }
         let Some(layer) = d.layer.as_deref() else {
@@ -542,13 +553,7 @@ fn status_dots_have_names(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
         // ... and it has to be shown there: the node's visible rect (its rect cut by its clip, and by the circle's clip) has
         // to overlap the visible disc with positive area. A row clipped to a sliver beside the circle, or to a corner of
         // its bounding box outside the disc, is not what the user sees under it.
-        let c = d.center;
-        let over_disc = |q: Rect| {
-            let q = q.intersect(d.clip);
-            let dx = (q.min.x - c.x).max(0.0).max(c.x - q.max.x);
-            let dy = (q.min.y - c.y).max(0.0).max(c.y - q.max.y);
-            q.is_positive() && dx.hypot(dy) < d.radius - 0.01
-        };
+        let over_disc = |q: Rect| disc_meets(d.center, d.radius, q.intersect(d.clip));
         let holds = |n: &&Node| n.rect.is_positive() && n.rect.expand(0.5).contains_rect(bounds);
         if let Some(n) = snap
             .nodes
@@ -583,10 +588,14 @@ fn status_dots_have_names(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
             .filter(|n| n.clip.is_some_and(|c| over_disc(c.intersect(n.rect))))
             .collect();
         // a node whose clip the snapshot does not know may or may not be shown over the disc: when counting it in would
-        // change the node that names the dot, that is not told
+        // change the node that names the dot, that is not told. The candidates keep their snapshot order, so a tie of
+        // depth and area goes the same way with and without them.
         let unsure: Vec<&Node> = own.iter().copied().filter(|n| n.clip.is_none()).collect();
-        let mut with_unsure = shown_nodes.clone();
-        with_unsure.extend(&unsure);
+        let with_unsure: Vec<&Node> = own
+            .iter()
+            .copied()
+            .filter(|n| n.clip.is_none_or(|c| over_disc(c.intersect(n.rect))))
+            .collect();
         let innermost = deepest(&shown_nodes).map(|i| shown_nodes[i]);
         let would_be = deepest(&with_unsure).map(|i| with_unsure[i]);
         if !unsure.is_empty()
@@ -2774,6 +2783,11 @@ enum Planted {
     /// Two amber/red circles over a visible unnamed button and a visible named label, each with a deeper node of the
     /// other kind clipped to the corner of the circle's bounding box outside the disc: only what shows names the dot.
     CornerClip,
+    /// A thin bar with a button as wide as the area whose clip ends well before the bar's reserve: nothing to find.
+    ClippedControl,
+    /// A red circle with no node, painted with a clip on the corner of its bounding square outside the disc: nothing of
+    /// it shows, so nothing to find.
+    CornerDisc,
 }
 
 struct PlantedScreen(Planted);
@@ -2797,8 +2811,19 @@ impl PlantedScreen {
             Planted::TransformedLayer => "Transformed layer screen",
             Planted::ClippedDot => "Clipped dot screen",
             Planted::CornerClip => "Corner clip screen",
+            Planted::ClippedControl => "Clipped control screen",
+            Planted::CornerDisc => "Corner disc screen",
         };
         ui.label(title);
+        if let Planted::CornerDisc = kind {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            let c = r.center();
+            let corner = eframe::egui::Rect::from_min_max(c + vec2(3.0, 3.0), c + vec2(4.0, 4.0));
+            ui.painter()
+                .with_clip_rect(corner)
+                .circle_filled(c, 4.0, RED);
+            return;
+        }
         if let Planted::Dots = kind {
             let (red, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
             ui.painter().circle_filled(red.center(), 4.0, RED);
@@ -2932,7 +2957,18 @@ impl PlantedScreen {
                 } else {
                     "A control"
                 };
-                ui.add_sized(vec2(width, 20.0), Button::new(text));
+                if let Planted::ClippedControl = kind {
+                    // as wide as the area, shown only on its left 100 px
+                    let full = ui.available_width();
+                    ui.scope(|ui| {
+                        let mut clip = ui.clip_rect();
+                        clip.max.x = ui.max_rect().left() + 100.0;
+                        ui.set_clip_rect(clip);
+                        ui.add_sized(vec2(full, 20.0), Button::new(text));
+                    });
+                } else {
+                    ui.add_sized(vec2(width, 20.0), Button::new(text));
+                }
                 ui.allocate_space(vec2(10.0, tall));
             });
         // an opaque rect in the bar's strip, 2 px wide, that is not the bar's
@@ -2983,6 +3019,8 @@ impl Entry for PlantedScreen {
             Planted::TransformedLayer => "test-only transformed layer",
             Planted::ClippedDot => "test-only clipped dot",
             Planted::CornerClip => "test-only corner clip",
+            Planted::ClippedControl => "test-only clipped control",
+            Planted::CornerDisc => "test-only disc clipped to its corner",
         }
     }
 
@@ -3001,6 +3039,8 @@ impl Entry for PlantedScreen {
         const MOVED: &[Needle] = &[crate::screens::has("Transformed layer screen")];
         const CLIPPED_DOT: &[Needle] = &[crate::screens::has("Clipped dot screen")];
         const CORNER: &[Needle] = &[crate::screens::has("Corner clip screen")];
+        const CLIPPED_CONTROL: &[Needle] = &[crate::screens::has("Clipped control screen")];
+        const CORNER_DISC: &[Needle] = &[crate::screens::has("Corner disc screen")];
         match self.0 {
             Planted::HiddenBar => HIDDEN,
             Planted::ClippedDecoy => CLIPPED,
@@ -3016,6 +3056,8 @@ impl Entry for PlantedScreen {
             Planted::TransformedLayer => MOVED,
             Planted::ClippedDot => CLIPPED_DOT,
             Planted::CornerClip => CORNER,
+            Planted::ClippedControl => CLIPPED_CONTROL,
+            Planted::CornerDisc => CORNER_DISC,
         }
     }
 
@@ -3260,6 +3302,105 @@ fn a_node_clipped_to_the_corner_of_the_bounds_does_not_decide_a_dot() {
         errors[0].contains("whose clip the snapshot does not know"),
         "{errors:?}"
     );
+}
+
+/// What is judged is what is shown: a control whose clip ends before a bar's reserve is clear of the bar, and a status
+/// circle whose clip holds only a corner of its bounding square (outside the disc) shows nothing; neither is a hit or an
+/// error. The same frames with the full rect (the clip unknown) or the whole square shown are hits.
+#[test]
+fn a_control_or_a_dot_its_clip_hides_is_not_judged() {
+    let clipped = PlantedScreen(Planted::ClippedControl).at(SIZES[1]).unwrap();
+    let bar = clipped
+        .nodes
+        .iter()
+        .find(|n| n.role == "ScrollBar")
+        .unwrap()
+        .rect;
+    let control = clipped
+        .nodes
+        .iter()
+        .find(|n| n.label == "A control")
+        .unwrap();
+    let reserve = bar.min.x - sdc_gui::look::thin_scroll().bar_width;
+    assert!(
+        control.rect.max.x > reserve && control.clip.is_some_and(|c| c.max.x < reserve - 10.0),
+        "the fixture: the control's rect reaches the reserve and its clip ends before it: {control:?} {bar:?}"
+    );
+    let (hits, errors) = observe_bars(&clipped);
+    assert!(hits.is_empty() && errors.is_empty(), "{hits:?} {errors:?}");
+    let mut full = clipped.clone();
+    for n in full.nodes.iter_mut().filter(|n| n.label == "A control") {
+        n.clip = None;
+    }
+    let (hits, errors) = observe_bars(&full);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        hits.iter().map(|h| h.invariant).collect::<Vec<_>>(),
+        ["scroll_bar_clearance"]
+    );
+    let observe_dots = |snap: &Snapshot| {
+        let mut errors = vec![];
+        let hits = status_dots_have_names(
+            &Frame {
+                screen: "s",
+                size: SIZES[1],
+                snapshot: snap,
+                findings: &[],
+            },
+            &mut errors,
+        );
+        (hits.len(), errors)
+    };
+    let corner = PlantedScreen(Planted::CornerDisc).at(SIZES[1]).unwrap();
+    let red: Vec<usize> = (0..corner.discs.len())
+        .filter(|&i| corner.discs[i].radius == 4.0 && corner.discs[i].fill.a() == 255)
+        .collect();
+    assert_eq!(red.len(), 1, "{:?}", corner.discs);
+    let d = &corner.discs[red[0]];
+    let square = Rect::from_center_size(d.center, Vec2::splat(2.0 * d.radius));
+    assert!(
+        square.intersect(d.clip).is_positive(),
+        "the fixture: the clip holds a corner of the square: {d:?}"
+    );
+    assert_eq!(observe_dots(&corner), (0, vec![]));
+    let mut whole = corner.clone();
+    whole.discs[red[0]].clip = square;
+    assert_eq!(observe_dots(&whole), (1, vec![]));
+}
+
+/// A node whose clip the snapshot does not know keeps its place among the candidates: two nodes of one depth and area
+/// over a dot, the unknown one first, tie the same way with and without it (the later one names the dot), so the dot is
+/// judged, not an error.
+#[test]
+fn an_unknown_clip_keeps_its_place_among_the_candidates() {
+    let mut snap = PlantedScreen(Planted::CornerDisc).at(SIZES[1]).unwrap();
+    let i = (0..snap.discs.len())
+        .find(|&i| snap.discs[i].radius == 4.0 && snap.discs[i].fill.a() == 255)
+        .unwrap();
+    let d = &mut snap.discs[i];
+    d.clip = Rect::EVERYTHING;
+    let (centre, layer) = (d.center, d.layer.clone());
+    let mut node = snap.nodes.last().unwrap().clone();
+    node.rect = Rect::from_center_size(centre, Vec2::splat(20.0));
+    node.layer = layer;
+    node.depth = 50;
+    let mut unknown = node.clone();
+    unknown.label = String::new();
+    unknown.clip = None;
+    node.label = "named".into();
+    node.clip = Some(node.rect);
+    snap.nodes.extend([unknown, node]);
+    let mut errors = vec![];
+    let hits = status_dots_have_names(
+        &Frame {
+            screen: "s",
+            size: SIZES[1],
+            snapshot: &snap,
+            findings: &[],
+        },
+        &mut errors,
+    );
+    assert!(hits.is_empty() && errors.is_empty(), "{hits:?} {errors:?}");
 }
 
 /// A frame with the pointer in the window is an error of its screen, not a pass: the bar's opacity at rest cannot be
