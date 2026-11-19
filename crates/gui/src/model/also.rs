@@ -188,6 +188,11 @@ impl AppModel {
 
     /// The folder the plan and the PBR outputs are under: the PBR folder while a tick is on, else the export folder.
     pub fn output_root(&self) -> PathBuf {
+        // E7 (test hook, ruling 3c-49): a call made while `review_writes` runs is one of its file-system queries.
+        #[cfg(feature = "test-hooks")]
+        if self.review_writes_probe.get() {
+            self.review_writes_fs.set(self.review_writes_fs.get() + 1);
+        }
         self.also_root().unwrap_or_else(|| self.export_root())
     }
 

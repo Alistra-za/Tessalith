@@ -257,6 +257,25 @@ fn nif_row_written(r: &super::meshes::NifReviewRow) -> bool {
     )
 }
 
+/// Test hook: `AppModel::review_writes_probe` is on while this lives.
+#[cfg(feature = "test-hooks")]
+struct WritesProbe<'a>(&'a std::cell::Cell<bool>);
+
+#[cfg(feature = "test-hooks")]
+impl<'a> WritesProbe<'a> {
+    fn on(c: &'a std::cell::Cell<bool>) -> Self {
+        c.set(true);
+        WritesProbe(c)
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Drop for WritesProbe<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
 /// E7 (ruling 3c-49): the footer's text for each entry, built with the list. `unchosen`: the fallback export folder
 /// while none is chosen, whose paths read under `‹export folder›` (Note FI5).
 fn also_labels(also: &[ReviewWrite], unchosen: Option<&Path>) -> Vec<AlsoLabel> {
@@ -335,7 +354,9 @@ impl AppModel {
         self.review_writes_cache.take();
     }
 
-    /// Tests (ruling 3c-49): how many file-system queries `review_writes` made, building its list or its key.
+    /// Tests (ruling 3c-49): how many file-system queries `review_writes` made, building its list or checking its key:
+    /// every `output_root()` call made while it runs (`view_key()` makes one), the copies' stamps and reads, and its
+    /// reads of the PGPatcher JSON and `sdc-project.toml`.
     #[cfg(feature = "test-hooks")]
     pub fn review_writes_fs_queries(&self) -> u64 {
         self.review_writes_fs.get()
@@ -352,6 +373,9 @@ impl AppModel {
     /// passes (disk state). Ruling 3c-49: a hit compares revisions and small values in place, so a frame whose key is
     /// unchanged asks the disk nothing, hashes nothing and builds no path.
     pub fn review_writes(&self) -> Arc<ReviewWrites> {
+        // Test hook: `output_root()` counts its calls while this runs, the lookup included.
+        #[cfg(feature = "test-hooks")]
+        let _probe = WritesProbe::on(&self.review_writes_probe);
         if let Some(c) = &*self.review_writes_cache.borrow() {
             if c.at.elapsed() < REVIEW_JSON_TTL && self.writes_key_is(&c.key) {
                 return c.value.clone();
@@ -632,7 +656,7 @@ impl AppModel {
                 put(d.sidecar_path(), HOVER_GENERATED);
             }
         }
-        let out = self.writes_output_root();
+        let out = self.output_root();
         // The engine plans into `export/<root prefix>` (Note HQ1), and its manifest lives there.
         if let Some(root) = &self.root {
             let planned = engine::discover::effective_output_root(root, &out);
@@ -669,12 +693,6 @@ impl AppModel {
             labels,
             whole,
         }
-    }
-
-    /// `output_root()` for `review_writes`, counted as a file-system query (it can stat the opened folder).
-    fn writes_output_root(&self) -> PathBuf {
-        self.writes_fs_query();
-        self.output_root()
     }
 
     /// `finish_json`'s decision for the PGPatcher JSON `text` (ruling 3c-46): `pbr_export::finish` writes a file that is

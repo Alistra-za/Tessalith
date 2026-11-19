@@ -589,6 +589,10 @@ pub struct AppModel {
     /// E7 (test hook, ruling 3c-49): how many file-system queries `review_writes` made (a cache hit makes none).
     #[cfg(feature = "test-hooks")]
     pub(crate) review_writes_fs: std::cell::Cell<u64>,
+    /// E7 (test hook): set while `review_writes` runs, so `output_root()` (which `view_key()` calls) counts itself in
+    /// `review_writes_fs` wherever it is called from.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_probe: std::cell::Cell<bool>,
     /// E7 (ruling 3c-49): moves whenever `set_nif_review_rows` hands over rows that differ (a path, a block, a foreign
     /// file or an answer), so `review_writes`' key compares a number, not the rows.
     nif_rows_rev: u64,
@@ -966,6 +970,8 @@ impl AppModel {
             review_writes_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
             review_writes_fs: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_probe: Default::default(),
             nif_rows_rev: 0,
             rename_cache: Default::default(),
             sets: vec![],
