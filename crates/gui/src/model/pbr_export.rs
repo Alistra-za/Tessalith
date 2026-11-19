@@ -3,7 +3,7 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, feature_slots, item_output_key, item_output_key_in, json_files,
+    engine_inputs, feature_slots, item_output_key, item_output_key_in, json_files, json_keeps_fill,
     output_candidates, packed_owners, set_views, slot_string, JsonFile, SetView, SlotFill,
     SlotKind,
 };
@@ -211,8 +211,8 @@ fn unresolved_slots(
         if v.json && !v.pbr && from.is_none() {
             continue;
         }
-        // `slots_of` writes an explicit `slotN` in place of the fill, a clear (`""`) included (review E1, Task 15a).
-        if slot_string(&v.settings, n).is_some() {
+        // A `slotN` link or clear the JSON writes in place of the fill names no path of it (3b-F8: `json_keeps_fill`).
+        if !json_keeps_fill(v, *kind) {
             continue;
         }
         if fill_path(item, views, paths, m).is_none() {
@@ -323,8 +323,7 @@ fn has(v: &SetView, s: SlotKind) -> bool {
 /// Whether the JSON `v` writes would hold own or borrowed files of both kinds `a` and `b` on their one game slot: a
 /// `slotN` there names one path, so only fills can clash.
 fn clash(v: &SetView, a: SlotKind, b: SlotKind) -> bool {
-    let fill = |s: SlotKind| json_files(v).any(|f| matches!(f, JsonFile::Fill(k, _) if k == s));
-    fill(a) && fill(b)
+    json_keeps_fill(v, a) && json_keeps_fill(v, b)
 }
 
 /// The "feature is on but its texture is missing" blocks of one PBR set; `has` says whether a slot is filled.

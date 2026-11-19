@@ -540,6 +540,13 @@ pub fn json_files(v: &SetView) -> impl Iterator<Item = JsonFile<'_>> {
     fills.chain(links)
 }
 
+/// Whether the JSON `v` writes keeps its own or borrowed fill of `kind` (ruling 3b-F8): a `JsonFile::Fill` of that
+/// kind, so no `slotN` link or clear overrides its game slot. The one answer to "slot string or fill" for Export's
+/// clash, `unresolved_slots` and the editor's conflict rows (`view_row`).
+pub fn json_keeps_fill(v: &SetView, kind: SlotKind) -> bool {
+    json_files(v).any(|f| matches!(f, JsonFile::Fill(k, _) if k == kind))
+}
+
 /// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
 /// a link first, then an own or borrowed file the link or an empty `slotN` overrides, then the file itself.
 pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
@@ -930,6 +937,13 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
 /// to the other kind (a `_f` on slot 7) would read empty.
 pub fn view_row(v: &SetView) -> Vec<SlotCell> {
     let mut cells = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    // Ruling 3b-F8: a conflict is what Export's clash reads, both fills kept by the JSON (a clear or a link leaves one
+    // path on the slot, so none).
+    for c in &mut cells {
+        c.clash = c
+            .clash
+            .filter(|k| json_keeps_fill(v, c.kind) && json_keeps_fill(v, *k));
+    }
     if v.linked.is_empty() {
         return cells;
     }

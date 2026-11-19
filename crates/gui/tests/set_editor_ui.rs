@@ -1450,6 +1450,92 @@ fn a_clashing_slot_card_shows_and_removes_either_member() {
     }
 }
 
+/// Ruling 3b-F8: the editor's conflict line and its Remove buttons read what Export's clash reads. A clear or a typed
+/// path on slot 7 (`_cnr` + `_f`) or slot 3 (`_g` + `_sk`) leaves one path in the JSON, so the editor shows no conflict
+/// and Export has no clash block; before the command both show one.
+#[test]
+fn a_slot_the_json_overrides_shows_no_conflict_as_export_has_none() {
+    use sdc_gui::model::sets::SlotCommand;
+    let blocks = |m: &AppModel| -> Vec<String> {
+        sdc_gui::model::pbr_export::export_blocks(m)
+            .iter()
+            .map(|i| i.text.clone())
+            .collect()
+    };
+    let cases = [
+        (
+            7u8,
+            ["rock01_cnr.png", "rock01_f.png"],
+            "_cnr and _f both use slot 7",
+        ),
+        (
+            3,
+            ["rock01_g.png", "rock01_sk.png"],
+            "_g and _sk both use slot 3",
+        ),
+    ];
+    for (n, files, block) in cases {
+        let block = format!("landscape/rock01: {block}");
+        let line = format!("{} and {} both use slot {n}", files[0], files[1]);
+        for cmd in [
+            SlotCommand::Clear,
+            SlotCommand::Path(r"effects\white.dds".into()),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let r = d.path().join("textures/landscape");
+            std::fs::create_dir_all(&r).unwrap();
+            for f in files {
+                image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+                    .save(r.join(f))
+                    .unwrap();
+            }
+            let mut m = pbr_opened(d.path());
+            if n == 3 {
+                // As `pbr_export::emissive_and_skin_sk_clash_on_any_set`: the two are decided by hand.
+                let pick = |m: &mut AppModel, f: &str, s: &str| {
+                    m.set_field(&format!("landscape/{f}"), "subtype", serde_json::json!(s))
+                };
+                pick(&mut m, files[0], "glow");
+                pick(&mut m, files[1], "skin_sk");
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            }
+            rock_selected(&mut m);
+            let mut h = harness(m);
+            h.run();
+            h.get_by_label_contains(&line);
+            for f in files {
+                h.get_by_label(&format!("Remove {f}"));
+            }
+            assert!(
+                blocks(h.state()).contains(&block),
+                "premise ({cmd:?}): {:?}",
+                blocks(h.state())
+            );
+            h.state_mut()
+                .set_slot_command("landscape/rock01", n, cmd.clone())
+                .unwrap();
+            assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+            h.run();
+            assert!(
+                !blocks(h.state()).contains(&block),
+                "{cmd:?}: {:?}",
+                blocks(h.state())
+            );
+            assert!(
+                h.query_by_label_contains(&format!("both use slot {n}"))
+                    .is_none(),
+                "{cmd:?}: the editor shows a conflict Export does not have"
+            );
+            for f in files {
+                assert!(
+                    h.query_by_label(&format!("Remove {f}")).is_none(),
+                    "{cmd:?}: Remove {f} is offered"
+                );
+            }
+        }
+    }
+}
+
 /// PBR grass design §4.3: a pbr_grass panel has no emissive, parallax, hair, coat, glint or fuzz switch, keeps the
 /// grass keys, and the Subsurface selector's Off removes the stored key (no grass default since AS8).
 #[test]
