@@ -501,6 +501,45 @@ pub fn feature_slots(v: &SetView) -> &BTreeMap<SlotKind, SlotFill> {
     v.features.as_ref().unwrap_or(&v.slots)
 }
 
+/// One file or path the exported JSON names in `v`'s slots (review E1, Task 15a), in the three states Export checks:
+/// a local file (`Fill`, `Linked`), a typed path no set writes (`External`), or nothing (a cleared slot has no item).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonFile<'a> {
+    /// An own or borrowed file the JSON keeps: no `slotN` overrides its game slot (or it has none, 9 and 10).
+    Fill(SlotKind, &'a SlotFill),
+    /// A `slotN` that names a set's output: a local file, on the row the link fills.
+    Linked(&'a SlotLink),
+    /// A `slotN` no set writes, on game slot `n`: it fills the slot, and there is no local file to check.
+    External(u8),
+}
+
+impl JsonFile<'_> {
+    /// Whether this fills `kind`'s row: a fill of that kind, a link on that row, or a typed path on its game slot.
+    pub fn fills(&self, kind: SlotKind) -> bool {
+        match self {
+            JsonFile::Fill(k, _) => *k == kind,
+            JsonFile::Linked(l) => l.row == Some(kind),
+            JsonFile::External(n) => kind.game_slot() == Some(*n),
+        }
+    }
+}
+
+/// What `v`'s exported JSON names, from the fields its feature keys read (`feature_slots`, `linked`), so Export checks
+/// the material it writes: the fills of `feature_slots` (a cleared slot's are already left out) except those on a game
+/// slot that holds a `slotN` link, then each link, as `Linked` when it names a set's output, else `External`. On a set
+/// that writes no entry (`linked` empty, `features` unset) these are its own and borrowed fills. No allocation.
+pub fn json_files(v: &SetView) -> impl Iterator<Item = JsonFile<'_>> {
+    let fills = feature_slots(v)
+        .iter()
+        .filter(|(k, f)| f.is_filled() && !k.game_slot().is_some_and(|n| v.linked.contains_key(&n)))
+        .map(|(k, f)| JsonFile::Fill(*k, f));
+    let links = v.linked.iter().map(|(n, l)| match l.from {
+        Some(_) => JsonFile::Linked(l),
+        None => JsonFile::External(*n),
+    });
+    fills.chain(links)
+}
+
 /// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
 /// a link first, then an own or borrowed file the link or an empty `slotN` overrides, then the file itself.
 pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {

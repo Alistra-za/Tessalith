@@ -3,8 +3,9 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, feature_slots, item_output_key, item_output_key_in, output_candidates,
-    packed_owners, set_views, SetView, SlotFill, SlotKind,
+    engine_inputs, feature_slots, item_output_key, item_output_key_in, json_files,
+    output_candidates, packed_owners, set_views, slot_string, JsonFile, SetView, SlotFill,
+    SlotKind,
 };
 use super::txst_map::record_entries;
 use super::AppModel;
@@ -209,7 +210,8 @@ fn unresolved_slots(
         if v.json && !v.pbr && from.is_none() {
             continue;
         }
-        if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()) {
+        // `slots_of` writes an explicit `slotN` in place of the fill, a clear (`""`) included (review E1, Task 15a).
+        if slot_string(&v.settings, n).is_some() {
             continue;
         }
         if fill_path(item, views, paths, m).is_none() {
@@ -311,8 +313,17 @@ const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [
     ),
 ];
 
+/// Review E1 (Task 15a): whether the JSON `v` writes fills `s`'s row (`json_files`): a typed path no set writes fills
+/// it too, and a cleared one does not.
 fn has(v: &SetView, s: SlotKind) -> bool {
-    v.slots.get(&s).is_some_and(SlotFill::is_filled)
+    json_files(v).any(|f| f.fills(s))
+}
+
+/// Whether the JSON `v` writes would hold own or borrowed files of both kinds `a` and `b` on their one game slot: a
+/// `slotN` there names one path, so only fills can clash.
+fn clash(v: &SetView, a: SlotKind, b: SlotKind) -> bool {
+    let fill = |s: SlotKind| json_files(v).any(|f| matches!(f, JsonFile::Fill(k, _) if k == s));
+    fill(a) && fill(b)
 }
 
 /// The "feature is on but its texture is missing" blocks of one PBR set; `has` says whether a slot is filled.
@@ -397,10 +408,10 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
         if m.target == Target::Cs && !m.pgp_entry_wanted(v) {
             continue;
         }
-        if has(v, SlotKind::Coat) && has(v, SlotKind::Fuzz) {
+        if clash(v, SlotKind::Coat, SlotKind::Fuzz) {
             out.push(issue(v, format!("{}: _cnr and _f both use slot 7", v.id)));
         }
-        if has(v, SlotKind::Emissive) && has(v, SlotKind::SkinSk) {
+        if clash(v, SlotKind::Emissive, SlotKind::SkinSk) {
             out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
         }
         if m.target != Target::Cs || !v.json {

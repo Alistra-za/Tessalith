@@ -1127,6 +1127,179 @@ fn leaf(m: &AppModel) -> SetView {
     views(m).iter().find(|v| v.id == LEAF).unwrap().clone()
 }
 
+fn block_texts(m: &AppModel) -> Vec<String> {
+    sdc_gui::model::pbr_export::export_blocks(m)
+        .iter()
+        .map(|i| i.text.clone())
+        .collect()
+}
+
+/// Export the whole project as a user would; the entry whose `match1` is `match1` in the written JSON (`None`: no such
+/// entry, or no JSON was written), and the export's notes.
+fn exported_entry(m: &mut AppModel, match1: &str) -> (Option<Value>, String) {
+    export_through(m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let notes = m.export.notes.join("\n");
+    let entry = std::fs::read_to_string(pgp_json_path(m))
+        .ok()
+        .and_then(|t| {
+            let j: Value = serde_json::from_str(&t).unwrap();
+            j["entries"]
+                .as_array()?
+                .iter()
+                .find(|e| e["match1"] == match1)
+                .cloned()
+        });
+    (entry, notes)
+}
+
+const LEAF_MATCH: &str = r"arch\leaf.dds";
+const NO_HEIGHT: &str = "arch/leaf: parallax is on but the set has no height texture (_p)";
+
+/// R1 (a): Parallax set by hand on a set with no height of its own, and a height linked from another set: Export does
+/// not refuse the set, and the written JSON carries the linked path and the key.
+#[test]
+fn export_takes_a_linked_height_for_parallax_set_by_hand() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    m.set_json_value(LEAF, "parallax", Some(json!(true)));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        block_texts(&m).iter().any(|b| b == NO_HEIGHT),
+        "premise: {:?}",
+        block_texts(&m)
+    );
+    link(&mut m, 4, "arch/bump_p.png");
+    assert!(
+        !block_texts(&m).iter().any(|b| b == NO_HEIGHT),
+        "{:?}",
+        block_texts(&m)
+    );
+    let path = member_game_path(&m, "arch/bump_p.png").unwrap();
+    let (e, notes) = exported_entry(&mut m, LEAF_MATCH);
+    let e = e.unwrap_or_else(|| panic!("no entry for arch/leaf: {notes}"));
+    assert_eq!(
+        (e["slot4"].clone(), e["parallax"].clone()),
+        (json!(path), json!(true))
+    );
+}
+
+/// R1 (a), a typed path no set writes: it fills the slot for the JSON and is never missing.
+#[test]
+fn export_takes_a_typed_height_path_for_parallax_set_by_hand() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_json_value(LEAF, "parallax", Some(json!(true)));
+    m.set_slot_command(LEAF, 4, SlotCommand::Path(r"textures\other\x_p.dds".into()))
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        !block_texts(&m).iter().any(|b| b == NO_HEIGHT),
+        "{:?}",
+        block_texts(&m)
+    );
+    let (e, notes) = exported_entry(&mut m, LEAF_MATCH);
+    let e = e.unwrap_or_else(|| panic!("no entry for arch/leaf: {notes}"));
+    assert_eq!(e["slot4"], json!(r"textures\other\x_p.dds"));
+}
+
+/// R1 (b): Parallax set by hand over an own height the user cleared: the JSON carries no height, so Export refuses the
+/// set as it refuses any set with Parallax on and no height, and writes nothing.
+#[test]
+fn export_refuses_parallax_set_by_hand_over_a_cleared_height() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_p.png", [128, 128, 128], Subtype::Height)],
+    );
+    m.set_json_value(LEAF, "parallax", Some(json!(true)));
+    m.set_slot_command(LEAF, 4, SlotCommand::Clear).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        matches!(
+            leaf(&m).slots.get(&SlotKind::Height),
+            Some(SlotFill::Own { .. })
+        ),
+        "premise: an own height"
+    );
+    assert!(
+        block_texts(&m).iter().any(|b| b == NO_HEIGHT),
+        "{:?}",
+        block_texts(&m)
+    );
+    let (e, _) = exported_entry(&mut m, LEAF_MATCH);
+    assert!(e.is_none(), "Export stopped: {e:?}");
+    assert!(!pgp_json_path(&m).exists());
+}
+
+/// R1 (c): a set with both `_cnr` and `_f` whose slot 7 is linked: the JSON carries one file there, so there is no
+/// clash, as the editor shows none.
+#[test]
+fn export_takes_a_linked_slot_7_over_an_own_cnr_and_f() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let clash = "arch/leaf: _cnr and _f both use slot 7";
+    assert!(
+        block_texts(&m).iter().any(|b| b == clash),
+        "premise: {:?}",
+        block_texts(&m)
+    );
+    link(&mut m, 7, "arch/lacq_cnr.png");
+    assert!(
+        !block_texts(&m).iter().any(|b| b == clash),
+        "{:?}",
+        block_texts(&m)
+    );
+    let path = member_game_path(&m, "arch/lacq_cnr.png").unwrap();
+    let (e, notes) = exported_entry(&mut m, LEAF_MATCH);
+    let e = e.unwrap_or_else(|| panic!("no entry for arch/leaf: {notes}"));
+    assert_eq!(e["slot7"], json!(path));
+}
+
+/// R1 (d): a clear over a fill that has no output path (a borrow from `arch/bump`, a set that is not PBR, so its
+/// output has no explicit path): the JSON clears the slot, so nothing blocks on that path.
+#[test]
+fn export_takes_a_clear_over_a_fill_with_no_output_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    m.edit_docs("share", None, true, |_, s| {
+        s.set_borrow(LEAF, 4, Some("arch/bump"))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let no_path = "arch/leaf: slot4 borrows from arch/bump, which has no output path";
+    assert!(
+        block_texts(&m).iter().any(|b| b == no_path),
+        "premise: {:?}",
+        block_texts(&m)
+    );
+    // The menu's Clear drops a borrow (Note HC7); a `slot4 = ""` written over it (by hand, or kept from before the
+    // borrow) clears the JSON's slot and keeps the borrow.
+    m.set_json_value(LEAF, "slot4", Some(json!("")));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        matches!(
+            leaf(&m).slots.get(&SlotKind::Height),
+            Some(SlotFill::Borrowed { .. })
+        ),
+        "premise: the borrow stays"
+    );
+    assert!(
+        !block_texts(&m).iter().any(|b| b.contains("slot4")),
+        "{:?}",
+        block_texts(&m)
+    );
+    let (e, notes) = exported_entry(&mut m, LEAF_MATCH);
+    let e = e.unwrap_or_else(|| panic!("no entry for arch/leaf: {notes}"));
+    assert_eq!(e["slot4"], json!(""));
+}
+
 /// R3: a link is looked up with PGPatcher's explicit-slot rule (`pgpsim` `slots.rs`: lower case, `textures\` put in
 /// front unless it is there): `pbr\arch\wall.dds` names the file `textures\pbr\arch\wall.dds` names, and
 /// `other\textures\pbr\arch\wall.dds` names another file.
