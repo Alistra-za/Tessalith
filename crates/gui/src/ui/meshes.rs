@@ -49,7 +49,7 @@ mod edit_extra;
 mod edit_fields;
 mod edit_panel;
 #[cfg(feature = "test-hooks")]
-pub use edit_panel::{layout_rects, EditPanelRects};
+pub use edit_panel::{draft_text_builds, layout_rects, EditPanelRects};
 mod skin_preview;
 mod txst_preview;
 use crate::model::meshes::skin_preview::has_skin_card;

@@ -15000,6 +15000,11 @@ fn a_horizontal_bar_stays_above_the_footer_at_1280x720() {
         bars[0]
     );
     assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "outer rect {r:?}");
+    // Task 10 (E6-Y4): both footer buttons stay whole inside the footer at this width
+    for name in ["Review…", "Show in Explorer: the draft"] {
+        let b = h.get_by_label(name).rect();
+        assert!(r.footer.contains_rect(b), "{name} {b:?} outside {r:?}");
+    }
 }
 
 /// Fix round 1, Important 3: an open Diff (a 160 px list) at 1280x720 with Review open would push the tab strip and
@@ -15407,12 +15412,140 @@ fn the_footer_names_the_draft_with_show_in_explorer() {
     );
 }
 
+/// The app with no project open and one NIF edit open (a plain autosave holds it).
+fn app_with_no_project() -> (tempfile::TempDir, AppH) {
+    app_data();
+    let d = files(false);
+    let mut model = sdc_gui::model::AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    model.set_export_folder(d.path().join("mods").join(EDIT_MOD));
+    let mut app = sdc_gui::app::SdcApp::new(model);
+    app.meshes.procs = sdc_gui::model::meshes::no_procs;
+    app.meshes.store_path = Some(d.path().join("scan.db"));
+    scan_and_select(&mut app.meshes, d.path());
+    app.meshes.open_edit();
+    gloss(&mut app.meshes, 12.5);
+    assert_eq!(app.meshes.error, None);
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
+            app,
+        );
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    (d, h)
+}
+
 #[test]
 fn with_no_project_the_footer_names_the_autosave() {
+    let (d, mut h) = app_with_no_project();
+    assert!(autosave(&d).is_file(), "the plain autosave is written");
+    h.get_by_label_contains(&format!("Draft saved in {}", autosave(&d).display()));
+    h.state_mut().shell_log = Some(vec![]);
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert_eq!(
+        h.state().shell_log,
+        Some(vec![sdc_gui::model::shell::ShellRequest::Reveal(autosave(
+            &d
+        ))])
+    );
+}
+
+/// Ruling E6-Y2: the saved line's text is built once for one path, width and font, not on every frame; another path
+/// builds it again.
+#[test]
+fn the_saved_line_builds_its_text_once_for_one_path_and_width() {
+    let (_d, mut h) = app_with_no_project();
+    let first = sdc_gui::ui::meshes::draft_text_builds();
+    assert!(first >= 1, "the line was built");
+    h.run_steps(10);
+    assert_eq!(
+        sdc_gui::ui::meshes::draft_text_builds(),
+        first,
+        "no rebuild"
+    );
+    // another width cuts the line again, the same path does not rebuild its full text
+    sdc_gui::ui::panel_ids::restore_size(&h.ctx, "meshes-edit", 300.0);
+    h.run_steps(6);
+    assert!(
+        sdc_gui::ui::meshes::draft_text_builds() > first,
+        "a new width"
+    );
+}
+
+/// Ruling E6-Y1: an edit whose save failed is not on disk, so the line does not name the older draft.
+#[test]
+fn an_edit_whose_save_fails_does_not_name_the_older_draft() {
+    let (d, mut m) = export_session();
+    let a = project_folder(&d, "a");
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(draft(&a).is_file());
+    std::fs::remove_dir_all(&a).unwrap();
+    gloss(&mut m, 13.5);
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains("Draft not saved yet");
+    assert!(h.query_by_label_contains("Draft saved in").is_none());
+    assert!(h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+}
+
+/// Ruling E6-Y1: a session opened from a winning kept autosave names that file, and Show in Explorer reveals it.
+#[test]
+fn a_session_opened_from_a_kept_autosave_names_it() {
+    let (d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    make_old(&draft(&p));
+    tick(&mut m, 40.5); // a drag, not flushed
+    let id = id_of(&p);
+    let p2 = d.path().join("p2");
+    std::fs::rename(&p, &p2).unwrap();
+    m.set_project_root(Some(&p2));
+    assert!(kept(&d, &id).exists(), "the drag was kept at the switch");
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5, 40.5],
+        "the kept autosave won"
+    );
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains(&format!("Draft saved in {}", kept(&d, &id).display()));
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert_eq!(h.state().reveal_request, Some(kept(&d, &id)));
+}
+
+/// Ruling E6-Y1: a carry that failed leaves the edit in the plain autosave, which the line names.
+#[test]
+fn a_failed_carry_names_the_autosave_that_holds_the_edit() {
     let (d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    assert!(autosave(&d).is_file(), "the plain autosave is written");
+    assert!(autosave(&d).is_file());
+    let p = project_folder(&d, "p");
+    std::fs::write(p.join("_sdc"), b"a file where the folder goes").unwrap();
+    m.set_project_root(Some(&p));
+    let e = m.edit.as_ref().unwrap();
+    assert!(
+        e.export_block().is_some(),
+        "the switch waits: {:?}",
+        e.draft_path
+    );
+    assert!(autosave(&d).is_file(), "the autosave stays");
     let mut h = view(m);
     h.run_steps(4);
     h.get_by_label_contains(&format!("Draft saved in {}", autosave(&d).display()));
@@ -15420,9 +15553,6 @@ fn with_no_project_the_footer_names_the_autosave() {
         .get_by_label("Show in Explorer: the draft")
         .accesskit_node()
         .is_disabled());
-    h.get_by_label("Show in Explorer: the draft").click();
-    h.run_steps(4);
-    assert_eq!(h.state().reveal_request, Some(autosave(&d)));
 }
 
 #[test]

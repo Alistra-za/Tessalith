@@ -70,6 +70,8 @@ pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
 pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let mut act = Act::default();
+    // The footer's Show in Explorer leaves its click under this key (and its text cache under a key derived from it).
+    let reveal_id = ui.scope_id().with("meshes-edit-reveal-draft");
     // Note GD1: a worklist fix opens its tab; its field takes focus when its widget is drawn.
     if let Some((tab, field)) = m.nif_tab.take() {
         ui.data_mut(|d| {
@@ -111,7 +113,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         let footer = crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
             .resizable(false)
             .show(ui, |ui| {
-                export_block(ui, e, foreign, diff, list_cap, &mut act)
+                export_block(ui, e, foreign, diff, list_cap, &mut act, reveal_id)
             });
         ui.data_mut(|d| {
             *d.get_temp_mut_or(fixed_id, 0.0f32) =
@@ -227,10 +229,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             tabs_h,
         );
     }
-    if ui
-        .data_mut(|d| d.remove_temp::<bool>(reveal_draft_id()))
-        .is_some()
-    {
+    if ui.data_mut(|d| d.remove_temp::<bool>(reveal_id)).is_some() {
         m.reveal_request = m
             .edit
             .as_ref()
@@ -416,6 +415,7 @@ fn export_block(
     diff: Option<&[String]>,
     list_cap: f32,
     act: &mut Act,
+    reveal_id: egui::Id,
 ) -> f32 {
     ui.add_space(4.0);
     let red = e.doc.has_conflicts();
@@ -518,7 +518,7 @@ fn export_block(
             ui.label(&name);
         });
     }
-    draft_and_review_row(ui, e, act);
+    draft_and_review_row(ui, e, act, reveal_id);
     list_h
 }
 
@@ -528,7 +528,7 @@ fn export_block(
 /// The draft line (review E6) is `Draft saved in {path}` cut in the middle to the room the buttons leave, the full path
 /// on hover and in the accessible name. Before the first save (and while a switch waits on a failed save) it says so
 /// and Show in Explorer is off.
-fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
+fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, reveal_id: egui::Id) {
     let draft = e.draft_on_disk();
     egui::Sides::new().shrink_left().truncate().show(
         ui,
@@ -537,15 +537,12 @@ fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
                 ui.weak("Draft not saved yet");
                 return;
             };
-            let full = path.display().to_string();
-            let font = egui::TextStyle::Body.resolve(ui.style());
-            let room = ui.available_width() - text_width(ui, "Draft saved in ", &font);
-            let shown = fit_middle(ui, &full, &font, room);
-            let name = format!("Draft saved in {full}");
-            let r = ui.add(egui::Label::new(format!("Draft saved in {shown}")).truncate());
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+            let text = draft_text(ui, reveal_id.with("text"), path);
+            let r = ui.add(egui::Label::new(egui::WidgetText::from(text.shown)).truncate());
+            let name = text.name;
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &*name));
             r.on_hover_ui(|ui| {
-                ui.label(&name);
+                ui.label(&*name);
             });
         },
         |ui| {
@@ -571,16 +568,90 @@ fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             });
             let r = r.on_disabled_hover_text("The draft is saved with your first edit.");
             if r.clicked() {
-                ui.data_mut(|d| d.insert_temp(reveal_draft_id(), true));
+                ui.data_mut(|d| d.insert_temp(reveal_id, true));
             }
         },
     );
 }
 
-/// The footer's Show in Explorer asks for the draft to be revealed; `panel` hands the draft's path to the model in
-/// the same pass.
-fn reveal_draft_id() -> egui::Id {
-    egui::Id::unique("meshes-edit-reveal-draft")
+/// What the saved line shows for one path (ruling E6-Y2): the full text of the name and hover, and the line cut to the
+/// room it had, each kept until its key changes, so a frame with the same path, width and font builds no string.
+#[derive(Clone)]
+struct DraftText {
+    path: std::sync::Arc<std::path::Path>,
+    name: std::sync::Arc<str>,
+    fit: Option<DraftFit>,
+}
+
+/// The cut line and what it was cut for.
+#[derive(Clone)]
+struct DraftFit {
+    width_bits: u32,
+    pixels_per_point_bits: u32,
+    font: egui::FontId,
+    shown: std::sync::Arc<egui::RichText>,
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static DRAFT_TEXT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times this thread built the saved line's text (a cache miss), for the cache's test.
+#[cfg(feature = "test-hooks")]
+pub fn draft_text_builds() -> usize {
+    DRAFT_TEXT_BUILDS.with(std::cell::Cell::get)
+}
+
+/// What `draft_text` hands the row: both are `Arc` clones on a cache hit.
+struct DraftShown {
+    shown: std::sync::Arc<egui::RichText>,
+    name: std::sync::Arc<str>,
+}
+
+/// `Draft saved in {path}` for `path`, cut in the middle to `ui.available_width()` (the room the buttons leave), from
+/// the cache kept under `id` (ruling E6-Y2).
+fn draft_text(ui: &egui::Ui, id: egui::Id, path: &std::path::Path) -> DraftShown {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let width_bits = ui.available_width().to_bits();
+    let pixels_per_point_bits = ui.ctx().pixels_per_point().to_bits();
+    let mut cached = ui
+        .data(|d| d.get_temp::<DraftText>(id))
+        .filter(|c| *c.path == *path);
+    if let Some(fit) = cached.as_ref().and_then(|c| c.fit.as_ref()) {
+        if fit.width_bits == width_bits
+            && fit.pixels_per_point_bits == pixels_per_point_bits
+            && fit.font == font
+        {
+            return DraftShown {
+                shown: fit.shown.clone(),
+                name: cached.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
+            };
+        }
+    }
+    #[cfg(feature = "test-hooks")]
+    DRAFT_TEXT_BUILDS.with(|n| n.set(n.get() + 1));
+    let mut c = cached.take().unwrap_or_else(|| {
+        let full = path.display().to_string();
+        DraftText {
+            path: path.into(),
+            name: format!("Draft saved in {full}").into(),
+            fit: None,
+        }
+    });
+    let full = path.display().to_string();
+    let room = ui.available_width() - text_width(ui, "Draft saved in ", &font);
+    let line = format!("Draft saved in {}", fit_middle(ui, &full, &font, room));
+    let shown = std::sync::Arc::new(egui::RichText::new(line));
+    c.fit = Some(DraftFit {
+        width_bits,
+        pixels_per_point_bits,
+        font,
+        shown: shown.clone(),
+    });
+    let name = c.name.clone();
+    ui.data_mut(|d| d.insert_temp(id, c));
+    DraftShown { shown, name }
 }
 
 /// The sentence the Writes line's hover and accessible name carry after the line itself.

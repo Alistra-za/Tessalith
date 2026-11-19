@@ -103,6 +103,12 @@ pub struct NifEdit {
     /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
     /// are kept.
     kept_older: Option<(PathBuf, String)>,
+    /// Ruling E6-Y1: the file known to hold this session's ops: the draft, the plain autosave or the kept autosave,
+    /// whichever the session was opened from or last wrote successfully (the footer's line and Show in Explorer).
+    /// A failed write of ops the file does not hold clears it; a save not yet tried keeps it.
+    held_at: Option<PathBuf>,
+    /// The ops changed since the last successful write (`ops_changed`): `held_at` holds older ops.
+    ops_ahead: bool,
     /// `retarget_error` says no save worked when the session was to end (a project switch, or ruling E6-C's other
     /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
@@ -930,6 +936,13 @@ impl NifEdit {
             }
         };
         let recovered = kept_autosave.is_some() || plain_fp.is_some();
+        // ruling E6-Y1: the file the session was opened from holds its ops until a later write elsewhere succeeds
+        let held_at = match (&draft_fp, &kept_autosave, &plain_fp) {
+            (Some(_), _, _) => Some(draft_path.clone()),
+            (None, Some(k), _) => Some(k.clone()),
+            (None, None, Some(_)) => autosave.map(Path::to_path_buf),
+            _ => None,
+        };
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
         // the id every draft save writes (`write_draft` writes `doc`); a draft without one gets it with its next edit
         if doc.id.is_none() {
@@ -968,6 +981,8 @@ impl NifEdit {
             kept_fp,
             kept_line: None,
             kept_older,
+            held_at,
+            ops_ahead: false,
             switch_failed: false,
             switch_wording: false,
             switch_saved: false,
@@ -1047,6 +1062,7 @@ impl NifEdit {
         e.reapply();
         if !same_ops(&read, &e.doc.ops) {
             e.unsaved = true;
+            e.ops_ahead = true;
         }
         if changed {
             e.count_changed();
@@ -1219,13 +1235,26 @@ impl NifEdit {
         Ok(())
     }
 
-    /// Where the draft is on disk now: the file the session loaded or wrote at `draft_path` (the project's draft, or
-    /// with no project the plain autosave). None before the first save, after a project change until the save into
-    /// the new project, and while a switch waits on a failed save (`switch_failed`): then the old project's draft may
-    /// be gone with its folder and the new project is not reached, so no path is named (review E6).
+    /// Ruling E6-Y1: the file that holds this session's ops now, from any route: the project draft, the plain autosave
+    /// (also after a failed carry), the kept autosave (a fallback write, or a winning one at open). None before the
+    /// first save, and after a failed write of ops the file did not hold. Never a project the edit has not reached.
     pub fn draft_on_disk(&self) -> Option<&Path> {
-        self.draft_fp.as_ref().filter(|_| !self.switch_failed)?;
-        Some(self.draft_path.as_path()).filter(|p| !p.as_os_str().is_empty())
+        self.held_at.as_deref()
+    }
+
+    /// A write of the session's ops worked at `at`.
+    fn held(&mut self, at: &Path) {
+        self.ops_ahead = false;
+        if self.held_at.as_deref() != Some(at) {
+            self.held_at = Some(at.to_path_buf());
+        }
+    }
+
+    /// A write of the session's ops failed (ruling E6-Y1): a file that holds older ops is no longer named, and one that
+    /// holds these is only while it is still there (the check runs on the failure, never per frame).
+    fn held_failed(&mut self) {
+        let ahead = self.ops_ahead;
+        self.held_at = self.held_at.take().filter(|p| !ahead && p.is_file());
     }
 
     /// Why the current state cannot be exported, from memory alone (export steps 2-4): refused ops first (A16 keeps
@@ -1612,6 +1641,7 @@ impl NifEdit {
         }
         // Note GD27: unsaved until the write succeeds, so a failed save keeps the session touched
         if let Err(e) = self.save_draft() {
+            self.held_failed();
             self.error = Some(e);
         }
     }
@@ -1661,6 +1691,8 @@ impl NifEdit {
     /// replaced since is not the session's to delete.
     fn draft_saved(&mut self) {
         self.unsaved = false;
+        let at = self.draft_path.clone();
+        self.held(&at);
         if self.project.is_none() {
             return;
         }
@@ -1704,6 +1736,7 @@ impl NifEdit {
             Err(e) => e,
         };
         if self.project.is_none() {
+            self.held_failed();
             return Err(draft_err); // the kept autosave would be beside it, in the folder that just failed
         }
         match self.save_kept(&draft_err) {
@@ -1712,7 +1745,10 @@ impl NifEdit {
                 self.unsaved = false;
                 Ok(())
             }
-            Err(kept_err) => Err(format!("{draft_err}; the autosave failed too: {kept_err}")),
+            Err(kept_err) => {
+                self.held_failed();
+                Err(format!("{draft_err}; the autosave failed too: {kept_err}"))
+            }
         }
     }
 
@@ -1754,6 +1790,7 @@ impl NifEdit {
         if self.kept_older.as_ref().is_some_and(|(at, _)| *at == k) {
             self.kept_older = None;
         }
+        self.held(&k);
         self.kept_autosave = Some(k.clone());
         self.kept_fp = Some(fp);
         let project = self.project.as_deref().unwrap_or(Path::new(""));
@@ -1798,6 +1835,7 @@ impl NifEdit {
     /// session goes on as it was. False (the failed state stays) when that save fails too.
     pub(super) fn save_back_into_own_project(&mut self) -> bool {
         if self.save_draft().is_err() {
+            self.held_failed();
             return false;
         }
         // ruling E6-R4: the failure clears only when the next open here loads these ops (a newer plain autosave with
@@ -2096,6 +2134,7 @@ impl NifEdit {
     /// tick) leaves the save to `flush`, except after a failed switch, where every change is the next try.
     fn ops_changed(&mut self, now: bool) {
         self.unsaved = true;
+        self.ops_ahead = true;
         if now || self.switch_failed {
             self.save();
         }
