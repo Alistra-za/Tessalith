@@ -243,12 +243,22 @@ pub(crate) fn set_value(t: &mut dyn TableLike, key: &str, mut v: Value) {
 /// engine matches `[files]` keys that way, so a GUI write must reuse a hand-written `Landscape/Rock01_N.png` or
 /// `Landscape/Rock01_N` rather than add a twin).
 pub(crate) fn find_key(t: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(t, key, || {})
+}
+
+/// `find_key` over `[files]`: each pass that compares every key counts as a walk (tests, Note JS7 N8-s).
+fn find_file_key(files: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(files, key, walked)
+}
+
+/// `find_key`, calling `walk` before each pass over every key of `t`.
+fn find_key_walking(t: &dyn TableLike, key: &str, walk: fn()) -> Option<String> {
     if t.contains_key(key) {
         return Some(key.to_owned());
     }
     let lower = key.to_lowercase();
     let by = |want: &str| {
-        walked();
+        walk();
         t.iter()
             .map(|(k, _)| k)
             .find(|k| k.to_lowercase() == want)
@@ -415,12 +425,18 @@ impl ProjectDoc {
     /// The entry for `key`, matched the way the engine matches (case-insensitively), as a table or inline table.
     fn entry(&self, key: &str) -> Option<&dyn TableLike> {
         let files = self.files()?;
-        files.get(&find_key(files, key)?)?.as_table_like()
+        files.get(&find_file_key(files, key)?)?.as_table_like()
     }
 
     /// The entry for `key`, created as `[files."<key>"]` when no spelling of it exists yet. `None` when `[files]`
     /// or the entry is not a table.
     fn entry_mut(&mut self, key: &str) -> Option<&mut dyn TableLike> {
+        self.entry_mut_as(key, true)
+    }
+
+    /// `entry_mut`, with `key` matched as the engine matches it (`resolve`) or taken byte for byte: the table spelled
+    /// `key`, created under that spelling when absent, with no walk over the keys (N8-s).
+    fn entry_mut_as(&mut self, key: &str, resolve: bool) -> Option<&mut dyn TableLike> {
         // Note FC1: a file of comments only holds them as the document's trailing text, which toml_edit writes after
         // a table added here; they go in front of the new entry instead, so the user's first line stays first.
         let mut lead = None;
@@ -443,7 +459,8 @@ impl ProjectDoc {
             t.set_implicit(true);
             Item::Table(t)
         })?;
-        let name = find_key(files, key).unwrap_or_else(|| key.to_owned());
+        let found = resolve.then(|| find_file_key(files, key)).flatten();
+        let name = found.unwrap_or_else(|| key.to_owned());
         sub_table(files, &name, || {
             let mut t = Table::new();
             if let Some(l) = lead {
@@ -463,7 +480,7 @@ impl ProjectDoc {
         else {
             return false;
         };
-        let Some(name) = find_key(files, key) else {
+        let Some(name) = find_file_key(files, key) else {
             return false;
         };
         let Some(gone) = files.remove(&name) else {
@@ -497,6 +514,18 @@ impl ProjectDoc {
     }
 
     pub fn set_file_value(&mut self, key: &str, field: &str, value: &Json) {
+        self.write_file_value(key, field, value, true);
+    }
+
+    /// Note JS7 (N8-s): write `field` into the `[files]` table spelled byte for byte `key`, created under that spelling
+    /// when absent: no case, Unicode or extension-less lookup, so no walk over the keys (`set_file_value` resolves the
+    /// key as the engine matches it). For a caller that has already chosen the table, as the shared-alpha step does
+    /// from its index.
+    pub fn set_exact_file_value(&mut self, key: &str, field: &str, value: &Json) {
+        self.write_file_value(key, field, value, false);
+    }
+
+    fn write_file_value(&mut self, key: &str, field: &str, value: &Json, resolve: bool) {
         if self.read_only() {
             return;
         }
@@ -504,7 +533,7 @@ impl ProjectDoc {
         let parts: Vec<&str> = field.split('.').collect();
         let (last, path) = parts.split_last().expect("split yields one part at least");
         let written = (|| {
-            let mut t = self.entry_mut(key)?;
+            let mut t = self.entry_mut_as(key, resolve)?;
             for part in path {
                 t = sub_table(t, part, dotted_table)?;
             }
@@ -513,8 +542,17 @@ impl ProjectDoc {
         })();
         if written.is_some() {
             self.touch();
-        } else if self.entry(key).is_some_and(|t| t.is_empty()) {
-            // A field path ran into a non-table: do not leave the entry we just created behind.
+            return;
+        }
+        // A field path ran into a non-table: do not leave the entry we just created behind.
+        let left = if resolve {
+            self.entry(key)
+        } else {
+            self.files()
+                .and_then(|f| f.get(key))
+                .and_then(Item::as_table_like)
+        };
+        if left.is_some_and(|t| t.is_empty()) {
             self.drop_entry(key);
         }
     }
@@ -823,8 +861,9 @@ thread_local! {
     static KEY_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Tests (Note JS7, N8-o): how many times this thread has walked a document's `[files]` keys: a `file_keys` call, or a
-/// `find_key` pass that missed the exact spelling and compared every key.
+/// Tests (Note JS7, N8-o, N8-s): how many times this thread has walked a document's `[files]` keys: a `file_keys` call,
+/// or a `[files]` key lookup's pass that missed the exact spelling and compared every key. `[inputs]` lookups are not
+/// counted.
 #[cfg(feature = "test-hooks")]
 pub fn key_walks() -> usize {
     KEY_WALKS.with(std::cell::Cell::get)

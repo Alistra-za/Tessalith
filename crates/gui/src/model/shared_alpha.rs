@@ -491,8 +491,9 @@ impl Tables {
 
     /// N8-e: the `[files]` table the share step writes `data` into for file `key`, and so the exact string it lists:
     /// the table spelled `key`, else the one `find_key` picks among its full-name spellings in another case (the
-    /// first in `[files]` order), else a new `[files."<key>"]`. `None` when the file's only table is spelled without
-    /// the extension: `set_file_value` would write there, where a `data` is the user's (no write; Task 9's row).
+    /// first in `[files]` order), else a new `[files."<key>"]` (no table matches, so none is walked for: N8-s). `None`
+    /// when the file's only table is spelled without the extension: the GUI's own edits of the file resolve to that
+    /// table, where a `data` is the user's (no write, N8-a; Task 9's row).
     fn write_table(&self, key: &str) -> Option<String> {
         let tables = self.matching(key);
         if tables.iter().any(|(k, ..)| k == key) {
@@ -712,8 +713,9 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
         }
     }
     let data = Some(json!("data"));
+    // N8-s: the index chose each table (`write_table`), so the write takes its spelling as it is, with no lookup.
     for k in c.write.iter().filter(|_| !fail) {
-        p.set_file_value(k, "alpha.policy", &json!("data"));
+        p.set_exact_file_value(k, "alpha.policy", &json!("data"));
     }
     // N8-k: each clear is exact and done once: the table spelled as the entry, and only while it holds `data`. One
     // that no longer does is left as it is; its entry is off the list either way.

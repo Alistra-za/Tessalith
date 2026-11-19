@@ -3014,3 +3014,108 @@ fn an_entry_whose_table_holds_another_value_leaves_the_list() {
     assert!(auto_data(&m).is_empty(), "the stale entry is dropped");
     assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("remove")));
 }
+
+/// N8-s (round 4, the reviewer's pin): a real Share of an eligible normal that has no `[files]` table, into the empty
+/// Normal slot of a populated regular set, on a project with 4,000 `[files]` tables, walks the keys at most once before
+/// the edit and once after it: the write creates the table under the spelling the step's index chose, with no lookup.
+/// The normal is `pbr_normal` with no table: the saved sets document chooses PBR grass for `landscape/rock`, so the
+/// engine types its landscape `_n` itself, and with accept None nothing records a type.
+#[test]
+fn a_share_that_creates_the_normals_table_walks_the_keys_once_per_document_state() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    let t = d.path().join("textures");
+    std::fs::create_dir_all(t.join("armor")).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([90u8, 90, 100]))
+        .save(t.join("armor/steel.png"))
+        .unwrap();
+    let mut toml = String::new();
+    for i in 0..4_000 {
+        toml.push_str(&format!(
+            "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"remove\"\n\n"
+        ));
+    }
+    std::fs::write(t.join("sdc.toml"), toml).unwrap();
+    std::fs::write(
+        t.join("sdc-project.toml"),
+        "[[sets]]\nid = \"landscape/rock\"\nshader = \"pbr_grass\"\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(sdc_gui::settings::GuiSettings::default(), None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(t);
+    settle(&mut m);
+    let p = m.project.as_ref().unwrap();
+    assert!(
+        !p.has_file_key(ROCK_N) && p.file_value(ROCK_N, "subtype").is_none(),
+        "precondition: no table for the normal"
+    );
+    let j = m.item(ROCK_N).and_then(|i| i.job.clone()).expect("job");
+    assert_eq!(j.profile.subtype, Subtype::PbrNormal, "precondition");
+    assert_ne!(j.profile.alpha.policy, AlphaPolicy::Data, "precondition");
+    let start = sdc_gui::project::key_walks();
+    drop_now(&mut m, ROCK_N, "armor/steel", DropChoice::Share);
+    let walks = sdc_gui::project::key_walks() - start;
+    let p = m.project.as_ref().unwrap();
+    assert!(
+        p.has_file_key(ROCK_N),
+        "precondition: the share created the table"
+    );
+    assert_eq!(p.file_value(ROCK_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), vec![ROCK_N.to_string()]);
+    assert!(walks <= 2, "{walks} walks of the [files] keys in the share");
+    settle(&mut m);
+}
+
+/// N8-s (B4 Minor): the walk counter counts `[files]` walks only: an alias lookup that misses the exact `[inputs]`
+/// spelling compares every `[inputs]` key, which is not a `[files]` walk.
+#[test]
+fn an_inputs_lookup_is_not_a_files_walk() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[inputs.'PBR/IRON.PNG']\nas = \"pbr/plate.png\"\n\n[files.'a/b.png']\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    let p = sdc_gui::project::ProjectDoc::open(d.path());
+    assert!(!p.read_only(), "{:?}", p.error());
+    let start = sdc_gui::project::key_walks();
+    assert_eq!(
+        p.read_as("pbr/iron.png").as_deref(),
+        Some("pbr/plate.png"),
+        "precondition: found under another case"
+    );
+    assert_eq!(sdc_gui::project::key_walks() - start, 0, "no [files] walk");
+}
+
+/// N8-s: `ProjectDoc::set_exact_file_value` writes the table spelled byte for byte as the key, created under that
+/// spelling when absent, without walking the keys; a case twin and an extension-less table are left as they are.
+#[test]
+fn the_exact_setter_writes_only_its_own_spelling_without_a_walk() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = \"remove\"\n\n[files.'pbr/iron_n']\nsubtype = \"pbr_normal\"\n",
+    )
+    .unwrap();
+    let mut p = sdc_gui::project::ProjectDoc::open(d.path());
+    assert!(!p.read_only(), "{:?}", p.error());
+    let twins = |p: &sdc_gui::project::ProjectDoc| {
+        (
+            p.exact_file_entry_text("PBR/IRON_N.PNG"),
+            p.exact_file_entry_text("pbr/iron_n"),
+        )
+    };
+    let before = twins(&p);
+    let start = sdc_gui::project::key_walks();
+    p.set_exact_file_value(IRON_N, "alpha.policy", &json!("data"));
+    assert_eq!(sdc_gui::project::key_walks() - start, 0, "no walk");
+    assert!(p.has_file_key(IRON_N), "the table under its own spelling");
+    assert_eq!(p.file_value(IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(twins(&p), before, "the twins are left as they are");
+    p.set_exact_file_value(IRON_N, "alpha.policy", &json!("remove"));
+    assert_eq!(sdc_gui::project::key_walks() - start, 0, "no walk");
+    assert_eq!(p.file_value(IRON_N, "alpha.policy"), Some(json!("remove")));
+    assert_eq!(twins(&p), before);
+}
