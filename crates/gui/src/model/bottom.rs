@@ -1641,19 +1641,57 @@ impl Scope {
 /// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
 /// and has no key. The key wins. `None` for the empty string.
 fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
+    view_lookup(views, root, s).map(|(v, _)| v)
+}
+
+/// `view_of`, and whether `s` named the set by its id (the second and third lookups) rather than by a key (the first
+/// and fourth). The lookup order lives here only.
+fn view_lookup<'a>(
+    views: &'a [sets::SetView],
+    root: &Path,
+    s: &str,
+) -> Option<(&'a sets::SetView, bool)> {
     if s.is_empty() {
         return None;
     }
     views
         .iter()
         .find(|v| v.key == s)
-        .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
-        .or_else(|| views.iter().find(|v| engine::sets::same_id(&v.id, s)))
+        .map(|v| (v, false))
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| v.key.is_empty() && v.id == s)
+                .map(|v| (v, true))
+        })
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| engine::sets::same_id(&v.id, s))
+                .map(|v| (v, true))
+        })
         .or_else(|| {
             views
                 .iter()
                 .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+                .map(|v| (v, false))
         })
+}
+
+impl AppModel {
+    /// Whether the open set filter's stored value names its set by id under the plan now in place (a key-less set's
+    /// id is typed by the user and may look like a key). Asked before a landing plan replaces the sets and the root,
+    /// so `rekey_filter` leaves such a value alone. `false` with no set filter open.
+    pub(super) fn set_filter_names_an_id(&self) -> bool {
+        let Some(
+            ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
+        ) = &self.bottom.filter
+        else {
+            return false;
+        };
+        let views = sets::views(self);
+        view_lookup(&views, &self.sets_root(), k).is_some_and(|(_, by_id)| by_id)
+    }
 }
 
 /// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip;

@@ -52,11 +52,12 @@ impl AppModel {
 
     /// Like `rekey_scope`, for the Problems filter's set key (`Set`, `SetNotes`, `SetChecks`): a key under the old root
     /// moves to the new root, so it never survives a root change to equal another set's rebuilt key. A value not
-    /// under the old root (a key-less set's id) is left as it is.
-    pub(super) fn rekey_filter(&mut self, old_root: Option<&Path>) {
+    /// under the old root (a key-less set's id) is left as it is. `names_an_id` is `set_filter_names_an_id`, asked
+    /// under the old plan: a value the resolver took for an id is never rekeyed, however it reads.
+    pub(super) fn rekey_filter(&mut self, old_root: Option<&Path>, names_an_id: bool) {
         use super::bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
         let new = self.sets_root();
-        let Some(old) = old_root.filter(|o| *o != new.as_path()) else {
+        let Some(old) = old_root.filter(|o| !names_an_id && *o != new.as_path()) else {
             return;
         };
         let rekey = |k: &str| {

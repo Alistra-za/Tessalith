@@ -5374,6 +5374,69 @@ fn a_set_filter_keeps_its_set_when_the_root_changes() {
     assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
 }
 
+/// A key-less entry's id is typed by the user and read as it stands: one that reads like a key under the old output
+/// root (the folded root, a slash, `wall`) is still an id, so a root change leaves the filter on it and never on the
+/// different set `wall` whose key the rewritten value would be.
+#[test]
+fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+    // The entry's id: what the key of a set `wall` is under the plan's output root now.
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "landscape/stray.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let entry = views.iter().find(|v| v.id == id).expect("the entry's card");
+    assert!(entry.key.is_empty(), "precondition: key-less: {entry:?}");
+    assert!(
+        !views.iter().any(|v| v.id == "wall"),
+        "precondition: no set wall yet"
+    );
+    let f = ProblemsFilter::Set(id.clone());
+    m.open_problems(Some(f.clone()));
+    let before = filtered(&m, Some(&f));
+    assert!(
+        before.iter().any(|p| p.text.contains("stray.txt")),
+        "precondition: the entry's row"
+    );
+    // The different set `wall` comes with the plan the move starts: one file at the top of the folder, too small for
+    // its format, so it has rows; its key under the new root is what a rewritten id would be.
+    image::ImageBuffer::from_fn(3, 3, |x, y| {
+        image::Rgb([(x * 40) as u8, (y * 40) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    choose_export(&mut m, d.path().join("elsewhere"));
+    assert!(
+        sdc_gui::model::sets::set_views(&m)
+            .iter()
+            .any(|v| v.id == "wall" && !v.key.is_empty()),
+        "precondition: set wall has a key now"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(
+        rows.iter().any(|p| p.text.contains("stray.txt")),
+        "the entry's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { key, id: i } => key.is_empty() && *i == id,
+            _ => false,
+        }),
+        "another set's row: {texts:?}"
+    );
+    assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+}
+
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
 /// has a key: it lists the keyed set's rows (the same rows as a filter by its key), never another set's, and its chip
 /// names the set.
