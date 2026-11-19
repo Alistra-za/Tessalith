@@ -176,8 +176,13 @@ pub struct NifEdit {
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
     pub notice: Option<String>,
-    /// The last export's result line, and whether it is an error.
+    /// The last export's result line, and whether it is an error. While `partial` holds, an op change keeps it: it is
+    /// the reason the session stays pending.
     pub export_note: Option<(String, bool)>,
+    /// Ruling E6-I: an export wrote its NIF (the SHA-256 hex of those bytes) and not its record. Until an export
+    /// writes the record, the session is pending whatever its ops are, and that NIF counts as this session's
+    /// (`foreign_hash`). In memory only.
+    partial: Option<String>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
     pub cleanup_note: Option<String>,
     /// Export is blocked with this reason: the export folder's record did not load (Note GD12), or (`switch_failed`)
@@ -279,9 +284,11 @@ pub struct NifReviewRow {
     pub compaction: Option<usize>,
 }
 
-/// `foreign_cache`'s key: the export path, the last export's hash and the file's (length, modified time).
+/// `foreign_cache`'s key: the export path, the last export's hash, a partial export's hash (ruling E6-I) and the
+/// file's (length, modified time).
 pub(super) type ForeignKey = (
     PathBuf,
+    Option<String>,
     Option<String>,
     Option<(u64, Option<std::time::SystemTime>)>,
 );
@@ -912,6 +919,7 @@ impl NifEdit {
             problems: Arc::default(),
             notice: None,
             export_note: None,
+            partial: None,
             cleanup_note: None,
             retarget_error: None,
             retarget_fail: None,
@@ -1077,8 +1085,11 @@ impl NifEdit {
     }
 
     /// `doc.pending()`, computed once per change (Note GD23): every op change makes a new `rev`, and an export or a
-    /// folder change a new export record.
+    /// folder change a new export record. Ruling E6-I: a partial export is pending whatever the ops are.
     pub fn pending(&self) -> bool {
+        if self.partial.is_some() {
+            return true;
+        }
         let key = (self.rev, self.doc.ops.len());
         let mut c = self.pending_cache.borrow_mut();
         if let Some((rev, n, h, p)) = &*c {
@@ -1190,7 +1201,12 @@ impl NifEdit {
         // (`reapply` made both, Note GD2)
         let (out, skipped) = (self.out.to_vec(), self.cleanup_skip.clone());
         let path = self.export_path.clone();
-        match foreign_hash(&path, &out, self.doc.export.sha256.as_deref()) {
+        match foreign_hash(
+            &path,
+            &out,
+            self.doc.export.sha256.as_deref(),
+            self.partial.as_deref(),
+        ) {
             Err(e) => return ExportOutcome::Blocked(e),
             Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
             Ok(_) => {}
@@ -1230,13 +1246,16 @@ impl NifEdit {
         let fp = match self.write_record(&record) {
             Ok(fp) => fp,
             Err(e) => {
+                // ruling E6-I: the NIF in place is this session's and not recorded: pending until repaired
+                self.partial = export.sha256.clone();
                 return ExportOutcome::Blocked(format!(
                     "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
                     path.display()
-                ))
+                ));
             }
         };
         self.doc.export = export;
+        self.partial = None;
         self.up_to_date = true;
         self.foreign_record = None;
         self.record_fp = fp;
@@ -1264,7 +1283,10 @@ impl NifEdit {
             }
         };
         self.apply_err = None;
-        self.export_note = None; // the last export's line no longer describes these edits
+        // the last export's line no longer describes these edits, except a partial export's (ruling E6-I)
+        if self.partial.is_none() {
+            self.export_note = None;
+        }
         self.cleanup_note = None;
         for (d, o) in self.doc.ops.iter_mut().zip(&a.outcomes) {
             if let Outcome::ReAnchored { block } = o {
@@ -2325,11 +2347,19 @@ pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
 }
 
 /// Note GP10: what an export of `out` to `path` finds there: None when the file is absent, equal to `out` or
-/// Tessalith's own (its hash is `last`, the last export's); Some(its SHA-256) when Tessalith did not write it; Err
-/// when it cannot be read.
-fn foreign_hash(path: &Path, out: &[u8], last: Option<&str>) -> Result<Option<[u8; 32]>, String> {
+/// Tessalith's own (its hash is `last`, the last export's, or `partial`, the NIF a partial export wrote, ruling
+/// E6-I); Some(its SHA-256) when Tessalith did not write it; Err when it cannot be read.
+fn foreign_hash(
+    path: &Path,
+    out: &[u8],
+    last: Option<&str>,
+    partial: Option<&str>,
+) -> Result<Option<[u8; 32]>, String> {
     let cannot = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
-    let ours = |b: &[u8]| last == Some(edit_doc::sha256_hex(b).as_str());
+    let ours = |b: &[u8]| {
+        let h = edit_doc::sha256_hex(b);
+        last == Some(h.as_str()) || partial == Some(h.as_str())
+    };
     match engine::dds::may_replace(path, out, ours) {
         Ok(()) => Ok(None),
         Err(Kept::Unreadable(e)) => Err(cannot(e)),
@@ -2901,13 +2931,23 @@ impl MeshesModel {
         let meta = std::fs::metadata(&e.export_path)
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
-        let key = (e.export_path.clone(), e.doc.export.sha256.clone(), meta);
+        let key = (
+            e.export_path.clone(),
+            e.doc.export.sha256.clone(),
+            e.partial.clone(),
+            meta,
+        );
         if let Some((k, v)) = &*self.foreign_cache.borrow() {
             if *k == key {
                 return v.clone();
             }
         }
-        let v = foreign_hash(&e.export_path, &e.out, e.doc.export.sha256.as_deref());
+        let v = foreign_hash(
+            &e.export_path,
+            &e.out,
+            e.doc.export.sha256.as_deref(),
+            e.partial.as_deref(),
+        );
         *self.foreign_cache.borrow_mut() = Some((key, v.clone()));
         v
     }

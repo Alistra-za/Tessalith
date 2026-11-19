@@ -5752,6 +5752,60 @@ fn an_export_stops_when_the_draft_cannot_be_saved() {
     assert!(!nif_doc(&export_root(&d)).exists());
 }
 
+/// Review round 2 (Important B6, ruling E6-I): a partial export (the NIF written, its record not) keeps the row until
+/// an export writes the record, even when the ops are undone back to the recorded ones; that export replaces the NIF
+/// it wrote without asking.
+#[test]
+fn a_partial_export_keeps_its_row_until_it_is_repaired() {
+    let (d, mut m, _p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let (rec, nif_x) = (
+        nif_doc(&export_root(&d)),
+        std::fs::read(exported(&d)).unwrap(),
+    );
+    gloss(&mut m, 13.5);
+    read_only(&rec, true); // the record is there, but cannot be replaced
+    let why = export(&mut m).unwrap_err();
+    assert!(why.contains("is in place, but its record"), "{why}");
+    assert_ne!(
+        std::fs::read(exported(&d)).unwrap(),
+        nif_x,
+        "premise: NIF Y is in place"
+    );
+    assert!(m.undo_edit());
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5]
+    );
+    assert!(
+        m.edit.as_ref().unwrap().pending(),
+        "the installed NIF is not the recorded one"
+    );
+    let row = review_row(&m);
+    assert_eq!(row.blocked, None, "Export can repair it");
+    assert_eq!(row.foreign, None, "the NIF in place is this session's");
+    assert!(
+        m.edit
+            .as_ref()
+            .unwrap()
+            .export_note
+            .as_ref()
+            .is_some_and(|(t, _)| t.contains("is in place, but its record")),
+        "the reason stays: {:?}",
+        m.edit.as_ref().unwrap().export_note
+    );
+    assert_eq!(m.quick_export_block(), None);
+    read_only(&rec, false);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(std::fs::read(exported(&d)).unwrap(), nif_x, "NIF X again");
+    let r = load(&rec).unwrap().unwrap();
+    assert_eq!(doc_values(&rec), [12.5]);
+    assert_eq!(r.export.sha256, Some(sha256_hex(&nif_x)));
+    assert!(m.nif_review_rows().is_empty(), "the row is gone");
+}
+
 /// Review E6 (Important 7, ruling E6-E): when the NIF is written and its record is not, the export is not reported as
 /// done: the export state stays where it was and the row stays pending with the reason. The next export of the same
 /// edit replaces the NIF it wrote itself without asking (the bytes are the same).
