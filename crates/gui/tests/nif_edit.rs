@@ -7098,11 +7098,51 @@ fn ownership_is_of_one_pathname() {
 /// E6-Q's rows that need Windows (a share-mode lock).
 #[cfg(windows)]
 fn windows_rows_q() -> Vec<(&'static str, fn())> {
-    vec![(
-        "open P with an older kept loser, replace the loser with another edit, make P's draft unreplaceable, edit \
-         and Close",
-        a_replaced_kept_loser_stays_at_its_name,
-    )]
+    vec![
+        (
+            "open P with an older kept loser, replace the loser with another edit, make P's draft unreplaceable, edit \
+             and Close",
+            a_replaced_kept_loser_stays_at_its_name,
+        ),
+        (
+            "the same, with one edit saved into the draft before the draft becomes unreplaceable",
+            a_replaced_kept_loser_stays_remembered_after_a_draft_save,
+        ),
+    ]
+}
+
+/// E6-Q's cleanup row: a draft save that finds the loser replaced leaves it and keeps it remembered, so the later kept
+/// fallback still compares it (forgetting it let the fallback move the replacement aside by a second route).
+#[cfg(windows)]
+fn a_replaced_kept_loser_stays_remembered_after_a_draft_save() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    let k = kept(&d, &id_of(&p));
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 9.5)).unwrap();
+    make_old(&k);
+    m.open_edit();
+    assert_eq!(vals(&m), [7.5], "premise: the draft won");
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 99.5)).unwrap();
+    let replaced = std::fs::read(&k).unwrap();
+    gloss(&mut m, 12.5);
+    assert_eq!(
+        doc_values(&draft(&p)),
+        [7.5, 12.5],
+        "premise: the draft saved"
+    );
+    let lock = hold(&draft(&p), 1);
+    gloss(&mut m, 13.5);
+    m.close_edit();
+    let (bytes, aside, open) = (
+        std::fs::read(&k).unwrap(),
+        moved_aside_from(&k),
+        m.edit.is_some(),
+    );
+    drop(lock);
+    assert_eq!(bytes, replaced, "its bytes are still at its name");
+    assert!(aside.is_empty(), "nothing moved aside: {aside:?}");
+    assert!(open, "the leave is refused: nowhere took the edit");
 }
 
 #[cfg(not(windows))]
@@ -7210,6 +7250,25 @@ fn every_route_into_a_project_runs_the_one_carry() {
                 let mut m = restart(&d, &p);
                 m.open_edit();
                 assert_eq!(vals(&m), [12.5, 13.5, 14.5], "reopening P loads X and Y");
+            },
+        ),
+        (
+            "a refused Close whose retry reaches only the kept autosave keeps its reason (nothing waits)",
+            || {
+                let (d, mut m, a) = session_in_project("a", None);
+                m.open_edit();
+                std::fs::write(a.join("_sdc"), b"a file").unwrap(); // the project's draft cannot be written
+                gloss(&mut m, 12.5);
+                m.close_edit();
+                assert!(m.edit.is_some(), "premise: Close refused");
+                gloss(&mut m, 13.5);
+                let id = m.edit.as_ref().unwrap().doc.id.clone().unwrap();
+                assert_eq!(doc_values(&kept(&d, &id)), [12.5, 13.5], "premise: kept only");
+                let why = m.edit.as_ref().unwrap().export_block().unwrap_or_default();
+                assert!(
+                    why.starts_with("Could not save the edits of"),
+                    "the reason is still shown: {why}"
+                );
             },
         ),
     ]);
