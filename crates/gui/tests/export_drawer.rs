@@ -10,6 +10,7 @@ use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::export::*;
 use sdc_gui::model::shell::{args, select_arg, ShellRequest};
 use sdc_gui::model::AppModel;
+use sdc_gui::settings::GuiSettings;
 use sdc_gui::ui::drawer::DrawerState;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -202,8 +203,9 @@ fn big() -> ExportModel {
 
 #[test]
 fn the_filters_combine_with_and() {
-    let x = big();
-    let n = |f: FileFilter| x.rows.iter().filter(|r| f.matches(r)).count();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.export = big();
+    let n = |f: FileFilter| m.export.rows.iter().filter(|r| f.matches(&m, r)).count();
     let failed_only = FileFilter {
         failed_only: true,
         ..Default::default()
@@ -224,7 +226,8 @@ fn the_filters_combine_with_and() {
 
 #[test]
 fn the_filtered_list_is_computed_once_per_change() {
-    let mut x = big();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.export = big();
     let mut idx = FilesIndex::default();
     let both = FileFilter {
         failed_only: true,
@@ -232,8 +235,8 @@ fn the_filtered_list_is_computed_once_per_change() {
     };
     // 200 frames over 10k rows with nothing changing: one computation.
     for _ in 0..200 {
-        assert_eq!(idx.len(&x, both), 500);
-        assert_eq!(idx.row(&x, both, 0).unwrap().job_key, "t/f00000.dds");
+        assert_eq!(idx.len(&m, both), 500);
+        assert_eq!(idx.row(&m, both, 0).unwrap().job_key, "t/f00000.dds");
     }
     assert_eq!(idx.computed, 1);
     // A change of filter recomputes once ...
@@ -242,22 +245,22 @@ fn the_filtered_list_is_computed_once_per_change() {
         ..Default::default()
     };
     for _ in 0..50 {
-        assert_eq!(idx.len(&x, warn), 2500);
+        assert_eq!(idx.len(&m, warn), 2500);
     }
     assert_eq!(idx.computed, 2);
     // ... so does an event that changes a row ...
-    x.on_event(ev(
+    m.export.on_event(ev(
         0,
         "t/f00001.dds",
         "t/f00001.png",
         EventKind::Warning(Warning::new(Code::DimNpot, "late")),
     ));
     for _ in 0..50 {
-        assert_eq!(idx.len(&x, warn), 2501);
+        assert_eq!(idx.len(&m, warn), 2501);
     }
     assert_eq!(idx.computed, 3);
     // ... but progress does not, and no filter needs no index at all.
-    x.on_event(ev(
+    m.export.on_event(ev(
         0,
         "t/f00001.dds",
         "t/f00001.png",
@@ -267,8 +270,8 @@ fn the_filtered_list_is_computed_once_per_change() {
             total: 2,
         },
     ));
-    assert_eq!(idx.len(&x, warn), 2501);
-    assert_eq!(idx.len(&x, FileFilter::default()), 10_000);
+    assert_eq!(idx.len(&m, warn), 2501);
+    assert_eq!(idx.len(&m, FileFilter::default()), 10_000);
     assert_eq!(idx.computed, 3);
 }
 
@@ -357,6 +360,16 @@ fn the_filter_toggles_narrow_the_files_list() {
     assert!(h.query_by_label("t/f00010.dds").is_none(), "no warning");
     h.get_by_label("t/f00020.dds");
     assert_eq!(h.state().1.index.computed, 2, "once per filter change");
+}
+
+#[test]
+fn has_warnings_explains_which_warnings_it_counts() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = drawer_harness(model_with(d.path(), d.path(), ExportModel::default()));
+    h.get_by_label("Has warnings").hover();
+    h.run();
+    h.run();
+    h.get_by_label("Only files with warnings not marked as intended");
 }
 
 #[test]

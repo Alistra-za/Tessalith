@@ -1,4 +1,6 @@
 //! Export and its report (M3a spec §2.5, §2.6, §5.5).
+use super::bottom::open_export_warnings;
+use super::AppModel;
 use engine::api::{BatchSummary, CancelToken};
 use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind};
@@ -718,44 +720,42 @@ impl FileFilter {
         self.failed_only || self.has_warnings
     }
 
-    pub fn matches(self, r: &Row) -> bool {
-        (!self.failed_only || r.state.is_failed()) && (!self.has_warnings || !r.warnings.is_empty())
+    pub fn matches(self, m: &AppModel, r: &Row) -> bool {
+        (!self.failed_only || r.state.is_failed())
+            && (!self.has_warnings || open_export_warnings(m, r) > 0)
     }
 }
 
-/// The row indices the Files tab shows, cached by what they were computed from: the filter and the export's
-/// `revision`. A frame that changed neither only reads the cache.
+/// The visible row indices depend on the filter, the export, the live items and their intended marks.
 #[derive(Default)]
 pub struct FilesIndex {
-    files: Option<(FileFilter, u64, Vec<usize>)>,
+    key: Option<(FileFilter, u64, u64, u64)>,
+    indices: Vec<usize>,
     /// How many times the filter was computed (tests).
     pub computed: u32,
 }
 
 impl FilesIndex {
-    /// How many rows pass `f`; recomputes the index only when `f` or the export changed.
-    pub fn len(&mut self, m: &ExportModel, f: FileFilter) -> usize {
+    /// How many rows pass `f`.
+    pub fn len(&mut self, m: &AppModel, f: FileFilter) -> usize {
         if !f.any() {
-            return m.rows.len();
+            return m.export.rows.len();
         }
-        let stale = !matches!(&self.files, Some((cf, rev, _)) if *cf == f && *rev == m.revision);
-        if stale {
+        let key = (f, m.export.revision, m.items_rev(), m.doc_rev());
+        if self.key != Some(key) {
             self.computed += 1;
-            let idx = (0..m.rows.len())
-                .filter(|&i| f.matches(&m.rows[i]))
-                .collect();
-            self.files = Some((f, m.revision, idx));
+            self.indices.clear();
+            self.indices
+                .extend((0..m.export.rows.len()).filter(|&i| f.matches(m, &m.export.rows[i])));
+            self.key = Some(key);
         }
-        self.files.as_ref().map_or(0, |(_, _, v)| v.len())
+        self.indices.len()
     }
 
     /// The `i`th row that passes `f`; call [`Self::len`] first in the frame.
-    pub fn row<'a>(&self, m: &'a ExportModel, f: FileFilter, i: usize) -> Option<&'a Row> {
-        if !f.any() {
-            return m.rows.get(i);
-        }
-        let (_, _, idx) = self.files.as_ref()?;
-        m.rows.get(*idx.get(i)?)
+    pub fn row<'a>(&self, m: &'a AppModel, f: FileFilter, i: usize) -> Option<&'a Row> {
+        let i = if f.any() { *self.indices.get(i)? } else { i };
+        m.export.rows.get(i)
     }
 }
 

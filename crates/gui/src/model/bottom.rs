@@ -293,6 +293,13 @@ pub fn with_marked(mut open: Vec<String>, marked: Vec<String>) -> Vec<String> {
     open
 }
 
+// A mark stores its code verbatim; sets_doc::folded folds only the subject.
+fn has_mark_of(m: &AppModel, code: Code) -> bool {
+    m.sets_doc
+        .as_ref()
+        .is_some_and(|doc| doc.intended_keys().iter().any(|k| k.code == code.as_str()))
+}
+
 /// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
 /// Final fix wave A6: only a code that can be marked (Warning or Info, as `markable`) reads one; a hand-written mark on
 /// an Error code is not one. A Note's warning reads no mark (Note JP6): its row has no Mark, so a mark stored while it
@@ -305,24 +312,20 @@ pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
         return false;
     };
-    // Tiles and cards ask every frame: only a warning whose code a mark names builds its key. This holds because a
-    // key's `code` is stored and compared verbatim: `sets_doc::folded` folds only the `subject`. A fold of the code
-    // there must fold it here too.
-    doc.intended_keys()
-        .iter()
-        .any(|k| k.code == w.code.as_str())
-        && class_at(m, at, w) == RowClass::Problem
-        && {
-            let text = warning_text(job_at(m, at), w);
-            let shown = code_text::shown_for(Some(w.code), &text);
-            doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
-        }
+    has_mark_of(m, w.code) && class_at(m, at, w) == RowClass::Problem && {
+        let text = warning_text(job_at(m, at), w);
+        let shown = code_text::shown_for(Some(w.code), &text);
+        doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
+    }
 }
 
 /// Final fix wave A6: whether the last export's warning `w` on the file `job_key` is marked, read where its row is: on
 /// the texture's row when the one live item of that file has a warning of the same code (the File loop of
 /// `build_problems` leaves the warning to it), else on the File row.
 pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::Warning) -> bool {
+    if !has_mark_of(m, w.code) {
+        return false;
+    }
     let mut of = m.items.iter().filter(|i| i.job_key == job_key);
     let first = of.next();
     let live = first.filter(|_| of.next().is_none());
@@ -333,6 +336,15 @@ pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::War
         Some((i, x)) => marked(m, &At::Texture(i.key.clone()), x),
         None => marked(m, &At::File(job_key.to_string()), w),
     }
+}
+
+/// Plan 3c Task 17a (F3): how many of a last-export row's warnings are not marked as intended
+/// (`export_warning_marked`): the Files row's "n warnings" and the Has warnings filter.
+pub fn open_export_warnings(m: &AppModel, r: &crate::model::export::Row) -> usize {
+    r.warnings
+        .iter()
+        .filter(|w| !export_warning_marked(m, &r.job_key, w))
+        .count()
 }
 
 /// Review E4: a row the Checks pill counts and its filter lists: a check row not marked as intended (a marked one is

@@ -1,6 +1,7 @@
 //! The Files tab of the bottom panel (M3a spec 2.5, layout v2 A1): progress and the report of the last export, by file.
 //! Open export folder, Show in Explorer, the progress line with pace, and a virtualised Files list with filters.
 //! DECISIONS AG34-AG37, CA16. A file's warnings show on hover of its row (R9).
+use crate::model::bottom::open_export_warnings;
 use crate::model::code_text::counted;
 use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex};
 use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 pub struct DrawerState {
     /// The Files tab's filters; both on means both must hold.
     pub filter: FileFilter,
-    /// The filtered rows, cached by (filter, export revision).
+    /// The cached indices of the filtered rows.
     pub index: FilesIndex,
     /// Cached "is the export folder / this file on disk" answers (AG39).
     pub stats: StatCache,
@@ -31,7 +32,7 @@ pub fn files_tab(ui: &mut egui::Ui, model: &mut AppModel, state: &mut DrawerStat
         ui.toggle_value(&mut state.filter.failed_only, "Failed only")
             .on_hover_text("Only files that failed or failed validation");
         ui.toggle_value(&mut state.filter.has_warnings, "Has warnings")
-            .on_hover_text("Only files with warnings");
+            .on_hover_text("Only files with warnings not marked as intended");
     });
     let (mut picked, mut reveal) = (None, None);
     files(ui, model, state, &mut picked, &mut reveal);
@@ -191,7 +192,7 @@ fn files(
     reveal: &mut Option<std::path::PathBuf>,
 ) {
     let filter = state.filter;
-    let n = state.index.len(&model.export, filter);
+    let n = state.index.len(model, filter);
     if n == 0 {
         ui.weak(if model.export.rows.is_empty() {
             "Not exported yet."
@@ -205,7 +206,7 @@ fn files(
         .auto_shrink([false, false])
         .show_rows(ui, row_h, n, |ui, range| {
             for i in range {
-                let Some(r) = state.index.row(&model.export, filter, i) else {
+                let Some(r) = state.index.row(model, filter, i) else {
                     continue;
                 };
                 ui.horizontal(|ui| {
@@ -214,11 +215,17 @@ fn files(
                     }
                     ui.label(r.state.label());
                     if !r.warnings.is_empty() {
-                        // A Label's hover never becomes its name (0.37), so it is built only while shown.
-                        ui.label(counted(r.warnings.len(), "warning", "warnings"))
-                            .on_hover_ui(|ui| {
-                                ui.label(warnings_hover(model, r));
-                            });
+                        // shortcut: an items scan per visible warning whose code is marked; cache the counts in `FilesIndex` if a profile shows it.
+                        let n = open_export_warnings(model, r);
+                        let label = if n > 0 {
+                            ui.label(counted(n, "warning", "warnings"))
+                        } else {
+                            let k = r.warnings.len() - n;
+                            ui.weak(format!("{k} marked"))
+                        };
+                        label.on_hover_ui(|ui| {
+                            ui.label(warnings_hover(model, r));
+                        });
                     }
                     // The written output once it exists, otherwise the source.
                     let now = Instant::now();

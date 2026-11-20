@@ -2079,6 +2079,100 @@ fn the_files_hover_reads_the_mark_of_the_textures_row() {
     );
 }
 
+/// Plan 3c Task 17a (F3): a Files row's "n warnings" and the Has warnings filter leave a warning marked as intended
+/// out, as its hover and the card badge do; a mark made while the filter is on takes the row out at once.
+#[test]
+fn a_marked_warning_leaves_the_files_count_and_filter() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::BottomTab;
+    use sdc_gui::model::export::{warning_line, Row, RowState};
+    let (_d, mut m) = with_warnings(&[]);
+    let (mip, cov) = (
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage 0.4"),
+    );
+    m.export.rows = vec![Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: RowState::Done { passed: true },
+        warnings: vec![mip.clone(), cov.clone()],
+    }];
+    m.invalidate_views();
+    m.show_tab(BottomTab::Files);
+    mark_first(&mut m, Code::ValMipError);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("2 warnings").count(),
+        0,
+        "the marked warning is not counted"
+    );
+    h.get_by_label("1 warning");
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.run();
+    h.get_by_label("derived/x"); // one warning still open: listed
+    mark_first(h.state_mut(), Code::ValCoverage);
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label("derived/x").is_none(),
+        "every warning marked: gone from Has warnings"
+    );
+    // Ruling 3c-11: with the filter off, the row shows a weak "2 marked" whose hover lists both under their line.
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.run();
+    for open in ["1 warning", "2 warnings"] {
+        assert_eq!(
+            h.query_all_by_label(open).count(),
+            0,
+            "no count of open warnings"
+        );
+    }
+    h.get_by_label("2 marked").hover();
+    h.run();
+    h.run();
+    h.get_by_label(&format!(
+        "Marked as intended:\n{}\n{}",
+        warning_line(&mip),
+        warning_line(&cov)
+    ));
+}
+
+#[test]
+fn has_warnings_tracks_the_texture_now_owning_an_export_warning() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::BottomTab;
+    use sdc_gui::model::export::{Row, RowState};
+
+    let warning = Warning::new(Code::ValMipError, "mip 3");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&warning));
+    let key = rock01(&m).members[0].clone();
+    mark_first(&mut m, warning.code);
+    m.export.rows = vec![Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: RowState::Done { passed: true },
+        warnings: vec![warning],
+    }];
+    m.show_tab(BottomTab::Files);
+    let mut h = harness(m);
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.get_by_label("derived/x");
+
+    let m = h.state_mut();
+    m.items.iter_mut().find(|i| i.key == key).unwrap().job_key = "derived/x".into();
+    m.invalidate_views();
+    h.run();
+    assert!(
+        h.query_by_label("derived/x").is_none(),
+        "the same export warning now belongs to the marked texture"
+    );
+}
+
 /// Review E4: the Textures column's "Has warnings" pill, its filter and the Status sort drop a marked warning.
 #[test]
 fn a_marked_warning_leaves_the_warnings_pill_filter_and_status_sort() {
