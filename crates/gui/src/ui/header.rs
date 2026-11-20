@@ -173,9 +173,7 @@ fn row(
         overflow_menu(ui, model, scan, &moved);
     }
     ui.separator();
-    if view_toggle(ui) {
-        model.centre_over_meshes = false;
-    }
+    view_toggle(ui, model);
     settings_button(ui, model);
     right_end(ui, model, edits, end);
 }
@@ -726,7 +724,7 @@ fn history_slot_width(ui: &egui::Ui) -> f32 {
 /// The Undo and Redo buttons (item 2): disabled with no history, the step's label in the hover text.
 fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
     // A20: the NIF history while a NIF edit is open in the Meshes view.
-    let nif = super::meshes::undo_target(ui.ctx());
+    let nif = super::actions::nif_history(ui.ctx(), model);
     let slot = egui::vec2(history_slot_width(ui), ui.spacing().interact_size.y);
     for undo in [true, false] {
         let textures = if undo {
@@ -743,13 +741,7 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
         // Backlog T20: a focused text field commits first, so its step is the one undone and Redo is not cleared.
         let ctx = ui.ctx().clone();
         super::commit_click(ui, &r, model, move |m| {
-            if !super::meshes::request_undo(&ctx, undo) {
-                if undo {
-                    m.undo();
-                } else {
-                    m.redo();
-                }
-            }
+            super::actions::history_step(&ctx, m, undo);
         });
     }
 }
@@ -863,7 +855,7 @@ fn preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
 /// Top-level view toggle (plan A Task 12), kept in egui memory for the session. Note BH8: two tabs, taller than the
 /// row, rounded on top only; the selected one is filled and bold. R21: they show "Textures" / "Meshes" and keep the
 /// accessible names "Textures view" / "Meshes view".
-pub fn view_toggle(ui: &mut egui::Ui) -> bool {
+fn view_toggle(ui: &mut egui::Ui, model: &mut AppModel) {
     let meshes = meshes_view_active(ui.ctx());
     let tab = |ui: &mut egui::Ui, on: bool, text: &str, name: &str| {
         let rich = egui::RichText::new(text);
@@ -887,14 +879,20 @@ pub fn view_toggle(ui: &mut egui::Ui) -> bool {
     fit(ui, view_tabs_width(ui));
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        let textures = tab(ui, !meshes, "Textures", "Textures view").clicked();
-        let meshes = tab(ui, meshes, "Meshes", "Meshes view").clicked();
-        if textures || meshes {
-            set_meshes_view(ui.ctx(), meshes);
+        for (target, text, name) in [
+            (false, "Textures", "Textures view"),
+            (true, "Meshes", "Meshes view"),
+        ] {
+            let r = tab(ui, meshes == target, text, name);
+            super::blur_on_press(ui, r.rect);
+            if r.clicked() {
+                super::navigate(ui.ctx(), model, move |ctx, m| {
+                    m.centre_over_meshes = false;
+                    set_meshes_view(ctx, target);
+                });
+            }
         }
-        textures || meshes
-    })
-    .inner
+    });
 }
 
 /// The width `view_toggle` takes: two tabs and the spacing after them.

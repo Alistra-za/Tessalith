@@ -88,7 +88,7 @@ fn strip_row(
 /// is popped out (rule 8.4).
 pub fn controls(ui: &mut egui::Ui, model: &mut AppModel, tab: CentreTab) {
     let title = VIEWS.iter().find(|v| v.0 == tab).map_or("", |v| v.1);
-    let Some((open, popped)) = flags(model, tab) else {
+    let Some((_, popped)) = flags(model, tab) else {
         return;
     };
     let button = |ui: &mut egui::Ui, text: &str, hover: &str| {
@@ -102,24 +102,31 @@ pub fn controls(ui: &mut egui::Ui, model: &mut AppModel, tab: CentreTab) {
             r.on_hover_text(hover)
         }
     };
-    if button(ui, "Close", "").clicked() {
-        *open = false;
-    }
-    if *popped {
-        if button(ui, "Dock", "Back into the centre column").clicked() {
-            *popped = false;
-            model.centre_tab = tab;
-            model.reveal_centre = true;
+    let popped = *popped;
+    let close = button(ui, "Close", "");
+    super::commit_click(ui, &close, model, move |m| {
+        if let Some((open, _)) = flags(m, tab) {
+            *open = false;
         }
-    } else if button(
-        ui,
-        "Pop out",
-        "Show it in a window of its own, for a second monitor",
-    )
-    .clicked()
-    {
-        *popped = true;
-    }
+    });
+    let toggle = if popped {
+        button(ui, "Dock", "Back into the centre column")
+    } else {
+        button(
+            ui,
+            "Pop out",
+            "Show it in a window of its own, for a second monitor",
+        )
+    };
+    super::commit_click(ui, &toggle, model, move |m| {
+        if let Some((_, flag)) = flags(m, tab) {
+            *flag = !popped;
+            if popped {
+                m.centre_tab = tab;
+                m.reveal_centre = true;
+            }
+        }
+    });
 }
 
 /// Each popped-out view in its own OS window (an embedded one where the platform has none, and in tests). Closing the

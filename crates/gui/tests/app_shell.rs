@@ -131,6 +131,86 @@ fn settings_and_other_docked_tools_yield_to_meshes_or_view_navigation() {
     assert!(!h.state().model.centre_over_meshes);
 }
 
+#[test]
+fn a_view_click_commits_the_overlay_json_name_once() {
+    use eframe::egui::{Event, PointerButton};
+
+    app_data();
+    for tab in ["Meshes view", "Textures view"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = app_harness::plain_harness(support::pbr_opened(d.path()));
+        header::set_meshes_view(&h.ctx, true);
+        h.state_mut().model.open_json_editor();
+        app_harness::settle(&mut h, 3);
+        h.get_by_label("Back to meshes");
+        let steps = h.state().model.history.undo.len();
+        h.get_by_label("JSON file name").click();
+        h.run_steps(2);
+        h.event(Event::Text("Overlay pack".into()));
+        h.run_steps(2);
+        assert_eq!(h.state().model.history.undo.len(), steps);
+        let pos = h.get_by_label(tab).rect().center();
+        h.input_mut().events.push(Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            h.input_mut().events.push(Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        app_harness::settle(&mut h, 3);
+        let m = &h.state().model;
+        assert_eq!(
+            m.sets_doc.as_ref().unwrap().json_name().as_deref(),
+            Some("Overlay pack"),
+            "{tab} commits the focused JSON name"
+        );
+        assert_eq!(m.history.undo.len(), steps + 1);
+        assert!(!m.centre_over_meshes);
+        assert_eq!(header::meshes_view_active(&h.ctx), tab == "Meshes view");
+    }
+}
+
+#[test]
+fn invalid_header_mo2_pick_shows_the_error_above_the_open_tool() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app_harness::plain_harness_no_mo2(model());
+    header::set_meshes_view(&h.ctx, true);
+    h.state_mut().model.open_settings_tab();
+    app_harness::settle(&mut h, 3);
+    let invalid = d.path().join("missing-instance");
+    let (backend, requests) = support::recording_picker(Some(invalid.clone()));
+    h.state().meshes.picker.set_backend(backend);
+    h.get_by_label("MO2…").click();
+    h.run_steps(3);
+    h.get_by_label("Choose…").click();
+    h.run_steps(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.state().meshes.error.is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the MO2 pick did not return an error"
+        );
+        app_harness::settle(&mut h, 1);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    let error = h.state().meshes.error.as_deref().unwrap();
+    assert!(error.contains(invalid.to_str().unwrap()));
+    let back = h.get_by_label("Back to meshes").rect();
+    let message = h
+        .query_by_label(error)
+        .expect("the MO2 error must be visible over Settings");
+    assert!(message.rect().bottom() <= back.top());
+    h.get_by_label("Dismiss").click();
+    h.run_steps(3);
+    assert!(h.state().meshes.error.is_none());
+    h.get_by_label("Back to meshes");
+}
+
 fn no_edit_controls(h: &app_harness::H) {
     for label in ["Undo", "Redo", "Save", "Files", "Problems", "Messages"] {
         assert!(

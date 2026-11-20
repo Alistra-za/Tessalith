@@ -1436,9 +1436,20 @@ fn recipe_link_opens_the_keyless_pbr_cards_also_tab() {
     let mut m = project(d.path());
     tick(&mut m, AlsoTarget::Vanilla);
     let target = add_keyless_pbr(&mut m);
-    m.set_skip_also(&steel_key(&m), true);
+    m.set_skip_also(&steel_id(&m), true);
     idle(&mut m);
-    m.select_target(target.clone());
+    let views = sdc_gui::model::sets::views(&m);
+    let cup = views.iter().find(|v| v.key.ends_with("cup")).unwrap();
+    m.select_set(&cup.key);
+    assert!(
+        matches!(&m.selection, sdc_gui::model::Selection::Set(k) if k.ends_with("cup")),
+        "Recipe must start on the non-PBR cup"
+    );
+    assert_eq!(
+        m.recipe_set(),
+        Some(target.clone()),
+        "the borrower is the unskipped PBR fallback"
+    );
     m.settings.set_view_3d = true;
     m.open_review();
     m.review.as_mut().unwrap().options_open = true;
@@ -1448,6 +1459,12 @@ fn recipe_link_opens_the_keyless_pbr_cards_also_tab() {
     assert_eq!(h.state().selection.set_target(), Some(target));
     assert!(!h.state().settings.set_view_3d);
     h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
+    assert!(
+        h.query_by_label("This set has no texture files of its own for Also export to skip.")
+            .is_some(),
+        "the borrower explains why it has no Skip control"
+    );
+    assert!(h.query_by_label("Skip vanilla/CM for this set").is_none());
 }
 
 /// Note JI2 (Review Focus 1): with no PBR set there is no set to open, so the link is not drawn.

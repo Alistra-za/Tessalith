@@ -1272,9 +1272,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
     });
     // Every click-through lands in the Textures view.
-    let to_textures = |ui: &egui::Ui| super::header::set_meshes_view(ui.ctx(), false);
     match act {
-        Some(Act::Texture(k)) => {
+        Some(Act::Texture(k)) => super::navigate(ui.ctx(), model, move |ctx, model| {
             // Note FB12: a helper in a collapsed Helpers group opens it, as the palette does. Local to this click:
             // `select_item` also runs for restores, which must not reopen a group the user collapsed.
             if model
@@ -1285,9 +1284,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 model.nav.reveal_item = Some(k.clone());
             }
             model.select_item(&k);
-            to_textures(ui);
+            super::header::set_meshes_view(ctx, false);
+        }),
+        Some(Act::Set(target, slot)) => {
+            super::navigate(ui.ctx(), model, move |_, m| m.go_to_target(target, slot))
         }
-        Some(Act::Set(target, slot)) => model.go_to_target(target, slot),
         // Re-check A5: a Vanilla or CM row of the last Also export names no texture; its file is shown in Explorer.
         Some(Act::File(k)) => match model.also_file(&k) {
             Some(f) => {
@@ -1295,13 +1296,22 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     model.status_line = e;
                 }
             }
-            None => {
-                model.select_job(&k);
-                to_textures(ui);
-            }
+            None => super::navigate(ui.ctx(), model, move |ctx, m| {
+                m.select_job(&k);
+                super::header::set_meshes_view(ctx, false);
+            }),
         },
+        Some(Act::Pick(r @ RowPick::Select(_))) => {
+            super::navigate(ui.ctx(), model, move |_, m| apply(m, r))
+        }
         Some(Act::Pick(r)) => apply(model, r),
-        Some(Act::Apply(fix, at)) => apply_fix(ui, model, fix, at),
+        Some(Act::Apply(
+            fix @ (Fix::FixPath(..) | Fix::ShowNifTab(..) | Fix::ChoosePreset),
+            at,
+        )) => {
+            super::navigate(ui.ctx(), model, move |ctx, m| apply_fix(ctx, m, fix, at));
+        }
+        Some(Act::Apply(fix, at)) => apply_fix(ui.ctx(), model, fix, at),
         Some(Act::Filter(f)) => model.bottom.filter = f,
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::HideKind(code, hide)) => model.set_kind_hidden(code, hide),
@@ -1312,8 +1322,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 /// What a row's fix button does (Note FC3). Only the writes named in Review Focus 3 write, and only from this click.
-fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
-    let to_textures = |ui: &egui::Ui| super::header::set_meshes_view(ui.ctx(), false);
+fn apply_fix(ctx: &egui::Context, model: &mut AppModel, fix: Fix, at: At) {
     match fix {
         Fix::RemoveMissing(miss) => {
             if let At::Set { id, .. } = at {
@@ -1339,17 +1348,16 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
                     model.settings.set_view_3d = false;
                     model.save_settings();
                 }
-                super::set_editor::show_main_tab(ui.ctx());
-                let at = ui.ctx().cumulative_pass_nr();
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
+                super::set_editor::show_main_tab(ctx);
+                let at = ctx.cumulative_pass_nr();
+                ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
             }
         }
         Fix::UndoLast => model.undo(),
         Fix::ShowNifTab(p, t, f) => model.nif_tab_request = Some((p, t, f)),
         Fix::ChoosePreset => {
-            to_textures(ui);
-            model.choose_preset = Some(ui.ctx().cumulative_pass_nr());
+            super::header::set_meshes_view(ctx, false);
+            model.choose_preset = Some(ctx.cumulative_pass_nr());
         }
         // Note FC10: each writes from this click only (Review Focus 3); a refusal goes to the status line.
         Fix::OpenInEditor(p) => model.shell.push(ShellRequest::Open(p)),

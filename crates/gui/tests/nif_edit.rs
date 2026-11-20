@@ -4615,6 +4615,41 @@ fn header_undo_enabled_state_and_hover_follow_the_nif_history() {
     h.get_by_label_contains("Shift+Z). Acts on the NIF edit history");
 }
 
+#[test]
+fn overlay_history_commands_leave_the_hidden_nif_edit_alone() {
+    let (_t, _d, mut h) = both_histories(1);
+    h.get_by_label("Settings…").click();
+    h.run_steps(4);
+    h.get_by_label("Back to meshes");
+    let tex = textures(&h);
+    support::header_undo(&h, "Undo").click();
+    h.run_steps(4);
+    assert!(
+        h.state().model.can_redo(),
+        "the overlay header undoes Textures"
+    );
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Y);
+    assert_eq!(textures(&h), tex, "the overlay shortcut redoes Textures");
+    palette_undo(&mut h);
+    assert!(
+        h.state().model.can_redo(),
+        "the overlay palette undoes Textures"
+    );
+    support::header_undo(&h, "Redo").click();
+    h.run_steps(4);
+    assert_eq!(textures(&h), tex);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert!(h.state().model.can_redo());
+    h.get_by_label("Back to meshes").click();
+    h.run_steps(4);
+    assert!(!h.state().model.centre_over_meshes);
+    assert_eq!(
+        nif(&h),
+        (1, false),
+        "Back must never apply a queued NIF undo"
+    );
+}
+
 /// Review: in the Textures view the header Undo and Ctrl+Z act on Textures although a NIF edit is open.
 #[test]
 fn the_textures_view_undoes_textures_with_a_nif_edit_open() {
@@ -11606,6 +11641,16 @@ fn the_meshes_cap_keeps_the_users_review_height() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(review_height(&h) < 600.0, "Meshes view: capped");
+    h.get_by_label("Settings…").click();
+    h.run_steps(4);
+    h.get_by_label("Back to meshes");
+    assert_eq!(review_height(&h), 600.0, "Settings covers the NIF preview");
+    h.get_by_label("Back to meshes").click();
+    h.run_steps(4);
+    assert!(
+        review_height(&h) < 600.0,
+        "Back restores the NIF preview cap"
+    );
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
     assert_eq!(review_height(&h), 600.0, "back in the Textures view");

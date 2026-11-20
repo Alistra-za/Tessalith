@@ -254,9 +254,7 @@ pub static ACTIONS: &[Action] = &[
     ),
     when(
         a("undo", "Undo", Global, &[ctrl(Key::Z)], |m, ctx| {
-            if !super::meshes::request_undo(ctx, true) {
-                m.undo();
-            }
+            history_step(ctx, m, true);
         }),
         AppModel::can_undo,
     ),
@@ -267,9 +265,7 @@ pub static ACTIONS: &[Action] = &[
             Global,
             &[ctrl(Key::Y), ctrl_shift(Key::Z)],
             |m, ctx| {
-                if !super::meshes::request_undo(ctx, false) {
-                    m.redo();
-                }
+                history_step(ctx, m, false);
             },
         ),
         AppModel::can_redo,
@@ -279,9 +275,12 @@ pub static ACTIONS: &[Action] = &[
         "Switch between the Textures and Meshes views",
         Global,
         &[],
-        |_, ctx| {
+        |m, ctx| {
             let meshes = super::header::meshes_view_active(ctx);
-            super::header::set_meshes_view(ctx, !meshes);
+            super::navigate(ctx, m, move |ctx, m| {
+                m.centre_over_meshes = false;
+                super::header::set_meshes_view(ctx, !meshes);
+            });
         },
     ),
     a(
@@ -585,9 +584,30 @@ pub fn keys_text(id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Whether action `a` can run now. A20: Undo / Redo follow the NIF history while a NIF edit is open.
+pub(super) fn nif_history(
+    ctx: &egui::Context,
+    model: &AppModel,
+) -> Option<super::meshes::UndoTarget> {
+    if model.centre_over_meshes {
+        return None;
+    }
+    super::meshes::undo_target(ctx)
+}
+
+pub(super) fn history_step(ctx: &egui::Context, model: &mut AppModel, undo: bool) {
+    if !model.centre_over_meshes && super::meshes::request_undo(ctx, undo) {
+        return;
+    }
+    if undo {
+        model.undo();
+    } else {
+        model.redo();
+    }
+}
+
+/// Whether action `a` can run now. A20: Undo / Redo follow the NIF history while its editor is visible.
 fn enabled(a: &Action, model: &AppModel, ctx: &egui::Context) -> bool {
-    match (a.id, super::meshes::undo_target(ctx)) {
+    match (a.id, nif_history(ctx, model)) {
         ("undo", Some(t)) => t.can_undo,
         ("redo", Some(t)) => t.can_redo,
         _ => (a.enabled)(model),
@@ -898,8 +918,10 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
         Pick::Action(id) => run(id, model, ctx),
         _ => {
             // A texture or a set is picked in the Textures view.
-            super::header::set_meshes_view(ctx, false);
-            model.palette_pick(&pick);
+            super::navigate(ctx, model, move |ctx, m| {
+                super::header::set_meshes_view(ctx, false);
+                m.palette_pick(&pick);
+            });
         }
     }
 }

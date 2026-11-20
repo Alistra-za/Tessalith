@@ -183,6 +183,13 @@ fn drop_blocked(
         || ctx.memory(|m| m.top_modal_layer()).is_some()
 }
 
+pub(crate) fn scan_feedback(ui: &mut egui::Ui, meshes: &mut crate::model::meshes::MeshesModel) {
+    if meshes::scan_row_shown(meshes) {
+        panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, meshes));
+    }
+    meshes::scan_dialogs(ui.ctx(), meshes);
+}
+
 /// [`draw_with`] with the mod scan's row under the header (the app passes its Meshes model; tests pass `None`).
 pub fn draw_with_scan(
     ui: &mut egui::Ui,
@@ -231,10 +238,7 @@ pub fn draw_with_scan(
     if let Some(m) = scan {
         header::draw(ui, model, Some(&mut *m));
         new_project_line(ui, model);
-        if meshes::scan_row_shown(m) {
-            panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, m));
-        }
-        meshes::scan_dialogs(ui.ctx(), m);
+        scan_feedback(ui, m);
     } else {
         header::draw(ui, model, None);
         new_project_line(ui, model);
@@ -358,6 +362,20 @@ pub(crate) fn after_commit(
     ctx.memory_mut(|m| m.stop_text_input());
     model.after_commit.push(Box::new(f));
     ctx.request_repaint();
+}
+
+/// Let the docked tool draw its focused field once more before another panel navigates away.
+pub(super) fn navigate(
+    ctx: &egui::Context,
+    model: &mut AppModel,
+    f: impl FnOnce(&egui::Context, &mut AppModel) + 'static,
+) {
+    if model.centre_over_meshes {
+        let nav_ctx = ctx.clone();
+        after_commit(ctx, model, move |m| f(&nav_ctx, m));
+    } else {
+        f(ctx, model);
+    }
 }
 
 /// Note FC8: a button that saves (Save, Export, Review's Export) blurs a focused text field on the press, so the

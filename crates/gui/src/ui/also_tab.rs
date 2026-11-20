@@ -53,7 +53,11 @@ fn edit_off(model: &AppModel) -> Option<String> {
 fn this_set(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
     ui.strong("This set");
     if !also::is_pbr_set(v) {
-        ui.weak("Also export reads PBR sets only; this set is not one");
+        if also::document_pbr_set(v) {
+            ui.weak("This set has no texture files of its own for Also export to skip.");
+        } else {
+            ui.weak("Also export reads PBR sets only; this set is not one");
+        }
         return;
     }
     let off = (!model.also_on())

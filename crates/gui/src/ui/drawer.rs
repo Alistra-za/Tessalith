@@ -36,7 +36,7 @@ pub fn files_tab(ui: &mut egui::Ui, model: &mut AppModel, state: &mut DrawerStat
     let (mut picked, mut reveal) = (None, None);
     files(ui, model, state, &mut picked, &mut reveal);
     if let Some(key) = picked {
-        model.select_job(&key);
+        super::navigate(ui.ctx(), model, move |_, m| m.select_job(&key));
     }
     if let Some(p) = reveal {
         let _ = model.reveal(&p);

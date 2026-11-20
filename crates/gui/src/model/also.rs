@@ -21,6 +21,11 @@ pub fn is_pbr_set(v: &sets::SetView) -> bool {
     v.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family())
 }
 
+// Document-only cards have no engine shader pick. Use their saved shader or borrowed diffuse.
+pub(crate) fn document_pbr_set(v: &sets::SetView) -> bool {
+    v.key.is_empty() && v.shader_choice.map_or(v.pbr, Shader::is_pbr_family)
+}
+
 /// (Vanilla, CM) ticked in configuration `c`.
 fn ticks_of(c: &ExportConfig) -> (bool, bool) {
     (
@@ -138,13 +143,7 @@ impl AppModel {
     /// the first PBR set in list order that is not skipped, else the first PBR set; `None` without a PBR set.
     pub fn recipe_set(&self) -> Option<SetTarget> {
         let all = sets::views(self);
-        // Document-only cards have no engine shader pick. Their saved shader or borrowed diffuse identifies PBR.
-        let pbr = || {
-            all.iter().filter(|v| {
-                is_pbr_set(v)
-                    || (v.key.is_empty() && v.shader_choice.map_or(v.pbr, Shader::is_pbr_family))
-            })
-        };
+        let pbr = || all.iter().filter(|v| is_pbr_set(v) || document_pbr_set(v));
         if let Some(target) = self.selection.set_target() {
             if let Some(v) = pbr().find(|v| target.matches(v)) {
                 return Some(SetTarget::view(v));

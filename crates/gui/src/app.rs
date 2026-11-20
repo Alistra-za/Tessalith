@@ -460,8 +460,11 @@ impl eframe::App for SdcApp {
             } else {
                 ui.skip_ahead_auto_ids(1);
             }
+            if self.model.centre_over_meshes {
+                crate::ui::scan_feedback(ui, &mut self.meshes);
+            }
             crate::ui::record_centre_rect(ui);
-            let nif_preview = self.meshes.selected_nif.is_some();
+            let nif_preview = !self.model.centre_over_meshes && self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
             if self.model.centre_over_meshes {
                 crate::ui::centre_over_meshes(ui, &mut self.model, &mut self.state);

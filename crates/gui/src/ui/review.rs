@@ -1119,30 +1119,33 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::ChoosePreset) => model.choose_preset = Some(ui.ctx().cumulative_pass_nr()),
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
         // Note JI2: the set's Also export tab, in 2D (the set editor is not drawn in 3D or over a preview).
-        Some(Act::Recipe) => {
+        Some(Act::Recipe) => super::navigate(ui.ctx(), model, |ctx, model| {
             if let Some(target) = model.recipe_set() {
                 model.collapse();
                 model.select_target(target);
-                super::set_editor::show_also_tab(ui.ctx());
+                super::set_editor::show_also_tab(ctx);
                 if model.settings.set_view_3d {
                     model.settings.set_view_3d = false;
                     model.save_settings();
                 }
-                super::header::set_meshes_view(ui.ctx(), false);
+                super::header::set_meshes_view(ctx, false);
             }
-        }
-        Some(Act::GoTo(k)) => {
-            model.select_set(&k);
-            super::header::set_meshes_view(ui.ctx(), false);
+        }),
+        Some(Act::GoTo(k)) => super::navigate(ui.ctx(), model, move |ctx, m| {
+            m.select_set(&k);
+            super::header::set_meshes_view(ctx, false);
+        }),
+        Some(Act::Row(p @ RowPick::Select(_))) => {
+            super::navigate(ui.ctx(), model, move |_, m| apply(m, p))
         }
         Some(Act::Row(p)) => apply(model, p),
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::Json(overwrite)) => model.answer_review_json(overwrite),
         Some(Act::Nif(path, overwrite, sha)) => model.answer_review_nif(&path, overwrite, sha),
-        Some(Act::NifDiff(path)) => {
-            model.nif_diff_request = Some(path);
-            super::header::set_meshes_view(ui.ctx(), true);
-        }
+        Some(Act::NifDiff(path)) => super::navigate(ui.ctx(), model, move |ctx, m| {
+            m.nif_diff_request = Some(path);
+            super::header::set_meshes_view(ctx, true);
+        }),
         // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal). Ruling
         // 3c-38: the click carries what the button saw when it fired, in case it waits a frame.
         Some(Act::Export) => {
