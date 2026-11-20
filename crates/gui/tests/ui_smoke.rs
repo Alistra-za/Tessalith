@@ -720,7 +720,7 @@ fn export_asks_about_undecided_textures_then_the_drawer_reports() {
     for label in ["Files", "Save report…", "Copy CLI command", "Close"] {
         h.get_by_label(label);
     }
-    h.get_by_label_contains("converted, ");
+    h.get_by_label_contains("written, ");
     assert!(h.query_all_by_label_contains("skipped: undecided").count() >= 1);
     press(&mut h, "Close");
     assert!(!h.state().bottom.open);

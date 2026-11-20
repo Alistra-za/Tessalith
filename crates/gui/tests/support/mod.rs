@@ -530,7 +530,7 @@ pub struct Listed {
     pub marked: bool,
 }
 
-/// Review's list, outputs first.
+/// Only the write groups participate in the comparison with the writer. Current, kept and protected paths stay visible in Review.
 pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
     w.outputs
         .iter()
@@ -545,6 +545,25 @@ pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
             marked: e.marked,
         }))
         .collect()
+}
+
+/// A junction may hide the writer's spelling from the walk. A re-encode can also replace a DDS with identical bytes.
+pub fn write_snapshot(
+    dir: &Path,
+    w: &sdc_gui::model::review::ReviewWrites,
+) -> std::collections::BTreeMap<PathBuf, String> {
+    let mut files = tree_hashes(&[dir]);
+    for o in w.outputs.iter().filter(|o| {
+        o.path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+    }) {
+        if let Some(hash) = sdc_gui::model::history::sha256_of(&o.path) {
+            let stamp = std::fs::metadata(&o.path).unwrap().modified().unwrap();
+            files.insert(o.path.clone(), format!("{hash} {stamp:?}"));
+        }
+    }
+    files
 }
 
 /// Removals that the export's saves and guarded JSON finishers can account for.

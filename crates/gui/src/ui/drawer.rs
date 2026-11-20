@@ -2,7 +2,7 @@
 //! Open export folder, Show in Explorer, the progress line with pace, and a virtualised Files list with filters.
 //! DECISIONS AG34-AG37, CA16. A file's warnings show on hover of its row (R9).
 use crate::model::code_text::counted;
-use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex, RowState};
+use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex};
 use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
 use crate::model::shell::StatCache;
 use crate::model::AppModel;
@@ -45,22 +45,14 @@ pub fn files_tab(ui: &mut egui::Ui, model: &mut AppModel, state: &mut DrawerStat
 
 /// The header line: counts, then Cancel / Open export folder / Close / Save report / Copy CLI command.
 fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
-    let count =
-        |f: &dyn Fn(&RowState) -> bool| model.export.rows.iter().filter(|r| f(&r.state)).count();
-    let converted = count(&|s| matches!(s, RowState::Done { .. }));
-    let up_to_date = count(&|s| matches!(s, RowState::UpToDate));
-    let skipped = count(&|s| matches!(s, RowState::Skipped(..)));
-    let failed = count(&|s| matches!(s, RowState::Failed(_)));
-    let validation_failed = count(&|s| matches!(s, RowState::Done { passed: false }));
-    let (finished, _) = model.export.progress();
+    let (finished, total) = model.export.progress();
     let running = model.export.running.is_some();
     let (mut cancel, mut close, mut save, mut copy, mut open) = (false, false, false, false, false);
     ui.horizontal_wrapped(|ui| {
         if running {
-            let total = model.export.rows.len().max(1);
             super::name_input(
                 ui.add(
-                    egui::ProgressBar::new(finished as f32 / total as f32)
+                    egui::ProgressBar::new(finished as f32 / total.max(1) as f32)
                         .desired_width(120.0)
                         .animate(false),
                 ),
@@ -68,18 +60,15 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             );
             // `done/total · elapsed · files/s · ETA`; the clock moves between events, so ask for a repaint.
             let line = match &model.export.pace {
-                Some(p) => p.line(finished, model.export.rows.len(), Instant::now()),
-                None => format!("{finished}/{}", model.export.rows.len()),
+                Some(p) => p.line(finished, total, Instant::now()),
+                None => format!("{finished}/{total}"),
             };
             ui.label(format!("Exporting: {line}"));
             ui.ctx().request_repaint_after(Duration::from_millis(500));
         }
         // Note FI14 (rule 1.7): no counts of nothing before an export.
-        if !model.export.rows.is_empty() {
-            ui.label(format!(
-                "{converted} converted, {up_to_date} up to date, {skipped} skipped, {failed} failed, \
-                 {validation_failed} validation failed"
-            ));
+        if let Some(r) = &model.export.result {
+            ui.label(crate::model::export::result_line(r));
         }
         if let Some(e) = &model.export.error {
             ui.colored_label(ui.visuals().error_fg_color, e);

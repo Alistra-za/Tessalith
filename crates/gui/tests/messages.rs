@@ -327,15 +327,18 @@ fn saved_undo_and_export_results_raise_toasts() {
         "{:?}",
         toasts(&m)
     );
-    let s = engine::api::BatchSummary {
-        converted: 7,
-        skipped: 2,
-        failed: 1,
+    let s = sdc_gui::model::export::ExportResult {
+        primary: sdc_gui::model::export::Outcomes {
+            written: 7,
+            skipped_sources: 2,
+            failed: 1,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(
         sdc_gui::model::export_finished_text(&s),
-        "Export finished: 7 written, 2 skipped, 1 failed"
+        "Export finished: 7 written, 0 up to date, 1 failed, 2 skipped sources"
     );
 }
 

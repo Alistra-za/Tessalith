@@ -32,6 +32,11 @@ pub struct MeshEvidence {
 }
 
 pub enum WorkerMsg {
+    Currency {
+        generation: u64,
+        request: u64,
+        result: Result<std::collections::BTreeMap<String, engine::api::PreviewVerdict>, String>,
+    },
     /// Planning has decoded `done` of `total` discovered files (DECISIONS AG91; the header shows a bar).
     PlanProgress {
         generation: u64,
@@ -198,6 +203,48 @@ pub(crate) fn or_send<T>(
         let _ = tx.send(failed(panic_text(&*p)));
         std::panic::resume_unwind(p)
     })
+}
+
+/// Review reads the same request as Export. Discoveries from this plan belong to neither Files nor progress.
+pub fn spawn_currency(
+    tx: Sender<WorkerMsg>,
+    session: Arc<Session>,
+    req: BatchRequest,
+    cancel: CancelToken,
+    generation: u64,
+    request: u64,
+) {
+    spawn_guarded(tx, "currency", move |tx| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let rep = Reporter::new(
+                Arc::new(engine::events::NullSink),
+                engine::events::new_batch_id(),
+            );
+            session
+                .plan(req, &rep, &cancel)
+                .and_then(|plan| {
+                    let mut verdicts = session.engine().currency_preview(&plan, &cancel)?;
+                    // A directory at the destination can be classified for re-encode, but the rename can never write it.
+                    for job in &plan.jobs {
+                        let key =
+                            engine::manifest::output_key(&plan.request.output_root, &job.output);
+                        if verdicts.get(&key) == Some(&engine::api::PreviewVerdict::WillWrite)
+                            && job.output.is_dir()
+                        {
+                            verdicts.remove(&key);
+                        }
+                    }
+                    Ok(verdicts)
+                })
+                .map_err(|e| e.to_string())
+        }))
+        .unwrap_or_else(|p| Err(panic_text(&*p)));
+        let _ = tx.send(WorkerMsg::Currency {
+            generation,
+            request,
+            result,
+        });
+    });
 }
 
 /// Plan (through the session's cache) and run, streaming every event into the channel, then send `ExportDone`.

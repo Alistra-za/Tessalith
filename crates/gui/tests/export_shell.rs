@@ -11,6 +11,351 @@ use egui_kittest::kittest::Queryable;
 use sdc_gui::settings::GuiSettings;
 
 #[test]
+fn the_header_number_is_the_progress_total_and_the_result_sum() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(support::opened_chosen_decided(d.path()));
+    for (written, current) in [(4, 0), (0, 4)] {
+        let m = h.state_mut();
+        assert_eq!(m.export_files(), 4);
+        m.open_review();
+        m.export_from_review();
+        assert_eq!(m.export.progress(), (0, 4));
+        idle(m);
+        assert_eq!(m.export.progress(), (4, 4));
+        let line = format!("{written} written, {current} up to date, 0 failed");
+        assert!(m
+            .messages
+            .entries()
+            .any(|e| e.text == format!("Export finished: {line}")));
+        settle(&mut h);
+        assert!(h.query_by_label(&line).is_some(), "{line}");
+    }
+}
+
+#[test]
+fn review_splits_will_be_written_from_up_to_date() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    export_and_compare(&mut m, d.path());
+    support::colour(&d.path().join("textures/g/a.png"), 160);
+    m.check_sources();
+    m.reload_changed();
+    idle(&mut m);
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    let normal = "g/a_n.png";
+    m.decide(normal, Answer::Subtype(Subtype::Msn));
+    idle(&mut m);
+    m.clear_field("g/u_n.png", "subtype");
+    idle(&mut m);
+    m.decide(normal, Answer::Subtype(Subtype::Normal));
+    idle(&mut m);
+    let sets = m.sets_doc.as_mut().unwrap();
+    assert!(!sets.auto_normal().contains_key(normal));
+    assert!(sdc_gui::sets_doc::SetsDoc::open(m.root.as_deref().unwrap())
+        .auto_normal()
+        .contains_key(normal));
+    sets.set_dirty(false);
+    let sets_path = sets.path().to_owned();
+    m.set_field("g/a.png", "subtype", serde_json::json!("normal"));
+    idle(&mut m);
+    m.undo();
+    idle(&mut m);
+    let files = m.project.as_ref().unwrap();
+    assert!(files.user_dirty());
+    let files_path = files.path().to_owned();
+    // A save that rewrites identical bytes also removes this document's recovery file.
+    std::fs::write(sdc_gui::crash_log::recovery_path(&files_path), "restore").unwrap();
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.written_text(), "Will be written (1) · Up to date (3)");
+    let writes = m.review_writes();
+    assert_eq!(writes.outputs.len(), 1);
+    assert!(writes.outputs[0].path.ends_with("g/a.dds"));
+    assert!(!writes.outputs[0].marked);
+    let root = m.output_root().join("textures/g");
+    let expected = ["a_n.dds", "u.dds", "u_n.dds"].map(|name| root.join(name));
+    assert_eq!(
+        writes
+            .current
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected.iter().collect()
+    );
+    for path in [&files_path, &sets_path] {
+        assert!(writes
+            .also_updated
+            .iter()
+            .any(|w| &w.path == path && !w.marked));
+    }
+    export_and_compare(&mut m, d.path());
+}
+
+#[test]
+fn the_up_to_date_count_never_outlives_its_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    export_and_compare(&mut m, d.path());
+    m.open_review();
+    idle(&mut m);
+    m.replan();
+    assert_eq!(m.written_text(), "4 files · checking which changed…");
+    idle(&mut m);
+    assert_eq!(m.written_text(), "Will be written (0) · Up to date (4)");
+    assert!(m.review_gate().is_ok());
+}
+
+#[test]
+fn a_stale_preview_result_is_dropped() {
+    use sdc_gui::model::StaleKind;
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    export_and_compare(&mut m, d.path());
+    for change in ["plan", "re-encode", "close"] {
+        m.set_reencode_all(false);
+        m.hold_plan_results = true;
+        m.open_review();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        let held = loop {
+            m.poll();
+            if let Some(reply) = m.take_held().pop() {
+                break reply;
+            }
+            assert!(std::time::Instant::now() < until, "no currency reply");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let WorkerMsg::Currency {
+            generation,
+            request,
+            ..
+        } = &held
+        else {
+            panic!("expected currency")
+        };
+        let error = WorkerMsg::Currency {
+            generation: *generation,
+            request: *request,
+            result: Err("stale".into()),
+        };
+        m.hold_plan_results = false;
+        match change {
+            "plan" => m.replan(),
+            "re-encode" => m.set_reencode_all(true),
+            _ => {
+                m.close_review();
+                m.open_review();
+            }
+        }
+        assert_eq!(m.generation() == *generation, change != "plan");
+        let drops = m.stale_replies_dropped(StaleKind::Currency);
+        m.handle_held(error);
+        assert_eq!(m.written_text(), "4 files · checking which changed…");
+        idle(&mut m);
+        m.handle_held(held);
+        assert_eq!(m.stale_replies_dropped(StaleKind::Currency), drops + 2);
+        let expected = if change == "re-encode" {
+            (4, 0)
+        } else {
+            (0, 4)
+        };
+        m.set_reencode_all(change == "re-encode");
+        assert_eq!(
+            m.written_text(),
+            format!(
+                "Will be written ({}) · Up to date ({})",
+                expected.0, expected.1
+            )
+        );
+        assert_eq!(m.review_writes().outputs.len(), expected.0);
+        assert!(m.review_gate().is_ok());
+        m.close_review();
+    }
+    m.open_review();
+    m.set_reencode_all(true);
+    assert!(m.written_text().contains("checking which changed"));
+    m.export_from_review();
+    assert!(m.export.running.is_some() && !m.reencode_all);
+    idle(&mut m);
+    assert_eq!(m.export.result.as_ref().unwrap().primary.written, 4);
+}
+
+#[test]
+fn the_status_line_counts_files_not_plan_items() {
+    let d = tempfile::tempdir().unwrap();
+    let m = support::pbr_opened_chosen_decided(d.path());
+    assert!(
+        m.items
+            .iter()
+            .filter_map(|i| i.job.as_ref())
+            .any(|j| j.bake.is_some()),
+        "roughness has a normal dependency"
+    );
+    assert_eq!(
+        m.status_line,
+        "6 files → 5 textures (1 packed or generated) · 3 sets"
+    );
+}
+
+#[test]
+fn the_status_line_omits_packed_when_there_is_none() {
+    let d = tempfile::tempdir().unwrap();
+    let m = support::opened_chosen_decided(d.path());
+    assert_eq!(m.status_line, "4 files → 4 textures · 2 sets");
+}
+
+#[test]
+fn a_failed_currency_check_leaves_the_conditional_list_and_export_available() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let manifest = m.export_root().join("textures/_sdc/manifest.jsonl");
+    std::fs::create_dir_all(&manifest).unwrap();
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.written_text(), "4 DDS files");
+    assert!(m.export.rows.is_empty());
+    let conditional = m.review_writes();
+    assert_eq!(conditional.outputs.len(), 4);
+    assert!(conditional.outputs.iter().all(|o| o.marked));
+    assert!(m.review_gate().is_ok());
+    std::fs::remove_dir(&manifest).unwrap();
+    m.export_from_review();
+    idle(&mut m);
+    assert_eq!(m.export.result.as_ref().unwrap().primary.written, 4);
+}
+
+#[test]
+fn a_skipped_dds_input_has_a_files_row_outside_the_progress_total() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    std::fs::write(d.path().join("textures/g/kept.dds"), b"already a DDS").unwrap();
+    m.replan();
+    idle(&mut m);
+    m.open_review();
+    m.export_from_review();
+    assert_eq!(m.export.progress(), (0, 4));
+    idle(&mut m);
+    assert_eq!(m.export.progress(), (4, 4));
+    assert!(m.export.rows.iter().any(|r| r.path.ends_with("kept.dds")));
+    let p = &m.export.result.as_ref().unwrap().primary;
+    assert_eq!((p.written, p.failed, p.skipped_sources), (4, 0, 1));
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == "Export finished: 4 written, 0 up to date, 0 failed, 1 skipped source"));
+}
+
+#[test]
+fn cancelling_before_the_first_discovery_accounts_for_every_primary_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.open_review();
+    m.export_from_review();
+    m.export.running.as_ref().unwrap().cancel();
+    idle(&mut m);
+    let p = &m.export.result.as_ref().unwrap().primary;
+    assert!(p.cancelled > 0);
+    assert_eq!(p.cancelled + p.written, 4);
+    assert_eq!(m.export.progress(), (4, 4));
+}
+
+#[test]
+fn six_faces_one_cube_and_a_source_dds_have_separate_units() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    for face in ["px", "nx", "py", "ny", "pz", "nz"] {
+        support::colour(&root.join(format!("a/chrome_e_{face}.png")), 90);
+    }
+    std::fs::write(root.join("a/old.dds"), b"already a DDS").unwrap();
+    let m = support::opened_as_the_app(root, d.path().join("export"));
+    assert!(
+        m.status_line.starts_with("7 files → 1 texture ·"),
+        "{}",
+        m.status_line
+    );
+}
+
+#[test]
+fn a_foreign_dds_is_protected_in_review_and_in_the_result() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let path = m
+        .item("g/a.png")
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap()
+        .output
+        .clone();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"foreign").unwrap();
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(
+        m.written_text(),
+        "Will be written (3) · Up to date (0) · Protected (1)"
+    );
+    export_and_compare(&mut m, d.path());
+    assert_eq!(std::fs::read(path).unwrap(), b"foreign");
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == "Export finished: 3 written, 0 up to date, 0 failed, 1 protected"));
+}
+
+#[test]
+fn an_unused_helper_and_shared_pack_input_count_once_each() {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    for name in [
+        "a/rock",
+        "a/rock_roughness",
+        "pbr/c/slab",
+        "a/orphan_opacity",
+    ] {
+        support::colour(&root.join(format!("{name}.png")), 90);
+    }
+    let mut m = support::opened_as_the_app(root, d.path().join("export"));
+    assert_eq!(
+        m.drop_choice("a/rock_roughness.png", "pbr/c/slab", DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(
+        m.status_line
+            .starts_with("4 files → 4 textures (2 packed or generated)"),
+        "{}",
+        m.status_line
+    );
+}
+
+#[test]
+fn validation_failure_is_one_failed_output() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    export_and_compare(&mut m, d.path());
+    let mut event = m
+        .export
+        .events
+        .iter()
+        .find(|e| matches!(e.kind, engine::events::EventKind::FileDone { .. }))
+        .unwrap()
+        .clone();
+    if let engine::events::EventKind::FileDone { validation, .. } = &mut event.kind {
+        validation.passed = false;
+    }
+    m.export.on_event(event);
+    let mut summary = m.export.summary.clone().unwrap();
+    summary.validation_failed = 1;
+    m.end_export_with(Ok(summary));
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == "Export finished: 3 written, 0 up to date, 1 failed"));
+}
+
+#[test]
 fn write_project_files_now_puts_the_automatic_types_on_disk() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(support::auto_project(d.path()));
@@ -1127,7 +1472,7 @@ fn after_a_waiting_click(between: Between) -> Vec<String> {
             m.set_target_mod(Some(t)).unwrap();
         }
         // The header's Re-encode all tick: a plain field, no plan, the same count.
-        Between::ReencodeAllTicked => m.reencode_all = true,
+        Between::ReencodeAllTicked => m.set_reencode_all(true),
         Between::ReviewOpenedByHand => m.open_review(),
         Between::DialogOpened => m.dialog = Some(Dialog::Error("a question".into())),
     }
@@ -2537,10 +2882,11 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     }
     assert!(m.review.is_some(), "the header opens Review");
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
+    idle(m);
     let w = (*m.review_writes()).clone();
     let pending = support::PendingRemovals::before_export(m);
     let listed: BTreeSet<PathBuf> = support::listed(&w).into_iter().map(|e| e.path).collect();
-    let before = support::tree_hashes(&[dir]);
+    let before = support::write_snapshot(dir, &w);
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(
@@ -2549,7 +2895,7 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
         m.export.notes
     );
     let removals = pending.after_export(m);
-    let after = support::tree_hashes(&[dir]);
+    let after = support::write_snapshot(dir, &w);
     // No scan store in these projects: no autosave can be credited.
     let support::ListingComparison {
         changed,
@@ -2833,6 +3179,13 @@ fn a_repeat_export_with_nothing_changed_lists_only_marked_entries() {
     };
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_exported_once(d.path());
+    m.open_review();
+    assert!(m.written_text().contains("checking which changed…"));
+    idle(&mut m);
+    assert_eq!(
+        m.written_text(),
+        format!("Will be written (0) · Up to date ({})", m.export_files())
+    );
     let json = support::pgp_json_path(&m);
     let s = export_and_compare(&mut m, d.path());
     let also: Vec<_> =
@@ -3103,7 +3456,7 @@ fn a_skipped_cm_finisher_cannot_credit_its_owned_twins_removal() {
     let diffuse = json.with_file_name("iron.dds");
     std::fs::remove_file(&diffuse).unwrap();
     std::fs::create_dir(&diffuse).unwrap();
-    m.reencode_all = true;
+    m.set_reencode_all(true);
     let s = export_and_compare(&mut m, d.path());
     assert!(m.export.summary.as_ref().unwrap().failed > 0);
     assert!(m

@@ -321,9 +321,40 @@ enum Footer<'a> {
     NifWaiting(&'a crate::model::meshes::NifReviewRow),
     NifSkipped(&'a crate::model::meshes::NifReviewRow),
     Written(String),
+    File(&'a Path, bool),
     Json(&'a JsonLine),
     /// E7: the files besides the outputs the export saves or records (`AppModel::review_writes`).
     Also(&'a Arc<ReviewWrites>),
+}
+
+/// Index the cached groups directly so scrolling to the end of a large project lays out only visible paths.
+fn output_row(w: &ReviewWrites, mut index: usize) -> Footer<'_> {
+    if !w.outputs.is_empty() {
+        if index == 0 {
+            return Footer::Heading("Will be written".into());
+        }
+        if let Some(o) = w.outputs.get(index - 1) {
+            return Footer::File(&o.path, o.marked);
+        }
+        index -= w.outputs.len() + 1;
+    }
+    for (name, paths) in [
+        ("Up to date", &w.current),
+        ("Kept", &w.kept),
+        ("Protected", &w.protected),
+    ] {
+        if paths.is_empty() {
+            continue;
+        }
+        if index == 0 {
+            return Footer::Heading(name.into());
+        }
+        if let Some(path) = paths.get(index - 1) {
+            return Footer::File(path, false);
+        }
+        index -= paths.len() + 1;
+    }
+    unreachable!("index inside the Review file list")
 }
 
 /// E7 (ruling 3c-49): the width of each entry's text and of the `…`, measured once per list and font (kept in the
@@ -753,19 +784,29 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             if !writes.also_updated.is_empty() {
                 list.push(Footer::Also(&writes));
             }
+            let paths = [writes.outputs.len(), writes.current.len(), writes.kept.len(), writes.protected.len()]
+                .into_iter().filter(|&n| n > 0).map(|n| n + 1).sum::<usize>();
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
             ui.scope(|ui| {
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::vertical()
                     .id_salt("review-footer-lists")
-                    .max_height(footer_cap.max(3.0 * stride))
+                    .max_height(footer_cap.max(3.0 * stride).min(list.len() as f32 * stride))
                     .auto_shrink([false, true])
                     // Rule 9.2: only the rows on screen are laid out, each exactly `row_h` tall.
-                    .show_rows(ui, row_h, list.len(), |ui, range| {
-                        for row in &list[range] {
+                    .show_rows(ui, row_h, list.len() + paths, |ui, range| {
+                        for index in range {
                             let size = egui::vec2(ui.available_width(), row_h);
                             let layout = egui::Layout::left_to_right(egui::Align::Center);
+                            let extra;
+                            let row = match list.get(index) {
+                                Some(row) => row,
+                                None => {
+                                    extra = output_row(&writes, index - list.len());
+                                    &extra
+                                }
+                            };
                             ui.allocate_ui_with_layout(size, layout, |ui| match row {
                                 Footer::Heading(t) => {
                                     ui.strong(t);
@@ -794,6 +835,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                 Footer::Written(text) => {
                                     ui.strong("What will be written");
                                     // Note JF1: with an Also tick the line is long; cut, it keeps its text on hover.
+                                    ui.add(egui::Label::new(text).truncate());
+                                }
+                                Footer::File(path, marked) => {
+                                    let shown = (!folder_chosen).then(|| m.export_root()).and_then(|root| path.strip_prefix(root).ok())
+                                        .map_or_else(|| path.display().to_string(), |p| format!("{NOT_CHOSEN_ROOT}\\{}", p.display()));
+                                    let text = if *marked { format!("{shown} (depends on this export)") } else { shown };
                                     ui.add(egui::Label::new(text).truncate());
                                 }
                                 Footer::Json(l) => {

@@ -165,6 +165,24 @@ fn a_tick_is_one_undo_step_and_exports_three_folders() {
     );
     assert!(v.join("textures/clutter/cup.dds").is_file());
     assert!(c.join("textures/arm/steel_m.dds").is_file());
+    let result = m.export.result.as_ref().unwrap();
+    let records = engine::manifest::Manifest::at(&v).read().unwrap();
+    let copies: Vec<_> = records
+        .iter()
+        .filter(|(_, rec)| rec.raw.get("copied_from").is_some())
+        .collect();
+    assert_eq!(result.copied, 1);
+    assert_eq!(copies.len(), result.copied as usize);
+    for (path, _) in copies {
+        assert_eq!(
+            std::fs::read(p.join(path)).unwrap(),
+            std::fs::read(v.join(path)).unwrap()
+        );
+    }
+    assert_eq!(
+        result.phases[0].1.written + result.copied as usize,
+        support::dds_under(&v)
+    );
     assert!(
         p.join("PBRNIFPatcher")
             .read_dir()
@@ -354,7 +372,9 @@ fn the_count_is_the_pbr_folders_and_the_other_folders_are_named() {
         assert_eq!(button, format!("Export {counted} files + {named}"));
         assert_eq!(
             m.written_text(),
-            format!("{counted} DDS files in the PBR folder, plus the {named}")
+            format!(
+                "{counted} files · checking which changed… in the PBR folder, plus the {named}"
+            )
         );
         let hover = sdc_gui::ui::header::export_hover(&m);
         assert!(
@@ -391,6 +411,72 @@ fn one_epoch_for_the_whole_also_export() {
     assert_eq!(m.drawer_epoch, e + 1);
     let (done, total) = m.export.progress();
     assert!(total > 0 && done == total);
+}
+
+#[test]
+fn with_an_also_tick_the_equality_holds_for_the_pbr_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    tick(&mut m, AlsoTarget::Cm);
+    let n = m.export_files();
+    export(&mut m);
+    let folders = m.also_folders();
+    assert_eq!(support::dds_under(&folders[0]), n);
+    assert_eq!(m.export.progress(), (n, n));
+    let r = m.export.result.as_ref().unwrap();
+    assert_eq!(r.primary.written, n);
+    assert_eq!(r.phases.len(), 2);
+    let vanilla = &r.phases[0].1;
+    let cm = &r.phases[1].1;
+    assert_eq!(
+        vanilla.written + r.copied as usize,
+        support::dds_under(&folders[1])
+    );
+    assert_eq!(cm.written, support::dds_under(&folders[2]));
+    assert_eq!((n, vanilla.written, cm.written, r.copied), (5, 4, 1, 0));
+    let line = "5 written, 0 up to date, 0 failed · Vanilla: 4 written, 0 up to date, 0 failed · CM: 1 written, 0 up to date, 0 failed, 1 skipped source";
+    assert!(
+        m.messages
+            .entries()
+            .any(|e| e.text == format!("Export finished: {line}")),
+        "{r:?}"
+    );
+    let h = ui_harness(m, 1600.0);
+    assert!(has_label(&h, line));
+}
+
+#[test]
+fn a_cm_failure_keeps_the_completed_vanilla_counts() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Cm);
+    let folders = m.also_folders();
+    std::fs::create_dir_all(folders[2].join("_sdc/manifest.jsonl")).unwrap();
+    export(&mut m);
+    assert_eq!(support::dds_under(&folders[1]), 4);
+    let result = m.export.result.as_ref().unwrap();
+    assert_eq!(result.phases.len(), 1);
+    assert_eq!((result.phases[0].1.written, result.copied), (3, 1));
+    let line = m
+        .messages
+        .entries()
+        .rev()
+        .find(|e| e.text.starts_with("Export finished: "))
+        .unwrap()
+        .text
+        .clone();
+    assert!(
+        line.contains("Vanilla: 3 written, 0 up to date, 0 failed")
+            && line.contains("CM phase failed")
+            && line.contains("1 Vanilla copy"),
+        "{line}"
+    );
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    assert!(has_label(
+        &h,
+        line.strip_prefix("Export finished: ").unwrap()
+    ));
 }
 
 #[test]
@@ -722,7 +808,9 @@ fn reviews_footer_counts_the_pbr_folder_and_names_the_vanilla_folder() {
         let d = tempfile::tempdir().unwrap();
         let h = reviewing(d.path(), w);
         let n = h.state().export_files();
-        let line = format!("{n} DDS files in the PBR folder, plus the Vanilla folder");
+        let line = format!(
+            "Will be written ({n}) · Up to date (0) in the PBR folder, plus the Vanilla folder"
+        );
         assert!(has_label(&h, &line), "{w}: {line}");
         assert!(has_label(&h, &format!("Export {n} files + Vanilla folder")));
     }

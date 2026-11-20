@@ -272,7 +272,12 @@ impl AppModel {
 
     /// Change the switches and save them; the next `poll` recomputes the results (no re-plan).
     pub fn set_checks(&mut self, c: ChecksSettings) {
+        let refresh = self.settings.checks.low_detail != c.low_detail;
         self.settings.checks = c;
+        if refresh {
+            self.invalidate_currency();
+            self.request_currency();
+        }
         self.save_settings();
     }
 

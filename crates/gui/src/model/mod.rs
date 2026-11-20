@@ -504,6 +504,7 @@ pub enum StaleKind {
     Plan,
     Source,
     Encode,
+    Currency,
 }
 
 /// Get-or-build one slot of the view cache under the current view key (backlog L9). `get` reads the slot from a cache
@@ -760,6 +761,7 @@ pub struct AppModel {
     pub history: history::History,
     pub target: Target,
     pub items: Vec<TextureItem>,
+    input_count: usize,
     pub sets: Vec<SetItem>,
     /// The export folder `sets` were planned with (audit 08c-3): set ids strip it, also while a re-plan for a new
     /// export folder runs. `None` before the first plan.
@@ -795,6 +797,7 @@ pub struct AppModel {
     review_json_cache: std::cell::RefCell<Option<review::JsonCache>>,
     /// E7: `review_writes` for its key, and when it was built; the footer draws from the `Arc`.
     review_writes_cache: std::cell::RefCell<Option<review::WritesCache>>,
+    currency: review::Currency,
     /// E7 (test hook): the list Review showed when it opened (`open_review` takes it; `start_export_pass` takes
     /// `review`, so it cannot live there).
     #[cfg(feature = "test-hooks")]
@@ -882,7 +885,7 @@ pub struct AppModel {
     pub(crate) whole_disk_reads: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
     #[cfg(feature = "test-hooks")]
-    pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
+    pub(crate) stale_drops: std::cell::Cell<[u32; 4]>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
     #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
@@ -1189,6 +1192,7 @@ impl AppModel {
             history: history::History::default(),
             target: Target::Cs,
             items: vec![],
+            input_count: 0,
             items_rev: 0,
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
@@ -1203,6 +1207,7 @@ impl AppModel {
             pick_cache: Default::default(),
             review_json_cache: Default::default(),
             review_writes_cache: Default::default(),
+            currency: Default::default(),
             #[cfg(feature = "test-hooks")]
             review_writes_open: Default::default(),
             #[cfg(feature = "test-hooks")]
@@ -1467,6 +1472,7 @@ impl AppModel {
             self.opening = Some((previous, recent, kept.0, kept.1));
         }
         self.items.clear();
+        self.input_count = 0;
         self.check_state.plans_applied += 1;
         self.invalidate_views();
         self.sets.clear();
@@ -1866,6 +1872,7 @@ impl AppModel {
         self.plan_failed = false;
         self.pending_slot_paths = slot_paths;
         self.generation += 1;
+        self.invalidate_currency();
         self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
         let (last, blame) = self.replan_pushes;
@@ -2090,7 +2097,10 @@ impl AppModel {
     }
 
     pub fn busy(&self) -> bool {
-        self.full_plan_pending() || self.non_plan_busy()
+        self.full_plan_pending()
+            || self.non_plan_busy()
+            || !self.currency.workers.is_empty()
+            || self.currency.pending.is_some()
     }
 
     /// The work `busy()` and `edit_busy()` share besides the plan: an export, the preview.
@@ -2149,12 +2159,17 @@ impl AppModel {
         let mut thumbs_landed = false;
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
+            if let WorkerMsg::Currency { request, .. } = &msg {
+                self.currency.workers.remove(request);
+            }
             match msg {
                 WorkerMsg::DdsThumb { path, stamp, thumb } => {
                     thumbs_landed |= self.dds_thumb_landed(path, stamp, thumb)
                 }
                 #[cfg(feature = "test-hooks")]
-                msg @ (WorkerMsg::Partial { .. } | WorkerMsg::Planned { .. })
+                msg @ (WorkerMsg::Partial { .. }
+                | WorkerMsg::Planned { .. }
+                | WorkerMsg::Currency { .. })
                     if self.hold_plan_results =>
                 {
                     self.held.push(msg)
@@ -2168,6 +2183,7 @@ impl AppModel {
         }
         // Note HF10: a queued scoped export that was dropped or cancelled above takes its scope with it.
         self.end_idle_scope();
+        self.request_currency();
         // Last, so a plan that landed above is checked in this poll (K1).
         changed |= self.refresh_checks();
         changed
@@ -2208,6 +2224,22 @@ impl AppModel {
 
     fn handle(&mut self, msg: WorkerMsg) {
         match msg {
+            WorkerMsg::Currency {
+                generation,
+                request,
+                result,
+            } => {
+                if generation == self.generation
+                    && request == self.currency.revision
+                    && self.review.is_some()
+                    && self.currency.pending.take().is_some()
+                {
+                    self.currency.verdicts = result.ok();
+                    self.currency.revision += 1;
+                } else {
+                    self.note_stale_drop(StaleKind::Currency);
+                }
+            }
             WorkerMsg::PlanProgress {
                 generation,
                 done,
@@ -2385,6 +2417,11 @@ impl AppModel {
             self.export.drop_unstarted();
         }
         self.export.end_unfinished(cancelled, why.as_deref());
+        let primary = self.export.primary_outcomes(cancelled);
+        self.export
+            .result
+            .get_or_insert_with(Default::default)
+            .primary = primary;
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
         }
@@ -2400,7 +2437,9 @@ impl AppModel {
                 } else {
                     messages::Severity::Info
                 };
-                self.messages.notify(sev, export_finished_text(&summary));
+                if let Some(result) = &self.export.result {
+                    self.messages.notify(sev, export_finished_text(result));
+                }
                 self.export.notes.extend(export::kept_note(&summary));
                 completed = summary.cancelled.is_empty();
                 self.export.summary = Some(summary);
@@ -3177,21 +3216,9 @@ impl AppModel {
         self.replan();
     }
 
-    /// Save first (the CLI command and the next session read `sdc.toml`), then run the export on a worker.
-    fn start_export_pass(&mut self) {
-        if self.export.running.is_some() {
-            return;
-        }
-        if self.save().is_err() {
-            return;
-        }
-        let (Some(session), Some(mut req)) = (self.session.clone(), self.request()) else {
-            return;
-        };
-        self.nif_export_queued = false;
-        // Note JA11: the item re-encodes what has a record and keeps a file without one; `ev` stays `Off`. JA12: it
-        // is one-shot, cleared as the pass starts, so a tick hidden in the closed menu never carries over.
-        req.on_existing = if std::mem::take(&mut self.reencode_all) {
+    fn export_request(&self) -> Option<BatchRequest> {
+        let mut req = self.request()?;
+        req.on_existing = if self.reencode_all {
             engine::api::OnExisting::Reencode
         } else {
             engine::api::OnExisting::IfChanged
@@ -3202,6 +3229,20 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        Some(req)
+    }
+
+    /// Save first, then consume Re-encode once the pass has its request.
+    fn start_export_pass(&mut self) {
+        if self.export.running.is_some() || self.save().is_err() {
+            return;
+        }
+        self.expand_scope_hosts();
+        let (Some(session), Some(req)) = (self.session.clone(), self.export_request()) else {
+            return;
+        };
+        self.reencode_all = false;
+        self.nif_export_queued = false;
         let also = self.also_runs();
         self.also_error = None;
         self.also_phases.clear();
@@ -3218,6 +3259,7 @@ impl AppModel {
         self.pending_cs_skin = cs_skin_json::prepare(self);
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
+        self.invalidate_currency();
         self.review_json_cache.take();
         // Note HF9: the textures a partial or excluding run leaves out get no Files row.
         let outside_run = match req.write_only {
@@ -3230,6 +3272,10 @@ impl AppModel {
             None => Default::default(),
         };
         self.export = export::ExportModel {
+            primary_keys: self
+                .primary_items()
+                .map(|i| (i.job_key.clone(), None))
+                .collect(),
             pace: Some(export::Pace::new(Instant::now())),
             outside_run,
             ..Default::default()
@@ -3239,9 +3285,7 @@ impl AppModel {
         let cancel = CancelToken::default();
         self.export.running = Some(cancel.clone());
         if also {
-            // P8: one `drawer_epoch` for the three phases (bumped above); progress is the rows, counted model-side.
-            // shortcut: the first phase's `BatchDone` stops the pace clock, so files/s and the ETA cover the PBR
-            // phase only; upgrade to an ETA across phases if users ask.
+            // One Files tab for the three phases, with progress measured against the PBR folder.
             let spec = self.also_spec();
             crate::worker::spawn_export_also(self.tx.clone(), session, req, spec, cancel);
         } else {
@@ -3535,6 +3579,7 @@ impl AppModel {
         let paths_changed = self.slot_paths != self.pending_slot_paths;
         self.slot_paths = std::mem::take(&mut self.pending_slot_paths);
         self.target = view.target;
+        self.input_count = view.input_count;
         let old_items = std::mem::replace(&mut self.items, view.items);
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
@@ -3614,7 +3659,7 @@ impl AppModel {
 
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.
     fn counts_status(&mut self) {
-        self.status_line = self.counts_line();
+        self.status_line = self.status_line_counts();
         for n in [&self.status_note, &self.undo_note].into_iter().flatten() {
             self.status_line = format!("{n} {}", self.status_line);
         }
@@ -4459,13 +4504,43 @@ impl AppModel {
         Some(UNDO_NOTE_FOR.saturating_sub(now.saturating_duration_since(at)))
     }
 
-    /// "1 texture, 1 set" / "3 textures, 2 sets" (Note FI14).
-    fn counts_line(&self) -> String {
-        let (t, s) = (self.items.len(), sets::carded_sets(self));
+    pub fn export_summary(&self) -> export::ExportSummary {
+        let views = sets::views(self);
+        let mut outputs = BTreeMap::new();
+        for (_, key, path) in views.iter().flat_map(sets::set_outputs) {
+            let Some(job) = self.item(key).and_then(|i| i.job.as_ref()) else {
+                continue;
+            };
+            if !matches!(job.status, engine::policy::JobStatus::PackingInput { .. }) {
+                outputs.insert(path, job.pack.is_some() || job.derive.is_some());
+            }
+        }
+        // An undecided single file can have a planned output before it gets its own set card.
+        for item in self.items.iter().filter(|i| i.waiting) {
+            if let Some(job) = &item.job {
+                outputs.entry(&job.output).or_insert(false);
+            }
+        }
+        export::ExportSummary {
+            files: self.input_count,
+            textures: outputs.len(),
+            generated: outputs.values().filter(|&&g| g).count(),
+            sets: sets::carded_sets(self),
+        }
+    }
+
+    pub fn status_line_counts(&self) -> String {
+        let s = self.export_summary();
+        let packed = if s.generated > 0 {
+            format!(" ({} packed or generated)", s.generated)
+        } else {
+            String::new()
+        };
         format!(
-            "{}, {}",
-            code_text::counted(t, "texture", "textures"),
-            code_text::counted(s, "set", "sets")
+            "{} → {}{packed} · {}",
+            code_text::counted(s.files, "file", "files"),
+            code_text::counted(s.textures, "texture", "textures"),
+            code_text::counted(s.sets, "set", "sets")
         )
     }
 
@@ -4475,7 +4550,7 @@ impl AppModel {
         self.drop_undo_note();
         let n = format!("{verb}: {label}.");
         // In front of the normal status text, not in place of it; the plan the step started rewrites the counts.
-        let counts = self.counts_line();
+        let counts = self.status_line_counts();
         self.status_line = match &self.status_note {
             Some(c) => format!("{n} {c} {counts}"),
             None => format!("{n} {counts}"),
@@ -5473,12 +5548,8 @@ fn remove_created(cf: &history::CreatedFile) -> Result<(), String> {
     }
 }
 
-/// The toast of a finished export: "Export finished: 12 written, 3 skipped, 0 failed".
-pub fn export_finished_text(s: &engine::api::BatchSummary) -> String {
-    format!(
-        "Export finished: {} written, {} skipped, {} failed",
-        s.converted, s.skipped, s.failed
-    )
+pub fn export_finished_text(result: &export::ExportResult) -> String {
+    format!("Export finished: {}", export::result_line(result))
 }
 
 #[cfg(test)]

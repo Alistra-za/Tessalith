@@ -128,7 +128,7 @@ fn undo_clears_the_encoding_note_and_keeps_the_export_cancelled_note() {
 fn the_undo_note_stands_in_front_of_the_counts_and_goes_with_the_next_plan_or_after_5_s() {
     let d = tempfile::tempdir().unwrap();
     let mut m = with_a_step(d.path());
-    let counts = format!("{} textures, {} sets", m.items.len(), m.sets.len());
+    let counts = "6 files → 5 textures (1 packed or generated) · 3 sets";
     m.undo();
     assert_eq!(m.status_line, format!("Undid: hair. {counts}"));
     // The plan the undo started shows it; the next plan drops it.

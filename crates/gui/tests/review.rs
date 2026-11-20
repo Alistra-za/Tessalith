@@ -745,7 +745,7 @@ fn review_has_no_half_size_or_stale_group() {
     let tab =
         sdc_gui::model::bottom::tab_label(sdc_gui::model::bottom::cached_tab_counts(h.state()));
     let expected: Vec<&str> = vec![
-        "1 DDS file",
+        "1 file · checking which changed…",
         "Accept all suggestions",
         "Acknowledge for this texture",
         "Also export as",

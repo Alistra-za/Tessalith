@@ -1451,7 +1451,26 @@ fn a_scoped_export_treats_a_linked_lender_as_a_borrowed_one() {
         let d = tempfile::tempdir().unwrap();
         let mut m = lender_project(d.path());
         leaf_takes_stone(&mut m, by_link);
-        export_sets(&mut m, &["arch/leaf"], "Export set arch/leaf");
+        let whole = m.export_files();
+        m.export_sets(keys(&m, &["arch/leaf"]), "Export set arch/leaf".into());
+        let n = m.export_files();
+        assert!(n < whole);
+        idle(&mut m);
+        assert_eq!(m.header_answer().files, whole);
+        let writes = m.review_writes();
+        let dds: Vec<_> = writes
+            .outputs
+            .iter()
+            .filter(|o| o.path.extension().is_some_and(|e| e == "dds"))
+            .collect();
+        assert_eq!(dds.len(), n);
+        assert!(dds.iter().any(|o| o.path.ends_with("arch/stone_p.dds")));
+        assert!(!dds.iter().any(|o| o.path.ends_with("arch/wall_p.dds")));
+        m.export_from_review();
+        assert_eq!(m.export.progress(), (0, n));
+        idle(&mut m);
+        assert_eq!(m.export.progress(), (n, n));
+        assert_eq!(m.export.result.as_ref().unwrap().primary.written, n);
         what_the_run_left(&m)
     };
     let (borrowed, linked) = (run(false), run(true));

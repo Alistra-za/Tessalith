@@ -43,6 +43,7 @@ impl AppModel {
         if self.export_scope != scope {
             self.export_scope = scope;
             self.scope_rev += 1;
+            self.invalidate_currency();
         }
     }
 

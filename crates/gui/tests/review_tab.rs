@@ -146,7 +146,7 @@ fn the_footer_says_when_every_output_will_be_reencoded() {
     let text = "Re-encode every output is on: every file Tessalith recorded is written again.";
     h.run();
     assert!(h.query_by_label(text).is_none());
-    h.state_mut().reencode_all = true;
+    h.state_mut().set_reencode_all(true);
     h.run();
     assert!(support::panel(&h.ctx, "review-footer").contains_rect(h.get_by_label(text).rect()));
 }

@@ -526,15 +526,24 @@ fn a_kept_note_is_not_carried_into_the_next_export() {
         })
         .collect();
     std::fs::write(&manifest, text).unwrap();
+    m.open_review();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let writes = m.review_writes();
+    assert_eq!(writes.kept.len(), 1);
+    assert!(writes.kept[0].is_file());
+    assert_eq!(writes.current.len() + writes.kept.len(), m.export_files());
+    assert!(m.written_text().ends_with(" · Kept (1)"));
+    m.close_review();
     let s = export_and_wait(&mut m);
     assert_eq!(s.kept_older_encode, 1, "{s:?}");
+    assert_eq!(m.export.result.as_ref().unwrap().primary.kept, 1);
     assert!(m
         .export
         .notes
         .iter()
         .any(|n| n.starts_with("1 kept from an older encode version")));
     // The next export encodes it again, keeps nothing, and starts with no notes.
-    m.reencode_all = true;
+    m.set_reencode_all(true);
     let s = export_and_wait(&mut m);
     assert_eq!(s.kept_older_encode, 0, "{s:?}");
     assert!(

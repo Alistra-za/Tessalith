@@ -7,6 +7,8 @@ use super::{
     bottom::BottomTab, cm_json, cs_pbr_export, cs_skin_json, pbr_export, xpmf_json, AppModel,
     Continue, ExportPress, ItemStatus,
 };
+use engine::api::{CancelToken, PreviewVerdict};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -157,7 +159,7 @@ pub struct ReviewWrite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     pub path: PathBuf,
-    /// Ruling 3c-50, as `ReviewWrite::marked`: every planned DDS until Task 8 reads the engine's currency verdict.
+    /// Whether the write still depends on the run or on a pending currency check.
     pub marked: bool,
 }
 
@@ -166,6 +168,10 @@ pub struct Output {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReviewWrites {
     pub outputs: Vec<Output>,
+    pub current: Vec<PathBuf>,
+    pub kept: Vec<PathBuf>,
+    pub protected: Vec<PathBuf>,
+    pub known_writes: usize,
     pub also_updated: Vec<ReviewWrite>,
     /// Ruling 3c-49: the footer's text for each entry of `also_updated`, built with the list, so a frame formats none.
     pub labels: Vec<AlsoLabel>,
@@ -205,6 +211,7 @@ impl ReviewWrites {
 /// What `AppModel::review_writes` reads besides the disk (see `writes_key`), as revisions and small values the model
 /// already holds (ruling 3c-49): a lookup compares them in place (`writes_key_is`) and builds nothing.
 pub(super) struct WritesKey {
+    currency: u64,
     items: u64,
     inputs: u64,
     /// `sdc-project.toml`'s revision: the sets, the hash records, the export folder and the Also location.
@@ -428,7 +435,57 @@ fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
 
+#[derive(Default)]
+pub(super) struct Currency {
+    pub(super) workers: BTreeSet<u64>,
+    pub(super) revision: u64,
+    pub(super) pending: Option<CancelToken>,
+    pub(super) verdicts: Option<BTreeMap<String, PreviewVerdict>>,
+    due: bool,
+}
+
 impl AppModel {
+    pub(super) fn invalidate_currency(&mut self) {
+        if let Some(token) = self.currency.pending.take() {
+            token.cancel();
+        }
+        self.currency.revision += 1;
+        self.currency.verdicts = None;
+        self.currency.due = self.review.is_some() && self.root.is_some();
+    }
+
+    pub(super) fn request_currency(&mut self) {
+        if !self.currency.due || self.review.is_none() || self.full_plan_pending() {
+            return;
+        }
+        self.expand_scope_hosts();
+        self.currency.due = false;
+        if self.plan_failed {
+            return;
+        }
+        if let (Some(session), Some(req)) = (self.session.clone(), self.export_request()) {
+            let token = CancelToken::default();
+            self.currency.pending = Some(token.clone());
+            self.currency.workers.insert(self.currency.revision);
+            crate::worker::spawn_currency(
+                self.tx.clone(),
+                session,
+                req,
+                token,
+                self.generation,
+                self.currency.revision,
+            );
+        }
+    }
+
+    pub fn set_reencode_all(&mut self, on: bool) {
+        if self.reencode_all != on {
+            self.reencode_all = on;
+            self.invalidate_currency();
+            self.request_currency();
+        }
+    }
+
     /// Open Review (its answers are kept when it is already open) and show its tab.
     pub fn open_review(&mut self) {
         let unwritable = self.also_toml_unwritable();
@@ -437,6 +494,8 @@ impl AppModel {
         review.options_open = false;
         review.also_blocked = false;
         self.show_tab(BottomTab::Review);
+        self.invalidate_currency();
+        self.request_currency();
         // E7: the list Review opens with reads the disk as it is now, not a second-old answer.
         self.review_writes_cache.take();
         #[cfg(feature = "test-hooks")]
@@ -530,6 +589,7 @@ impl AppModel {
     /// text (`doc`), the folder names the opened folder (`root`) and, with no document, `gui.toml`'s folder.
     fn writes_key(&self) -> WritesKey {
         WritesKey {
+            currency: self.currency.revision,
             items: self.items_rev,
             inputs: self.inputs_rev,
             doc: self
@@ -559,7 +619,8 @@ impl AppModel {
 
     /// `writes_key() == *k`, compared field by field in place: no clone, no file query.
     fn writes_key_is(&self, k: &WritesKey) -> bool {
-        k.items == self.items_rev
+        k.currency == self.currency.revision
+            && k.items == self.items_rev
             && k.inputs == self.inputs_rev
             && k.doc
                 == self
@@ -595,11 +656,8 @@ impl AppModel {
     /// material, XPMF, CS skin), each exact one against Review's copy of the hash records.
     fn build_review_writes(&self, prep: &Prepared) -> ReviewWrites {
         use super::json_finish::{plan_guarded, Guarded};
-        // What this run writes: the plan's DDS outputs (the brief's broad rule until Task 8, each marked).
         let written_items = || {
-            self.items
-                .iter()
-                .filter(|i| self.writes_a_file(i))
+            self.primary_items()
                 .filter_map(|i| i.job.as_ref().map(|j| (i, j)))
         };
         // The Vanilla and CM folders of a whole-project Also run: the engine plans and writes their files.
@@ -788,8 +846,29 @@ impl AppModel {
             &mut run_records,
         );
 
+        let mut writes = ReviewWrites::default();
         let mut outputs: Vec<Output> = written_items()
-            .map(|(_, j)| (j.output.clone(), true))
+            .filter_map(|(item, job)| {
+                let path: PathBuf = job.output.components().collect();
+                match self
+                    .currency
+                    .verdicts
+                    .as_ref()
+                    .and_then(|v| v.get(&item.job_key))
+                {
+                    Some(PreviewVerdict::Current) => writes.current.push(path),
+                    Some(PreviewVerdict::Kept { .. } | PreviewVerdict::OnExistingSkip) => {
+                        writes.kept.push(path)
+                    }
+                    Some(PreviewVerdict::UnknownExisting) => writes.protected.push(path),
+                    Some(PreviewVerdict::WillWrite) => {
+                        writes.known_writes += 1;
+                        return Some((path, false));
+                    }
+                    None => return Some((path, true)),
+                }
+                None
+            })
             .chain(json)
             // A plan's output path can mix `/` and `\`; one path, one spelling.
             .map(|(p, marked)| Output {
@@ -878,6 +957,7 @@ impl AppModel {
             also_updated: also,
             labels,
             whole,
+            ..writes
         }
     }
 
@@ -1082,6 +1162,7 @@ impl AppModel {
     /// Close Review and its answers; the panel collapses when it showed Review (R7: the tab is listed only while open).
     pub fn close_review(&mut self) {
         self.review = None;
+        self.invalidate_currency();
         // Note HF9: closing Review ends an Export set / group; the next Export is the whole project.
         self.set_scope(None);
         // Note FC5 (GD29): the NIF answers go with Review; each foreign row asks again. Not while a run Review started
@@ -1116,7 +1197,14 @@ impl AppModel {
     }
 
     fn count_export_files(&self) -> usize {
-        self.items.iter().filter(|i| self.writes_a_file(i)).count()
+        self.primary_items()
+            .map(|i| &i.job_key)
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    }
+
+    pub(super) fn primary_items(&self) -> impl Iterator<Item = &super::TextureItem> {
+        self.items.iter().filter(|i| self.writes_a_file(i))
     }
 
     /// `i` is one of the files `export_files` counts.
@@ -1610,7 +1698,24 @@ impl AppModel {
     /// folder's and the other folders are named without one, "20 DDS files in the PBR folder, plus the Vanilla folder".
     pub fn written_text(&self) -> String {
         let n = self.export_files();
-        let dds = counted(n, "DDS file", "DDS files");
+        let dds = if self.currency.due || self.currency.pending.is_some() {
+            format!("{} · checking which changed…", counted(n, "file", "files"))
+        } else if self.currency.verdicts.is_some() {
+            let w = self.review_writes();
+            let mut line = format!(
+                "Will be written ({}) · Up to date ({})",
+                w.known_writes,
+                w.current.len()
+            );
+            for (name, count) in [("Kept", w.kept.len()), ("Protected", w.protected.len())] {
+                if count > 0 {
+                    line.push_str(&format!(" · {name} ({count})"));
+                }
+            }
+            line
+        } else {
+            counted(n, "DDS file", "DDS files")
+        };
         if self.also_runs() {
             format!(
                 "{dds} in the PBR folder, plus the {}",

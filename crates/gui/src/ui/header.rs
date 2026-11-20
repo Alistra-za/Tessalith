@@ -794,7 +794,7 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
     if let Some((t, on)) = tick {
         model.set_also_tick(t, on);
     }
-    model.reencode_all = reencode;
+    model.set_reencode_all(reencode);
 }
 
 fn status(ui: &mut egui::Ui, model: &mut AppModel) {

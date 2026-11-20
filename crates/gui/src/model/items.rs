@@ -120,6 +120,7 @@ pub struct SetItem {
 
 #[derive(Debug, Clone)]
 pub struct PlanView {
+    pub input_count: usize,
     pub target: Target,
     /// The preset the batch resolved from (the request, the configs, or the target's default).
     pub preset_id: String,
@@ -513,6 +514,12 @@ impl PlanView {
             }
         }
         PlanView {
+            input_count: events
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::FileDiscovered { .. }))
+                .filter_map(|e| e.path.as_deref())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
             target: plan.target,
             preset_id: plan.preset_id.clone(),
             user_presets: plan

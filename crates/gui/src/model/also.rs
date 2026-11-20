@@ -407,6 +407,27 @@ impl AppModel {
             self.export.notes.push(t.clone());
             self.also_error = Some(t);
         }
+        let phases = s
+            .phases
+            .iter()
+            .filter_map(|(phase, batch)| {
+                let idx = match phase {
+                    Phase::Pbr => return None,
+                    Phase::Vanilla => 1,
+                    Phase::Cm => 2,
+                };
+                Some((
+                    *phase,
+                    self.export.secondary_outcomes(batch, &s.folders[idx]),
+                ))
+            })
+            .collect();
+        self.export.result = Some(super::export::ExportResult {
+            phases,
+            copied: s.copied,
+            phase_error: self.also_error.clone(),
+            ..Default::default()
+        });
         self.also_written = Some(s.folders);
     }
 
