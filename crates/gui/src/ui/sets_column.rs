@@ -159,6 +159,7 @@ pub struct DropState {
     pub last_choice: Option<DropChoice>,
     pub pending: Option<Pending>,
     pub(super) choice_options: Option<ChoiceOptions>,
+    pub(super) folded: FoldedCache,
     /// Item 17: a file drop not yet taken by a slot card this frame (`ui::draw_with_scan` opens its folder after).
     pub file: Option<FileDrop>,
     pub slot_note: Option<SlotNote>,
@@ -1058,7 +1059,7 @@ fn folded_row(
     ui: &mut egui::Ui,
     model: &AppModel,
     v: &SetView,
-    item: &TextureItem,
+    helper: &FoldedHelper,
     name: &str,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
@@ -1068,7 +1069,7 @@ fn folded_row(
         member_acts(
             model,
             v,
-            &item.key,
+            &helper.key,
             None,
             false,
             ChipDrag::Item,
@@ -1082,7 +1083,7 @@ fn folded_row(
             egui::WidgetInfo::labeled(
                 egui::Role::Button,
                 off.is_none(),
-                format!("Remove {} from set", item.name),
+                format!("Remove {} from set", helper.file),
             )
         });
         let remove = match off {
@@ -1090,20 +1091,53 @@ fn folded_row(
             None => remove.on_hover_text("Remove from set"),
         };
         if remove.clicked() {
-            acts.push(Act::RemoveMember(v.id.clone(), item.key.clone()));
+            acts.push(Act::RemoveMember(v.id.clone(), helper.key.clone()));
             ui.close();
         }
     });
 }
 
-struct FoldedHelper<'a> {
-    item: &'a TextureItem,
+#[derive(Debug)]
+struct FoldedHelper {
+    key: String,
+    file: String,
     fills: Vec<engine::helper::FillTarget>,
+}
+
+/// Each set's slot and hidden range, for one revision of the column's views.
+type FoldedBySlice = HashMap<(SlotKind, usize, usize), Arc<[FoldedHelper]>>;
+
+#[derive(Debug, Default)]
+pub(super) struct FoldedCache {
+    views: std::sync::Weak<Vec<SetView>>,
+    by_set: HashMap<usize, FoldedBySlice>,
+}
+
+fn group_hidden(model: &AppModel, hidden: &[&Docked]) -> Arc<[FoldedHelper]> {
+    #[cfg(feature = "test-hooks")]
+    super::paint_counts::Work::FoldedGroups.built();
+    let mut groups: Vec<FoldedHelper> = Vec::new();
+    for d in hidden {
+        if let Some(group) = groups.iter_mut().find(|g| g.key == d.helper) {
+            group.fills.push(d.target);
+        } else {
+            #[cfg(feature = "test-hooks")]
+            super::paint_counts::Work::FoldedItemLookups.built();
+            if let Some(item) = model.item(&d.helper) {
+                groups.push(FoldedHelper {
+                    key: item.key.clone(),
+                    file: item.name.clone(),
+                    fills: vec![d.target],
+                });
+            }
+        }
+    }
+    groups.into()
 }
 
 enum PlannedCell<'a> {
     Badge(&'a Docked, &'a TextureItem),
-    More(SlotKind, Vec<FoldedHelper<'a>>),
+    More(SlotKind, Arc<[FoldedHelper]>),
 }
 
 /// One chip's rect, its index among the card's fixed rects and its drawable cells.
@@ -1120,7 +1154,7 @@ fn plan_dock<'a>(
     own: usize,
     entries: &[&'a Docked],
     locks: (bool, bool),
-    represented: &mut HashSet<&'a str>,
+    folded: &mut FoldedBySlice,
 ) -> DockPlan<'a> {
     let mut cells = Vec::new();
     for (pos, cell) in dock_cells(locks.0, locks.1, entries.len()) {
@@ -1130,27 +1164,18 @@ fn plan_dock<'a>(
                 let Some(item) = model.item(&d.helper) else {
                     continue;
                 };
-                represented.insert(item.key.as_str());
                 PlannedCell::Badge(d, item)
             }
             Cell::More(k) => {
-                let hidden = &entries[entries.len() - k..];
-                let mut groups: Vec<FoldedHelper> = Vec::new();
-                for d in hidden {
-                    if let Some(group) = groups.iter_mut().find(|g| g.item.key == d.helper) {
-                        group.fills.push(d.target);
-                    } else if let Some(item) = model.item(&d.helper) {
-                        groups.push(FoldedHelper {
-                            item,
-                            fills: vec![d.target],
-                        });
-                    }
-                }
+                let first = entries.len() - k;
+                let slot = entries[first].slot;
+                let groups = folded
+                    .entry((slot, first, k))
+                    .or_insert_with(|| group_hidden(model, &entries[first..]));
                 if groups.is_empty() {
                     continue;
                 }
-                represented.extend(groups.iter().map(|g| g.item.key.as_str()));
-                PlannedCell::More(hidden[0].slot, groups)
+                PlannedCell::More(slot, groups.clone())
             }
         };
         cells.push((pos, cell));
@@ -1249,7 +1274,7 @@ fn draw_dock(
                                 .copied()
                                 .map(fill_text)
                                 .collect::<Vec<_>>();
-                            format!("{}, fills {}", group.item.name, fills.join(", "))
+                            format!("{}, fills {}", group.file, fills.join(", "))
                         })
                         .collect::<Vec<_>>()
                 });
@@ -1293,7 +1318,7 @@ fn draw_dock(
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .show(|ui| {
                         for (group, name) in groups.iter().zip(names.iter()) {
-                            folded_row(ui, model, v, group.item, name, acts, member_menu);
+                            folded_row(ui, model, v, group, name, acts, member_menu);
                         }
                     });
                 r.on_hover_ui(|ui| {
@@ -1901,6 +1926,11 @@ pub fn draw(
         exporting: model.export.running.is_some(),
     };
     let views = crate::model::sets::views(model);
+    // A view snapshot covers the item and document revisions. Its set indices stay valid until it changes.
+    if st.folded.views.as_ptr() != Arc::as_ptr(&views) {
+        st.folded.by_set.clear();
+        st.folded.views = Arc::downgrade(&views);
+    }
     let visible = model.visible_sets();
     let has_clear = filter_strips(ui, model, &views, &visible);
     if views.is_empty() && model.root.is_some() && !model.busy() {
@@ -2101,6 +2131,7 @@ pub fn draw(
                         thumbs,
                         v,
                         (index, views.len()),
+                        st.folded.by_set.entry(index).or_default(),
                         &editing,
                         status_of(v),
                         look,
@@ -2618,6 +2649,7 @@ fn pill(
     thumbs: &mut ThumbCache,
     v: &SetView,
     (index, total): (usize, usize),
+    folded: &mut FoldedBySlice,
     editing: &Editing,
     status: Status,
     look: PillLook,
@@ -2914,6 +2946,7 @@ fn pill(
                                     thumbs,
                                     v,
                                     &dock,
+                                    folded,
                                     editing,
                                     sel_items,
                                     acts,
@@ -3105,6 +3138,7 @@ fn chip_row<'a>(
     thumbs: &mut ThumbCache,
     v: &SetView,
     dock: &'a [Docked],
+    folded: &mut FoldedBySlice,
     editing: &Editing,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
@@ -3112,7 +3146,6 @@ fn chip_row<'a>(
     mut fixed: Vec<egui::Rect>,
 ) -> (Vec<DockPlan<'a>>, Vec<egui::Rect>) {
     let row = view_row(v);
-    let mut chipped: HashSet<&str> = HashSet::new();
     let mut represented: HashSet<&str> = HashSet::new();
     let mut plans: Vec<DockPlan> = vec![];
     for cell in &row {
@@ -3129,7 +3162,7 @@ fn chip_row<'a>(
                     sel_items,
                     acts,
                     member_menu,
-                    &mut chipped,
+                    &mut represented,
                 );
                 fixed.push(rect);
                 continue;
@@ -3167,7 +3200,7 @@ fn chip_row<'a>(
                 continue;
             }
         };
-        chipped.insert(mk);
+        represented.insert(mk);
         let note = from.map(|f| move || format!("borrowed from {f}"));
         // Note JW4: a displayed borrow shares its source, including at the end of a chain.
         let Some(r) = member_chip(
@@ -3200,15 +3233,20 @@ fn chip_row<'a>(
             chip_link_mark(ui, r.rect);
         }
         let entries: Vec<&Docked> = dock.iter().filter(|d| d.slot == k).collect();
-        let name = chip_name(model, &letter, mk, &entries);
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Button,
+                true,
+                chip_name(model, &letter, mk, &entries),
+            )
+        });
         plans.push(plan_dock(
             model,
             r.rect,
             own,
             &entries,
             chip_locks(v, Some(k)),
-            &mut represented,
+            folded,
         ));
     }
     // K12: an add/remove entry that matches no file.
@@ -3238,9 +3276,19 @@ fn chip_row<'a>(
         });
         *member_menu |= open.is_some();
     }
+    for (_, cell) in plans.iter().flat_map(|plan| &plan.cells) {
+        match cell {
+            PlannedCell::Badge(d, _) => {
+                represented.insert(&d.helper);
+            }
+            PlannedCell::More(_, groups) => {
+                represented.extend(groups.iter().map(|g| g.key.as_str()))
+            }
+        }
+    }
     // Members in no chip (an env mask `_m`, a clashing second kind) follow as plain thumbnails.
     for mk in &v.members {
-        if chipped.contains(mk.as_str()) || represented.contains(mk.as_str()) {
+        if represented.contains(mk.as_str()) {
             continue;
         }
         // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
@@ -4580,6 +4628,7 @@ mod tests {
                     &mut thumbs,
                     v,
                     &[],
+                    &mut FoldedBySlice::new(),
                     &editing,
                     &HashSet::new(),
                     &mut vec![],

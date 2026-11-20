@@ -87,9 +87,11 @@ pub mod paint_counts {
         Format,
         Picker,
         FoldedNames,
+        FoldedGroups,
+        FoldedItemLookups,
     }
 
-    thread_local! { static BUILDS: Cell<[usize; 8]> = const { Cell::new([0; 8]) }; }
+    thread_local! { static BUILDS: Cell<[usize; 10]> = const { Cell::new([0; 10]) }; }
 
     impl Work {
         pub(super) fn built(self) {

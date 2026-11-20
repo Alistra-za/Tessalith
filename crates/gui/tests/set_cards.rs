@@ -247,6 +247,7 @@ fn a_closed_unhovered_overflow_builds_no_display_names() {
     );
     ctx.enable_accesskit();
     h.run_steps(2);
+    let before_open = FoldedNames.count();
     h.get_by_role_and_label(
         egui::Role::Button,
         "3 more helpers fill RMAOS in landscape/rock01",
@@ -255,8 +256,52 @@ fn a_closed_unhovered_overflow_builds_no_display_names() {
     h.run();
     h.get_by_role_and_label(egui::Role::Button, "Remove rock01_metallic.png from set");
     assert!(
-        FoldedNames.count() > before,
+        FoldedNames.count() > before_open,
         "the open list builds its names"
+    );
+}
+
+#[test]
+fn folded_helpers_are_grouped_once_per_change() {
+    use sdc_gui::ui::paint_counts::Work::{FoldedGroups, FoldedItemLookups};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    let more = "3 more helpers fill RMAOS in landscape/rock01";
+    let description = |h: &Harness<'static, AppModel>| {
+        h.get_by_role_and_label(egui::Role::Button, more)
+            .accesskit_node()
+            .description()
+            .unwrap()
+    };
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS G"));
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(h.ctx.input(|i| i.pointer.hover_pos().is_none()));
+    let counts = || (FoldedGroups.count(), FoldedItemLookups.count());
+    let before = counts();
+    h.run_steps(2);
+    assert_eq!(counts(), before, "two idle frames regrouped hidden helpers");
+
+    h.state_mut()
+        .edit_docs("Swap two folded channels", None, true, |p, _| {
+            for (file, fill) in [
+                ("landscape/rock01_metallic.png", "rmaos.r"),
+                ("landscape/rock01_roughness.png", "rmaos.g"),
+            ] {
+                p.set_file_value(
+                    file,
+                    engine::helper::FILLS_FIELD,
+                    &serde_json::json!([fill]),
+                );
+            }
+        });
+    idle(h.state_mut());
+    h.run_steps(2);
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS R"));
+    assert_eq!(
+        counts(),
+        (before.0 + 1, before.1 + 3),
+        "one rebuild for the three hidden files"
     );
 }
 
