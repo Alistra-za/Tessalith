@@ -101,6 +101,7 @@
 - The set-drop question highlights your last accepted answer (Move, Share or Duplicate) if it is available. Hold Shift at release to use it. With no button focused, Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. The documents change when the drop completes. Duplicate creates its copy at that point. If Replace opens, both wait for confirmation.
 - Replace waits for a successful plan after a texture type changes. Undo keeps a file that replaced a duplicate with different contents while the copy was finishing.
 - Helpers no longer take a full tile on a set card. A slot shows at most two helper thumbnails. Click the **+**, with or without a number, to list the rest.
+- Clicking a thumbnail on a set card opens the set. Shift+click the thumbnail to open the texture's settings.
 
 ## 3.0.0
 

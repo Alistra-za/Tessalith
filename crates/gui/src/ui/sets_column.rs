@@ -2,7 +2,7 @@
 //! of textures onto sets (and onto an empty area for a new set), drag-to-reorder by the ≡ handle, and a context
 //! menu. Drawing only: every change is a model call, made after drawing.
 use super::columns::{
-    bulk_menu, member, status_text, AMBER, DOCK_GAP_X, DOCK_GAP_Y, DOCK_INSET, RED,
+    bulk_menu, member, status_text, AMBER, DOCK_GAP_X, DOCK_GAP_Y, DOCK_INSET, MEMBER_HINT, RED,
 };
 use super::slot_commands::SlotCmdState;
 use super::status::{shared_stroke, Status};
@@ -853,9 +853,7 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetVi
         });
 }
 
-/// A member's thumbnail on the card with today's behaviours: click selects, double-click expands, a slot member has
-/// the slot menu, and `drag` offers it for dragging; `note` is a line added to its hover. `None` when the item is
-/// not in the model.
+/// A member's thumbnail, with the slot menu and an optional extra line on hover.
 #[allow(clippy::too_many_arguments)]
 fn member_chip(
     ui: &mut egui::Ui,
@@ -874,7 +872,17 @@ fn member_chip(
     let item = model.item(mk)?;
     let (locked, pgp) = chip_locks(v, kind);
     let r = member(ui, item, sel_items.contains(mk), locked, pgp, thumbs, note);
-    member_acts(model, v, mk, kind, remove, drag, &r, acts, member_menu);
+    member_acts(
+        model,
+        Some(v),
+        mk,
+        kind,
+        remove,
+        drag,
+        &r,
+        acts,
+        member_menu,
+    );
     Some(r)
 }
 
@@ -1036,12 +1044,11 @@ fn slot_box_menu(
     *member_menu |= open.is_some();
 }
 
-/// A member chip's menu, drag payload and clicks: click selects, double-click expands, a slot member has the slot
-/// menu, and an own member can be removed.
+/// A card thumbnail opens its set unless Shift is held. A row in the overflow list opens its texture directly.
 #[allow(clippy::too_many_arguments)]
 fn member_acts(
     model: &AppModel,
-    v: &SetView,
+    card: Option<&SetView>,
     mk: &str,
     kind: Option<SlotKind>,
     remove: bool,
@@ -1051,7 +1058,7 @@ fn member_acts(
     member_menu: &mut bool,
 ) {
     // Note JW4: only own members can leave the set through this menu.
-    if kind.is_some() || remove {
+    if let Some(v) = card.filter(|_| kind.is_some() || remove) {
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             if let Some(k) = kind {
@@ -1085,7 +1092,12 @@ fn member_acts(
     if r.double_clicked() {
         acts.push(Act::Expand(mk.to_string()));
     } else if r.clicked() {
-        acts.push(Act::SelectItem(mk.to_string()));
+        let mods = r.ctx.input(|i| i.modifiers);
+        if let Some(v) = card.filter(|_| !mods.shift) {
+            acts.push(Act::Click(v.id.clone(), mods.command, false));
+        } else {
+            acts.push(Act::SelectItem(mk.to_string()));
+        }
     }
 }
 
@@ -1143,7 +1155,7 @@ fn helper_tile(
     });
     member_acts(
         model,
-        v,
+        Some(v),
         mk,
         None,
         true,
@@ -1152,7 +1164,7 @@ fn helper_tile(
         acts,
         member_menu,
     );
-    let text = || format!("{}\n{role}", item.name);
+    let text = || format!("{}\n{role}\n{MEMBER_HINT}", item.name);
     ui.ctx()
         .accesskit_node_builder(r.id, |b| b.set_description(text()));
     Some(r.on_hover_ui(|ui| {
@@ -1174,7 +1186,7 @@ fn folded_row(
         let r = ui.add(egui::Button::new(name).sense(egui::Sense::click_and_drag()));
         member_acts(
             model,
-            v,
+            None,
             &helper.key,
             None,
             false,
@@ -1335,7 +1347,7 @@ fn draw_docks(
 }
 
 /// Note HN: the helpers that fill one chip, drawn on its top corners. A badge is the helper's thumbnail with the
-/// member behaviours (click selects, double-click expands, drag, the member menu). `+K` lists the folded helpers.
+/// member behaviours (JX1-JX3). `+K` lists the folded helpers.
 /// `hits` are the clamped hit rects of `plan.cells`, in order.
 #[allow(clippy::too_many_arguments)]
 fn draw_dock(
@@ -1363,7 +1375,7 @@ fn draw_dock(
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                 member_acts(
                     model,
-                    v,
+                    Some(v),
                     &d.helper,
                     None,
                     true,
@@ -1377,8 +1389,8 @@ fn draw_dock(
                     .as_ref()
                     .map(|h| helper_target_files(h, v.tails()));
                 r.on_hover_text(match target {
-                    Some(t) => format!("{}\n{t}", item.name),
-                    None => item.name.clone(),
+                    Some(t) => format!("{}\n{t}\n{MEMBER_HINT}", item.name),
+                    None => format!("{}\n{MEMBER_HINT}", item.name),
                 });
             }
             PlannedCell::More(kind, groups) => {

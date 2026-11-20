@@ -129,6 +129,12 @@ fn one(h: &crate::app_harness::H, label: &str) -> egui::Rect {
     b[0]
 }
 
+fn shift_click(h: &crate::app_harness::H, label: &str) {
+    let chip = h.get_by_role_and_label(Role::Button, label);
+    assert!(in_sets_column(h, chip.rect()), "{label} is in Sets");
+    chip.click_modifiers(egui::Modifiers::SHIFT);
+}
+
 /// The names of the Sets-column Buttons that start with `prefix`.
 fn named_from(h: &crate::app_harness::H, prefix: &str) -> Vec<String> {
     h.query_all_by_role(Role::Button)
@@ -414,12 +420,7 @@ fn a_selected_badge_has_a_two_pixel_selection_stroke() {
     for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
         let resize = resize_line(w, h_px);
         let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
-        let badge = one(&h, "crate_roughness.png, fills RMAOS R");
-        h.event(egui::Event::PointerMoved(badge.center()));
-        h.run_steps(1);
-        for pressed in [true, false] {
-            press(&mut h, badge.center(), pressed);
-        }
+        shift_click(&h, "crate_roughness.png, fills RMAOS R");
         crate::app_harness::settle(&mut h, 6);
         let accent = h.ctx.global_style().visuals.selection.stroke.color;
         let badge = one(&h, "crate_roughness.png, fills RMAOS R");
@@ -496,18 +497,8 @@ fn a_click_on_the_chip_beside_its_badge_selects_the_chip_file() {
     let (_d, mut h) = crate::replay("helpers", &[SEARCH]);
     let (key, name) = packed(&h);
     let label = format!("RMAOS, {name}, filled by crate_roughness.png");
-    let c = one(&h, &label);
-    h.event(egui::Event::PointerMoved(c.center()));
-    h.run_steps(1);
-    for pressed in [true, false] {
-        h.event(egui::Event::PointerButton {
-            pos: c.center(),
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        });
-    }
-    h.run_steps(2);
+    shift_click(&h, &label);
+    crate::app_harness::settle(&mut h, 6);
     assert_eq!(h.state().model.selection, Selection::Item(key));
 }
 
@@ -1141,16 +1132,9 @@ fn one_fill_has_one_wording() {
         let badge = one(&h, "crate_roughness.png, fills RMAOS R");
         h.event(egui::Event::PointerMoved(badge.center()));
         h.run();
-        let hover = "crate_roughness.png\nfills CNR alpha  crate_cnr, RMAOS R  crate_rmaos";
+        let hover = "crate_roughness.png\nfills CNR alpha  crate_cnr, RMAOS R  crate_rmaos\nShift+click to open its settings.";
         assert!(texts(&h).iter().any(|(t, _)| t == hover), "{at}: hover");
-        for p in [true, false] {
-            h.event(egui::Event::PointerButton {
-                pos: badge.center(),
-                button: egui::PointerButton::Primary,
-                pressed: p,
-                modifiers: egui::Modifiers::NONE,
-            });
-        }
+        shift_click(&h, "crate_roughness.png, fills RMAOS R");
         crate::app_harness::settle(&mut h, 6);
         let sub = "fills CNR alpha  crate_cnr, RMAOS R  crate_rmaos";
         let weak = h.ctx.global_style().visuals.weak_text_color();
@@ -2043,7 +2027,7 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
             "demo",
             &[
                 resize.as_str(),
-                r#"{"op":"click","at":{"label":"RMAOS","index":0}}"#,
+                r#"{"op":"click","mods":"Shift","at":{"label":"RMAOS","index":0}}"#,
                 r#"{"op":"settle","frames":3}"#,
             ],
         );
