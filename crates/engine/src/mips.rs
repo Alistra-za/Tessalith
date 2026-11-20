@@ -292,46 +292,71 @@ pub(crate) fn keeps_normal_lengths(
         && stores_xyz(p.format)
 }
 
-// Read base lengths on demand so the first scalar allocation is already reduced.
-fn mean_lengths(src: &Rgba32F, dst: &Rgba32F, length_at: impl Fn(usize) -> f32) -> Vec<f32> {
-    let mut lengths = Vec::with_capacity(dst.px.len());
-    for y in 0..dst.height {
-        for x in 0..dst.width {
-            let mut mean = 0.0;
-            for (cy, wy) in axis_footprint(y, src.height, dst.height) {
-                for (cx, wx) in axis_footprint(x, src.width, dst.width) {
-                    let i = cy as usize * src.width as usize + cx as usize;
-                    mean += wy * wx * f64::from(length_at(i));
-                }
-            }
-            lengths.push(mean as f32);
+fn kept_length(px: &[f32; 4]) -> f64 {
+    let [x, y, z, _] = px.map(f64::from);
+    (x * x + y * y + z * z).sqrt()
+}
+
+fn footprint_mean(
+    src: &Rgba32F,
+    (w, h): (u32, u32),
+    x: u32,
+    y: u32,
+    sample: impl Fn(usize) -> f64,
+) -> f64 {
+    let mut mean = 0.0;
+    for (cy, wy) in axis_footprint(y, src.height, h) {
+        for (cx, wx) in axis_footprint(x, src.width, w) {
+            mean += wy * wx * sample(cy as usize * src.width as usize + cx as usize);
         }
     }
-    lengths
+    mean
 }
 
 fn kept_normal_chain(base: &Rgba32F, levels: u32) -> Vec<Rgba32F> {
     let mut out = Vec::with_capacity(levels as usize);
     out.push(base.clone());
     let mut acc = None;
-    let mut lengths = Vec::new();
+    // Half lengths fit the rolling f32 buffers even for a diagonal of f32::MAX components.
+    let mut half_lengths: Vec<f32> = Vec::new();
     for _ in 1..levels {
         let prev = acc.as_ref().unwrap_or(base);
-        let next = box_down(prev);
-        lengths = if acc.is_none() {
-            mean_lengths(prev, &next, |i| vector_length(&base.px[i]))
-        } else {
-            mean_lengths(prev, &next, |i| lengths[i])
-        };
+        let mut next = box_down(prev);
+        let size = (next.width, next.height);
+        let mut next_lengths = Vec::with_capacity(next.px.len());
         let mut stored = next.clone();
-        for (px, &radius) in stored.px.iter_mut().zip(&lengths) {
-            normalize_vector(px, Domain::Normal);
-            let max_component = px[0].abs().max(px[1].abs()).max(px[2].abs());
-            let scale = radius.min(1.0 / max_component);
-            for c in &mut px[..3] {
-                *c *= scale;
+        for y in 0..next.height {
+            for x in 0..next.width {
+                let px = next.at_mut(x, y);
+                // An even box sums in f32 before dividing. Retry an overflowing component in f64.
+                for (channel, value) in px[..3].iter_mut().enumerate() {
+                    if !value.is_finite() {
+                        *value =
+                            footprint_mean(prev, size, x, y, |i| f64::from(prev.px[i][channel]))
+                                as f32;
+                    }
+                }
+                let half = if acc.is_none() {
+                    footprint_mean(prev, size, x, y, |i| kept_length(&prev.px[i]) * 0.5)
+                } else {
+                    footprint_mean(prev, size, x, y, |i| f64::from(half_lengths[i]))
+                };
+                next_lengths.push(half as f32);
+                let radius = 2.0 * half;
+                let len = kept_length(px);
+                let dest = stored.at_mut(x, y);
+                if len > 1e-8 {
+                    let max = f64::from(px[0].abs().max(px[1].abs()).max(px[2].abs()));
+                    let scale = (radius / len).min(1.0 / max);
+                    for c in 0..3 {
+                        dest[c] = (f64::from(px[c]) * scale) as f32;
+                    }
+                } else {
+                    dest[..3].copy_from_slice(&[0.0, 0.0, radius.min(1.0) as f32]);
+                }
             }
         }
+        half_lengths = next_lengths;
         out.push(stored);
         acc = Some(next);
     }
@@ -662,6 +687,23 @@ mod tests {
     }
 
     #[test]
+    fn finite_large_kept_normals_reach_the_component_cap() {
+        use crate::quantize::{stored_rgb, unorm8};
+
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        for (input, expected) in [
+            ([2e19, 0.0, 0.0, 1.0], [255, 128, 128]),
+            ([f32::MAX, -f32::MAX, 0.0, 1.0], [255, 0, 128]),
+        ] {
+            let w = work(Rgba32F::new(2, 2, input), Domain::Normal, true);
+            let px = build_chain(&w, &p)[1].px[0];
+            assert_eq!(stored_rgb(&px, w.domain).map(unorm8), expected, "{px:?}");
+            assert!(px[..3].iter().all(|c| (-1.0..=1.0).contains(c)), "{px:?}");
+        }
+    }
+
+    #[test]
     fn zero_and_cancelling_kept_normals_keep_their_mean_lengths() {
         let mut img = Rgba32F::new(4, 1, [0.0; 4]);
         img.px[2] = [0.4, 0.0, 0.0, 0.25];
@@ -685,6 +727,22 @@ mod tests {
         assert_texel(chain[1].px[0], [0.0, 0.0, 0.1, 0.2]);
         assert_texel(chain[1].px[1], [0.0, 0.0, 0.5, 0.4]);
         assert_texel(chain[2].px[0], [0.0, 0.0, 0.3, 0.3]);
+    }
+
+    #[test]
+    fn odd_kept_normals_use_recursive_footprints_at_mip_two() {
+        let mut img = Rgba32F::new(11, 1, [0.0, 0.0, 0.5, 0.0]);
+        img.px[4] = [1.0, 0.0, 0.0, 1.0];
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        assert_eq!((chain[1].width, chain[2].width), (5, 2));
+        // Texel 4 has weight 3/11 in mip 1's middle cell, which has weight 1/5 in the right cell.
+        let weight = 3.0f32 / 55.0;
+        let z = (1.0 - weight) * 0.5;
+        let radius = weight + z;
+        let scale = radius / weight.hypot(z);
+        assert_texel(chain[2].px[1], [weight * scale, 0.0, z * scale, weight]);
     }
 
     #[test]
