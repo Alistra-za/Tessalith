@@ -4998,7 +4998,14 @@ impl AppModel {
 
     /// "Presets…": open the creator on a fresh scan of the presets folder.
     pub fn open_presets(&mut self) {
-        self.presets_model().rescan();
+        let preset = self.project_preset();
+        let default = engine::presets::default_preset_for(self.target);
+        let presets = self.presets_model();
+        if presets.draft.is_none() {
+            presets.select(preset.as_deref().unwrap_or(default));
+        } else {
+            presets.rescan();
+        }
         self.presets_open = true;
         if !self.presets_popped {
             self.centre_tab = CentreTab::Presets;

@@ -31,7 +31,7 @@ fn presets_opens_as_a_centre_tab() {
             n.accesskit_node()
                 .value()
                 .or(n.accesskit_node().label())
-                .is_some_and(|v| v.starts_with("default ("))
+                .is_some_and(|v| v.ends_with(" · default"))
         })
         .expect("the Preset combo")
         .click();
@@ -43,7 +43,10 @@ fn presets_opens_as_a_centre_tab() {
     assert_eq!(h.state().centre_front(), CentreTab::Presets);
     assert_in_centre(&h, "Presets tab");
     assert_in_centre(&h, "Pop out Presets");
-    assert_in_centre(&h, "Pick a preset, or New.");
+    assert_in_centre(
+        &h,
+        "Built-in presets are read-only: Duplicate makes an editable copy.",
+    );
     assert_eq!(windows(&h), 0, "no floating Presets window");
 }
 

@@ -746,25 +746,22 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// What a Preset combo shows: the project's preset, or `default ({the target's default})`.
+/// The project's preset, or the tagged target default when the project follows it.
 pub(super) fn preset_text(model: &AppModel) -> String {
     model
         .project_preset()
-        .unwrap_or_else(|| default_text(model))
+        .unwrap_or_else(|| default_text(engine::presets::default_preset_for(model.target)))
 }
 
-fn default_text(model: &AppModel) -> String {
-    format!(
-        "default ({})",
-        engine::presets::default_preset_for(model.target)
-    )
+fn default_text(id: &str) -> String {
+    format!("{id} · default")
 }
 
-/// The Preset menu's entries (AM12): the target's default, then each preset of this target (a user preset appears
+/// The Preset menu's entries (AM12): the tagged default, then each other preset of this target (a user preset appears
 /// once saved); off with no project. The header's combo and the Settings tab's (Note JI1) draw it. The pick (`None` =
 /// the default), only when it differs from the project's preset.
 pub(super) fn preset_entries(ui: &mut egui::Ui, model: &mut AppModel) -> Option<Option<String>> {
-    let default = default_text(model);
+    let default = engine::presets::default_preset_for(model.target);
     let cur = model.project_preset();
     let choices = model.preset_choices();
     let mut picked = None;
@@ -774,10 +771,14 @@ pub(super) fn preset_entries(ui: &mut egui::Ui, model: &mut AppModel) -> Option<
                 .on_disabled_hover_text("Open a folder first")
                 .clicked()
         };
-        if entry(ui, cur.is_none(), &default) {
+        if entry(
+            ui,
+            cur.as_deref().is_none_or(|id| id == default),
+            &default_text(default),
+        ) {
             picked = Some(None);
         }
-        for id in &choices {
+        for id in choices.iter().filter(|id| *id != default) {
             if entry(ui, cur.as_deref() == Some(id.as_str()), id) {
                 picked = Some(Some(id.clone()));
             }

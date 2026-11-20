@@ -46,11 +46,11 @@ fn combo_text(n: &egui_kittest::Node<'_>) -> Option<String> {
     a.value().or(a.label()).map(|v| v.to_string())
 }
 
-/// The header's Preset combo shows `default (…)` or a preset id; the Settings tab's is named "Preset (this project): …".
+/// The header's Preset combo tags the default; the Settings tab's is named "Preset (this project): …".
 fn header_preset_text(h: &H) -> String {
     h.query_all_by_role(Role::ComboBox)
         .filter_map(|n| combo_text(&n))
-        .find(|v| v.starts_with("default ("))
+        .find(|v| v.ends_with(" · default"))
         .expect("the header's Preset combo")
 }
 
@@ -506,7 +506,7 @@ fn the_settings_tab_sets_the_project_mode() {
     assert!(!h.state_mut().presets_model().dirty());
     h.get_by_label(&mode_name("vanilla"));
     let want = format!(
-        "default ({})",
+        "{} · default",
         engine::presets::default_preset_for(Target::Vanilla)
     );
     assert_eq!(header_preset_text(&h), want);

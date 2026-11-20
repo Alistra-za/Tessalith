@@ -443,7 +443,7 @@ fn choose_preset_opens_the_preset_list_and_a_pick_closes_it() {
         .find(|n| {
             n.accesskit_node()
                 .label()
-                .is_some_and(|l| l.starts_with("default ("))
+                .is_some_and(|l| l.ends_with(" · default"))
         })
         .expect("the list's default entry");
     default.click();

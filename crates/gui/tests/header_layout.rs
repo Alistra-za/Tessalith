@@ -469,7 +469,7 @@ fn picking_the_current_preset_closes_both_pickers() {
             m.set_preset(current.clone());
             let label = current.clone().unwrap_or_else(|| {
                 format!(
-                    "default ({})",
+                    "{} · default",
                     engine::presets::default_preset_for(m.target)
                 )
             });
@@ -480,7 +480,13 @@ fn picking_the_current_preset_closes_both_pickers() {
             } else {
                 open_moved_item(&mut h, "Preset");
             }
-            h.get_by_role_and_label(Role::Button, &label).click();
+            let current_row = h.get_by_role_and_label(Role::Button, &label);
+            assert_eq!(
+                current_row.accesskit_node().toggled(),
+                Some(egui::accesskit::Toggled::True),
+                "the current preset {label} is selected"
+            );
+            current_row.click();
             h.run_steps(4);
             assert!(
                 h.query_by_role_and_label(Role::Button, &label).is_none(),
@@ -877,6 +883,79 @@ fn the_settings_button_shows_with_no_folder_and_in_meshes_view() {
     }
 }
 
+#[test]
+fn the_default_preset_shows_once_with_a_tag() {
+    let d = tempfile::tempdir().unwrap();
+    let m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    let mut h = harness(m, 1600.0, false);
+    let tagged = format!("{def} · default");
+    h.query_all_by_role(Role::ComboBox)
+        .find(|n| n.accesskit_node().value().is_some_and(|v| v == tagged))
+        .expect("the closed Preset combo reads the tagged default")
+        .click();
+    h.run();
+    assert_eq!(h.query_all_by_label_contains("default (").count(), 0);
+    let rows: Vec<String> = h
+        .query_all_by_label_contains(def)
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(rows, vec![tagged.clone()], "{rows:?}");
+    assert_eq!(
+        h.get_by_role_and_label(Role::Button, &tagged)
+            .accesskit_node()
+            .toggled(),
+        Some(egui::accesskit::Toggled::True)
+    );
+}
+
+#[test]
+fn clicking_the_selected_explicit_default_returns_to_following_the_target() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    m.set_preset(Some(def.into()));
+    let mut h = harness(m, 1600.0, false);
+    h.get_by_role_and_label(Role::ComboBox, "Preset").click();
+    h.run();
+    h.query_all_by_label_contains(def)
+        .find(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
+        .expect("the project's explicit default is selected")
+        .click();
+    h.run();
+    assert_eq!(h.state().0.project_preset(), None);
+}
+
+#[test]
+fn presets_opens_on_the_projects_preset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.set_preset(Some("cs-compact".into()));
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), "cs-compact");
+}
+
+#[test]
+fn presets_opens_on_the_target_default_without_a_project_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), def);
+}
+
+#[test]
+fn reopening_presets_keeps_the_editors_draft() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let target = m.target;
+    m.presets_model().new_preset(target);
+    m.presets_model().set_id("work-in-progress");
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), "work-in-progress");
+    assert!(m.presets_model().dirty());
+}
+
 /// Note JI1: the Preset combo's hover sends a mode change to Settings.
 #[test]
 fn the_preset_hover_names_settings() {
@@ -887,7 +966,7 @@ fn the_preset_hover_names_settings() {
             n.accesskit_node()
                 .value()
                 .or(n.accesskit_node().label())
-                .is_some_and(|v| v.starts_with("default ("))
+                .is_some_and(|v| v.ends_with(" · default"))
         })
         .expect("the Preset combo")
         .hover();
