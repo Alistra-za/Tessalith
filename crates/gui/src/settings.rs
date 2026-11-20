@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct GuiSettings {
     pub export_folder: Option<PathBuf>,
+    /// The last folder accepted in an export dialog, shared by all projects.
+    pub last_export_folder: Option<PathBuf>,
     /// Most recent first, at most 10.
     pub recent: Vec<PathBuf>,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
@@ -123,6 +125,7 @@ impl GuiSettings {
         s.recent.retain(ok);
         for p in [
             &mut s.export_folder,
+            &mut s.last_export_folder,
             &mut s.meshes.instance,
             &mut s.meshes.folder,
         ] {

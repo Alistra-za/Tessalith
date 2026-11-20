@@ -261,9 +261,40 @@ use super::AppModel;
 impl AppModel {
     /// Open a picker for `purpose`, tagged with the opened folder when the purpose is folder-scoped. False when a
     /// dialog is already open.
-    pub fn pick(&self, ctx: &egui::Context, purpose: PickerPurpose, spec: PickerSpec) -> bool {
+    pub fn pick(&self, ctx: &egui::Context, purpose: PickerPurpose, mut spec: PickerSpec) -> bool {
+        match purpose {
+            PickerPurpose::ExportFolder => {
+                spec.start = self
+                    .sets_doc
+                    .as_ref()
+                    .filter(|d| !d.read_only())
+                    .and_then(|d| d.export_folder_ref())
+                    .filter(|p| p.is_dir())
+                    .or_else(|| {
+                        self.settings
+                            .last_export_folder
+                            .as_deref()
+                            .filter(|p| p.is_dir())
+                    })
+                    .map(std::path::Path::to_owned)
+                    .or_else(|| self.project_start());
+            }
+            PickerPurpose::AlsoLocation | PickerPurpose::TargetMod => {
+                spec.start = self.project_start();
+            }
+            PickerPurpose::SaveReport => {
+                if let PickerKind::Save { dir, .. } = &mut spec.kind {
+                    *dir = self.project_start();
+                }
+            }
+            _ => {}
+        }
         let scope = purpose.folder_scoped().then(|| self.root.clone()).flatten();
         self.picker.request(ctx, purpose, scope, spec)
+    }
+
+    fn project_start(&self) -> Option<PathBuf> {
+        self.root.clone().or_else(|| self.open_folder_spec().start)
     }
 
     /// The Open folder dialog: it starts in the parent of the most recent project, when that parent still exists
@@ -281,14 +312,9 @@ impl AppModel {
         }
     }
 
-    /// Open the export folder picker, starting in the app-wide last pick (`gui.toml`) when there is one (Note FB1:
-    /// it is no longer the project's choice, only where the dialog opens).
+    /// Open the export folder picker for the current project.
     pub fn pick_export_folder(&self, ctx: &egui::Context) -> bool {
-        let spec = match self.settings.export_folder.clone() {
-            Some(p) => PickerSpec::folder().start_in(p),
-            None => PickerSpec::folder(),
-        };
-        self.pick(ctx, PickerPurpose::ExportFolder, spec)
+        self.pick(ctx, PickerPurpose::ExportFolder, PickerSpec::folder())
     }
 
     /// The export folder chosen in the picker, for this project (owner ruling, Note BV6): saved in
@@ -339,7 +365,14 @@ impl AppModel {
                 self.messages
                     .notify(super::messages::Severity::Warning, note);
             }
-            PickerPurpose::ExportFolder => self.set_export_folder(path),
+            PickerPurpose::ExportFolder => {
+                self.settings.last_export_folder = Some(path.clone());
+                // Without a writable project, set_export_folder saves both settings together.
+                if self.sets_doc.as_ref().is_some_and(|d| !d.read_only()) {
+                    self.save_settings();
+                }
+                self.set_export_folder(path);
+            }
             // Refused (with the status line) while an export runs, as every Also edit is.
             PickerPurpose::AlsoLocation => self.set_also_location(&path),
             PickerPurpose::SaveReport => self.save_report(path),

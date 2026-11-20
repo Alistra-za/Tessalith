@@ -5,12 +5,36 @@ use eframe::egui;
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use image::{ImageBuffer, Luma, Rgb, Rgba};
+use sdc_gui::model::picker::{PickerBackend, PickerSpec};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+type RecordedSpecs = Arc<Mutex<Vec<PickerSpec>>>;
+
+pub fn recording_picker(answer: Option<PathBuf>) -> (Arc<dyn PickerBackend>, RecordedSpecs) {
+    struct Recorder(RecordedSpecs, Option<PathBuf>);
+    impl PickerBackend for Recorder {
+        fn pick(&self, spec: &PickerSpec) -> Option<PathBuf> {
+            self.0.lock().unwrap().push(spec.clone());
+            self.1.clone()
+        }
+    }
+    let specs = RecordedSpecs::default();
+    (Arc::new(Recorder(specs.clone(), answer)), specs)
+}
+
+pub fn wait_picker(m: &mut AppModel) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while m.picker.busy() {
+        assert!(Instant::now() < end, "the dialog never closed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.poll(), "the completed picker reply was drained");
+}
 
 /// Both pairs are (sdc.toml, sdc-project.toml). Recovery includes pending automatic writes alongside user work.
 /// Check the dialog's flags and every recovery path and text.

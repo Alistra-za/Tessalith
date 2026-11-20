@@ -6,12 +6,9 @@ use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::MeshesModel;
-use sdc_gui::model::picker::{PickerBackend, PickerSpec};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::{GuiSettings, MeshesSettings};
 use sdc_gui::ui::meshes::UndoTarget;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use support::*;
 
@@ -385,13 +382,38 @@ fn undo_text_does_not_move_the_header() {
     h.get_by_label_contains(&format!("Undo NIF edit: {long}"));
 }
 
-/// The picker backend that records where the dialog was asked to start.
-struct Recorder(std::sync::Mutex<Vec<Option<PathBuf>>>, PathBuf);
+#[test]
+fn the_export_picker_starts_in_the_last_export_folder_then_the_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_unchosen(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::create_dir(m.settings.export_folder.as_ref().unwrap()).unwrap();
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend.clone());
+    let start = |m: &mut AppModel| {
+        assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+        wait_picker(m);
+        specs.lock().unwrap().pop().unwrap().start
+    };
+    assert_eq!(start(&mut m).as_ref(), Some(&root));
+    let last = d.path().join("last");
+    std::fs::create_dir(&last).unwrap();
+    m.settings.last_export_folder = Some(last.clone());
+    assert_eq!(start(&mut m).as_ref(), Some(&last));
+    let chosen = d.path().join("chosen");
+    std::fs::create_dir(&chosen).unwrap();
+    choose_export(&mut m, chosen.clone());
+    assert_eq!(start(&mut m).as_ref(), Some(&chosen));
+    std::fs::remove_dir(chosen).unwrap();
+    assert_eq!(start(&mut m).as_ref(), Some(&last));
+    std::fs::remove_dir(last).unwrap();
+    assert_eq!(start(&mut m), Some(root));
 
-impl PickerBackend for Recorder {
-    fn pick(&self, spec: &PickerSpec) -> Option<PathBuf> {
-        self.0.lock().unwrap().push(spec.start.clone());
-        Some(self.1.clone())
+    let mut m = AppModel::new(m.settings.clone(), None, session());
+    m.picker.set_backend(backend);
+    for expected in [Some(d.path().to_owned()), None] {
+        assert_eq!(start(&mut m), expected);
+        m.settings.recent = vec![d.path().join("missing/project")];
     }
 }
 
@@ -400,8 +422,9 @@ fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fresh(d.path());
     let out = d.path().join("picked");
-    let rec = Arc::new(Recorder(Default::default(), out.clone()));
-    m.picker.set_backend(rec.clone());
+    let root = m.root.clone().unwrap();
+    let (backend, specs) = recording_picker(Some(out.clone()));
+    m.picker.set_backend(backend);
     m.open_review();
     let mut h = harness(m);
     h.run();
@@ -419,19 +442,12 @@ fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     );
     h.get_by_label("Choose the export folder…").click();
     h.run();
-    let end = std::time::Instant::now() + Duration::from_secs(10);
-    while h.state().picker.busy() {
-        assert!(std::time::Instant::now() < end, "the dialog never closed");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(h.state_mut().poll());
+    wait_picker(h.state_mut());
     idle(h.state_mut());
     assert_eq!(h.state().export_folder_chosen(), Some(out));
-    // The dialog opened where gui.toml last pointed.
-    assert_eq!(
-        rec.0.lock().unwrap().clone(),
-        vec![Some(d.path().join("other-mod"))]
-    );
+    let specs = specs.lock().unwrap();
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].start, Some(root));
     h.run();
     assert_eq!(h.query_all_by_label(NO_FOLDER).count(), 0);
     h.get_by_label("Blockers (0)");
