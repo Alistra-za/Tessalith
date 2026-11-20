@@ -27,6 +27,7 @@ hex.workspace = true
 globset.workspace = true
 walkdir.workspace = true
 humantime.workspace = true
+tempfile.workspace = true
 # The analysis cache's thumbnails are stored deflated (Note HV); already in the lock through esp.
 flate2.workspace = true
 
@@ -37,7 +38,6 @@ flate2.workspace = true
 test-hooks = ["encoders-sys/test-hooks"]
 
 [dev-dependencies]
-tempfile.workspace = true
 engine = { path = ".", features = ["test-hooks"] }
 
 [lints]

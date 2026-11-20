@@ -985,19 +985,23 @@ pub(crate) enum Currency {
     Stale,
 }
 
-/// Hash in parallel, preserving plan order. Check existence when the caller consumes each verdict so a newly
-/// appeared output without a record still receives the run's existing-file protection.
-fn ready_verdicts<'a>(
+#[cfg(test)]
+thread_local! {
+    static READY_EXISTENCE_CHECKS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Hash recorded outputs in parallel, preserving plan order for the final existence check and reporting.
+fn classify_ready_jobs<'a>(
     plan: &'a Plan,
     existing: &BTreeMap<String, ManifestEntry>,
     pool: &rayon::ThreadPool,
     cancel: &CancelToken,
-) -> impl Iterator<Item = (&'a ResolvedJob, String, PreviewVerdict)> {
+) -> Vec<(&'a ResolvedJob, String, Option<Currency>)> {
     use rayon::prelude::*;
     let req = &plan.request;
     let encoders = EncoderVersions::current();
     let ready: Vec<_> = plan.ready_jobs().collect();
-    let classified: Vec<_> = pool.install(|| {
+    pool.install(|| {
         ready
             .into_par_iter()
             .map(|job| {
@@ -1015,28 +1019,34 @@ fn ready_verdicts<'a>(
                 (job, key, recorded)
             })
             .collect()
-    });
-    classified.into_iter().map(|(job, key, recorded)| {
-        let verdict = match (req.on_existing, recorded) {
-            _ if !job.output.exists() => PreviewVerdict::WillWrite,
-            (OnExisting::Overwrite, _) => PreviewVerdict::WillWrite,
-            (OnExisting::Skip, _) => PreviewVerdict::OnExistingSkip,
-            (_, None) => PreviewVerdict::UnknownExisting,
-            (_, Some(Currency::Stale)) => PreviewVerdict::WillWrite,
-            (_, Some(Currency::Current)) => PreviewVerdict::Current,
-            (
-                _,
-                Some(Currency::Kept {
-                    older_encode,
-                    lower_target,
-                }),
-            ) => PreviewVerdict::Kept {
+    })
+}
+
+fn ready_output_exists(output: &Path) -> bool {
+    #[cfg(test)]
+    READY_EXISTENCE_CHECKS.set(READY_EXISTENCE_CHECKS.get() + 1);
+    output.exists()
+}
+
+fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -> PreviewVerdict {
+    match (policy, recorded) {
+        _ if !exists => PreviewVerdict::WillWrite,
+        (OnExisting::Overwrite, _) => PreviewVerdict::WillWrite,
+        (OnExisting::Skip, _) => PreviewVerdict::OnExistingSkip,
+        (_, None) => PreviewVerdict::UnknownExisting,
+        (_, Some(Currency::Stale)) => PreviewVerdict::WillWrite,
+        (_, Some(Currency::Current)) => PreviewVerdict::Current,
+        (
+            _,
+            Some(Currency::Kept {
                 older_encode,
                 lower_target,
-            },
-        };
-        (job, key, verdict)
-    })
+            }),
+        ) => PreviewVerdict::Kept {
+            older_encode,
+            lower_target,
+        },
+    }
 }
 
 /// The if-changed rule (spec §8, carry 13; Note JA, the owner: re-encode when the image changed, not when only our
@@ -3345,8 +3355,16 @@ impl Engine {
             EngineError::Fatal(format!("manifest {}: {e}", manifest.path().display()))
         })?;
         let pool = thread_pool(plan.request.jobs)?;
-        let verdicts = ready_verdicts(plan, &existing, &pool, cancel)
-            .map(|(_, key, verdict)| (key, verdict))
+        let verdicts = classify_ready_jobs(plan, &existing, &pool, cancel)
+            .into_iter()
+            .take_while(|_| !cancel.is_cancelled())
+            .map(|(job, key, recorded)| {
+                let exists = ready_output_exists(&job.output);
+                (
+                    key,
+                    ready_verdict(plan.request.on_existing, exists, recorded),
+                )
+            })
             .collect();
         if cancel.is_cancelled() {
             return Err(cancelled());
@@ -3622,12 +3640,14 @@ impl Engine {
         // Note JA: the outputs kept for an older encode version, per format and per sub-type, for the run's one line.
         let mut older_by_format: BTreeMap<Format, u32> = BTreeMap::new();
         let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
-        let mut todo: Vec<(&ResolvedJob, PresetRef)> = vec![];
-        for (job, job_key, verdict) in ready_verdicts(&plan, &existing, &pool, cancel) {
+        let mut todo = vec![];
+        for (job, job_key, recorded) in classify_ready_jobs(&plan, &existing, &pool, cancel) {
             if cancel.is_cancelled() {
                 summary.cancelled.push(job.input.clone());
                 continue;
             }
+            let exists = ready_output_exists(&job.output);
+            let verdict = ready_verdict(req.on_existing, exists, recorded);
             let reason = match verdict {
                 PreviewVerdict::OnExistingSkip => {
                     skip(
@@ -3643,27 +3663,8 @@ impl Engine {
                     continue;
                 }
                 PreviewVerdict::UnknownExisting => {
-                    rep.emit_job(
-                        Some(&job_key),
-                        Some(&job.set_key),
-                        Some(&job.input),
-                        EventKind::Warning(Warning::new(
-                            Code::OutUnknownExisting,
-                            format!(
-                                "{} exists without a manifest record; kept (use --on-existing overwrite)",
-                                slash(&job.output)
-                            ),
-                        )),
-                    );
-                    skip(
-                        &job.output,
-                        Some(&job.set_key),
-                        &job.input,
-                        SkipKind::UnknownExisting,
-                        Some(Code::OutUnknownExisting),
-                        "existing output without a manifest record".into(),
-                        &mut summary,
-                    );
+                    report_unknown_existing(rep, job, &job_key);
+                    summary.skipped += 1;
                     continue;
                 }
                 PreviewVerdict::WillWrite => None,
@@ -3715,7 +3716,11 @@ impl Engine {
                 None => PresetRef::for_preset(&plan.registry, &plan.preset_id, None),
             };
             match preset {
-                Some(p) => todo.push((job, p)),
+                Some(p) => {
+                    let replace_existing =
+                        recorded.is_some() || (exists && req.on_existing == OnExisting::Overwrite);
+                    todo.push((job, p, replace_existing));
+                }
                 None => {
                     summary.failed += 1;
                     rep.emit_job(
@@ -3738,7 +3743,7 @@ impl Engine {
         // ever blocks on the budget. A pool thread blocked in `acquire` while its nested band-parallel encode stole
         // another file's task could otherwise hold budget forever (deadlock).
         pool.in_place_scope(|scope| {
-            for &(job, ref preset) in &todo {
+            for &(job, ref preset, replace_existing) in &todo {
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
                     continue;
@@ -3758,7 +3763,16 @@ impl Engine {
                         lock(state).cancelled.push(job.input.clone());
                         return;
                     }
-                    run_one(job, req, preset, cancel, rep, manifest, state);
+                    run_one(
+                        job,
+                        req,
+                        preset,
+                        cancel,
+                        rep,
+                        manifest,
+                        state,
+                        replace_existing,
+                    );
                 });
             }
         });
@@ -3841,6 +3855,22 @@ fn kept_warnings(
     out
 }
 
+fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
+    let emit = |kind| rep.emit_job(Some(key), Some(&job.set_key), Some(&job.input), kind);
+    emit(EventKind::Warning(Warning::new(
+        Code::OutUnknownExisting,
+        format!(
+            "{} exists without a manifest record; kept (use --on-existing overwrite)",
+            slash(&job.output)
+        ),
+    )));
+    emit(EventKind::FileSkipped {
+        kind: SkipKind::UnknownExisting,
+        code: Some(Code::OutUnknownExisting),
+        reason: "existing output without a manifest record".into(),
+    });
+}
+
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
 /// output was written (manifest append) has that output removed, best effort, so no output is
 /// left on disk without a record (review I1). A panic is reported at the last stage the file entered (review M10).
@@ -3853,6 +3883,7 @@ fn run_one(
     rep: &Reporter,
     manifest: &Manifest,
     state: &Mutex<BatchSummary>,
+    replace_existing: bool,
 ) {
     let (set, path) = (Some(job.set_key.as_str()), Some(job.input.as_path()));
     let key = output_key(&req.output_root, &job.output);
@@ -3860,10 +3891,24 @@ fn run_one(
     emit(EventKind::FileStarted);
     let tracker = FileTracker::default();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        process_file(job, req, preset, cancel, rep, manifest, &tracker)
+        process_file(
+            job,
+            req,
+            preset,
+            cancel,
+            rep,
+            manifest,
+            &tracker,
+            replace_existing,
+        )
     }));
     let (stage, error) = match r {
-        Ok(Ok(out)) => {
+        Ok(Ok(None)) => {
+            report_unknown_existing(rep, job, &key);
+            lock(state).skipped += 1;
+            return;
+        }
+        Ok(Ok(Some(out))) => {
             for w in &out.report.warnings {
                 emit(EventKind::Warning(w.clone()));
             }
@@ -4729,14 +4774,24 @@ mod tests {
             .save(req.inputs[0].join("b.png"))
             .unwrap();
         let manifest = Manifest::at(&req.output_root);
-        let before = std::fs::read(manifest.path()).unwrap();
         let mut plan = engine.plan(req, &rep, &cancel).unwrap();
+        // Duplicate a stale record past both compaction thresholds, retaining the three live records.
+        let mut line = br#"{"schema":1,"output":"stale.dds"}"#.to_vec();
+        line.resize(65535, b' ');
+        line.push(b'\n');
+        let n = crate::manifest::COMPACT_MIN_BYTES as usize / line.len() + 1;
+        let mut before = line.repeat(n);
+        before.extend(std::fs::read(manifest.path()).unwrap());
+        std::fs::write(manifest.path(), &before).unwrap();
         let verdicts = engine.currency_preview(&plan, &cancel).unwrap();
         assert_eq!(verdicts, expected(WillWrite));
         plan.request.on_existing = OnExisting::Reencode;
         assert_eq!(engine.currency_preview(&plan, &cancel).unwrap(), first);
         plan.request.on_existing = OnExisting::IfChanged;
-        assert_eq!(std::fs::read(manifest.path()).unwrap(), before);
+        assert!(
+            std::fs::read(manifest.path()).unwrap() == before,
+            "currency preview rewrote the manifest"
+        );
         sink.take();
         let summary = engine.run(plan, &rep, &cancel).unwrap();
         assert_eq!((summary.converted, summary.up_to_date), (1, 2));
@@ -4754,6 +4809,92 @@ mod tests {
             assert!(terminal.insert(event.job.unwrap(), verdict).is_none());
         }
         assert_eq!(terminal, verdicts);
+    }
+
+    #[test]
+    fn run_protects_an_unrecorded_dds_that_appears_on_file_started() {
+        use crate::events::{EventSink, VecSink};
+        for mode in [
+            OnExisting::IfChanged,
+            OnExisting::Reencode,
+            OnExisting::Skip,
+            OnExisting::Overwrite,
+        ] {
+            let (_dir, engine, mut req) = preview_fixture();
+            req.on_existing = mode;
+            req.write_only = Some([crate::sets::set_key(&req.output_root, "a")].into());
+            let path = req.output_root.join("a.dds");
+            let dest = path.clone();
+            let events = Arc::new(VecSink::default());
+            let log = events.clone();
+            let rep = Reporter::new(
+                Arc::new(OnEvent(move |e: &crate::events::EngineEvent| {
+                    if matches!(e.kind, EventKind::FileStarted) {
+                        assert_eq!(e.job.as_deref(), Some("a.dds"));
+                        std::fs::write(&dest, b"foreign bytes").unwrap();
+                    }
+                    log.emit(e);
+                })),
+                "late file",
+            );
+            let cancel = CancelToken::default();
+            let manifest = Manifest::at(&req.output_root);
+            let plan = engine.plan(req, &rep, &cancel).unwrap();
+            let summary = engine.run(plan, &rep, &cancel).unwrap();
+            assert!(
+                events
+                    .take()
+                    .iter()
+                    .any(|e| e.job.as_deref() == Some("a.dds")
+                        && matches!(
+                            e.kind,
+                            EventKind::FileSkipped {
+                                kind: SkipKind::UnknownExisting,
+                                ..
+                            }
+                        )),
+                "{mode:?}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"foreign bytes");
+            assert_eq!(
+                (summary.converted, summary.skipped, summary.failed),
+                (0, 1, 0)
+            );
+            assert!(manifest.read().unwrap().is_empty());
+        }
+    }
+
+    struct OnEvent<F>(F);
+
+    impl<F: Fn(&crate::events::EngineEvent) + Send + Sync> crate::events::EventSink for OnEvent<F> {
+        fn emit(&self, event: &crate::events::EngineEvent) {
+            self.0(event);
+        }
+    }
+
+    #[test]
+    fn cancelled_ready_outputs_skip_the_existence_check() {
+        let (_dir, engine, req) = preview_fixture();
+        std::fs::create_dir(&req.output_root).unwrap();
+        std::fs::write(req.output_root.join("a.dds"), b"foreign bytes").unwrap();
+        let cancel = CancelToken::default();
+        let token = cancel.clone();
+        let rep = Reporter::new(
+            Arc::new(OnEvent(move |e: &crate::events::EngineEvent| {
+                if e.job.as_deref() == Some("a.dds")
+                    && matches!(e.kind, EventKind::FileSkipped { .. })
+                {
+                    token.cancel();
+                }
+            })),
+            "cancel",
+        );
+        let remaining = ["b.png", "c.png"].map(|name| req.inputs[0].join(name));
+        let plan = engine.plan(req, &rep, &cancel).unwrap();
+        READY_EXISTENCE_CHECKS.set(0);
+        let summary = engine.run(plan, &rep, &cancel).unwrap();
+        assert_eq!(summary.cancelled, remaining);
+        assert_eq!(READY_EXISTENCE_CHECKS.get(), 1, "only a.dds was checked");
     }
 
     #[test]
