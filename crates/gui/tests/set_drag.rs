@@ -18,6 +18,104 @@ use support::*;
 
 const ROCK: &str = "landscape/rock01";
 
+/// Note JW2 (A4-2): files dragged from Explorer over a card show its empty slots; the strip goes when they leave.
+/// Wiring only: here the OS position is egui's pointer (`drop_pos` falls back without a viewport rect), so this passes
+/// whether `over` reads `at` or egui's hover. `sets_column::tests::files_from_explorer_place_the_strip_by_the_os_cursor`
+/// pins that.
+#[test]
+fn files_dragged_from_explorer_over_a_card_show_its_empty_slots() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened_plain(d.path()));
+    h.run();
+    h.run();
+    let card = card_of(&h, ROCK);
+    h.hover_at(card.center());
+    h.input_mut()
+        .hovered_files
+        .push(egui::HoveredFile::default());
+    h.run_steps(2);
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK)
+    );
+    let painted = h.state().1.drops.strip.as_ref().unwrap().1;
+    h.hover_at(painted.center());
+    h.run_steps(2);
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK),
+        "the strip keeps its owner"
+    );
+    h.input_mut().hovered_files.clear();
+    h.run_steps(2);
+    assert_eq!(h.state().1.drops.strip, None);
+    h.hover_at(card.center());
+    h.input_mut()
+        .hovered_files
+        .push(egui::HoveredFile::default());
+    h.state_mut().1.drops.pending = Some(Pending::Refused("busy".into()));
+    h.step();
+    assert!(
+        h.state().1.drops.strip.is_none(),
+        "a pending modal blocks the strip on its opening frame"
+    );
+}
+
+#[test]
+fn files_dragged_outside_the_cards_keep_polling_until_they_leave() {
+    use sdc_gui::ui::paint_counts::Work::DropPosition;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened_plain(d.path()));
+    h.hover_at(egui::pos2(1.0, 1.0));
+    h.run();
+    let poll = Duration::from_millis(50);
+    let before = DropPosition.count();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&polls);
+    h.ctx.set_repaint_observer(move |info| {
+        if info.delay == poll {
+            seen.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+    let delay = |h: &H| h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    h.input_mut()
+        .hovered_files
+        .push(egui::HoveredFile::default());
+    h.run_steps(3);
+    assert!(h.state().1.drops.strip.is_none());
+    assert_eq!(
+        DropPosition.count() - before,
+        3,
+        "one cursor read per hover frame"
+    );
+    assert_eq!(
+        polls.load(Ordering::Relaxed),
+        3,
+        "one 50 ms request per hover frame"
+    );
+    assert!(
+        delay(&h) <= poll,
+        "files outside a card still need a repaint"
+    );
+    h.step();
+    assert!(delay(&h) <= poll, "keep polling every hover frame");
+    h.input_mut().hovered_files.clear();
+    h.run_steps(3);
+    assert!(delay(&h) > poll, "polling stops when the files leave");
+    assert_eq!(
+        DropPosition.count() - before,
+        4,
+        "idle frames skip the cursor read"
+    );
+    assert_eq!(
+        polls.load(Ordering::Relaxed),
+        4,
+        "no hover, no more requests"
+    );
+}
+
 /// `pbr_ready` with a new set from leaf (pbr_albedo, Vanilla target) that borrows rock01's normal; returns the model,
 /// that set's id, and the normal's key.
 fn leaf_borrows_normal(dir: &std::path::Path) -> (sdc_gui::model::AppModel, String, String) {

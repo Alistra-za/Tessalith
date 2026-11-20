@@ -293,6 +293,86 @@ fn drop_on_card_scrolled_out_of_view_opens_folder_not_slot() {
     );
 }
 
+/// Note JW2: previous paint owns the release even if the set card is no longer drawn.
+#[test]
+fn an_explorer_drop_uses_the_last_release_on_the_previous_strip_or_bridge() {
+    use eframe::egui;
+    let d = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let outside = other.path().join("brick.png");
+    std::fs::write(&outside, b"x").unwrap();
+    let strip = egui::Vec2::ZERO;
+    let bridge = egui::vec2(0.0, 17.0);
+    let beside = egui::vec2(48.0, 0.0);
+    for (release, pointer, opens_folder) in [
+        (Some(strip), beside, true),
+        (Some(bridge), beside, true),
+        (Some(beside), strip, false),
+        (None, strip, true),
+        (None, beside, false),
+    ] {
+        let mut m = pbr_opened(d.path());
+        let key = set_views(&m)
+            .into_iter()
+            .find(|v| v.id == LEAF)
+            .unwrap()
+            .key;
+        m.select_set(&key);
+        let mut h = harness(m);
+        h.run();
+        let slot = slot_rect(&h, "Normal _n").center();
+        // Seed the previous paint: the owner's column is gone and the editor now occupies its space.
+        let painted = egui::Rect::from_center_size(slot, egui::vec2(32.0, 32.0));
+        let hit = egui::Rect::from_center_size(slot + bridge, egui::vec2(32.0, 2.0));
+        h.state_mut().1.drops.strip = Some((ROCK.into(), painted, hit));
+        h.state_mut().0.settings.sets_hidden = true;
+        if let Some(release) = release {
+            for (pos, button) in [
+                (slot + pointer, egui::PointerButton::Primary),
+                (slot + release, egui::PointerButton::Secondary),
+            ] {
+                h.input_mut().events.push(egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                });
+            }
+        }
+        h.input_mut()
+            .events
+            .push(egui::Event::PointerMoved(slot + pointer));
+        h.input_mut()
+            .dropped_files
+            .push(std::sync::Arc::new(Dropped(outside.clone())));
+        h.step();
+        if opens_folder {
+            assert!(
+                h.state().1.drops.slot_note.is_none(),
+                "the new slot must not take last frame's strip"
+            );
+            assert!(
+                matches!(&h.state().0.dialog, Some(sdc_gui::model::Dialog::OpenUnsaved(p)) if p == other.path())
+            );
+        } else {
+            assert!(
+                h.state()
+                    .1
+                    .drops
+                    .slot_note
+                    .as_ref()
+                    .is_some_and(|n| n.error),
+                "the release was on an editor slot"
+            );
+            assert!(h.state().0.dialog.is_none());
+        }
+        assert!(
+            h.state().1.drops.strip.is_none(),
+            "the hidden column has no current strip"
+        );
+    }
+}
+
 /// Trace-debug #52: a folder change closes the Sets column's modal and the Slot commands window.
 #[test]
 fn a_folder_change_closes_the_sets_modals_and_slot_commands() {

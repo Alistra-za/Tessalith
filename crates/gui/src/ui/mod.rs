@@ -89,9 +89,10 @@ pub mod paint_counts {
         FoldedNames,
         FoldedGroups,
         FoldedItemLookups,
+        DropPosition,
     }
 
-    thread_local! { static BUILDS: Cell<[usize; 10]> = const { Cell::new([0; 10]) }; }
+    thread_local! { static BUILDS: Cell<[usize; 11]> = const { Cell::new([0; 11]) }; }
 
     impl Work {
         pub(super) fn built(self) {
@@ -152,6 +153,19 @@ pub fn draw_with(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
     draw_with_scan(ui, model, state, None);
 }
 
+/// Backlog T21: a modal open now owns the window: an OS drop under it is ignored, and no strip shows (Note JW2).
+fn os_drop_blocked(
+    ctx: &egui::Context,
+    model: &AppModel,
+    drops: &sets_column::DropState,
+    cmds: &slot_commands::SlotCmdState,
+) -> bool {
+    model.dialog.is_some()
+        || drops.pending.is_some()
+        || cmds.open.is_some()
+        || ctx.memory(|m| m.top_modal_layer()).is_some()
+}
+
 /// [`draw_with`] with the mod scan's row under the header (the app passes its Meshes model; tests pass `None`).
 pub fn draw_with_scan(
     ui: &mut egui::Ui,
@@ -174,10 +188,7 @@ pub fn draw_with_scan(
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).
     // Backlog T21: a modal open at this frame's start owns the window; a drop under it is ignored.
-    let modal = model.dialog.is_some()
-        || state.drops.pending.is_some()
-        || state.slot_cmds.open.is_some()
-        || ui.ctx().memory(|m| m.top_modal_layer()).is_some();
+    let modal = os_drop_blocked(ui.ctx(), model, &state.drops, &state.slot_cmds);
     let paths: Vec<std::path::PathBuf> = if modal {
         Vec::new()
     } else {
@@ -189,9 +200,17 @@ pub fn draw_with_scan(
                 .collect()
         })
     };
-    state.drops.file = (!paths.is_empty()).then(|| sets_column::FileDrop {
-        paths,
-        pos: drop_pos(ui.ctx()),
+    let previous_strip = state.drops.strip.take();
+    state.drops.file = (!paths.is_empty()).then(|| {
+        // Note JW2: a release on the previous strip belongs to Sets even if the editor now occupies that space.
+        // Explorer usually supplies no button event; use the OS cursor in that case.
+        let release = previous_strip
+            .as_ref()
+            .and_then(|_| ui.input(sets_column::image_releases).0);
+        let pos = release
+            .or_else(|| drop_pos(ui.ctx()))
+            .filter(|&p| sets_column::strip_owner_at(&previous_strip, p).is_none());
+        sets_column::FileDrop { paths, pos }
     });
     // First, before any widget sees the keys (items 5 and 19).
     actions::keys(ui.ctx(), model, state.drops.pending.is_some());
@@ -276,6 +295,7 @@ pub fn draw_with_scan(
             columns::SETS_MIN..=ui.available_width() - floor,
             model,
             |ui, model| {
+                drops.strip = previous_strip;
                 sets_column::draw(ui, model, thumbs, drops, cmds);
             },
         );
@@ -529,6 +549,8 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
 /// on Windows the cursor is read from the OS and placed with the window's inner position. Elsewhere, and without
 /// viewport information (tests), the last pointer position egui has.
 fn drop_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
+    #[cfg(feature = "test-hooks")]
+    paint_counts::Work::DropPosition.built();
     os_cursor(ctx).or_else(|| ctx.input(|i| i.pointer.latest_pos()))
 }
 

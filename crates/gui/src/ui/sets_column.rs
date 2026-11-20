@@ -151,7 +151,8 @@ pub struct MapTargetState {
     sel: Option<TargetPick>,
 }
 
-/// Item 17: files dropped from Explorer this frame, and where (`None` when the position is unknown).
+/// Item 17: files dropped from Explorer this frame, and where a slot may take them.
+/// An unknown position or a release owned by the Sets strip opens the folder (Note JW2).
 #[derive(Debug, Clone)]
 pub struct FileDrop {
     pub paths: Vec<std::path::PathBuf>,
@@ -214,6 +215,16 @@ pub(super) struct ChoiceOptions {
     views: std::sync::Weak<Vec<SetView>>,
     editable: bool,
     buttons: Vec<(DropChoice, Option<String>)>,
+}
+
+pub(super) fn strip_owner_at(
+    strip: &Option<(String, egui::Rect, egui::Rect)>,
+    pos: egui::Pos2,
+) -> Option<&str> {
+    strip
+        .as_ref()
+        .filter(|(_, painted, hit)| painted.contains(pos) || hit.contains(pos))
+        .map(|(id, ..)| id.as_str())
 }
 
 impl DropState {
@@ -2190,39 +2201,30 @@ pub fn draw(
     }
     let image = egui::DragAndDrop::has_payload_of_type::<DragItem>(&ctx)
         || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(&ctx);
+    let files = ui.input(|i| !i.raw.hovered_files.is_empty());
+    // winit sends no pointer moves during an Explorer drag, including between cards.
+    let os = if files {
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        super::drop_pos(&ctx)
+    } else {
+        None
+    };
+    let modal = files && super::os_drop_blocked(&ctx, model, st, cmds);
+    let pointer = if image {
+        ctx.pointer_latest_pos()
+    } else {
+        None
+    };
+    let at = image_drag_at(image, files, modal, pointer, os);
     let mut next_strip = None;
     // Test last frame's painted area and its bridge once, before any zone can take the release.
-    let (release, shift_release) = ctx.input(|i| {
-        if !image || !i.pointer.any_released() {
-            return (None, None);
-        }
-        let releases = i.events.iter().filter_map(|event| match event {
-            egui::Event::PointerButton {
-                button,
-                pressed: false,
-                pos,
-                modifiers,
-            } => Some((*pos, *button, modifiers.shift)),
-            _ => None,
-        });
-        let last = releases.clone().next_back().map(|(pos, ..)| pos);
-        let mut primary = releases.filter(|(_, button, _)| *button == egui::PointerButton::Primary);
-        let shift = match (primary.next(), primary.next()) {
-            (Some((pos, _, true)), None) => Some(pos),
-            _ => None,
-        };
-        (last, shift)
-    });
-    let strip_at = |pos| {
-        st.strip
-            .as_ref()
-            .filter(|(_, painted, hit)| image && (painted.contains(pos) || hit.contains(pos)))
-            .map(|(id, ..)| id.as_str())
+    let (release, shift_release) = if image {
+        ctx.input(image_releases)
+    } else {
+        (None, None)
     };
-    let strip_owner = release
-        .or_else(|| ctx.pointer_latest_pos())
-        .and_then(strip_at);
-    let shift_strip = shift_release.and_then(strip_at);
+    let strip_owner = release.or(at).and_then(|p| strip_owner_at(&st.strip, p));
+    let shift_strip = shift_release.and_then(|p| strip_owner_at(&st.strip, p));
     let out = area.show(ui, |ui| {
         let view_top = ui.clip_rect().top();
         // `top` runs on the remembered heights, not on the laid-out rects: egui rounds each allocation, and the sum of
@@ -2263,7 +2265,8 @@ pub fn draw(
                     egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
                 if ui.is_rect_visible(probe) {
                     let look = PillLook {
-                        image: image && next_strip.is_none(),
+                        at: at.filter(|_| next_strip.is_none()),
+                        os_drag: files && !image,
                         strip_owner,
                         release,
                         shift: shift(),
@@ -2818,7 +2821,8 @@ struct PillOut {
 /// How a pill is drawn this frame.
 #[derive(Clone, Copy)]
 struct PillLook<'a> {
-    image: bool,
+    at: Option<egui::Pos2>,
+    os_drag: bool,
     strip_owner: Option<&'a str>,
     release: Option<egui::Pos2>,
     shift: bool,
@@ -3175,7 +3179,15 @@ fn pill(
             },
         );
         // Final review I1: the zone's hover stroke is under the card frame, so outline the drop target on top.
-        let over = look.image && !covered && (zone.contains_pointer() || owns);
+        let over = look.at.is_some()
+            && image_over(
+                look.os_drag,
+                look.at,
+                zone.rect.intersect(ui.clip_rect()),
+                zone.contains_pointer(),
+                covered,
+                owns,
+            );
         if editing.on && over {
             ui.painter().rect_stroke(
                 zone.rect,
@@ -4753,11 +4765,151 @@ fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
     });
 }
 
+/// Note JW2: the last release owns the drop. Only a single Shift-primary release can use a remembered answer.
+pub(super) fn image_releases(i: &egui::InputState) -> (Option<egui::Pos2>, Option<egui::Pos2>) {
+    if !i.pointer.any_released() {
+        return (None, None);
+    }
+    let releases = i.events.iter().filter_map(|event| match event {
+        egui::Event::PointerButton {
+            button,
+            pressed: false,
+            pos,
+            modifiers,
+        } => Some((*pos, *button, modifiers.shift)),
+        _ => None,
+    });
+    let last = releases.clone().next_back().map(|(pos, ..)| pos);
+    let mut primary = releases.filter(|(_, button, _)| *button == egui::PointerButton::Primary);
+    let shift = match (primary.next(), primary.next()) {
+        (Some((pos, _, true)), None) => Some(pos),
+        _ => None,
+    };
+    (last, shift)
+}
+
+/// Note JW2 (A4-2): an in-app image follows egui's pointer; files from Explorer follow the OS cursor until a modal opens.
+fn image_drag_at(
+    item: bool,
+    files: bool,
+    modal: bool,
+    pointer: Option<egui::Pos2>,
+    os: Option<egui::Pos2>,
+) -> Option<egui::Pos2> {
+    if item {
+        pointer
+    } else if files && !modal {
+        os
+    } else {
+        None
+    }
+}
+
+/// Note JW2 (A4-2): whether the image is over this card or its previous strip.
+fn image_over(
+    os_drag: bool,
+    at: Option<egui::Pos2>,
+    visible_card: egui::Rect,
+    zone_hover: bool,
+    covered: bool,
+    owns: bool,
+) -> bool {
+    !covered
+        && (owns
+            || if os_drag {
+                at.is_some_and(|p| visible_card.contains(p))
+            } else {
+                zone_hover
+            })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui_kittest::kittest::{NodeT, Queryable};
     use engine::codes::Code;
+
+    #[test]
+    fn an_image_drag_is_found_and_placed() {
+        let (p, o) = (Some(egui::pos2(10.0, 10.0)), Some(egui::pos2(50.0, 50.0)));
+        assert_eq!(
+            image_drag_at(true, false, false, p, None),
+            p,
+            "a texture or a share: egui's pointer"
+        );
+        assert_eq!(
+            image_drag_at(true, true, false, p, o),
+            p,
+            "an egui drag wins over hovering files"
+        );
+        assert_eq!(
+            image_drag_at(false, true, false, p, o),
+            o,
+            "files from Explorer: the OS cursor"
+        );
+        assert_eq!(
+            image_drag_at(false, true, true, p, o),
+            None,
+            "a dialog is open: no strip"
+        );
+        assert_eq!(
+            image_drag_at(false, false, false, p, o),
+            None,
+            "nothing in flight"
+        );
+        assert_eq!(
+            image_drag_at(false, true, false, p, None),
+            None,
+            "no position known"
+        );
+    }
+
+    /// The real pin of Task 7 (the kittest's OS position is egui's pointer): with files from Explorer, the card under the
+    /// OS cursor shows the strip, and the card under egui's stale pointer does not.
+    #[test]
+    fn files_from_explorer_place_the_strip_by_the_os_cursor() {
+        // Two cards, A above B, as `draw` stacks them.
+        let a = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 60.0));
+        let b = egui::Rect::from_min_size(egui::pos2(0.0, 70.0), egui::vec2(200.0, 60.0));
+        // egui's pointer stayed on A when the drag came in; the OS cursor has moved on to B.
+        let (stale, os) = (Some(a.center()), Some(b.center()));
+        let at = image_drag_at(false, true, false, stale, os);
+        assert_eq!(at, os, "files from Explorer: the OS cursor");
+        // `zone.contains_pointer()` follows the stale pointer: true on A, false on B.
+        let shows = |card: egui::Rect, zone_hover: bool| {
+            image_over(true, at, card, zone_hover, false, false)
+        };
+        let showing: Vec<char> = [('A', a, true), ('B', b, false)]
+            .into_iter()
+            .filter(|&(_, card, hover)| shows(card, hover))
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(
+            showing,
+            ['B'],
+            "only the card under the OS cursor shows the strip"
+        );
+        let clip = egui::Rect::from_min_max(b.min, egui::pos2(b.right(), b.center().y - 1.0));
+        assert!(
+            !image_over(true, at, b.intersect(clip), true, false, false),
+            "OS cursor in clipped-away part"
+        );
+        // A card under last frame's strip shows nothing; the strip's own card keeps it with the cursor off the card.
+        assert!(!image_over(true, at, b, false, true, false), "covered");
+        assert!(
+            image_over(true, Some(egui::pos2(100.0, 200.0)), a, false, false, true),
+            "owns"
+        );
+        // No OS position: no card.
+        assert!(
+            !image_over(true, None, b, true, false, false),
+            "nothing known, egui's hover ignored"
+        );
+        // An egui drag (a texture or a share): egui's own hover decides, as in Task 6.
+        let at = image_drag_at(true, true, false, stale, os);
+        assert!(image_over(false, at, a, true, false, false));
+        assert!(!image_over(false, at, b, false, false, false));
+    }
 
     #[test]
     fn the_empty_strip_is_sized_by_its_slots() {
