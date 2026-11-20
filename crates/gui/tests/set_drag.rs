@@ -2,9 +2,10 @@
 mod support;
 use eframe::egui;
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use image::{ImageBuffer, Luma, Rgb};
+use sdc_gui::model::sets::DropOutcome;
 use sdc_gui::model::AppModel;
 use sdc_gui::ui::sets_column::Pending;
 use sdc_gui::ui::State;
@@ -128,4 +129,85 @@ fn the_drop_dialog_offers_a_helper_no_duplicate() {
     assert!(h
         .query_by_label("Duplicate the source for this set")
         .is_none());
+}
+
+fn assert_refused_button(h: &mut H, dir: &Path, label: &str, reason: &str) {
+    let files = || {
+        walkdir::WalkDir::new(dir)
+            .sort_by_file_name()
+            .into_iter()
+            .map(Result::unwrap)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| (e.path().to_owned(), std::fs::read(e.path()).unwrap()))
+            .collect::<Vec<_>>()
+    };
+    h.run();
+    let before = files();
+    let undo = h.state().0.history.undo.len();
+    let button = h.get_by_role_and_label(Role::Button, label);
+    assert!(button.accesskit_node().is_disabled(), "{label} is enabled");
+    assert_eq!(
+        button.accesskit_node().description().as_deref(),
+        Some(reason)
+    );
+    button.hover();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::Label, reason);
+    h.get_by_role_and_label(Role::Button, label).click();
+    h.run();
+    assert!(matches!(
+        h.state().1.drops.pending,
+        Some(Pending::Choice { .. })
+    ));
+    assert_eq!(h.state().0.history.undo.len(), undo);
+    assert_eq!(files(), before);
+}
+
+#[test]
+fn refused_button_for_a_non_raw_helper() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    m.items.iter_mut().find(|i| i.key == AO).unwrap().helper = None;
+    let DropOutcome::AskChoice { from } = m.drop_on_set(AO, B) else {
+        panic!("expected a choice for the helper");
+    };
+    let mut h = harness(m);
+    h.state_mut().1.drops.pending = Some(choice(AO, B, &from));
+    assert_refused_button(
+        &mut h,
+        d.path(),
+        "Share (borrow its finished output)",
+        "Only a raw helper can be shared as a file.",
+    );
+}
+
+#[test]
+fn refused_buttons_for_a_packed_map() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let packed = m
+        .items
+        .iter()
+        .find(|i| i.name == "rock01_rmaos")
+        .unwrap()
+        .key
+        .clone();
+    let set = "landscape/leaf";
+    let DropOutcome::AskChoice { from } = m.drop_on_set(&packed, set) else {
+        panic!("expected a choice for the packed map");
+    };
+    let mut h = harness(m);
+    h.state_mut().1.drops.pending = Some(choice(&packed, set, &from));
+    assert_refused_button(
+        &mut h,
+        d.path(),
+        "Duplicate the source for this set",
+        "A packed map cannot be duplicated. Share its finished output or move its raw maps.",
+    );
+    assert_refused_button(
+        &mut h,
+        d.path(),
+        "Move it here",
+        "a packed map follows its raw maps; move those, or share the finished map",
+    );
 }

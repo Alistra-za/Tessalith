@@ -16,9 +16,9 @@ use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, member_tail, shader_options, slot_shown, view_row,
-    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
-    SlotShown,
+    badge_text, fill_proposals, is_shareable_helper, kind_text, member_tail, shader_options,
+    slot_of, slot_shown, view_row, DropChoice, DropOutcome, FillProposal, Missing, SetView,
+    SlotFill, SlotKind, SlotLink, SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -3307,10 +3307,12 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     }
     let Some(p) = st.pending.clone() else { return };
     use super::dialogs::Role;
+    let mut dragged = None;
     // Per case: the title, the body line, and the footer as (label, role, what it answers).
     let (title, line, footer) = match &p {
         Pending::Choice { item, from, .. } => {
-            let name = model.item(item).map_or(item.clone(), |i| i.name.clone());
+            dragged = model.item(item);
+            let name = dragged.map_or(item.as_str(), |i| i.name.as_str());
             // K5: the drop choices stay in the body; the footer has only Cancel.
             let footer = vec![("Cancel".to_string(), Role::Plain, ModalAnswer::Close)];
             (format!("{name} is in {from}"), None, footer)
@@ -3349,20 +3351,33 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             if let Some(line) = &line {
                 ui.label(line);
             }
-            if let Pending::Choice { item, .. } = &p {
+            if matches!(p, Pending::Choice { .. }) {
                 // Note JW5: helpers have no Duplicate button; a raw helper shares the file itself.
-                let share = if model.is_shareable_helper(item) {
+                let raw_helper = dragged.is_some_and(is_shareable_helper);
+                let kind = dragged.map(|i| i.kind);
+                let slot = dragged.and_then(slot_of);
+                let share = if raw_helper {
                     "Share (use this file here too, no copy)"
                 } else {
                     "Share (borrow its finished output)"
                 };
-                for c in model.drop_choices(item) {
+                for &c in DropChoice::offered(kind) {
                     let label = match c {
                         DropChoice::Move => "Move it here",
                         DropChoice::Share => share,
                         DropChoice::Duplicate => "Duplicate the source for this set",
                     };
-                    if ui.button(label).clicked() {
+                    let refusal = if raw_helper && c == DropChoice::Share {
+                        None
+                    } else {
+                        c.slot_refusal(kind, slot)
+                    };
+                    let r = ui.add_enabled(refusal.is_none(), egui::Button::new(label));
+                    if let Some(why) = refusal {
+                        ui.ctx()
+                            .accesskit_node_builder(r.id, |b| b.set_description(why));
+                        r.on_disabled_hover_text(why);
+                    } else if r.clicked() {
                         answer = Some(ModalAnswer::Choice(c));
                     }
                 }

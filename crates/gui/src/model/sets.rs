@@ -2636,6 +2636,46 @@ pub enum DropChoice {
     Duplicate,
 }
 
+impl DropChoice {
+    pub(crate) fn offered(kind: Option<ItemKind>) -> &'static [Self] {
+        if kind == Some(ItemKind::Helper) {
+            &[Self::Move, Self::Share]
+        } else {
+            &[Self::Move, Self::Share, Self::Duplicate]
+        }
+    }
+
+    /// Item-only refusals for slot drops. A raw helper shared as a file bypasses the slot.
+    pub(crate) fn slot_refusal(
+        self,
+        kind: Option<ItemKind>,
+        slot: Option<SlotKind>,
+    ) -> Option<&'static str> {
+        match self {
+            Self::Move if kind == Some(ItemKind::Packed) => Some(PACKED_MOVE),
+            Self::Duplicate if kind == Some(ItemKind::Packed) => Some(PACKED_DUPLICATE),
+            Self::Duplicate if kind == Some(ItemKind::Helper) => Some(HELPER_DUPLICATE),
+            Self::Share if slot.is_none() && kind == Some(ItemKind::Helper) =>
+                Some("Only a raw helper can be shared as a file."),
+            Self::Share if slot.is_none() =>
+                Some("only a finished texture can be shared; duplicate the source to use it in two sets"),
+            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
+            Self::Share if slot.is_some_and(|s| s.slot_number().is_none()) =>
+                Some("Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"),
+            _ => None,
+        }
+    }
+}
+
+/// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
+pub(crate) fn is_shareable_helper(item: &TextureItem) -> bool {
+    item.kind == ItemKind::Helper
+        && item
+            .helper
+            .as_ref()
+            .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropOutcome {
     Joined,
@@ -3429,7 +3469,10 @@ impl AppModel {
             return DropOutcome::Refused(why);
         }
         // Note HH5: a no-set helper can be shared, so it asks too; every other no-set texture moves.
-        if from.is_none() && self.is_no_set(item) && self.is_shareable_helper(item) {
+        if from.is_none()
+            && self.is_no_set(item)
+            && self.item(item).is_some_and(is_shareable_helper)
+        {
             return DropOutcome::AskChoice {
                 from: "no set".into(),
             };
@@ -3516,7 +3559,7 @@ impl AppModel {
             Ok(t) => t,
             Err(e) => return DropOutcome::Refused(e),
         };
-        if choice == DropChoice::Share && self.is_shareable_helper(item) {
+        if choice == DropChoice::Share && self.item(item).is_some_and(is_shareable_helper) {
             return match self.share_helper(item, &target) {
                 Ok(()) => DropOutcome::Joined,
                 Err(e) => DropOutcome::Refused(e),
@@ -3570,21 +3613,7 @@ impl AppModel {
     /// Note JW5: the answers the drop dialog offers for `item`, in order: Move, Share, and Duplicate unless the
     /// item is a helper (`ItemKind::Helper`).
     pub fn drop_choices(&self, item: &str) -> Vec<DropChoice> {
-        if self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) {
-            vec![DropChoice::Move, DropChoice::Share]
-        } else {
-            vec![DropChoice::Move, DropChoice::Share, DropChoice::Duplicate]
-        }
-    }
-
-    /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
-    pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
-        self.item(item).is_some_and(|i| {
-            i.kind == ItemKind::Helper
-                && i.helper
-                    .as_ref()
-                    .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
-        })
+        DropChoice::offered(self.item(item).map(|i| i.kind)).to_vec()
     }
 
     /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
@@ -3646,13 +3675,10 @@ impl AppModel {
         if choice == DropChoice::Move {
             self.leaves_locked(item)?;
         }
+        if let Some(why) = choice.slot_refusal(self.item(item).map(|i| i.kind), slot) {
+            return Err(why.into());
+        }
         match choice {
-            DropChoice::Move if self.is_packed(item) => Err(PACKED_MOVE.into()),
-            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
-            DropChoice::Share if slot.is_some_and(|s| s.slot_number().is_none()) => Err(
-                "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
-                    .into(),
-            ),
             // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
             DropChoice::Share
                 if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail))
@@ -3663,19 +3689,8 @@ impl AppModel {
                     target.id
                 ))
             }
-            DropChoice::Share if slot.is_none() && self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) => {
-                Err("Only a raw helper can be shared as a file.".into())
-            }
-            DropChoice::Share if slot.is_none() => Err(
-                "only a finished texture can be shared; duplicate the source to use it in two sets"
-                    .into(),
-            ),
             DropChoice::Share if self.set_of_item(item).is_none() => {
                 Err("the texture is in no set".into())
-            }
-            DropChoice::Duplicate if self.is_packed(item) => Err(PACKED_DUPLICATE.into()),
-            DropChoice::Duplicate if self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) => {
-                Err(HELPER_DUPLICATE.into())
             }
             _ => Ok(()),
         }
