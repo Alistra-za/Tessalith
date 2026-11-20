@@ -473,20 +473,20 @@ Report-only rows, each against the (1, 1) default under the same setting:
 
 Two limits of this measurement:
 
-- **The NVIDIA 3-colour model has a gap in rgbcx's tables.** The table for the NVIDIA midpoint of a 3-colour block (`interp_half_6_nv`) is asymmetric, and `solid_block` and `bc1_encode3` swap the endpoints after scoring. The score the encoder minimises then differs from what NVIDIA decodes on some blocks. Both NVIDIA-weighted candidates were measured with this handicap; AMD's table (`interp_half_5_6_amd`) is symmetric and has no such gap: Task 2's trace of 64 encodings found zero AMD gap.
+- Both NVIDIA-weighted candidates were affected by the [three-colour midpoint gap](#bc1-nvidia-three-colour-midpoint-2026-11-20-note-jz).
 - **1-bit alpha gets worse under both candidates.** On generated blocks, total error against (1, 1) is +0.035% for W21 and +0.067% for W31. The `rgb_real` images are opaque and do not exercise the alpha path, so no image-set figure exists for it.
 
 Result: nothing passed and the default stays (1, 1). The weight parameter and the measurement tool stay on the branch, unmerged.
 
 #### BC1 NVIDIA three-colour midpoint (2026-11-20, Note JZ)
 
-Does BC1 gain quality if the encoder scores the green midpoint that NVIDIA will decode from the packed endpoints? The trial kept rgbcx's NVIDIA table. It looked up green in the order of the two stored RGB565 words when scoring a three-colour fit or choosing endpoints for a solid block.
+Does BC1 gain quality if the encoder scores the green midpoint that NVIDIA will decode from the packed endpoints? In the shipped encoder, `solid_block` and `bc1_encode3` can swap endpoints after scoring. That swap can change the green midpoint because rgbcx's NVIDIA lookup (`interp_half_6_nv`) is asymmetric. The trial kept rgbcx's NVIDIA table. It looked up green in the order of the two stored RGB565 words when scoring a three-colour fit or choosing endpoints for a solid block.
 
 For example, stored words `0x0000 0x0200` have green codes (0, 16). Selector 2 gives green 33 on NVIDIA. With words `0x0200 0x0800`, red puts green 16 first. The NVIDIA midpoint is then 32. AMD gives 33 in both cases. On a test block where all 16 texels chose the midpoint, the default search scored 64 units of squared error across both decoders. The packed bytes scored 32.
 
 The trial used level 18 on 93 opaque `rgb_real` images with transparent black off. Of 5,799,936 default blocks, 127,087 used three colours. In 7,693 blocks across 48 images, packing swapped the endpoints and changed a midpoint used by an image texel. These included 7,628 fitted blocks and 65 solids.
 
-**Decoder check.** Before scoring, texcore and rgbcx decoded the same bytes with their NVIDIA models. All 16 RGBA texels agreed on every block across 19 rows (1,763,180,544 comparisons). The original rgbcx NVIDIA and AMD decoders graded in-image RGB. The hardware evidence is the [RTX 4090 readback](#bc1-decoder-model-2026-10-29) of 4,096 random blocks on DX12 and Vulkan. The software checks cover every ordered green pair. Hardware coverage is limited to that sample, with no AMD or Intel readback.
+**Decoder check.** Before scoring, texcore and rgbcx decoded the same bytes with their NVIDIA models. All 16 RGBA texels agreed on every block across 19 rows (1,763,180,544 comparisons). The original rgbcx NVIDIA and AMD decoders graded in-image RGB. Task 3's restricted-minimum test, `nv_table_restricted_minima` in `crates/bcenc/src/bc1/nv_table.rs` (`research/bcenc-nv-table` at `472ede38`), checks every ordered green pair for all 256 targets at each trial weight. The hardware evidence is the [RTX 4090 readback](#bc1-decoder-model-2026-10-29) of 4,096 random blocks on DX12 and Vulkan. Hardware coverage is limited to that sample, with no AMD or Intel readback.
 
 **Plain RGB.** C++ Dual (`cpp:18`) and the Rust default (`rust:w11`) matched byte for byte on every block and tied on both decoders on all 93 images. The per-image scores for W11, W21 and W31 reproduced the [decoder weights results](#bc1-decoder-weights-2026-11-15-note-hy18) to their published four decimal places.
 
@@ -511,7 +511,7 @@ Against the legacy encoder at the same weights, nv11 changed 59,176 blocks, nv21
 
 Perceptual BC1 fails the per-image rule. All three corrections lowered total masked error at fixed weights, but only nv11 beat the default on that measure. The four-colour control exercises BC3's colour half. All its bytes matched the legacy row at each fixed weight. Fast search, real cutouts and complete BC3 textures need their own measurements.
 
-**Verdict.** All three candidates failed the 0.02 dB NVIDIA mean-gain floor. The interval for nv11 also includes zero. No candidate qualified. The speed run was not made because adoption required both quality and speed (NV-11 to NV-14). Using medians from the same run, a candidate had to take less than C++ Dual time divided by 1.6. Its added time over Rust default could use at most one third of the time Rust saved over C++ Dual. For historical reference only, plan D measured 27.3 us/block for C++ Dual, 4.02 for Rust default, 4.26 for legacy W21 and 4.03 for legacy W31.
+**Verdict.** All three candidates failed the 0.02 dB NVIDIA mean-gain floor. The interval for nv11 also includes zero. No candidate qualified. The speed run was not made because adoption required both quality and speed. Using medians from the same run, a candidate had to take less than C++ Dual time divided by 1.6. Its added time over Rust default could use at most one third of the time Rust saved over C++ Dual. For historical reference only, plan D measured 27.3 µs/block for C++ Dual, 4.02 for Rust default, 4.26 for legacy W21 and 4.03 for legacy W31.
 
 Reproduce the tables at `472ede38` on `research/bcenc-nv-table`. The evidence folder is `F:\ai\dds\bench\nv-table-2026-11-20`. The per-image scores and run logs are `plain`, `p` and `4c` (CSV and TXT). The generated cutout results are in `masked.txt`.
 

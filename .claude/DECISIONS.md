@@ -2068,5 +2068,5 @@ The owner: "if a normal is only ever in a pbr set, its alpha should always be dr
 
 ## Note JZ — BC1 NVIDIA three-colour midpoint (main team, 2026-11-20)
 
-- **JZ1** The trial scored three-colour fits and solid blocks in packed endpoint order. No candidate met the quality rule. Keep rgbcx's NVIDIA table and the default byte-exact Dual path at (1, 1) (HY18). See the [midpoint measurements](../docs/research/encoder-benchmark.md#bc1-nvidia-three-colour-midpoint-2026-11-20-note-jz).
+- **JZ1** The trial scored three-colour fits and solid blocks in packed endpoint order. No candidate met the quality rule. The shipped encoder keeps its legacy midpoint lookup (scored before the endpoint swap), rgbcx's NVIDIA table and the byte-exact default Dual path at (1, 1) (HY18). See the [midpoint measurements](../docs/research/encoder-benchmark.md#bc1-nvidia-three-colour-midpoint-2026-11-20-note-jz).
 - **JZ2** Adoption needs a separate owner instruction and a port to current main. Require fresh quality and speed results for each affected mode. Keep cutouts, perceptual, fast and BC3 on their legacy paths until each qualifies separately from plain BC1. For changed bytes, bump the affected `encode_version`, re-record the goldens and document the identity change in DECISIONS.
