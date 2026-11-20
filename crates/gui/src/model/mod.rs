@@ -2238,11 +2238,12 @@ impl AppModel {
                     && self.review.is_some()
                     && self.currency.pending.take().is_some()
                 {
-                    if let Ok(verdicts) = &result {
+                    if let (false, Ok(verdicts)) = (self.currency.reconciled, &result) {
                         let reviewed: BTreeSet<_> =
                             self.primary_items().map(|i| &i.job_key).collect();
                         if !reviewed.into_iter().eq(verdicts.keys()) {
                             self.replan();
+                            self.currency.reconciled = true;
                             return;
                         }
                     }

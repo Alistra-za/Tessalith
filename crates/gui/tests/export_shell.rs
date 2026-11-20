@@ -114,6 +114,18 @@ fn the_up_to_date_count_never_outlives_its_plan() {
     assert!(m.review_gate().is_ok());
 }
 
+fn held_currency(m: &mut AppModel) -> sdc_gui::worker::WorkerMsg {
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        m.poll();
+        if let Some(reply) = m.take_held().pop() {
+            return reply;
+        }
+        assert!(std::time::Instant::now() < until, "no currency reply");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn a_stale_preview_result_is_dropped() {
     use sdc_gui::model::StaleKind;
@@ -125,15 +137,7 @@ fn a_stale_preview_result_is_dropped() {
         m.set_reencode_all(false);
         m.hold_plan_results = true;
         m.open_review();
-        let until = std::time::Instant::now() + Duration::from_secs(5);
-        let held = loop {
-            m.poll();
-            if let Some(reply) = m.take_held().pop() {
-                break reply;
-            }
-            assert!(std::time::Instant::now() < until, "no currency reply");
-            std::thread::sleep(Duration::from_millis(10));
-        };
+        let held = held_currency(&mut m);
         let WorkerMsg::Currency {
             generation,
             request,
@@ -202,6 +206,61 @@ fn review_replans_for_a_new_ready_set() {
     }
     export_and_compare(&mut m, d.path());
     assert_eq!(m.export.progress(), (6, 6));
+}
+
+#[test]
+fn review_replans_only_once_for_two_differing_previews() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.hold_plan_results = true;
+    support::add_ready_set(d.path(), "b");
+    m.open_review();
+
+    for settled in [4, 6] {
+        let reply = held_currency(&mut m);
+        assert_eq!(m.export_files(), settled);
+        let WorkerMsg::Currency { result, .. } = &reply else {
+            panic!("expected a preview of the {settled}-output plan")
+        };
+        let keys = result.as_ref().unwrap();
+        assert_eq!(keys.len(), settled + 2, "preview {keys:?}");
+        let generation = m.generation();
+        m.handle_held(reply);
+        if settled == 4 {
+            assert_eq!(m.generation(), generation + 1, "first mismatch replans");
+            assert!(m.full_plan_pending());
+            while m.full_plan_pending() {
+                for msg in held_plan(&mut m) {
+                    m.handle_held(msg);
+                }
+            }
+            // Finish recording b's automatic decisions before the next preview sees c.
+            support::add_ready_set(d.path(), "c");
+        } else {
+            assert_eq!(m.generation(), generation, "second mismatch replanned");
+        }
+    }
+
+    assert!(m.review.is_some());
+    assert!(!m.full_plan_pending());
+    assert!(!m.written_text().contains("checking which changed"));
+    assert!(m.review_gate().is_ok());
+    let writes = m.review_writes();
+    let root = m.output_root().join("textures/g");
+    let expected = ["a.dds", "a_n.dds", "b.dds", "b_n.dds", "u.dds", "u_n.dds"];
+    let paths = expected.map(|name| root.join(name));
+    assert!(writes.outputs.iter().map(|w| &w.path).eq(paths.iter()));
+
+    m.hold_plan_results = false;
+    m.set_reencode_all(true);
+    idle(&mut m);
+    assert_eq!(m.export_files(), 8);
+    m.close_review();
+    support::add_ready_set(d.path(), "e");
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.export_files(), 10);
 }
 
 #[test]

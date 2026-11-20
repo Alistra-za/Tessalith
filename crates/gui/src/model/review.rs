@@ -441,11 +441,16 @@ pub(super) struct Currency {
     pub(super) revision: u64,
     pub(super) pending: Option<CancelToken>,
     pub(super) verdicts: Option<crate::worker::CurrencyVerdicts>,
+    pub(super) reconciled: bool,
     due: bool,
 }
 
 impl AppModel {
     pub(super) fn invalidate_currency(&mut self) {
+        // Follow-up plans started while a worker result lands belong to the same Review request.
+        if self.landing == 0 {
+            self.currency.reconciled = false;
+        }
         if let Some(token) = self.currency.pending.take() {
             token.cancel();
         }
@@ -494,6 +499,7 @@ impl AppModel {
         review.options_open = false;
         review.also_blocked = false;
         self.show_tab(BottomTab::Review);
+        self.currency.reconciled = false;
         self.invalidate_currency();
         self.request_currency();
         // E7: the list Review opens with reads the disk as it is now, not a second-old answer.
