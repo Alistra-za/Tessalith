@@ -3395,8 +3395,7 @@ impl AppModel {
             .map(|n| (n.text.clone(), n.lines.clone()))
     }
 
-    /// The plan generation, bumped once per `replan` (tests: one plan per bulk apply).
-    #[cfg(feature = "test-hooks")]
+    /// The plan generation, bumped once per `replan`.
     pub fn generation(&self) -> u64 {
         self.generation
     }

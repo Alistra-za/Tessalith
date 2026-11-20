@@ -158,6 +158,7 @@ pub struct DropState {
     /// Note JW6: the last answer for this run, kept when opening another folder.
     pub last_choice: Option<DropChoice>,
     pub pending: Option<Pending>,
+    pub(super) choice_options: Option<ChoiceOptions>,
     /// Item 17: a file drop not yet taken by a slot card this frame (`ui::draw_with_scan` opens its folder after).
     pub file: Option<FileDrop>,
     pub slot_note: Option<SlotNote>,
@@ -186,6 +187,52 @@ pub struct DropState {
     /// Note HF6: the selection last frame (`None` on the first). A selection that moved opens the group of what it
     /// moved to: a click on a texture, Go to set.
     pub selection: Option<Selection>,
+}
+
+/// The answers for this opening. A weak reference lets the model reuse its views on a replan.
+#[derive(Debug)]
+pub(super) struct ChoiceOptions {
+    item: String,
+    set: String,
+    generation: u64,
+    views: std::sync::Weak<Vec<SetView>>,
+    editable: bool,
+    buttons: Vec<(DropChoice, Option<String>)>,
+}
+
+impl DropState {
+    fn choice_buttons(
+        &mut self,
+        model: &AppModel,
+        item: &str,
+        set: &str,
+    ) -> &[(DropChoice, Option<String>)] {
+        let views = crate::model::sets::views(model);
+        let generation = model.generation();
+        let editable = model.sets_editable();
+        if self.choice_options.as_ref().is_some_and(|cached| {
+            cached.item != item
+                || cached.set != set
+                || cached.generation != generation
+                || cached.views.as_ptr() != Arc::as_ptr(&views)
+                || cached.editable != editable
+        }) {
+            self.choice_options = None;
+        }
+        let options = self.choice_options.get_or_insert_with(|| ChoiceOptions {
+            item: item.to_owned(),
+            set: set.to_owned(),
+            generation,
+            views: Arc::downgrade(&views),
+            editable,
+            buttons: model
+                .drop_choices(item)
+                .into_iter()
+                .map(|c| (c, model.choice_refused(item, set, c)))
+                .collect(),
+        });
+        &options.buttons
+    }
 }
 
 /// Review I1: a reveal re-aims at most this many frames, so a key that names no visible card cannot loop.
@@ -2786,7 +2833,16 @@ fn pill(
         Some(Dropped::Item(p)) => acts.push(Act::Drop(
             p.0.clone(),
             v.id.clone(),
-            ui.input(|i| i.modifiers.shift),
+            ui.input(|i| {
+                i.events.iter().find_map(|event| match event {
+                    egui::Event::PointerButton {
+                        pressed: false,
+                        modifiers,
+                        ..
+                    } => Some(modifiers.shift),
+                    _ => None,
+                }) == Some(true)
+            }),
         )),
         Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
             item: p.item.clone(),
@@ -3399,6 +3455,9 @@ fn choose(model: &mut AppModel, item: String, set: String, c: DropChoice) -> Opt
 /// The drop, delete and rename dialogs. Drawn by `ui::draw_with_scan` whether or not this column shows: a file
 /// dropped on a slot card asks its Replace here too (item 17).
 pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
+    if !matches!(st.pending, Some(Pending::Choice { .. })) {
+        st.choice_options = None;
+    }
     if matches!(st.pending, Some(Pending::Rename { .. })) {
         rename_modal(ctx, model, st);
         return;
@@ -3492,15 +3551,15 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
                 } else {
                     "Share (borrow its finished output)"
                 };
-                for c in model.drop_choices(item) {
+                let last = st.last_choice;
+                for &(c, ref refusal) in st.choice_buttons(model, item, set) {
                     let label = match c {
                         DropChoice::Move => "Move it here",
                         DropChoice::Share => share,
                         DropChoice::Duplicate => "Duplicate the source for this set",
                     };
-                    let refusal = model.choice_refused(item, set, c);
                     let usable = refusal.is_none();
-                    let remembered = usable && st.last_choice == Some(c);
+                    let remembered = usable && last == Some(c);
                     let mut button = egui::Button::new(label);
                     if remembered {
                         def = Some(c);
@@ -3520,7 +3579,7 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
                     if let Some(why) = refusal {
                         ui.ctx()
                             .accesskit_node_builder(r.id, |b| b.set_description(why.as_str()));
-                        r.on_disabled_hover_text(why);
+                        r.on_disabled_hover_text(why.as_str());
                     } else if r.clicked() {
                         answer = Some(ModalAnswer::Choice(c));
                     }
@@ -3535,13 +3594,17 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     }
     // Esc and a click outside cancel; Enter presses the OK of a refusal.
     let refusal = matches!(p, Pending::Refused(_));
-    if answer.is_none() && keys.enter {
-        answer = def.map(ModalAnswer::Choice);
-    }
-    if answer.is_none() && (keys.cancel || (keys.enter && refusal)) {
+    if keys.cancel {
         answer = Some(ModalAnswer::Close);
+    } else if answer.is_none() && keys.enter {
+        answer = if refusal {
+            Some(ModalAnswer::Close)
+        } else {
+            def.map(ModalAnswer::Choice)
+        };
     }
     let Some(answer) = answer else { return };
+    st.choice_options = None;
     st.pending = match (answer, p) {
         (ModalAnswer::Choice(c), Pending::Choice { item, set, .. }) => {
             let next = choose(model, item, set, c);

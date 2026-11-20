@@ -76,10 +76,7 @@ fn on_card_of<'a>(h: &'a H, id: &str, label: &'a str) -> Vec<egui_kittest::Node<
         .collect()
 }
 
-/// Press at `at`, move to `to` in six steps (the payload pass and the painted one each), release with `release` held.
-/// egui 0.37's `RawInput` has no `modifiers` field: `i.modifiers` changes only on `Event::ModifiersChanged`, and
-/// keeps its value across frames (`input_state/mod.rs` l.395, l.434). Kittest runs one frame per queued event, so
-/// the change lands in its own frame before the release, as `tests/ui_drive/steps.rs` (l.346-353) does.
+/// Press at `at`, drag to `to`, and release with `release` held.
 fn drag_to(h: &mut H, at: egui::Pos2, to: egui::Pos2, release: egui::Modifiers) {
     drag_with_modifiers(h, at, to, egui::Modifiers::NONE, release);
 }
@@ -91,17 +88,30 @@ fn drag_with_modifiers(
     start: egui::Modifiers,
     release: egui::Modifiers,
 ) {
-    let press = |pos, pressed, modifiers| egui::Event::PointerButton {
+    drag_over(h, at, to, start);
+    h.event(egui::Event::ModifiersChanged(release));
+    h.run_steps(1);
+    h.event(pointer_button(to, false, release));
+    h.run_steps(3);
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run();
+}
+
+fn pointer_button(pos: egui::Pos2, pressed: bool, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
         pressed,
         modifiers,
-    };
+    }
+}
+
+fn drag_over(h: &mut H, at: egui::Pos2, to: egui::Pos2, start: egui::Modifiers) {
     h.event(egui::Event::ModifiersChanged(start));
     h.run_steps(1);
     h.hover_at(at);
     h.run();
-    h.event(press(at, true, start));
+    h.event(pointer_button(at, true, start));
     h.run();
     for step in 1..=6 {
         h.event(egui::Event::PointerMoved(
@@ -109,12 +119,6 @@ fn drag_with_modifiers(
         ));
         h.run_steps(2);
     }
-    h.event(egui::Event::ModifiersChanged(release));
-    h.run_steps(1);
-    h.event(press(to, false, release));
-    h.run_steps(3);
-    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
-    h.run();
 }
 
 /// Note JW4: dropping a shared chip on another card shares it there through the card's real zone, with no dialog.
@@ -824,6 +828,96 @@ fn enter_picks_a_remembered_duplicate() {
 }
 
 #[test]
+fn enter_cancels_unsaved_changes_above_choice() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Duplicate), NORMAL, &id);
+    let before = documents(&h.state().0);
+    let files = files_under(d.path());
+    assert!(!h.state_mut().0.request_close());
+    h.run();
+    h.get_by_label("Unsaved changes");
+    assert!(h.ctx.memory(|m| m.focused().is_none()));
+    press_enter(&mut h);
+    assert!(h.state().0.dialog.is_none(), "Enter cancelled the close");
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
+    assert_eq!(files_under(d.path()), files);
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
+fn escape_before_enter_in_one_frame_cancels_duplicate() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Duplicate), NORMAL, &id);
+    h.get_by_label(&format!(
+        "Duplicate the source for this set{DEFAULT_SUFFIX}"
+    ));
+    let files = files_under(d.path());
+    let before = documents(&h.state().0);
+    for key in [egui::Key::Escape, egui::Key::Enter] {
+        h.input_mut().events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.step();
+    assert_eq!(
+        files_under(d.path()),
+        files,
+        "Escape must not create a copy"
+    );
+    assert_eq!(documents(&h.state().0), before);
+    assert_eq!(h.state().1.drops.pending, None);
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Duplicate));
+}
+
+#[test]
+fn choice_rechecks_only_when_its_inputs_change_or_it_reopens() {
+    use sdc_gui::model::sets::DROP_PRECHECKS;
+    let checks = || DROP_PRECHECKS.with(std::cell::Cell::get);
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = leaf_set(d.path());
+    let odd = key_of(&m, "odd.png");
+    let other = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let start = checks();
+    h.state_mut().1.drops.pending = Some(choice(NORMAL, &id, ROCK));
+    h.step();
+    let opened = checks();
+    h.step();
+    h.step();
+    assert_eq!(checks(), opened, "two unchanged frames repeated prechecks");
+    assert_eq!(opened - start, 3, "one check per offered answer");
+
+    h.state_mut().0.replan();
+    h.step();
+    assert_eq!(checks() - opened, 3, "a new plan generation");
+    idle(&mut h.state_mut().0);
+    h.run();
+    let settled = checks();
+    h.state_mut().1.drops.pending = Some(choice("landscape/rock01.png", &id, ROCK));
+    h.step();
+    assert_eq!(checks() - settled, 3, "a different dragged item");
+    h.state_mut().1.drops.pending = Some(choice("landscape/rock01.png", &other, ROCK));
+    h.step();
+    assert_eq!(checks() - settled, 6, "a different destination");
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert_eq!(h.state().1.drops.pending, None);
+    h.state_mut().1.drops.pending = Some(choice("landscape/rock01.png", &other, ROCK));
+    h.step();
+    assert_eq!(checks() - settled, 9, "a fresh opening of the same choice");
+}
+
+#[test]
 fn enter_picks_a_remembered_move() {
     let d = tempfile::tempdir().unwrap();
     let (m, id) = leaf_set(d.path());
@@ -962,18 +1056,34 @@ fn choosing_duplicate_is_remembered_even_if_replace_is_cancelled() {
 #[test]
 fn an_answer_is_remembered_and_cancel_is_not() {
     let d = tempfile::tempdir().unwrap();
-    let (m, id) = leaf_set(d.path());
+    let (mut m, id) = leaf_set(d.path());
+    let odd = key_of(&m, "odd.png");
+    let fresh = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
     let mut h = harness(m);
     open_choice(&mut h, None, NORMAL, &id);
-    h.get_by_role_and_label(Role::Button, "Share (borrow its finished output)")
+    h.get_by_role_and_label(Role::Button, "Duplicate the source for this set")
         .click();
     h.run();
-    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
-    open_choice(&mut h, Some(DropChoice::Share), NORMAL, &id);
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Duplicate));
+    idle(&mut h.state_mut().0);
+    h.state_mut().1.drops.pending = Some(choice(NORMAL, &fresh, ROCK));
+    h.run();
+    h.get_by_label(&format!(
+        "Duplicate the source for this set{DEFAULT_SUFFIX}"
+    ));
+    let files = files_under(d.path());
+    let before = documents(&h.state().0);
     h.key_press(egui::Key::Escape);
     h.run();
     assert_eq!(h.state().1.drops.pending, None);
-    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Duplicate));
+    assert_eq!(
+        files_under(d.path()),
+        files,
+        "Escape must not create a copy"
+    );
+    assert_eq!(documents(&h.state().0), before);
 }
 
 /// Note JW6 (A8-1): "for the session": opening another folder keeps the remembered answer.
@@ -990,6 +1100,45 @@ fn the_remembered_answer_survives_opening_another_folder() {
     h.run();
     h.run();
     assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Move));
+}
+
+fn release_then_change_shift(release: egui::Modifiers, after: egui::Modifiers) {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_over(&mut h, from, to, release);
+    let before = documents(&h.state().0);
+    // Harness::event draws each event separately. RawInput delivers both to this single step.
+    h.input_mut().events.extend([
+        pointer_button(to, false, release),
+        egui::Event::ModifiersChanged(after),
+    ]);
+    h.step();
+    if release.shift {
+        assert_eq!(h.state().1.drops.pending, None, "Shift was held at release");
+        idle(&mut h.state_mut().0);
+        assert!(matches!(
+            view(&h.state().0, &id).slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ));
+    } else {
+        assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
+        assert_eq!(documents(&h.state().0), before);
+    }
+}
+
+#[test]
+fn shift_changed_after_release_down_still_asks() {
+    release_then_change_shift(egui::Modifiers::NONE, egui::Modifiers::SHIFT);
+}
+
+#[test]
+fn shift_changed_after_release_up_still_shares() {
+    release_then_change_shift(egui::Modifiers::SHIFT, egui::Modifiers::NONE);
 }
 
 /// Note JW6 (A8-3): Shift held at the drop answers with the remembered Share: no dialog, the borrow is written.

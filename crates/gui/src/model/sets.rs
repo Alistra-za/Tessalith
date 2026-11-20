@@ -1270,6 +1270,9 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
+    /// Full model checks for drop choices on this test thread.
+    pub static DROP_PRECHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+
     /// Test probe: how many times the plan's output paths were built on this thread (ruling 3b-F14).
     static ENGINE_INPUT_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -3806,6 +3809,8 @@ impl AppModel {
 
     /// Note JW6: the dialog and the edit check the same destination before any write.
     fn drop_precheck(&self, item: &str, set: &str, choice: DropChoice) -> Result<DropPlan, String> {
+        #[cfg(feature = "test-hooks")]
+        DROP_PRECHECKS.with(|n| n.set(n.get() + 1));
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
