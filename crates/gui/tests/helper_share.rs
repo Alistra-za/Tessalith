@@ -776,6 +776,72 @@ fn editing_b(dir: &Path, helper: &str) -> AppModel {
     m
 }
 
+fn flat_shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
+    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            s => out.push(s.clone()),
+        }
+    }
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, &mut out);
+    }
+    out
+}
+
+/// Note JW3 (A5-1): a shared-helper row is outlined in the strong text colour with the link mark, never amber.
+#[test]
+fn a_shared_helper_row_is_outlined_neutral_with_the_link_mark() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(editing_b(d.path(), AO), 1100.0);
+    h.get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
+        .scroll_to_me();
+    h.run();
+    h.run();
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre");
+    let name = h
+        .query_all_by_label("rock_ao.png (shared)")
+        .map(|n| n.rect())
+        .find(|r| centre.contains(r.center()))
+        .expect("the row's name");
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let shapes = flat_shapes(&h);
+    let stop = h
+        .get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
+        .rect();
+    let row = shapes
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if r.stroke.width == 1.0
+                    && r.rect.contains_rect(name)
+                    && r.rect.contains_rect(stop)
+                    && r.rect.height() <= name.height().max(stop.height()).max(20.0) + 6.0 =>
+            {
+                Some(r)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+        .expect("the shared row outline");
+    assert_eq!(row.stroke.color, strong);
+    let right = name.left() - h.ctx.global_style().spacing.item_spacing.x;
+    let mark = egui::Rect::from_center_size(
+        egui::pos2(right - 6.0, name.center().y),
+        egui::Vec2::splat(12.0),
+    );
+    assert!(row.rect.contains_rect(mark));
+    assert_eq!(
+        shapes
+            .iter()
+            .filter(|s| matches!(s, egui::Shape::Circle(c)
+        if c.stroke.width == 1.5 && c.stroke.color == strong && mark.contains(c.center)))
+            .count(),
+        2
+    );
+}
+
 #[test]
 fn the_target_lists_the_shared_helper_with_stop() {
     let d = tempfile::tempdir().unwrap();

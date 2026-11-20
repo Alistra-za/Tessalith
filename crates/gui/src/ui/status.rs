@@ -7,6 +7,12 @@ pub const AMBER: egui::Color32 = egui::Color32::from_rgb(230, 160, 30);
 pub const RED: egui::Color32 = egui::Color32::from_rgb(210, 60, 60);
 pub const GREEN: egui::Color32 = egui::Color32::from_rgb(90, 170, 90);
 
+/// Note JW3: the outline of anything shared from another set (a borrowed chip, a record fill, a shared-helper row):
+/// the strong text colour of the theme, so it never reads as amber ("needs a decision", V8).
+pub fn shared_stroke(vis: &egui::Visuals, width: f32) -> egui::Stroke {
+    egui::Stroke::new(width, vis.strong_text_color())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Blocks,

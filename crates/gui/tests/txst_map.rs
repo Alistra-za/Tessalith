@@ -1089,6 +1089,78 @@ fn a_record_slot_another_set_writes_is_borrowed() {
     assert!(c.filled.contains_key(&2) && c.filled.contains_key(&3));
 }
 
+fn flat_shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
+    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            s => out.push(s.clone()),
+        }
+    }
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, &mut out);
+    }
+    out
+}
+
+/// Note JW3 (A5-1, HG7): a record fill is a `SlotFill::Borrowed` chip, drawn by the same `chip_row` arm as a borrow
+/// line, so it takes the neutral outline too, never amber.
+#[test]
+fn a_record_fill_chip_is_outlined_neutral() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.push("textures/s/x_detail_n.png");
+    let m = r_with(d.path(), &files, "", "");
+    let c = view(&m, M);
+    assert_eq!(
+        borrowed_from(&c, SlotKind::Normal).as_deref(),
+        Some(X),
+        "premise: a record fill"
+    );
+    assert_eq!(
+        borrowed_from(&c, SlotKind::SkinSk).as_deref(),
+        Some(X),
+        "premise: a record fill"
+    );
+    assert_eq!(borrowed_from(&c, SlotKind::SkinDetail).as_deref(), Some(X));
+    let mut h = harness(m, 1100.0);
+    h.run();
+    h.run();
+    let card = h
+        .get_by_label_contains(&format!("Set {M}, position "))
+        .rect();
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let shapes = flat_shapes(&h);
+    for label in ["N", "SK", "DETAIL_N"] {
+        let chips: Vec<_> = h
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, label)
+            .map(|n| n.rect())
+            .filter(|r| card.contains_rect(*r))
+            .collect();
+        assert_eq!(chips.len(), 1, "the recipient's {label} chip");
+        let chip = chips[0];
+        let outline = |colour| {
+            shapes.iter().any(|s| {
+                matches!(s, egui::Shape::Rect(r)
+            if r.rect == chip && r.stroke.width == 2.0 && r.stroke.color == colour)
+            })
+        };
+        assert!(outline(strong) && !outline(sdc_gui::ui::status::AMBER));
+        let mark =
+            egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0));
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r)
+            if r.rect == mark && r.fill == h.ctx.global_style().visuals.panel_fill)));
+        assert_eq!(
+            shapes
+                .iter()
+                .filter(|s| matches!(s, egui::Shape::Circle(c)
+            if c.stroke.width == 1.5 && c.stroke.color == strong && mark.contains(c.center)))
+                .count(),
+            2
+        );
+    }
+}
+
 #[test]
 fn a_fill_writes_nothing() {
     let d = tempfile::tempdir().unwrap();

@@ -5,7 +5,7 @@ use super::columns::{
     bulk_menu, member, status_text, AMBER, DOCK_GAP_X, DOCK_GAP_Y, DOCK_INSET, RED,
 };
 use super::slot_commands::SlotCmdState;
-use super::status::Status;
+use super::status::{shared_stroke, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
 use crate::model::bulk::MenuAction;
@@ -2790,8 +2790,12 @@ fn linked_chip<'a>(
             r.rect
         }
     };
-    // The mark sits at the chip's top centre, between the two lock cells (the slot lock top right, PGPatcher's top
-    // left), so it covers neither them nor the letter (bottom left). A linked chip docks nothing.
+    chip_link_mark(ui, rect);
+    rect
+}
+
+/// Note JW3: linked and borrowed chips share the mark between their two top lock cells.
+fn chip_link_mark(ui: &egui::Ui, rect: egui::Rect) {
     let side = CHIP - 2.0 * (LOCK_PAD + LOCK_W);
     let at = egui::Rect::from_min_size(
         rect.left_top() + egui::vec2(LOCK_PAD + LOCK_W, MARK_TOP),
@@ -2800,7 +2804,6 @@ fn linked_chip<'a>(
     // the panel's fill backs the mark so the strong text colour reads over any thumbnail in both themes
     ui.painter().rect_filled(at, 2.0, ui.visuals().panel_fill);
     link_mark(ui.painter(), at, ui.visuals().strong_text_color());
-    rect
 }
 
 /// Note HP: the chip row of a card: one chip per slot (an empty one is a letter box), the missing entries, then the
@@ -2904,9 +2907,10 @@ fn chip_row<'a>(
             ui.painter().rect_stroke(
                 r.rect,
                 2.0,
-                egui::Stroke::new(2.0, AMBER),
+                shared_stroke(ui.visuals(), 2.0),
                 egui::StrokeKind::Inside,
             );
+            chip_link_mark(ui, r.rect);
         }
         let entries: Vec<&Docked> = dock.iter().filter(|d| d.slot == k).collect();
         let name = chip_name(model, &letter, mk, &entries);

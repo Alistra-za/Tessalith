@@ -376,10 +376,10 @@ fn drags_a_texture(h: &mut Harness<'static, AppModel>, at: egui::Pos2) -> bool {
     dragging
 }
 
-/// K13: a borrowed chip is outlined amber, says where it is from in its one hover, and is never offered for
+/// Note JW3, K13: a borrowed chip has a neutral outline and link mark, says where it is from in its one hover, and is never offered for
 /// dragging (dragging it would move another set's member). An own chip still drags.
 #[test]
-fn a_borrowed_chip_is_amber_and_offers_no_drag() {
+fn a_borrowed_chip_is_outlined_neutral_and_offers_no_drag() {
     use sdc_gui::model::sets::DropChoice;
     use sdc_gui::model::sets::DropOutcome;
     let d = tempfile::tempdir().unwrap();
@@ -424,16 +424,38 @@ fn a_borrowed_chip_is_amber_and_offers_no_drag() {
     let chip = on_card_of(&h, &id, "N");
     assert_eq!(chip.len(), 1, "the borrower's N chip");
     let at = chip[0].rect();
-    let amber = |h: &Harness<'static, AppModel>, r: egui::Rect| {
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let stroked = |h: &Harness<'static, AppModel>, r: egui::Rect, c: egui::Color32| {
         shapes(h).iter().any(|s| {
-            matches!(s, egui::Shape::Rect(x) if x.rect == r
-                && x.stroke.width == 2.0
-                && x.stroke.color == sdc_gui::ui::status::AMBER)
+            matches!(s, egui::Shape::Rect(x) if x.rect == r && x.stroke.width == 2.0 && x.stroke.color == c)
         })
     };
-    assert!(amber(&h, at), "the borrowed chip is outlined amber");
+    let backing = |chip: egui::Rect| {
+        egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0))
+    };
+    let rings = |chip| {
+        shapes(&h)
+            .iter()
+            .filter(|s| {
+                matches!(s, egui::Shape::Circle(c)
+        if c.stroke.width == 1.5 && c.stroke.color == strong && backing(chip).contains(c.center))
+            })
+            .count()
+    };
+    assert!(
+        stroked(&h, at, strong),
+        "the borrowed chip has the neutral 2 px outline"
+    );
+    assert!(!stroked(&h, at, sdc_gui::ui::status::AMBER), "and no amber");
+    assert!(shapes(&h).iter().any(|s| matches!(s, egui::Shape::Rect(r)
+        if r.rect == backing(at) && r.fill == h.ctx.global_style().visuals.panel_fill)));
+    assert_eq!(rings(at), 2);
     let own = on_card(&h, "N")[0].rect();
-    assert!(!amber(&h, own), "rock01's own N chip is not");
+    assert!(
+        !stroked(&h, own, strong) && rings(own) == 0,
+        "rock01's own N chip has neither"
+    );
+    assert!(!stroked(&h, own, sdc_gui::ui::status::AMBER));
     h.hover_at(at.center());
     h.run();
     h.run();
