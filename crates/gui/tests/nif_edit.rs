@@ -2579,14 +2579,11 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     use sdc_gui::app::SdcApp;
     app_data();
     let d = files(false);
-    let model = sdc_gui::model::AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
+    let project = tempfile::tempdir().unwrap();
+    let model = support::opened_as_the_app(
+        project.path().to_owned(),
+        d.path().join("mods").join(EDIT_MOD),
     );
-    let mut model = model;
-    // Note GD5: the app hands the chosen export folder to the meshes each frame
-    model.set_export_folder(d.path().join("mods").join(EDIT_MOD));
     let mut app = SdcApp::new(model);
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     app.meshes.store_path = Some(d.path().join("scan.db"));
@@ -10931,7 +10928,31 @@ fn tree(p: &Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn meshes_only_review_exports_the_nif_edit() {
     let out = tempfile::tempdir().unwrap();
-    let (_d, mut h) = no_project_app(Some(out.path()), 1);
+    let (_d, mut h) = no_project_app(Some(out.path()), 0);
+    assert!(h.state().meshes.selected_nif.is_some());
+    assert!(h.state().model.nif_review_rows().is_empty());
+    assert_eq!(support::header_export_action(&h), None);
+    assert!(h.query_by_label("Files").is_none());
+    tick(&mut h.state_mut().meshes, 40.5);
+    h.state_mut().meshes.edit.as_mut().unwrap().flush();
+    h.run_steps(4);
+    assert_eq!(h.state().model.nif_review_rows().len(), 1);
+    support::header_undo(&h, "Undo");
+    support::header_undo(&h, "Redo");
+    assert_eq!(support::header_export_label(&h), "Review 1 NIF edit…");
+    let review = h.get_by_role_and_label(AkRole::Button, "Review 1 NIF edit…");
+    assert!(review.accesskit_node().is_disabled());
+    review.hover();
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run_steps(4);
+    h.get_by_label("Open Review from the NIF edit panel (Review…)");
+    h.get_by_label("Files");
+    h.get_by_label_contains("Problems");
+    h.get_by_label_contains("Messages");
+    assert!(h.query_by_label("Save").is_none(), "texture Save is hidden");
     let (_path, out_path, bytes) = nif_out(&h);
     assert!(out_path.starts_with(out.path()), "{out_path:?}");
     h.state_mut().model.open_review();

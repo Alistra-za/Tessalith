@@ -102,7 +102,7 @@ impl SdcApp {
     /// Puts the saved panel widths and the Textures | Meshes view into egui, and the OS's reduced-motion setting
     /// (`ui::motion`), before the first frame.
     pub fn restore_ctx(&self, ctx: &egui::Context) {
-        crate::layout::restore_ctx(ctx, &self.model.settings.layout);
+        crate::layout::restore_ctx(ctx, &self.model.settings.layout, self.model.root.is_some());
         crate::ui::motion::install(ctx);
     }
 
@@ -452,6 +452,11 @@ impl eframe::App for SdcApp {
             // C7: the one header in both views (MO2… framed with Mode), then the bottom panel (R7), then the view.
             crate::ui::header::draw(ui, &mut self.model, Some(&mut self.meshes));
             crate::ui::new_project_line(ui, &mut self.model);
+            if self.model.root.is_none() {
+                crate::ui::no_project_banner(ui, &mut self.model);
+            } else {
+                ui.skip_ahead_auto_ids(1);
+            }
             crate::ui::record_centre_rect(ui);
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);

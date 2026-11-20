@@ -183,12 +183,12 @@ pub fn harness(m: AppModel) -> H {
     }
     let _ = ADAPTER.set(name);
     let app = SdcApp::new(m).with_render_state(Some(&rs));
-    build(app, Some(rs))
+    build(app, Some(rs), false)
 }
 
 /// The shared builder: the manifest's size, pixels per point and theme, Windows, the app's fonts; the GPU renderer
 /// when there is a render state.
-fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
+fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>, mut restore: bool) -> H {
     let render = manifest::load(&manifest::repo_root().join("docs/img/gui/shots.toml")).render;
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     let mut frame = eframe::Frame::_new_kittest();
@@ -209,7 +209,12 @@ fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
         b = b.renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(rs));
     }
     let h = b.build_ui_state(
-        move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
+        move |ui, app: &mut SdcApp| {
+            if std::mem::take(&mut restore) {
+                app.restore_ctx(ui.ctx());
+            }
+            eframe::App::ui(app, ui, &mut frame);
+        },
         app,
     );
     h
@@ -218,7 +223,11 @@ fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
 /// `harness` without wgpu: the same size, pixels per point, theme, OS and fonts, for runs that need no pixels from
 /// the GPU (the 2D preview and 3D views are then off). `h.render()` is not available on it.
 pub fn plain_harness(m: AppModel) -> H {
-    build(SdcApp::new(m), None)
+    build(SdcApp::new(m), None, false)
+}
+
+pub fn restored_harness(m: AppModel) -> H {
+    build(SdcApp::new(m), None, true)
 }
 
 /// `plain_harness` for the whole-app walk (`ui_proof` `screens`): the Meshes view is activated with no MO2 launch
@@ -228,7 +237,7 @@ pub fn plain_harness_no_mo2(m: AppModel) -> H {
     let mut app = SdcApp::new(m);
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     app.meshes.activate_with(None);
-    build(app, None)
+    build(app, None, false)
 }
 
 /// Frames with real time between them, so workers (thumbnails, previews, plans) land. True when the model went idle

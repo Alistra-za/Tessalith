@@ -46,8 +46,8 @@ fn the_start_screen_offers_open_folder_recent_and_the_drop_hint() {
         h.query_all_by_label("Sets").next().is_none(),
         "no Sets column"
     );
-    h.get_by_label("Save");
-    header_export_label(&h);
+    assert!(h.query_by_label("Save").is_none());
+    assert_eq!(header_export_action(&h), None);
 }
 
 #[test]
@@ -63,6 +63,8 @@ fn a_recent_folder_on_the_start_screen_opens_it() {
     h.get_by_label(&root.display().to_string()).click();
     h.run();
     assert_eq!(h.state().root.as_deref(), Some(root.as_path()));
+    h.get_by_label("Save");
+    header_export_label(&h);
 }
 
 #[test]
@@ -1524,7 +1526,8 @@ fn the_preview_has_a_close_button_that_collapses_it() {
 
 #[test]
 fn the_export_button_is_big_enough_to_find() {
-    let mut h = harness(AppModel::placeholder(GuiSettings::default()));
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(dir.path()));
     h.run();
     let r = h.get_by_label(&header_export_label(&h)).rect();
     assert!(r.width() >= 110.0 && r.height() >= 28.0, "{r:?}");

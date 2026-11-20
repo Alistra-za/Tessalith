@@ -499,12 +499,13 @@ fn no_it_module_changes_process_state() {
 /// least one needle, and the list is the manifest's (Note HU2).
 #[test]
 fn process_state_needles_match_the_files_kept_apart() {
-    // Kept apart for process-wide state: the six that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
+    // Kept apart for process-wide state: the seven that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
     // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
     // `it` is the shared binary and `ui_drive` is a driver with its own `main` (`harness = false`), not kept apart
     // for state, so neither is on the list.
     let apart = [
         "app_no_local_store",
+        "app_shell",
         "doc_shots",
         "meshes_header",
         "nif_edit",

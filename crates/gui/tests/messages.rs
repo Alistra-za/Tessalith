@@ -210,11 +210,9 @@ fn the_panel_counts_one_message_in_the_singular() {
 /// R14 (K9): the unread count is on the bottom panel's Messages tab (the header button is gone).
 #[test]
 fn the_messages_tab_shows_the_unread_count_and_opens_the_panel() {
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
+    m.messages.clear();
     m.messages.log(Severity::Info, "a");
     m.messages.log(Severity::Info, "b");
     let mut h = Harness::builder()
@@ -264,11 +262,8 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
 /// its buttons (Review's Export); with it collapsed they keep the window's bottom-right corner.
 #[test]
 fn toasts_sit_above_an_open_bottom_panel() {
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
     m.messages.notify(Severity::Info, "Saved");
     m.toggle_tab(sdc_gui::model::bottom::BottomTab::Messages);
     assert!(m.bottom.open);

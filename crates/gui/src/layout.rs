@@ -416,7 +416,7 @@ fn window_now(ctx: &egui::Context, prev: Option<WindowSettings>) -> Option<Windo
 }
 
 /// Puts the saved arrangement into egui before the first frame: the panel widths and the Textures | Meshes view.
-pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
+pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings, project_open: bool) {
     for (name, w) in &l.widths {
         if matches!(name.as_str(), "textures" | "sets") {
             ctx.data_mut(|d| d.insert_persisted(panel_ids::chosen_width_id(name), *w));
@@ -424,7 +424,7 @@ pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
             panel_ids::restore_size(ctx, name.as_str(), *w);
         }
     }
-    crate::ui::header::set_meshes_view(ctx, l.meshes_view);
+    crate::ui::header::set_meshes_view(ctx, project_open && l.meshes_view);
     for n in DETAILS_NAMES {
         crate::ui::viewport3d::set_details_open(ctx, n, l.details.iter().any(|d| d == n));
     }

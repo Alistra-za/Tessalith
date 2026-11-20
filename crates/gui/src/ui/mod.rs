@@ -400,6 +400,22 @@ pub fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
                 && model.resolved_selection().index.is_some())
 }
 
+/// GH8: a pending NIF edit in Meshes uses the header and bottom tabs without a texture project.
+fn edit_controls_visible(ctx: &egui::Context, model: &AppModel) -> bool {
+    model.root.is_some() || (header::meshes_view_active(ctx) && !model.nif_review_rows().is_empty())
+}
+
+pub fn no_project_banner(ui: &mut egui::Ui, model: &mut AppModel) {
+    panel_ids::top(ui, "no-project-banner").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("No project open. This list is your MO2 instance; open a folder to edit its textures.");
+            if crate::model::picker::button(ui, &model.picker, egui::Button::new("Open folder…")) {
+                model.pick(ui.ctx(), PickerPurpose::OpenFolder, model.open_folder_spec());
+            }
+        });
+    });
+}
+
 /// A11: with no folder, one big Open folder…, the recent folders and the drop hint.
 fn start_screen(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut open = None;

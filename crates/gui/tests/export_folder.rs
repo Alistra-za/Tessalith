@@ -557,11 +557,11 @@ fn an_empty_project_is_not_clean() {
     assert_eq!(m.header_export_text(), "Review 0 files…");
 }
 
-/// Final review M5: with no folder open the button is plain "Export", not "Review 0 files".
 #[test]
-fn no_folder_open_reads_plain_export() {
+fn no_folder_open_draws_no_export_button() {
     let m = AppModel::new(GuiSettings::default(), None, session());
     assert_eq!(m.header_export_text(), "Export");
+    assert_eq!(header_export_action(&harness(m)), None);
 }
 
 /// Note FI18 (3; HANDOFF 2026-11-01 owed item 3): with no folder open the header counts pending NIF edits as the
@@ -592,6 +592,9 @@ fn the_disabled_no_project_review_button_says_where_review_opens() {
         s.interaction.show_tooltips_only_when_still = false;
     });
     h.run();
+    assert_eq!(header_export_action(&h), None);
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(2);
     h.get_by_role_and_label(Role::Button, "Review 1 NIF edit…")
         .hover();
     h.run();

@@ -350,7 +350,10 @@ fn a_new_app_starts_from_the_saved_layout() {
         },
         ..GuiSettings::default()
     };
-    let model = sdc_gui::model::AppModel::placeholder(settings);
+    let dir = tempfile::tempdir().unwrap();
+    let mut model = sdc_gui::model::AppModel::new(settings, None, support::session());
+    model.open_folder(dir.path().to_owned());
+    assert!(model.wait_idle(Duration::from_secs(60)));
     let mut app = SdcApp::new(model);
     assert!(app.model.filter.warnings && app.model.filter.not_in_set);
     assert!(!app.model.filter.failed && !app.model.filter.needs_decision);
@@ -401,7 +404,7 @@ fn saved_column_widths_come_back_in_the_real_panels() {
             |ui, (m, s): &mut (sdc_gui::model::AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (support::opened(d.path()), State::default()),
         );
-    sdc_gui::layout::restore_ctx(&h.ctx, &layout);
+    sdc_gui::layout::restore_ctx(&h.ctx, &layout, true);
     let mut h = h;
     h.run();
     h.run();
@@ -422,7 +425,7 @@ fn a_saved_meshes_tree_width_comes_back() {
         .with_context_setup(move |ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
             // Before the first frame, as the app does (`main.rs` calls `restore_ctx` from the creation context).
-            sdc_gui::layout::restore_ctx(ctx, &layout);
+            sdc_gui::layout::restore_ctx(ctx, &layout, false);
         })
         .with_size(vec2(1600.0, 800.0))
         .build_ui_state(
@@ -519,6 +522,7 @@ fn a_start_that_changes_nothing_writes_nothing() {
             widths: [("textures".to_string(), 500.0)].into(),
             ..LayoutSettings::default()
         },
+        false,
     );
     let t0 = Instant::now();
     app.sync_layout_at(&ctx, t0);
@@ -646,7 +650,7 @@ fn the_details_footers_open_state_is_saved_and_restored() {
     assert_eq!(saved.details, vec![SET_DETAILS.to_string()]);
     // A new start opens it again, and only it.
     let ctx = egui::Context::default();
-    sdc_gui::layout::restore_ctx(&ctx, &saved);
+    sdc_gui::layout::restore_ctx(&ctx, &saved, false);
     assert!(details_open(&ctx, SET_DETAILS));
     assert!(!details_open(&ctx, MESHES_DETAILS));
 }

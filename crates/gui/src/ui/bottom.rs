@@ -58,6 +58,11 @@ pub fn draw(
     drawer: &mut drawer::DrawerState,
     nif_preview: bool,
 ) {
+    if !super::edit_controls_visible(ui.ctx(), model) {
+        problems::forget_focus(ui.ctx());
+        ui.skip_ahead_auto_ids(1);
+        return;
+    }
     // Another folder or a new export: the cached file checks belong to another run.
     if drawer.epoch != model.drawer_epoch {
         drawer.stats.clear();

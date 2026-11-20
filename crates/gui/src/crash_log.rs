@@ -121,6 +121,22 @@ pub fn after_device_loss_folder(
     None
 }
 
+/// The first positional folder, excluding the device-loss restart's own argument.
+pub fn folder_arg(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--after-device-loss" {
+            args.next();
+        } else if !arg.as_encoded_bytes().starts_with(b"-") {
+            let path = PathBuf::from(arg);
+            if path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 /// Note FC4 (DN3): the arguments the restarted process gets, so it reopens the folder and FB5's restore runs.
 /// The bare flag (no folder open) still marks the restart, so the loop guard holds.
 pub fn relaunch_args(folder: Option<&Path>) -> Vec<std::ffi::OsString> {
@@ -388,6 +404,36 @@ pub fn install_in(dir: Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_arg_takes_the_first_existing_folder() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let file = a.path().join("texture.png");
+        std::fs::write(&file, []).unwrap();
+        let args = [
+            "--verbose".into(),
+            file.into_os_string(),
+            a.path().as_os_str().to_owned(),
+            b.path().as_os_str().to_owned(),
+        ];
+        assert_eq!(folder_arg(args), Some(a.path().to_path_buf()));
+        assert_eq!(folder_arg(["C:\\no\\such\\folder".into()]), None);
+    }
+
+    #[test]
+    fn folder_arg_skips_the_after_device_loss_value() {
+        let d = tempfile::tempdir().unwrap();
+        let args = [
+            "--after-device-loss".into(),
+            d.path().as_os_str().to_owned(),
+        ];
+        assert_eq!(
+            folder_arg(args),
+            None,
+            "that folder is reopened by the device-loss path"
+        );
+    }
 
     #[test]
     fn the_line_names_thread_location_message_and_one_line_backtrace() {

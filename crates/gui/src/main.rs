@@ -40,6 +40,16 @@ fn build_model() -> AppModel {
     model
 }
 
+fn open_startup_folder(
+    model: &mut AppModel,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+    reopen: Option<Option<std::path::PathBuf>>,
+) {
+    if let Some(folder) = sdc_gui::crash_log::folder_arg(args).or_else(|| reopen.flatten()) {
+        model.open_folder(folder);
+    }
+}
+
 fn main() -> eframe::Result {
     sdc_gui::crash_log::install();
     // Note FC4: a restart after a lost graphics device reopens the folder that was open.
@@ -86,12 +96,53 @@ fn main() -> eframe::Result {
                     .messages
                     .log(sdc_gui::model::messages::Severity::Warning, text);
             }
-            if let Some(Some(folder)) = reopen {
-                model.open_folder(folder);
-            }
+            open_startup_folder(&mut model, std::env::args_os().skip(1), reopen);
             let app = SdcApp::new(model).with_render_state(cc.wgpu_render_state.as_ref());
             app.restore_ctx(&cc.egui_ctx);
             Ok(Box::new(app))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sdc_gui::crash_log::after_device_loss_folder;
+
+    #[test]
+    fn folder_arg_wins_in_both_orders_and_a_bare_restart_stays_a_restart() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let explicit = a.path().as_os_str().to_owned();
+        let previous = b.path().as_os_str().to_owned();
+        let check = |args: &[std::ffi::OsString], restarted, want: Option<&std::path::Path>| {
+            let reopen = after_device_loss_folder(args.iter().cloned());
+            assert_eq!(reopen.is_some(), restarted);
+            let mut model = AppModel::placeholder(settings::GuiSettings::default());
+            open_startup_folder(&mut model, args.iter().cloned(), reopen);
+            assert_eq!(model.root.as_deref(), want);
+            assert_eq!(
+                model.folder_epoch,
+                u64::from(want.is_some()),
+                "one open per folder"
+            );
+        };
+        for args in [
+            [
+                explicit.clone(),
+                "--after-device-loss".into(),
+                previous.clone(),
+            ],
+            ["--after-device-loss".into(), previous, explicit.clone()],
+        ] {
+            check(&args, true, Some(a.path()));
+        }
+        check(&[explicit], false, Some(a.path()));
+        check(&sdc_gui::crash_log::relaunch_args(None), true, None);
+        check(
+            &sdc_gui::crash_log::relaunch_args(Some(b.path())),
+            true,
+            Some(b.path()),
+        );
+    }
 }

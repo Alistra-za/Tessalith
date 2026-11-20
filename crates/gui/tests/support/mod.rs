@@ -877,6 +877,16 @@ pub fn pbr_ready(dir: &Path) -> AppModel {
 /// now`; its label as drawn now (the Review panel's own `Export {n} files` button is below the header, so the
 /// header's rect picks the right one).
 pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
+    header_export_action(h).expect("the header Export button")
+}
+
+pub fn settings_with_meshes_view() -> GuiSettings {
+    let mut settings = GuiSettings::default();
+    settings.layout.meshes_view = true;
+    settings
+}
+
+pub fn header_export_action<S>(h: &egui_kittest::Harness<'_, S>) -> Option<String> {
     use eframe::egui::accesskit::Role;
     use egui_kittest::kittest::{NodeT, Queryable};
     let header =
@@ -886,10 +896,10 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .filter_map(|n| n.accesskit_node().label())
         .find(|l| {
             *l == "Export"
-                || l.starts_with("Review ")
-                || (l.starts_with("Export ") && l.ends_with(" now"))
+                || l.strip_prefix("Review ")
+                    .or_else(|| l.strip_prefix("Export "))
+                    .is_some_and(|tail| tail.starts_with(|c: char| c.is_ascii_digit()))
         })
-        .expect("the header Export button")
 }
 
 /// Panel `name`'s outer rect from the last frame that built the panel (`ui::panel_ids`); panics when the panel was

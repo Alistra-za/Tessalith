@@ -22,7 +22,7 @@ name = "it"
 path = "tests/it/main.rs"
 
 # Each file below changes process-wide state, so it stays a process of its own (Note HU2).
-# These six point %LOCALAPPDATA% or %APPDATA% at a temp folder.
+# These seven point %LOCALAPPDATA% or %APPDATA% at a temp folder.
 [[test]]
 name = "app_no_local_store"
 path = "tests/app_no_local_store.rs"
@@ -34,6 +34,10 @@ path = "tests/doc_shots.rs"
 [[test]]
 name = "meshes_header"
 path = "tests/meshes_header.rs"
+
+[[test]]
+name = "app_shell"
+path = "tests/app_shell.rs"
 
 [[test]]
 name = "nif_edit"

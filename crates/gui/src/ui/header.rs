@@ -86,7 +86,10 @@ fn row(
     // Save and Export's height from the start, so every control centres on one line (not lower after the taller tabs).
     ui.set_row_height(2.0 * ui.spacing().interact_size.y);
     open_menu(ui, model);
-    undo_redo(ui, model);
+    let edits = super::edit_controls_visible(ui.ctx(), model);
+    if edits {
+        undo_redo(ui, model);
+    }
     ui.separator();
     // Note JI1: the Mode control is in the Settings tab (FI16); MO2… stands alone, where the app has a scan model.
     if let Some(m) = scan {
@@ -97,7 +100,7 @@ fn row(
     ui.separator();
     view_toggle(ui);
     settings_button(ui, model);
-    right_end(ui, model);
+    right_end(ui, model, edits);
 }
 
 /// Note JI1: "Settings…" where the column eyes were (they are the Settings tab's Columns group now), after the view
@@ -113,13 +116,13 @@ fn settings_button(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 /// Export to ▾, Save and Export against the row's right edge; Save and Export two rows tall (A4).
-fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
+fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool) {
     let gap = ui.spacing().item_spacing.x;
     let h = 2.0 * ui.spacing().interact_size.y;
     let save_w = button_width(ui, "Save");
     let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
     // Note FI5: with a project open the menu reads `Export to: {folder} ▾` or `Export to: not chosen ▾`; with none it
-    // is `More ▾` (the folder in `gui.toml` is not this project's, and nothing exports without a project).
+    // is `More ▾` (the folder in `gui.toml` is not a texture project's destination).
     let full = model
         .root
         .as_ref()
@@ -131,11 +134,16 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
         (Some(_), None) => (NOT_CHOSEN_TEXT, 0.0, None),
         (Some(_), Some(p)) => ("Export to:  ▾", PATH_MIN_CHARS as f32 * glyph, Some(p)),
     };
-    let fixed = button_width(ui, lead) + gap + save_w + gap + EXPORT_WIDTH;
+    let save_space = if model.root.is_some() {
+        gap + save_w
+    } else {
+        0.0
+    };
+    let others = save_space + if edits { gap + EXPORT_WIDTH } else { 0.0 };
+    let fixed = button_width(ui, lead) + others;
     fit(ui, fixed + min_path);
     let mut chars =
         (((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize).max(PATH_MIN_CHARS);
-    let others = gap + save_w + gap + EXPORT_WIDTH;
     let text = match path {
         None => lead.to_string(),
         Some(p) => loop {
@@ -149,11 +157,20 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
     };
     push_right(ui, button_width(ui, &text) + others);
     export_to_menu(ui, model, text, full);
+    if model.root.is_some() {
+        save_button(ui, model, egui::vec2(save_w, h));
+    }
+    if edits {
+        export_button(ui, model, egui::vec2(EXPORT_WIDTH, h));
+    }
+}
+
+fn save_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     // Note FC8: a focused text field may hold the only unsaved edit, so Save is live while one has the focus.
     let unsaved = model.unsaved();
     let r = ui.add_enabled(
         unsaved || super::actions::text_field_focused(ui.ctx()),
-        egui::Button::new("Save").min_size(egui::vec2(save_w, h)),
+        egui::Button::new("Save").min_size(size),
     );
     let r = if unsaved {
         r
@@ -170,7 +187,6 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
             let _ = m.save();
         }
     });
-    export_button(ui, model, egui::vec2(EXPORT_WIDTH, h));
 }
 
 /// `path` cut in the middle to at most `max_chars` characters: the first component (`C:`), `…`, then as many whole

@@ -10,7 +10,6 @@ use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::export::*;
 use sdc_gui::model::shell::{args, select_arg, ShellRequest};
 use sdc_gui::model::AppModel;
-use sdc_gui::settings::GuiSettings;
 use sdc_gui::ui::drawer::DrawerState;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -288,11 +287,10 @@ fn drawer_harness(m: AppModel) -> Harness<'static, (AppModel, DrawerState)> {
     h
 }
 
-fn model_with(export: &Path, x: ExportModel) -> AppModel {
-    let mut m = AppModel::placeholder(GuiSettings {
-        export_folder: Some(export.to_path_buf()),
-        ..GuiSettings::default()
-    });
+fn model_with(dir: &Path, export: &Path, x: ExportModel) -> AppModel {
+    let root = dir.join("project");
+    std::fs::create_dir(&root).unwrap();
+    let mut m = opened_as_the_app(root, export.to_owned());
     m.export = x;
     m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
     m
@@ -302,7 +300,7 @@ fn model_with(export: &Path, x: ExportModel) -> AppModel {
 fn open_export_folder_is_disabled_until_the_folder_exists() {
     let d = tempfile::tempdir().unwrap();
     let out = d.path().join("export");
-    let mut h = drawer_harness(model_with(&out, ExportModel::default()));
+    let mut h = drawer_harness(model_with(d.path(), &out, ExportModel::default()));
     h.run();
     assert!(h
         .get_by_label("Open export folder")
@@ -333,7 +331,7 @@ fn open_export_folder_is_disabled_until_the_folder_exists() {
 #[test]
 fn the_files_list_draws_only_the_rows_on_screen() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), big()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), big()));
     h.run();
     h.run();
     let drawn = h.query_all_by_label_contains("t/f").count();
@@ -343,7 +341,7 @@ fn the_files_list_draws_only_the_rows_on_screen() {
 #[test]
 fn the_filter_toggles_narrow_the_files_list() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), big()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), big()));
     h.run();
     h.get_by_label("Failed only").click();
     h.run();
@@ -381,7 +379,7 @@ fn a_files_row_lists_its_warnings_on_hover() {
             "1000x750 is not a power of two; mips will be uneven",
         )),
     ));
-    let mut h = drawer_harness(model_with(d.path(), x));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), x));
     h.run();
     h.run();
     h.get_by_label("1 warning").hover();
@@ -414,7 +412,7 @@ fn a_files_row_reveals_the_output_once_written_else_the_source() {
             output: out.to_string_lossy().replace('\\', "/"),
         },
     ));
-    let m = model_with(d.path(), x);
+    let m = model_with(d.path(), d.path(), x);
     assert_eq!(m.row_reveal_target(&m.export.rows[0]), Some(src.clone()));
     std::fs::write(&out, b"y").unwrap();
     assert_eq!(m.row_reveal_target(&m.export.rows[0]), Some(out));
@@ -586,7 +584,7 @@ fn packed_source_skips_drop_rows_and_later_events_find_the_rest() {
 #[test]
 fn the_drawer_forgets_its_file_checks_on_a_new_epoch() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), ExportModel::default()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), ExportModel::default()));
     h.run();
     let now = Instant::now();
     let p = d.path().join("x");
