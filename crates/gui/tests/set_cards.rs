@@ -7,7 +7,7 @@ use egui_kittest::Harness;
 use engine::config::Subtype;
 use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::sets::{set_views, view_row, views, SlotCommand, SlotFill, SlotKind};
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, CentreTab, Selection};
 use std::time::Duration;
 use support::*;
 
@@ -772,6 +772,176 @@ fn idle(m: &mut AppModel) {
     );
 }
 
+const DIFFUSE: &str = "landscape/rock01.png";
+
+fn rock_selection(m: &AppModel) -> Selection {
+    Selection::Set(views(m).iter().find(|v| v.id == ROCK).unwrap().key.clone())
+}
+
+#[test]
+fn a_plain_click_on_a_thumbnail_opens_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item(DIFFUSE);
+    let set = rock_selection(&m);
+    let mut h = harness(m);
+    h.run();
+    on_card(&h, "D")[0].click();
+    h.run();
+    assert_eq!(h.state().selection, set);
+    assert_in_centre(&h, "Slot commands…");
+}
+
+#[test]
+fn shift_click_on_a_thumbnail_opens_its_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()));
+    for already_selected in [false, true] {
+        h.state_mut().open_presets();
+        h.run();
+        let item = Selection::Item(DIFFUSE.into());
+        assert_eq!(h.state().selection == item, already_selected);
+        assert_eq!(h.state().centre_front(), CentreTab::Presets);
+        on_card(&h, "D")[0].click_modifiers(egui::Modifiers::SHIFT);
+        h.run();
+        assert_eq!(h.state().selection, item);
+        assert_eq!(h.state().centre_front(), CentreTab::Selection);
+        let tick = h
+            .get_by_role_and_label(egui::Role::CheckBox, "Mipmaps")
+            .rect();
+        assert!(sdc_gui::ui::centre_rect(&h.ctx)
+            .unwrap()
+            .contains_rect(tick));
+        h.run_steps(30); // a second single click on the selected texture
+    }
+}
+
+#[test]
+fn ctrl_click_on_a_thumbnail_toggles_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let cards = views(&m);
+    let rock = &cards.iter().find(|v| v.id == ROCK).unwrap().key;
+    let other = &cards
+        .iter()
+        .find(|v| v.id != ROCK && !v.key.is_empty())
+        .unwrap()
+        .key;
+    m.select_set(other);
+    let mut h = harness(m);
+    h.run();
+    for include in [true, false] {
+        on_card(&h, "D")[0].click_modifiers(egui::Modifiers::CTRL | egui::Modifiers::COMMAND);
+        h.run();
+        let selected = h.state().selected_sets();
+        assert!(selected.contains(other), "keep the other set");
+        assert_eq!(selected.contains(rock), include);
+        assert_eq!(selected.len(), if include { 2 } else { 1 });
+        h.run_steps(30); // separate single clicks
+    }
+}
+
+#[test]
+fn keyboard_on_a_thumbnail_follows_shift() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()));
+    let set = rock_selection(h.state());
+    let texture = Selection::Item(DIFFUSE.into());
+    h.state_mut().select_item(DIFFUSE);
+    h.run();
+    for key in [egui::Key::Enter, egui::Key::Space] {
+        for (mods, expected) in [
+            (egui::Modifiers::NONE, &set),
+            (egui::Modifiers::SHIFT, &texture),
+        ] {
+            h.get_by_label_contains("Set landscape/rock01, position ")
+                .focus();
+            h.run();
+            for _ in 0..20 {
+                h.key_press(egui::Key::Tab);
+                h.run();
+                if on_card(&h, "D")[0].is_focused() {
+                    break;
+                }
+            }
+            assert!(
+                on_card(&h, "D")[0].is_focused(),
+                "Tab reached the thumbnail"
+            );
+            h.key_press_modifiers(mods, key);
+            h.run();
+            assert_eq!(&h.state().selection, expected, "{mods:?} + {key:?}");
+        }
+    }
+}
+
+#[test]
+fn helper_thumbnails_follow_shift() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.set_helper_fills("landscape/rock01_ao.png", Some(vec![]));
+    idle(&mut m);
+    let set = rock_selection(&m);
+    let mut h = harness(m);
+    h.run();
+    for file in ["roughness", "ao"] {
+        let key = format!("landscape/rock01_{file}.png");
+        h.state_mut().select_item(&key);
+        h.run();
+        for (mods, expected) in [
+            (egui::Modifiers::NONE, set.clone()),
+            (egui::Modifiers::SHIFT, Selection::Item(key.clone())),
+        ] {
+            let card = card_rect(&h);
+            let prefix = format!("rock01_{file}.png, ");
+            let n = h
+                .query_all_by_label_contains(&prefix)
+                .find(|n| card.contains_rect(n.rect()))
+                .unwrap();
+            n.click_modifiers(mods);
+            h.run();
+            assert_eq!(h.state().selection, expected, "{file}, {mods:?}");
+            h.run_steps(30);
+        }
+    }
+}
+
+#[test]
+fn thumbnail_hover_and_description_explain_shift() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()));
+    h.run();
+    let chip = &on_card(&h, "D")[0];
+    let hint = "Shift+click to open its settings.";
+    assert!(
+        chip.accesskit_node()
+            .description()
+            .unwrap_or_default()
+            .contains(hint),
+        "thumbnail description"
+    );
+    chip.hover();
+    h.run();
+    assert!(h.query_by_label_contains(hint).is_some(), "thumbnail hover");
+}
+
+#[test]
+fn the_overflow_list_still_opens_a_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    h.get_by_label("3 more helpers fill RMAOS in landscape/rock01")
+        .click();
+    h.run();
+    h.get_by_label_contains("rock01_metallic.png, fills RMAOS")
+        .click();
+    h.run();
+    assert_eq!(
+        h.state().selection,
+        Selection::Item("landscape/rock01_metallic.png".into())
+    );
+}
+
 #[test]
 fn the_idle_sets_column_checks_bulk_membership_once_for_each_visible_summary_and_banner() {
     let d = tempfile::tempdir().unwrap();
@@ -1024,7 +1194,7 @@ fn the_open_set_is_highlighted() {
 }
 
 #[test]
-fn a_chip_keeps_the_member_behaviours() {
+fn drag_double_click_and_menu_are_unchanged() {
     let d = tempfile::tempdir().unwrap();
     let m = pbr_opened(d.path());
     let diffuse = m
@@ -1036,26 +1206,42 @@ fn a_chip_keeps_the_member_behaviours() {
         .clone();
     let mut h = harness(m);
     h.run();
-    let at = on_card(&h, "D")[0].rect().center();
-    h.hover_at(at);
-    h.run();
-    for _ in 0..2 {
-        for pressed in [true, false] {
-            h.event(egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            });
-        }
+    for mods in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+        let chip = &on_card(&h, "D")[0];
+        chip.click_modifiers(mods);
+        chip.click_modifiers(mods);
+        h.run();
+        assert_eq!(h.state().expanded.as_deref(), Some(diffuse.as_str()));
+        h.state_mut().expanded = None;
+        h.run_steps(30);
     }
-    h.run();
-    assert_eq!(h.state().expanded.as_deref(), Some(diffuse.as_str()));
-    h.state_mut().expanded = None;
-    h.run();
     on_card(&h, "D")[0].click_secondary();
     h.run();
     h.get_by_label("Slot 1: Diffuse");
+    h.key_press(egui::Key::Escape);
+    h.run();
+    let source = on_card(&h, "D")[0].rect().center();
+    let other = views(h.state())
+        .iter()
+        .find(|v| v.id != ROCK && !v.key.is_empty())
+        .unwrap()
+        .id
+        .clone();
+    let dest = name_of(&h, &other).center();
+    start_drag(&mut h, source);
+    h.hover_at(dest);
+    h.run_steps(2);
+    h.event(egui::Event::PointerButton {
+        pos: dest,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    assert!(
+        h.query_by_label("Move it here").is_some(),
+        "drop on {other}"
+    );
 }
 
 #[test]

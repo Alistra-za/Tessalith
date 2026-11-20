@@ -16,6 +16,7 @@ pub const STRIP_WIDTH: f32 = 24.0;
 /// The tile size a fresh install starts at (the buttons run 64 up to `ColumnPrefs::tile_cap`, 128 at 100 %; Note FC13); the narrowest column is sized for it.
 const TILE: f32 = crate::model::texture_view::ColumnPrefs::TILE_DEFAULT;
 const MEMBER: f32 = 32.0;
+pub(super) const MEMBER_HINT: &str = "Shift+click to open its settings.";
 const TILE_MARGIN: f32 = 4.0;
 const TILE_STROKE: f32 = 2.0;
 /// Scroll bar and margin allowance when fitting tiles to a row.
@@ -1112,6 +1113,8 @@ pub(super) fn member(
             hover.push('\n');
             hover.push_str(&n());
         }
+        hover.push('\n');
+        hover.push_str(MEMBER_HINT);
         hover
     };
     ui.ctx()
