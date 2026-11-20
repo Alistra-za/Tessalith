@@ -1819,18 +1819,117 @@ fn labels_sit_bottom_left_on_every_tile() {
             let (off, ..) = tile_label(&h, tile, tag);
             same_offset(off, d_off, &format!("{q} at {w}x{h_px}"));
         }
+        // Note JW7: a helper in the trailing row is a 20 px tile with no painted tag; its name keeps "unused".
         let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
-        let tile = tile_named(&h, "crate_metallic.png, ");
-        let (off, _, label) = tile_label(&h, tile, "unused");
-        same_offset(off, d_off, &format!("crate at {w}x{h_px}"));
-        assert!(tile.contains_rect(label), "unused inside its tile");
-        // Task 3 review: no helper badge covers the label
+        let tile = one(&h, "crate_metallic.png, unused: no targets chosen");
+        assert!(
+            near(tile, 20.0, 20.0),
+            "crate at {w}x{h_px}: a badge-size tile, got {tile:?}"
+        );
+        assert!(
+            (drawn_badge(&h, tile).center() - tile.center())
+                .abs()
+                .max_elem()
+                <= 0.5
+        );
+        assert!(
+            !coloured_texts(&h)
+                .iter()
+                .any(|(t, r, _)| t == "unused" && tile.expand(1.0).contains(r.center())),
+            "crate at {w}x{h_px}: no tag painted on the tile"
+        );
         for b in crate_card(&h).badges {
             assert_eq!(
-                shared_area(b, label),
+                shared_area(b, tile),
                 0.0,
-                "badge {b:?} covers the label {label:?}"
+                "badge {b:?} covers the tile {tile:?}"
             );
+        }
+    }
+}
+
+/// Note JW7 (A9): a helper whose fills land on no chip of its set is a 20 px tile in the trailing row too.
+#[test]
+fn a_helper_whose_fills_land_on_no_chip_is_a_small_tile() {
+    let (_d, h) = crate::replay_with(
+        "helpers",
+        |h| {
+            let fill = F::Packed {
+                suffix: "m",
+                channel: 0,
+            };
+            let m = &mut h.state_mut().model;
+            m.set_target(engine::config::Target::Vanilla);
+            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            m.set_shader("props/crate", Some(engine::shader::Shader::Envmap));
+            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            m.set_helper_fills("props/crate_metallic.png", Some(vec![fill]));
+            crate::app_harness::settle(h, 3);
+            let m = &h.state().model;
+            let v = sets::views(m);
+            let crate_set = v.iter().find(|v| v.id == "props/crate").unwrap();
+            assert_eq!(
+                crate_set.shader.as_ref().unwrap().shader,
+                engine::shader::Shader::Envmap
+            );
+            let report = m
+                .item("props/crate_metallic.png")
+                .unwrap()
+                .helper
+                .as_ref()
+                .unwrap();
+            assert!(report.fills.contains(&fill));
+            assert_eq!(sdc_gui::model::helpers::fill_slot(fill), None);
+        },
+        &[SEARCH],
+    );
+    let names = named_from(&h, "crate_metallic.png, ");
+    assert_eq!(
+        names.len(),
+        1,
+        "one node, the trailing tile, and no badge: {names:?}"
+    );
+    assert!(
+        !names[0].contains("unused"),
+        "premise: it fills something, only no chip of crate: {names:?}"
+    );
+    let tile = one(&h, &names[0]);
+    assert!(near(tile, 20.0, 20.0), "a badge-size tile, got {tile:?}");
+}
+
+/// Note JW7: roughness stays on Coat while RMAOS is locked. Linking Coat leaves just its trailing tile.
+#[test]
+fn a_helper_whose_second_chip_is_linked_returns_to_the_trailing_row() {
+    for linked in [false, true] {
+        let (_d, h) = crate::replay_with(
+            "helpers",
+            |h| {
+                let m = &mut h.state_mut().model;
+                let id = "props/crate";
+                m.edit_docs("Lock RMAOS", None, false, |_, s| s.set_lock(id, 6, true));
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+                m.set_pgp_lock(id, 6, true).unwrap();
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+                if linked {
+                    m.set_slot_command(
+                        id,
+                        7,
+                        sets::SlotCommand::Path(r"textures\other\coat_cnr.dds".into()),
+                    )
+                    .unwrap();
+                }
+                crate::app_harness::settle(h, 3);
+            },
+            &[SEARCH],
+        );
+        let names = named_from(&h, "crate_roughness.png, ");
+        assert_eq!(names.len(), 1, "{names:?}");
+        if linked {
+            one(&h, "CNR, path coat_cnr.dds");
+            assert_ne!(names[0], "crate_roughness.png, fills CNR alpha");
+            assert!(near(one(&h, &names[0]), 20.0, 20.0));
+        } else {
+            assert_eq!(names, ["crate_roughness.png, fills CNR alpha"]);
         }
     }
 }

@@ -1116,6 +1116,14 @@ pub(super) fn member(
     };
     ui.ctx()
         .accesskit_node_builder(response.id, |b| b.set_description(text()));
+    // Note JW7: the chip can still be the drag target under +K. Give the click target its hover first.
+    if response.contains_pointer()
+        && ui
+            .ctx()
+            .viewport(|vp| vp.hits.click.is_some_and(|hit| hit.id != response.id))
+    {
+        return response;
+    }
     response.on_hover_ui(|ui| {
         ui.label(text());
     })

@@ -10,7 +10,7 @@ use super::thumbs::ThumbCache;
 use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
-use crate::model::items::{helper_tag_text, helper_target_files};
+use crate::model::items::{helper_tag_text, helper_target_files, ItemKind, TextureItem};
 use crate::model::labels::subtype_name;
 use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
@@ -244,8 +244,8 @@ const CARD_EST: f32 = 110.0;
 /// Note FM32: the rows `v`'s chips wrap into at column width `width` (`frame_x` is the card's side margins and
 /// the chip rows' inset, Note HP). A count from the set's slot row, its
 /// missing entries and its extra members, not a layout; the chips sit `DOCK_GAP_X` apart.
-// shortcut: a helper docked on a chip still counts as an extra member here, so an unmeasured card may be estimated
-// a row too tall (drawing corrects it, FM32); subtract the docked helpers if a scroll jump shows.
+// shortcut: a docked or folded helper still counts as an extra member here, and a helper tile counts as a full chip,
+// so an unmeasured card may be estimated a row too tall (drawing corrects it, FM32); count them apart if a scroll jump shows.
 fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
     let chips = view_row(v).len() + v.missing.len() + v.members.len().saturating_sub(v.slots.len());
     chips.div_ceil(chips_per_row(width, frame_x))
@@ -475,8 +475,7 @@ fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool, max_w: f
     ui.painter().galley(at, g, colour);
 }
 
-/// Note HP (Decision 7): the trailing-row tile's tag. A member whose slot is taken: its slot letter; an unused helper:
-/// "unused"; a helper whose fills land on no chip: its first fill; any other member: its `member_tail`, or "—".
+/// Note JW7: a non-helper trailing tile paints its slot letter, or its member tail.
 /// `kind` is the slot the member owns in the set, if any. The tail is read with `v.skin || v.shared`, as the input
 /// names are (`input_name.rs`).
 fn tile_tag(model: &AppModel, v: &SetView, key: &str, kind: Option<SlotKind>) -> String {
@@ -490,17 +489,11 @@ fn tile_tag(model: &AppModel, v: &SetView, key: &str, kind: Option<SlotKind>) ->
         .file_stem()
         .map(|s| s.to_string_lossy())
         .unwrap_or_default();
-    let fills = item.helper.as_ref().map(|h| h.fills.as_slice());
-    tag_text(fills, member_tail(&stem, v.tails(), &model.suffix_aliases))
+    tag_text(member_tail(&stem, v.tails(), &model.suffix_aliases))
 }
 
-/// `tile_tag` for a member with no slot: a helper's first fill, or "unused" with none; any other member's tail, or "—".
-fn tag_text(helper_fills: Option<&[engine::helper::FillTarget]>, tail: &str) -> String {
-    match (helper_fills, tail) {
-        (Some(f), _) => f.first().map_or("unused".to_string(), |t| fill_text(*t)),
-        (None, "") => "—".to_string(),
-        (None, t) => t.to_string(),
-    }
+fn tag_text(tail: &str) -> String {
+    if tail.is_empty() { "—" } else { tail }.to_string()
 }
 
 /// Review E4 (controller ruling 10): what Ready means, on the Ready pill and a ready card's status hover.
@@ -989,6 +982,123 @@ fn member_acts(
     }
 }
 
+/// Note JW7: docked badges and trailing helpers paint the same thumbnail and selection stroke.
+fn paint_helper(
+    ui: &egui::Ui,
+    thumbs: &mut ThumbCache,
+    item: &TextureItem,
+    rect: egui::Rect,
+    selected: bool,
+) {
+    if ui.is_rect_visible(rect) {
+        match thumbs.get(ui.ctx(), item) {
+            Some(t) => egui::Image::new(&t)
+                .fit_to_exact_size(rect.size())
+                .paint_at(ui, rect),
+            None => {
+                ui.painter().rect_filled(
+                    rect,
+                    1.0,
+                    ui.visuals().widgets.noninteractive.weak_bg_fill,
+                );
+            }
+        }
+        let stroke = if selected {
+            egui::Stroke::new(2.0, ui.visuals().selection.stroke.color)
+        } else {
+            egui::Stroke::new(1.0, ui.visuals().panel_fill)
+        };
+        ui.painter()
+            .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
+    }
+}
+
+/// Note JW7: a helper that has no dock gets a BADGE thumbnail in a BADGE_HIT square with no painted tag.
+#[allow(clippy::too_many_arguments)]
+fn helper_tile(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    thumbs: &mut ThumbCache,
+    v: &SetView,
+    mk: &str,
+    role: &str,
+    sel_items: &HashSet<String>,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+) -> Option<egui::Response> {
+    let item = model.item(mk)?;
+    let (hit, r) =
+        ui.allocate_exact_size(egui::Vec2::splat(BADGE_HIT), egui::Sense::click_and_drag());
+    let rect = egui::Rect::from_center_size(hit.center(), egui::Vec2::splat(BADGE));
+    paint_helper(ui, thumbs, item, rect, sel_items.contains(mk));
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{}, {role}", item.name))
+    });
+    member_acts(
+        model,
+        v,
+        mk,
+        None,
+        true,
+        ChipDrag::Item,
+        &r,
+        acts,
+        member_menu,
+    );
+    let text = || format!("{}\n{role}", item.name);
+    ui.ctx()
+        .accesskit_node_builder(r.id, |b| b.set_description(text()));
+    Some(r.on_hover_ui(|ui| {
+        ui.label(text());
+    }))
+}
+
+/// Note JW7: one row per hidden helper on this chip. Its name lists its folded fills in dock order.
+fn folded_row(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    v: &SetView,
+    helper: &str,
+    name: &str,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+) {
+    let Some(item) = model.item(helper) else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        let r = ui.add(egui::Button::new(name).sense(egui::Sense::click_and_drag()));
+        member_acts(
+            model,
+            v,
+            helper,
+            None,
+            false,
+            ChipDrag::Item,
+            &r,
+            acts,
+            member_menu,
+        );
+        let off = model.sets_read_only_reason();
+        let remove = ui.add_enabled(off.is_none(), egui::Button::new("✕"));
+        remove.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Button,
+                off.is_none(),
+                format!("Remove {} from set", item.name),
+            )
+        });
+        let remove = match off {
+            Some(why) => remove.on_disabled_hover_text(why),
+            None => remove.on_hover_text("Remove from set"),
+        };
+        if remove.clicked() {
+            acts.push(Act::RemoveMember(v.id.clone(), helper.to_owned()));
+            ui.close();
+        }
+    });
+}
+
 /// One chip's dock, planned: its rect, the index of that rect among the card's fixed rects, the helpers that fill it
 /// and the cells to draw (a badge whose item is gone has no cell).
 struct DockPlan<'a> {
@@ -998,26 +1108,28 @@ struct DockPlan<'a> {
     cells: Vec<(usize, Cell)>,
 }
 
-/// Note HN: the cells of the helpers that fill the chip `chip` (index `own` among the fixed rects). A helper with a
-/// badge is added to `badged`, so the trailing row skips it.
+/// Note JW7: only helpers represented by a badge or an overflow row can be skipped on the trailing row.
 fn plan_dock<'a>(
     model: &AppModel,
     chip: egui::Rect,
     own: usize,
     entries: Vec<&'a Docked>,
     locks: (bool, bool),
-    badged: &mut HashSet<&'a str>,
+    represented: &mut HashSet<&'a str>,
 ) -> DockPlan<'a> {
     let mut cells = dock_cells(locks.0, locks.1, entries.len());
-    cells.retain(|(_, c)| match c {
-        Cell::Badge(i) => model.item(&entries[*i].helper).is_some(),
-        Cell::More(_) => true,
-    });
-    for (_, c) in &cells {
-        if let Cell::Badge(i) = c {
-            badged.insert(entries[*i].helper.as_str());
+    cells.retain(|(_, cell)| {
+        let slice = match *cell {
+            Cell::Badge(i) => &entries[i..=i],
+            Cell::More(k) => &entries[entries.len() - k..],
+        };
+        let mut extant = false;
+        for d in slice.iter().filter(|d| model.item(&d.helper).is_some()) {
+            represented.insert(d.helper.as_str());
+            extant = true;
         }
-    }
+        extant
+    });
     DockPlan {
         chip,
         own,
@@ -1057,7 +1169,7 @@ fn draw_docks(
 }
 
 /// Note HN: the helpers that fill one chip, drawn on its top corners. A badge is the helper's thumbnail with the
-/// member behaviours (click selects, double-click expands, drag, the member menu); `+K` is a hover-only count.
+/// member behaviours (click selects, double-click expands, drag, the member menu). `+K` lists the folded helpers.
 /// `hits` are the clamped hit rects of `plan.cells`, in order.
 #[allow(clippy::too_many_arguments)]
 fn draw_dock(
@@ -1087,27 +1199,7 @@ fn draw_dock(
                     .scope_id()
                     .with(("dock", &v.id, &d.helper, d.slot, d.channel));
                 let r = ui.interact(hit, id, egui::Sense::click_and_drag());
-                if ui.is_rect_visible(rect) {
-                    match thumbs.get(ui.ctx(), item) {
-                        Some(t) => egui::Image::new(&t)
-                            .fit_to_exact_size(rect.size())
-                            .paint_at(ui, rect),
-                        None => {
-                            ui.painter().rect_filled(
-                                rect,
-                                1.0,
-                                ui.visuals().widgets.noninteractive.weak_bg_fill,
-                            );
-                        }
-                    }
-                    let stroke = if sel_items.contains(&d.helper) {
-                        egui::Stroke::new(2.0, ui.visuals().selection.stroke.color)
-                    } else {
-                        egui::Stroke::new(1.0, ui.visuals().panel_fill)
-                    };
-                    ui.painter()
-                        .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
-                }
+                paint_helper(ui, thumbs, item, rect, sel_items.contains(&d.helper));
                 let name = format!("{}, fills {}", item.name, fill_text(d.target));
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                 member_acts(
@@ -1137,7 +1229,21 @@ fn draw_dock(
                 let id = ui
                     .scope_id()
                     .with(("dock-more", &v.id, hidden[0].slot, pos));
-                let r = ui.interact(hit, id, egui::Sense::hover());
+                let mut groups: Vec<(&str, String)> = Vec::new();
+                for d in hidden {
+                    let Some(item) = model.item(&d.helper) else {
+                        continue;
+                    };
+                    let fill = fill_text(d.target);
+                    if let Some((_, name)) = groups.iter_mut().find(|(key, _)| *key == d.helper) {
+                        name.push_str(", ");
+                        name.push_str(&fill);
+                    } else {
+                        groups.push((&d.helper, format!("{}, fills {fill}", item.name)));
+                    }
+                }
+                let k = groups.len();
+                let r = ui.interact(hit, id, egui::Sense::click());
                 if ui.is_rect_visible(rect) {
                     let font = egui::TextStyle::Small.resolve(ui.style());
                     ui.painter()
@@ -1156,15 +1262,20 @@ fn draw_dock(
                     );
                 }
                 let name = format!("{k} more helpers fill {slot}");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
-                let lines: Vec<String> = hidden
-                    .iter()
-                    .map(|d| {
-                        let file = model.item(&d.helper).map_or(d.helper.as_str(), |i| &i.name);
-                        format!("{file}, fills {}", fill_text(d.target))
-                    })
-                    .collect();
-                r.on_hover_text(lines.join("\n"));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                egui::Popup::menu(&r)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        for (key, name) in &groups {
+                            folded_row(ui, model, v, key, name, acts, member_menu);
+                        }
+                    });
+                r.on_hover_ui(|ui| {
+                    for (_, name) in &groups {
+                        ui.label(name);
+                    }
+                    ui.label("Click to list them.");
+                });
             }
         }
     }
@@ -2976,7 +3087,7 @@ fn chip_row<'a>(
 ) -> (Vec<DockPlan<'a>>, Vec<egui::Rect>) {
     let row = view_row(v);
     let mut chipped: HashSet<&str> = HashSet::new();
-    let mut badged: HashSet<&str> = HashSet::new();
+    let mut represented: HashSet<&str> = HashSet::new();
     let mut plans: Vec<DockPlan> = vec![];
     for cell in &row {
         let k = cell.kind;
@@ -3071,7 +3182,7 @@ fn chip_row<'a>(
             own,
             entries,
             chip_locks(v, Some(k)),
-            &mut badged,
+            &mut represented,
         ));
     }
     // K12: an add/remove entry that matches no file.
@@ -3103,7 +3214,7 @@ fn chip_row<'a>(
     }
     // Members in no chip (an env mask `_m`, a clashing second kind) follow as plain thumbnails.
     for mk in &v.members {
-        if chipped.contains(mk.as_str()) || badged.contains(mk.as_str()) {
+        if chipped.contains(mk.as_str()) || represented.contains(mk.as_str()) {
             continue;
         }
         // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
@@ -3127,39 +3238,58 @@ fn chip_row<'a>(
             (Some(k), ..) => {
                 format!("{} (its slot is taken)", v.slot_text(k))
             }
-            // the tag paints "unused", so the name and hover say it too (Note HP12)
+            // Note JW7: the small tile keeps the unused reason in its name and hover.
             (None, Some(h), _) => helper_tag_text(h),
             (None, None, Some(j)) => subtype_name(j.profile.subtype),
             _ => "not converted".to_string(),
         };
-        let dim = item.helper.as_ref().is_some_and(|h| h.fills.is_empty());
-        let was = ui.opacity();
-        if dim {
-            ui.multiply_opacity(ui.visuals().disabled_alpha());
-        }
-        let r = member_chip(
-            ui,
-            model,
-            thumbs,
-            v,
-            mk,
-            kind,
-            true,
-            ChipDrag::Item,
-            Some(&|| role.clone()),
-            sel_items,
-            acts,
-            member_menu,
-        );
-        // the tag is painted at the tile's opacity, so an unused helper's fades with it
-        if let Some(r) = &r {
-            paint_letter(ui, r.rect, &tile_tag(model, v, mk, kind), false, CHIP - 2.0);
-        }
-        ui.set_opacity(was);
+        let r = if item.kind == ItemKind::Helper && kind.is_none() {
+            let was = ui.opacity();
+            if item.helper.as_ref().is_some_and(|h| h.fills.is_empty()) {
+                ui.multiply_opacity(ui.visuals().disabled_alpha());
+            }
+            let r = helper_tile(
+                ui,
+                model,
+                thumbs,
+                v,
+                mk,
+                &role,
+                sel_items,
+                acts,
+                member_menu,
+            );
+            ui.set_opacity(was);
+            r
+        } else {
+            let r = member_chip(
+                ui,
+                model,
+                thumbs,
+                v,
+                mk,
+                kind,
+                true,
+                ChipDrag::Item,
+                Some(&|| role.clone()),
+                sel_items,
+                acts,
+                member_menu,
+            );
+            if let Some(r) = &r {
+                paint_letter(ui, r.rect, &tile_tag(model, v, mk, kind), false, CHIP - 2.0);
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        format!("{}, {role}", item.name),
+                    )
+                });
+            }
+            r
+        };
         if let Some(r) = r {
             fixed.push(r.rect);
-            let name = format!("{}, {role}", item.name);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         }
     }
     (plans, fixed)
@@ -4541,18 +4671,9 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_tag_is_the_slot_letter_or_the_first_fill_or_the_tail_or_a_dash() {
-        use engine::helper::{AlphaTarget as A, FillTarget as F};
-        let mask = F::Packed {
-            suffix: "m",
-            channel: 1,
-        };
-        // a helper: its first fill, "unused" with none (the tail is not read)
-        assert_eq!(tag_text(Some(&[mask, F::Alpha(A::N)]), "_m"), "M G");
-        assert_eq!(tag_text(Some(&[]), "_m"), "unused");
-        // any other member: its tail, or an em dash
-        assert_eq!(tag_text(None, "_m"), "_m");
-        assert_eq!(tag_text(None, ""), "—");
+    fn a_tile_tag_is_the_slot_letter_or_the_tail_or_a_dash() {
+        assert_eq!(tag_text("_m"), "_m");
+        assert_eq!(tag_text(""), "—");
     }
 
     /// Final wave Group 6 (ledger 187): the last resort `…/<tail>` is never as long as the id it stands for.
