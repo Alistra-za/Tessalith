@@ -1854,9 +1854,8 @@ fn shift_changed_after_release_up_still_shares() {
     release_then_change_shift(egui::Modifiers::SHIFT, egui::Modifiers::NONE);
 }
 
-fn shift_share_at_strip(bridge: bool) {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = three_cards(d.path());
+fn drag_normal_to_odd(dir: &Path) -> H {
+    let mut m = three_cards(dir);
     let odd = "landscape/odd";
     m.set_shader(odd, Some(engine::shader::Shader::Pbr));
     idle(&mut m);
@@ -1867,6 +1866,63 @@ fn shift_share_at_strip(bridge: bool) {
     let from = outside_sets(&h, "rock01_normal.png").rect().center();
     let card = card_of(&h, odd);
     drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    h
+}
+
+fn assert_strip_release_asks(events: impl FnOnce(egui::Pos2, egui::Pos2) -> Vec<egui::Event>) {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = drag_normal_to_odd(d.path());
+    let odd = "landscape/odd";
+    let (owner, strip, bridge) = h.state().1.drops.strip.clone().expect("strip on odd");
+    let at = strip.center();
+    assert_eq!(owner, odd);
+    assert!(!card_of(&h, odd).contains(at));
+    let outside = card_of(&h, ROCK).right_center() - egui::vec2(2.0, 0.0);
+    assert!(!strip.contains(outside) && !bridge.contains(outside));
+    let before = documents(&h.state().0);
+    h.input_mut().events.extend(events(at, outside));
+    h.step();
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, odd, ROCK)));
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
+fn two_primary_releases_on_the_strip_ask() {
+    assert_strip_release_asks(|at, _| {
+        vec![
+            pointer_button(at, false, egui::Modifiers::SHIFT),
+            pointer_button(at, false, egui::Modifiers::SHIFT),
+        ]
+    });
+}
+
+#[test]
+fn a_secondary_only_release_on_the_strip_asks() {
+    assert_strip_release_asks(|at, _| {
+        vec![release(
+            at,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::SHIFT,
+        )]
+    });
+}
+
+#[test]
+fn a_last_release_on_the_strip_asks_when_the_shift_primary_was_elsewhere() {
+    assert_strip_release_asks(|at, outside| {
+        vec![
+            pointer_button(outside, false, egui::Modifiers::SHIFT),
+            release(at, egui::PointerButton::Secondary, egui::Modifiers::NONE),
+            egui::Event::PointerMoved(outside),
+        ]
+    });
+}
+
+fn shift_share_at_strip(bridge: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = drag_normal_to_odd(d.path());
+    let odd = "landscape/odd";
+    let card = card_of(&h, odd);
     let (owner, strip, hit) = h.state().1.drops.strip.clone().expect("strip on odd");
     assert_eq!(owner, odd);
     let at = if bridge {
