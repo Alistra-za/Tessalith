@@ -188,10 +188,17 @@ fn a_packed_output_cannot_be_moved_only_shared() {
         DropOutcome::Refused(_)
     ));
     assert!(m.remove_member("landscape/rock01", &rmaos).is_err());
+    assert_eq!(
+        m.drop_choice(&rmaos, &id, DropChoice::Duplicate),
+        DropOutcome::Refused(
+            "A packed map cannot be duplicated. Share its finished output or move its raw maps."
+                .into()
+        )
+    );
 }
 
 #[test]
-fn duplicating_a_raw_source_copies_it_and_undo_deletes_it_only_when_unchanged() {
+fn duplicating_a_source_copies_it_and_undo_deletes_it_only_when_unchanged() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
@@ -217,6 +224,11 @@ fn duplicating_a_raw_source_copies_it_and_undo_deletes_it_only_when_unchanged() 
     assert!(!m.sets_doc.as_ref().unwrap().text().contains("share"));
     assert_eq!(
         m.drop_choice(&rough, &id, DropChoice::Duplicate),
+        DropOutcome::Refused(sdc_gui::model::sets::HELPER_DUPLICATE.into())
+    );
+    let normal = key_of(&m, "rock01_normal.png");
+    assert_eq!(
+        m.drop_choice(&normal, &id, DropChoice::Duplicate),
         DropOutcome::Joined
     );
     let base = id.rsplit('/').next().unwrap().to_string();
@@ -224,7 +236,7 @@ fn duplicating_a_raw_source_copies_it_and_undo_deletes_it_only_when_unchanged() 
         .root
         .clone()
         .unwrap()
-        .join(format!("landscape/{base}_roughness.png"));
+        .join(format!("landscape/{base}_normal.png"));
     assert!(copy.exists(), "{copy:?}");
     m.undo();
     assert!(!copy.exists(), "an unchanged copy is deleted by undo");
@@ -3829,16 +3841,16 @@ fn redo_of_a_duplicate_refuses_an_occupied_path_and_records_the_new_hash() {
     let odd = key_of(&m, "odd.png");
     let id = m.drop_new_set(&odd).unwrap();
     idle(&mut m);
-    let rough = key_of(&m, "rock01_roughness.png");
-    m.drop_on_set(&rough, &id);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.drop_on_set(&normal, &id);
     assert_eq!(
-        m.drop_choice(&rough, &id, DropChoice::Duplicate),
+        m.drop_choice(&normal, &id, DropChoice::Duplicate),
         DropOutcome::Joined
     );
     let root = m.root.clone().unwrap();
     let base = id.rsplit('/').next().unwrap().to_string();
-    let copy = root.join(format!("landscape/{base}_roughness.png"));
-    let src = root.join("landscape/rock01_roughness.png");
+    let copy = root.join(format!("landscape/{base}_normal.png"));
+    let src = root.join("landscape/rock01_normal.png");
     m.undo();
     std::fs::write(&copy, b"someone else").unwrap();
     m.redo();
@@ -3866,14 +3878,14 @@ fn duplicate_skips_a_name_another_file_reads_as() {
     let mut m = pbr_opened(d.path());
     let root = m.root.clone().unwrap();
     let leaf = key_of(&m, "leaf.png");
-    let rough = key_of(&m, "rock01_roughness.png");
+    let normal = key_of(&m, "rock01_normal.png");
     m.edit_docs("alias", None, true, |p, _| {
-        p.set_read_as(&leaf, Some("landscape/odd_roughness.png"))
+        p.set_read_as(&leaf, Some("landscape/odd_normal.png"))
     });
     idle(&mut m);
-    let _ = m.drop_replace(&rough, "landscape/odd", DropChoice::Duplicate);
-    assert!(!root.join("landscape/odd_roughness.png").exists());
-    assert!(root.join("landscape/odd-2_roughness.png").exists());
+    let _ = m.drop_replace(&normal, "landscape/odd", DropChoice::Duplicate);
+    assert!(!root.join("landscape/odd_normal.png").exists());
+    assert!(root.join("landscape/odd-2_normal.png").exists());
 }
 
 /// Trace-debug #55: Move down on the last set (no `[project].order` yet) is no edit at all.

@@ -135,6 +135,40 @@ fn no_set_ao(dir: &Path) -> AppModel {
 
 // ---- the drop ----
 
+/// Note JW5 (A7-1): a helper is shared, never duplicated, wherever it comes from.
+#[test]
+fn a_helper_is_never_duplicated() {
+    use sdc_gui::model::sets::HELPER_DUPLICATE;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    assert_eq!(m.drop_choices(AO), [DropChoice::Move, DropChoice::Share]);
+    assert_eq!(
+        m.drop_choices("a/rock.png"),
+        [DropChoice::Move, DropChoice::Share, DropChoice::Duplicate]
+    );
+    let before = files_under(d.path());
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Duplicate),
+        DropOutcome::Refused(HELPER_DUPLICATE.into())
+    );
+    assert_eq!(
+        m.drop_replace(AO, B, DropChoice::Duplicate),
+        Err(HELPER_DUPLICATE.to_string())
+    );
+    // A helper without a raw role still has no slot and cannot be shared as a file.
+    m.items.iter_mut().find(|i| i.key == AO).unwrap().helper = None;
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Share),
+        DropOutcome::Refused("Only a raw helper can be shared as a file.".into())
+    );
+    assert_eq!(m.drop_choices(AO), [DropChoice::Move, DropChoice::Share]);
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Duplicate),
+        DropOutcome::Refused(HELPER_DUPLICATE.into())
+    );
+    assert_eq!(files_under(d.path()), before, "no file is copied");
+}
+
 #[test]
 fn share_writes_one_line_and_no_file() {
     let d = tempfile::tempdir().unwrap();

@@ -3311,7 +3311,7 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     let (title, line, footer) = match &p {
         Pending::Choice { item, from, .. } => {
             let name = model.item(item).map_or(item.clone(), |i| i.name.clone());
-            // K5: the three answers stay in the body; the footer has only Cancel.
+            // K5: the drop choices stay in the body; the footer has only Cancel.
             let footer = vec![("Cancel".to_string(), Role::Plain, ModalAnswer::Close)];
             (format!("{name} is in {from}"), None, footer)
         }
@@ -3350,21 +3350,18 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
                 ui.label(line);
             }
             if let Pending::Choice { item, .. } = &p {
-                // Note HH5: a helper is shared as the file itself; a no-set one has no set to duplicate it from.
-                let helper = model.is_shareable_helper(item);
-                let share = if helper {
+                // Note JW5: helpers have no Duplicate button; a raw helper shares the file itself.
+                let share = if model.is_shareable_helper(item) {
                     "Share (use this file here too, no copy)"
                 } else {
                     "Share (borrow its finished output)"
                 };
-                let mut choices = vec![
-                    ("Move it here", DropChoice::Move),
-                    (share, DropChoice::Share),
-                ];
-                if !(helper && model.is_no_set(item)) {
-                    choices.push(("Duplicate the source for this set", DropChoice::Duplicate));
-                }
-                for (label, c) in choices {
+                for c in model.drop_choices(item) {
+                    let label = match c {
+                        DropChoice::Move => "Move it here",
+                        DropChoice::Share => share,
+                        DropChoice::Duplicate => "Duplicate the source for this set",
+                    };
                     if ui.button(label).clicked() {
                         answer = Some(ModalAnswer::Choice(c));
                     }

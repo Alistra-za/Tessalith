@@ -2656,8 +2656,12 @@ pub enum SlotCommand {
 }
 
 pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
+/// Note JW5: why a helper is never duplicated (a helper is shared as the file itself, Note HH5).
+pub const HELPER_DUPLICATE: &str = "a helper cannot be duplicated; share it instead";
 const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
+const PACKED_DUPLICATE: &str =
+    "A packed map cannot be duplicated. Share its finished output or move its raw maps.";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.
 const NO_FILES_LEFT: &str = "no texture of this set is left in the folder";
 
@@ -3563,6 +3567,16 @@ impl AppModel {
         self.apply_choice(item, &target, slot, choice, existing)
     }
 
+    /// Note JW5: the answers the drop dialog offers for `item`, in order: Move, Share, and Duplicate unless the
+    /// item is a helper (`ItemKind::Helper`).
+    pub fn drop_choices(&self, item: &str) -> Vec<DropChoice> {
+        if self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) {
+            vec![DropChoice::Move, DropChoice::Share]
+        } else {
+            vec![DropChoice::Move, DropChoice::Share, DropChoice::Duplicate]
+        }
+    }
+
     /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
     pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
         self.item(item).is_some_and(|i| {
@@ -3649,6 +3663,9 @@ impl AppModel {
                     target.id
                 ))
             }
+            DropChoice::Share if slot.is_none() && self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) => {
+                Err("Only a raw helper can be shared as a file.".into())
+            }
             DropChoice::Share if slot.is_none() => Err(
                 "only a finished texture can be shared; duplicate the source to use it in two sets"
                     .into(),
@@ -3656,8 +3673,9 @@ impl AppModel {
             DropChoice::Share if self.set_of_item(item).is_none() => {
                 Err("the texture is in no set".into())
             }
-            DropChoice::Duplicate if self.is_packed(item) => {
-                Err("a packed map cannot be duplicated; duplicate its raw maps".into())
+            DropChoice::Duplicate if self.is_packed(item) => Err(PACKED_DUPLICATE.into()),
+            DropChoice::Duplicate if self.item(item).is_some_and(|i| i.kind == ItemKind::Helper) => {
+                Err(HELPER_DUPLICATE.into())
             }
             _ => Ok(()),
         }
@@ -3766,7 +3784,7 @@ impl AppModel {
             return Err(READ_ONLY.into());
         }
         if self.is_packed(item) {
-            return Err("a packed map cannot be duplicated; duplicate its raw maps".into());
+            return Err(PACKED_DUPLICATE.into());
         }
         let src = self
             .item(item)

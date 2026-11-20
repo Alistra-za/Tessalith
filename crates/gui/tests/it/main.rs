@@ -259,6 +259,8 @@ mod scroll_bars;
 mod set_cards;
 #[path = "../set_cleanup.rs"]
 mod set_cleanup;
+#[path = "../set_drag.rs"]
+mod set_drag;
 #[path = "../set_editor_ui.rs"]
 mod set_editor_ui;
 #[path = "../set_editor_width.rs"]
