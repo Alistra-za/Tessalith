@@ -410,6 +410,87 @@ fn plus_k_says_it_lists_them() {
     h.get_by_label_contains("Click to list them.");
 }
 
+fn folded_ao_files(dir: &std::path::Path, count: usize) -> AppModel {
+    let root = mod_folder(dir);
+    let keys: Vec<_> = (0..count - 2)
+        .map(|n| format!("layer{n}/rock01_ao.png"))
+        .collect();
+    for key in &keys {
+        let path = root.join(key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::copy(root.join("landscape/rock01_ao.png"), path).unwrap();
+    }
+    let mut m = pbr_opened_plain(dir);
+    m.edit_docs("Dock the helpers on one locked chip", None, true, |_, s| {
+        s.set_lock(ROCK, 6, true);
+        for key in &keys {
+            s.add_member(ROCK, key);
+        }
+    });
+    idle(&mut m);
+    if count == 4 {
+        use engine::{config::RawMap, helper::HelperRole};
+        for (key, role) in keys.iter().zip([RawMap::Metallic, RawMap::Specular]) {
+            m.set_helper_role(key, Some(HelperRole::Raw(role)));
+        }
+        idle(&mut m);
+    } else {
+        // A four-channel map cannot supply ten distinct fills. Exercise the renderer with that many reported rows.
+        for item in &mut m.items {
+            if keys.contains(&item.key) {
+                let report = std::sync::Arc::make_mut(item.helper.as_mut().unwrap());
+                report.fills = vec![engine::helper::FillTarget::Packed {
+                    suffix: "rmaos",
+                    channel: 2,
+                }];
+            }
+        }
+        m.invalidate_views();
+    }
+    m
+}
+
+#[test]
+fn folded_helpers_with_matching_names_use_project_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(folded_ao_files(d.path(), 4));
+    h.run();
+    h.get_by_label("4 more helpers fill RMAOS in landscape/rock01")
+        .click();
+    h.run();
+    for dir in ["layer0", "layer1", "landscape"] {
+        let path = format!("{dir}/rock01_ao.png");
+        h.get_by_role_and_label(egui::Role::Button, &format!("Remove {path} from set"));
+        assert_eq!(
+            h.query_all_by_label_contains(&format!("{path}, fills RMAOS"))
+                .filter(|n| n.accesskit_node().role() == egui::Role::Button)
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn folded_overflow_paints_nine_then_only_plus_at_ten() {
+    for (count, expected) in [(9, "+9"), (10, "+")] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = harness(folded_ao_files(d.path(), count));
+        h.run();
+        let cell = h
+            .get_by_label(&format!("{count} more helpers fill RMAOS in {ROCK}"))
+            .rect();
+        let labels: Vec<_> = shapes(&h)
+            .into_iter()
+            .filter_map(|s| {
+                let egui::Shape::Text(t) = s else { return None };
+                cell.contains(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    .then(|| t.galley.job.text.clone())
+            })
+            .collect();
+        assert_eq!(labels, [expected], "{count} folded helpers");
+    }
+}
+
 /// Note JW7: on a read-only project file the ✕ of a list row is off, with the read-only reason on hover.
 #[test]
 fn a_folded_helpers_remove_is_off_when_the_project_is_read_only() {
@@ -453,6 +534,10 @@ fn a_folded_helpers_remove_is_off_when_the_project_is_read_only() {
                 .is_some_and(|l| l.starts_with("Remove rock01_"))
         })
         .expect("a ✕");
+    assert_eq!(
+        x.accesskit_node().description().as_deref(),
+        Some(why.as_str())
+    );
     assert!(x.accesskit_node().is_disabled(), "the ✕ is off");
     let at = x.rect().center();
     // The reason may already be drawn elsewhere (a banner, a Problems row), so the hover is one more node.

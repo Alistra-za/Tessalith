@@ -715,11 +715,12 @@ fn file_drop(model: &mut AppModel, drops: &mut DropState, set: &str, slot: SlotK
     };
     drops.slot_note = match r.outcome {
         crate::model::sets::DropOutcome::Refused(why) => Some(line(why, true)),
-        crate::model::sets::DropOutcome::AskReplace { existing } => {
+        crate::model::sets::DropOutcome::AskReplace { kind, existing } => {
             if let Some(item) = r.item {
                 drops.pending = Some(Pending::Replace {
                     item,
                     set: set.to_string(),
+                    kind,
                     existing,
                     choice: crate::model::sets::DropChoice::Move,
                 });

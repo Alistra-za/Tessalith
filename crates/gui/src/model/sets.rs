@@ -1,6 +1,6 @@
 //! The user's texture sets (M3b spec §3, §6.1): views for the Sets column and set editor, shared-slot ownership,
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
-use super::history::{sha256_of, CreatedFile};
+use super::history::CreatedFile;
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
 use super::txst_map::{fill_from_records, link_slots, record_shared_sets};
 use super::AppModel;
@@ -2780,7 +2780,7 @@ enum DropPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropOutcome {
     Joined,
-    AskReplace { existing: String },
+    AskReplace { kind: SlotKind, existing: SlotFill },
     AskChoice { from: String },
     Refused(String),
 }
@@ -2803,6 +2803,8 @@ const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
 const PACKED_DUPLICATE: &str =
     "A packed map cannot be duplicated. Share its finished output or move its raw maps.";
+const SHARED_SOURCE_CHANGED: &str = "The shared source changed. Drag the chip again.";
+const DESTINATION_SLOT_CHANGED: &str = "The destination slot changed. Drag the chip again.";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.
 const NO_FILES_LEFT: &str = "no texture of this set is left in the folder";
 
@@ -3700,8 +3702,8 @@ impl AppModel {
         if !self.sets_editable() {
             return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
         }
-        if membership_edits(self) != self.landed_membership {
-            return Err("The shared source changed. Drag the chip again.".into());
+        if self.full_plan_pending() || membership_edits(self) != self.landed_membership {
+            return Err(SHARED_SOURCE_CHANGED.into());
         }
         let target = match self.drop_target(set) {
             Ok(target) => target,
@@ -3711,9 +3713,7 @@ impl AppModel {
             .item(item)
             .and_then(|it| Some((it, slot_of(it)?, self.lent_slot(item)?.0)));
         let Some((it, kind, owner)) = source.filter(|(_, _, owner)| same_id(owner, from)) else {
-            return Ok(BorrowOutcome::Refused(
-                "The shared source changed. Drag the chip again.".into(),
-            ));
+            return Ok(BorrowOutcome::Refused(SHARED_SOURCE_CHANGED.into()));
         };
         if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner) {
             return Err(why);
@@ -3722,7 +3722,7 @@ impl AppModel {
         if confirmed
             .is_some_and(|(approved, existing)| approved != kind || !existing.matches(&shown))
         {
-            return Err("The destination slot changed. Drag the chip again.".into());
+            return Err(DESTINATION_SLOT_CHANGED.into());
         }
         let set = &target.id;
         let name = &it.name;
@@ -3811,23 +3811,20 @@ impl AppModel {
 
     /// Note JW6: why the dialog cannot offer this answer. A choice that would ask Replace is usable.
     pub fn choice_refused(&self, item: &str, set: &str, choice: DropChoice) -> Option<String> {
-        self.drop_precheck(item, set, choice).err()
+        self.drop_precheck(item, set, choice, None).err()
     }
 
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set
     /// already fills asks to replace first (spec §3.1); answer that with `drop_replace` and the same choice.
     pub fn drop_choice(&mut self, item: &str, set: &str, choice: DropChoice) -> DropOutcome {
-        let result = match self.drop_precheck(item, set, choice) {
+        let result = match self.drop_precheck(item, set, choice, None) {
             Err(e) => return DropOutcome::Refused(e),
             Ok(DropPlan::ShareHelper(target)) => self.share_helper(item, &target),
             Ok(DropPlan::Slot {
-                existing:
-                    Some(
-                        SlotFill::Own { item: existing }
-                        | SlotFill::Borrowed { item: existing, .. },
-                    ),
+                slot: Some(kind),
+                existing: Some(existing),
                 ..
-            }) => return DropOutcome::AskReplace { existing },
+            }) => return DropOutcome::AskReplace { kind, existing },
             Ok(DropPlan::Slot { target, slot, .. }) => {
                 self.apply_choice(item, &target, slot, choice, None)
             }
@@ -3839,24 +3836,44 @@ impl AppModel {
     }
 
     /// Note JW6: the dialog and the edit check the same destination before any write.
-    fn drop_precheck(&self, item: &str, set: &str, choice: DropChoice) -> Result<DropPlan, String> {
+    fn drop_precheck(
+        &self,
+        item: &str,
+        set: &str,
+        choice: DropChoice,
+        approved: Option<(SlotKind, &SlotFill)>,
+    ) -> Result<DropPlan, String> {
         #[cfg(feature = "test-hooks")]
         DROP_PRECHECKS.with(|n| n.set(n.get() + 1));
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
-        let target = self.drop_target(set)?;
+        let target = self.drop_target(set).map_err(|why| {
+            if approved.is_some() {
+                DESTINATION_SLOT_CHANGED.into()
+            } else {
+                why
+            }
+        })?;
+        let slot = self.item(item).and_then(slot_of);
+        if approved
+            .is_some_and(|(kind, old)| slot != Some(kind) || target.slots.get(&kind) != Some(old))
+        {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        }
         if choice == DropChoice::Share && self.item(item).is_some_and(is_shareable_helper) {
             self.share_helper_check(item, &target)?;
             return Ok(DropPlan::ShareHelper(target));
         }
-        let slot = self.item(item).and_then(slot_of);
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
             .then_some(from.as_deref())
             .flatten();
         let existing = self.occupant(&target, slot, share_from)?;
         self.choice_allowed(item, &target, slot, choice)?;
+        if choice == DropChoice::Share {
+            share_keeps_member(&target, existing.as_ref())?;
+        }
         Ok(DropPlan::Slot {
             target,
             slot,
@@ -3871,18 +3888,27 @@ impl AppModel {
         item: &str,
         set: &str,
         choice: DropChoice,
+        kind: SlotKind,
+        approved: &SlotFill,
     ) -> Result<(), String> {
-        if !self.sets_editable() {
-            return Err(READ_ONLY.into());
+        if self.full_plan_pending() {
+            self.status_line = SHARED_SOURCE_CHANGED.into();
+            return Err(self.status_line.clone());
         }
-        let target = self.drop_target(set)?;
-        let slot = self.item(item).and_then(slot_of);
-        let from = self.set_of_item(item).map(|f| f.id);
-        let share_from = (choice == DropChoice::Share)
-            .then_some(from.as_deref())
-            .flatten();
-        let existing = self.occupant(&target, slot, share_from)?;
-        self.apply_choice(item, &target, slot, choice, existing)
+        if !approved.is_filled() {
+            return Err(self
+                .choice_refused(item, set, choice)
+                .unwrap_or_else(|| DESTINATION_SLOT_CHANGED.into()));
+        }
+        let DropPlan::Slot {
+            target,
+            slot,
+            existing: Some(existing),
+        } = self.drop_precheck(item, set, choice, Some((kind, approved)))?
+        else {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        };
+        self.apply_choice(item, &target, slot, choice, Some(existing))
     }
 
     /// Note JW5: the answers the drop dialog offers for `item`, in order: Move, Share, and Duplicate unless the
@@ -3974,6 +4000,9 @@ impl AppModel {
             }
             DropChoice::Share if self.set_of_item(item).is_none() => {
                 Err("the texture is in no set".into())
+            }
+            DropChoice::Share if self.lent_slot(item).is_none() => {
+                Err(SHARED_SOURCE_CHANGED.into())
             }
             _ => Ok(()),
         }
@@ -4125,11 +4154,9 @@ impl AppModel {
             .strip_prefix(&root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .map_err(|_| "the copy would be outside the folder".to_string())?;
-        std::fs::copy(&src, &dst).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
-        let Some(sha256) = sha256_of(&dst) else {
-            let _ = std::fs::remove_file(&dst);
-            return Err("could not read the copy".into());
-        };
+        let sha256 = std::fs::File::open(&src)
+            .and_then(|input| super::write_copy(input, &dst))
+            .map_err(|e| format!("could not copy {}: {e}", src.display()))?;
         let id = set.to_string();
         let before = self.sets_doc.as_ref().map(|d| d.text());
         self.edit_docs(&format!("Duplicate into {id}"), None, true, move |_, s| {

@@ -66,7 +66,10 @@ fn a_filled_slot_asks_first_and_a_locked_slot_refuses() {
     assert_eq!(
         r.outcome,
         DropOutcome::AskReplace {
-            existing: "landscape/rock01.png".into()
+            kind: SlotKind::Diffuse,
+            existing: sdc_gui::model::sets::SlotFill::Own {
+                item: "landscape/rock01.png".into()
+            }
         }
     );
     m.set_slot_lock(LEAF, 2, true).unwrap();

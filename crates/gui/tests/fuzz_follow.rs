@@ -1342,9 +1342,15 @@ fn a_hand_set_fuzz_role_keeps_the_recorded_skin_albedo() {
     assert!(m.fuzz_recorded_skin(DIFFUSE), "before the share");
     use sdc_gui::model::sets::{DropChoice, DropOutcome};
     let out = m.drop_choice("m/aaa01_mask.png", "m/rock01", DropChoice::Share);
-    if matches!(out, DropOutcome::AskReplace { .. }) {
-        m.drop_replace("m/aaa01_mask.png", "m/rock01", DropChoice::Share)
-            .unwrap();
+    if let DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(
+            "m/aaa01_mask.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        )
+        .unwrap();
     }
     idle(&mut m);
     assert!(
@@ -1490,8 +1496,8 @@ fn a_borrowers_view_does_not_decide_the_lenders_file() {
         AcceptSuggestions::None,
     );
     let out = m.drop_choice(DIFFUSE, "m/aaa01", DropChoice::Share);
-    if matches!(out, DropOutcome::AskReplace { .. }) {
-        m.drop_replace(DIFFUSE, "m/aaa01", DropChoice::Share)
+    if let DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(DIFFUSE, "m/aaa01", DropChoice::Share, kind, &existing)
             .unwrap();
     }
     idle(&mut m);

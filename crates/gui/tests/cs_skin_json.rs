@@ -106,9 +106,13 @@ fn wet_can_be_shared_from_another_skin_set() {
     // rock01 gives its own `_wet` up for rock02's: Share rock02's into rock01 (replacing the occupant).
     let out = m.drop_choice("m/rock02_wet.png", "m/rock01", DropChoice::Share);
     let r = match out {
-        sdc_gui::model::sets::DropOutcome::AskReplace { .. } => {
-            m.drop_replace("m/rock02_wet.png", "m/rock01", DropChoice::Share)
-        }
+        sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } => m.drop_replace(
+            "m/rock02_wet.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        ),
         sdc_gui::model::sets::DropOutcome::Joined => Ok(()),
         other => panic!("{other:?}"),
     };
@@ -150,9 +154,15 @@ fn a_wet_slot_can_be_pinned() {
 /// rock01 borrows rock02's `_wet` (slot 9).
 fn with_borrowed_wet(m: &mut AppModel) {
     let out = m.drop_choice("m/rock02_wet.png", "m/rock01", DropChoice::Share);
-    if matches!(out, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
-        m.drop_replace("m/rock02_wet.png", "m/rock01", DropChoice::Share)
-            .unwrap();
+    if let sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(
+            "m/rock02_wet.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        )
+        .unwrap();
     }
     idle(m);
     assert!(matches!(
@@ -316,12 +326,18 @@ fn share_of_wet_or_detail_needs_an_advanced_skin_set() {
     use sdc_gui::model::sets::DropOutcome;
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
-    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
+    for (item, kind) in [
+        ("m/rock02_wet.png", SlotKind::SkinWet),
+        ("m/rock02_detail_n.png", SlotKind::SkinDetail),
+    ] {
         match m.drop_choice(item, "m/plain", DropChoice::Share) {
             DropOutcome::Refused(why) => assert!(why.contains("not an Advanced skin set"), "{why}"),
             other => panic!("{item}: {other:?}"),
         }
-        assert!(m.drop_replace(item, "m/plain", DropChoice::Share).is_err());
+        assert!(m
+            .drop_replace(item, "m/plain", DropChoice::Share, kind, &SlotFill::Empty)
+            .unwrap_err()
+            .contains("not an Advanced skin set"));
     }
     idle(&mut m);
     let e = m
@@ -441,8 +457,9 @@ fn read_json(p: &Path) -> Json {
 /// Share `item` into set `to` (replacing its own occupant).
 fn share(m: &mut AppModel, item: &str, to: &str) {
     let o = m.drop_choice(item, to, DropChoice::Share);
-    if matches!(o, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
-        m.drop_replace(item, to, DropChoice::Share).unwrap();
+    if let sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } = o {
+        m.drop_replace(item, to, DropChoice::Share, kind, &existing)
+            .unwrap();
     }
     idle(m);
 }

@@ -876,7 +876,10 @@ fn the_set_dialogs_enter_still_presses_what_it_pressed() {
         Pending::Replace {
             item: "landscape/leaf.png".into(),
             set: "s".into(),
-            existing: "landscape/rock01".into(),
+            kind: sdc_gui::model::sets::SlotKind::Diffuse,
+            existing: sdc_gui::model::sets::SlotFill::Own {
+                item: "landscape/rock01".into(),
+            },
             choice: DropChoice::Move,
         },
         Pending::Choice {
@@ -1050,7 +1053,10 @@ fn focused_destructive_buttons_ignore_enter_and_space() {
         let replace = Pending::Replace {
             item: "landscape/leaf.png".into(),
             set: "s".into(),
-            existing: "landscape/rock01".into(),
+            kind: sdc_gui::model::sets::SlotKind::Diffuse,
+            existing: sdc_gui::model::sets::SlotFill::Own {
+                item: "landscape/rock01".into(),
+            },
             choice: DropChoice::Move,
         };
         h.state_mut().1.drops.pending = Some(replace.clone());
@@ -1166,7 +1172,10 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
     h.state_mut().1.drops.pending = Some(Pending::Replace {
         item: "landscape/leaf.png".into(),
         set: "s".into(),
-        existing: existing.clone(),
+        kind: sdc_gui::model::sets::SlotKind::Diffuse,
+        existing: sdc_gui::model::sets::SlotFill::Own {
+            item: existing.clone(),
+        },
         choice: DropChoice::Move,
     });
     assert_dialog_settles_on_screen(

@@ -152,7 +152,13 @@ fn a_helper_is_never_duplicated() {
         DropOutcome::Refused(HELPER_DUPLICATE.into())
     );
     assert_eq!(
-        m.drop_replace(AO, B, DropChoice::Duplicate),
+        m.drop_replace(
+            AO,
+            B,
+            DropChoice::Duplicate,
+            SlotKind::Rmaos,
+            &sdc_gui::model::sets::SlotFill::Empty
+        ),
         Err(HELPER_DUPLICATE.to_string())
     );
     // A helper without a raw role still has no slot and cannot be shared as a file.

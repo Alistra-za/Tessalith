@@ -309,11 +309,13 @@ fn dropping_a_diffuse_on_a_set_with_one_asks_to_replace() {
     assert_eq!(
         out,
         DropOutcome::AskReplace {
-            existing: key_of(&m, "rock01.png")
+            kind: SlotKind::Diffuse,
+            existing: SlotFill::Own {
+                item: key_of(&m, "rock01.png")
+            }
         }
     );
-    m.drop_replace(&leaf, "landscape/rock01", DropChoice::Move)
-        .unwrap();
+    accept_drop(&mut m, &leaf, "landscape/rock01", DropChoice::Move).unwrap();
     idle(&mut m);
     let v = set_views(&m);
     let rock = view(&v, "landscape/rock01");
@@ -683,8 +685,7 @@ fn rename_refuses_the_name_of_an_automatic_set_emptied_by_a_move() {
     let mut m = pbr_opened(d.path());
     idle(&mut m);
     let leaf = key_of(&m, "leaf.png");
-    m.drop_replace(&leaf, "landscape/rock01", DropChoice::Move)
-        .unwrap();
+    accept_drop(&mut m, &leaf, "landscape/rock01", DropChoice::Move).unwrap();
     idle(&mut m);
     let v = set_views(&m);
     assert!(!v.iter().any(|s| s.id == "landscape/leaf"), "no leaf card");
@@ -799,7 +800,15 @@ fn a_read_only_project_file_refuses_set_edits_but_sdc_toml_still_edits() {
     assert!(m.rename_set("landscape/rock01", "x/y").is_err());
     assert!(m.remove_member("landscape/rock01", &rough).is_err());
     assert!(m
-        .drop_replace(&leaf, "landscape/rock01", DropChoice::Move)
+        .drop_replace(
+            &leaf,
+            "landscape/rock01",
+            DropChoice::Move,
+            SlotKind::Diffuse,
+            &SlotFill::Own {
+                item: "landscape/rock01.png".into()
+            }
+        )
         .is_err());
     assert!(!m.delete_set("landscape/rock01"));
     assert!(m
@@ -838,13 +847,14 @@ fn sharing_into_a_filled_slot_asks_to_replace() {
     assert_eq!(
         m.drop_choice(&rock, &id, DropChoice::Share),
         DropOutcome::AskReplace {
-            existing: leaf.clone()
+            kind: SlotKind::Diffuse,
+            existing: SlotFill::Own { item: leaf.clone() }
         }
     );
     // Cancel: nothing changed.
     assert_eq!(m.sets_doc.as_ref().unwrap().text(), before);
     // Replace: leaf leaves, the slot borrows rock01's diffuse, in one step.
-    m.drop_replace(&rock, &id, DropChoice::Share).unwrap();
+    accept_drop(&mut m, &rock, &id, DropChoice::Share).unwrap();
     idle(&mut m);
     let v = set_views(&m);
     assert!(matches!(
@@ -863,12 +873,23 @@ fn sharing_away_the_only_texture_of_an_automatic_set_is_refused() {
     let mut m = pbr_opened(d.path());
     idle(&mut m);
     let rock = key_of(&m, "rock01.png");
-    assert!(matches!(
+    assert_eq!(
         m.drop_choice(&rock, "landscape/leaf", DropChoice::Share),
-        DropOutcome::AskReplace { .. }
-    ));
+        DropOutcome::Refused(
+            "landscape/leaf would have no texture of its own left; move another texture in first"
+                .into()
+        )
+    );
     assert!(m
-        .drop_replace(&rock, "landscape/leaf", DropChoice::Share)
+        .drop_replace(
+            &rock,
+            "landscape/leaf",
+            DropChoice::Share,
+            SlotKind::Diffuse,
+            &SlotFill::Own {
+                item: "landscape/leaf.png".into()
+            }
+        )
         .is_err());
     m.edit_docs("Share the albedo", None, true, |_, s| {
         s.create_set("landscape/shared");
@@ -918,11 +939,12 @@ fn duplicating_a_finished_map_into_a_filled_slot_asks_to_replace() {
     assert_eq!(
         m.drop_choice(&rock, &id, DropChoice::Duplicate),
         DropOutcome::AskReplace {
-            existing: leaf.clone()
+            kind: SlotKind::Diffuse,
+            existing: SlotFill::Own { item: leaf.clone() }
         }
     );
     assert!(!copy.exists(), "cancel copies nothing");
-    m.drop_replace(&rock, &id, DropChoice::Duplicate).unwrap();
+    accept_drop(&mut m, &rock, &id, DropChoice::Duplicate).unwrap();
     assert!(copy.exists(), "{copy:?}");
     idle(&mut m);
     let members = view(&set_views(&m), &id).members.clone();
@@ -1973,10 +1995,14 @@ fn moving_a_lent_normal_into_its_borrower_leaves_no_self_borrow() {
     assert_eq!(
         m.drop_choice(&normal, id, DropChoice::Move),
         DropOutcome::AskReplace {
-            existing: normal.clone()
+            kind: SlotKind::Normal,
+            existing: SlotFill::Borrowed {
+                item: normal.clone(),
+                from: ROCK.into()
+            }
         }
     );
-    m.drop_replace(&normal, id, DropChoice::Move).unwrap();
+    accept_drop(&mut m, &normal, id, DropChoice::Move).unwrap();
     idle(&mut m);
     assert_eq!(borrow_of(&m, id, 2), None);
     assert_eq!(
@@ -2163,10 +2189,13 @@ fn replacing_a_lent_file_by_a_share_points_its_borrowers_at_the_new_source() {
     idle(&mut m);
     assert_eq!(
         m.drop_choice(&normal, id, DropChoice::Share),
-        DropOutcome::AskReplace { existing: n02 }
+        DropOutcome::AskReplace {
+            kind: SlotKind::Normal,
+            existing: SlotFill::Own { item: n02 }
+        }
     );
     let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
-        m.drop_replace(&normal, id, DropChoice::Share).unwrap();
+        accept_drop(m, &normal, id, DropChoice::Share).unwrap();
     });
     assert_eq!(borrow_of(&m, id, 2).as_deref(), Some("landscape/rock01"));
     assert_eq!(
@@ -2243,8 +2272,7 @@ fn a_share_that_replaces_a_share_points_its_borrowers_at_the_new_source() {
         DropOutcome::AskReplace { .. }
     ));
     let before = one_step(&mut m, None, |m| {
-        m.drop_replace(&normal, "landscape/leaf", DropChoice::Share)
-            .unwrap()
+        accept_drop(m, &normal, "landscape/leaf", DropChoice::Share).unwrap()
     });
     for id in ["landscape/leaf", "landscape/odd"] {
         assert_eq!(
@@ -2309,7 +2337,7 @@ fn a_borrower_that_is_the_new_source_drops_its_borrow() {
         DropOutcome::AskReplace { .. }
     ));
     let before = one_step(&mut m, None, |m| {
-        m.drop_replace(&normal, id, DropChoice::Share).unwrap()
+        accept_drop(m, &normal, id, DropChoice::Share).unwrap()
     });
     assert_eq!(borrow_of(&m, "landscape/rock01", 2), None);
     let views = set_views(&m);
@@ -2356,7 +2384,7 @@ fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_th
             .get(&SlotKind::Normal)
             .cloned()
     };
-    m.drop_replace(&normal, id, DropChoice::Move).unwrap();
+    accept_drop(&mut m, &normal, id, DropChoice::Move).unwrap();
     idle(&mut m);
     assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
     assert_eq!(
@@ -2368,7 +2396,7 @@ fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_th
     );
     m.undo();
     idle(&mut m);
-    m.drop_replace(&normal, id, DropChoice::Duplicate).unwrap();
+    accept_drop(&mut m, &normal, id, DropChoice::Duplicate).unwrap();
     idle(&mut m);
     let copy = "landscape/rock02_normal.png";
     m.decide(copy, Answer::Subtype(Subtype::PbrNormal));
@@ -4123,7 +4151,7 @@ fn duplicate_skips_a_name_another_file_reads_as() {
         p.set_read_as(&leaf, Some("landscape/odd_normal.png"))
     });
     idle(&mut m);
-    let _ = m.drop_replace(&normal, "landscape/odd", DropChoice::Duplicate);
+    let _ = accept_drop(&mut m, &normal, "landscape/odd", DropChoice::Duplicate);
     assert!(!root.join("landscape/odd_normal.png").exists());
     assert!(root.join("landscape/odd-2_normal.png").exists());
 }

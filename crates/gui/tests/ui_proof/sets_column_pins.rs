@@ -1757,7 +1757,7 @@ fn labels_sit_bottom_left_on_every_tile() {
         let search = |s: &str| {
             format!(r#"{{"op":"type","text":"{s}","at":{{"placeholder":"Search sets"}}}}"#)
         };
-        let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
         let at = format!("cobble at {w}x{h_px}");
         // the letter reads on the chip's own fill in both themes
         for v in [egui::Visuals::dark(), egui::Visuals::light()] {
@@ -1792,7 +1792,70 @@ fn labels_sit_bottom_left_on_every_tile() {
             }
         }
         let d_chip = d_off.expect("the D chip");
-        let (d_off, ..) = tile_label(&h, d_chip, "D");
+        let (d_off, _, d_letter) = tile_label(&h, d_chip, "D");
+        let views = sets::views(&h.state().model);
+        let v = views
+            .iter()
+            .find(|v| v.id == "architecture/stone/cobble")
+            .unwrap();
+        let letters: Vec<_> = v.empty.iter().map(|&k| sets::chip_letter(v, k)).collect();
+        assert!(!letters.is_empty(), "{at}: the card has empty slots");
+        h.hover_at(card.center());
+        egui::DragAndDrop::set_payload(
+            &h.ctx,
+            sdc_gui::ui::sets_column::DragItem(
+                v.members.first().expect("cobble has a texture").clone(),
+            ),
+        );
+        h.run_steps(3);
+        let (owner, strip, _) = h.state().state.drops.strip.as_ref().expect("visible strip");
+        assert_eq!(owner, &v.id);
+        // Start at the foreground strip's background. Text on the card underneath is covered.
+        let shapes = crate::support::shapes(&h);
+        let start = shapes
+            .iter()
+            .rposition(|s| matches!(s, egui::Shape::Rect(r) if r.rect == *strip))
+            .expect("strip background");
+        let painted = &shapes[start + 1..];
+        let cells: Vec<_> = painted
+            .iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Rect(r) if strip.contains_rect(r.rect) && near(r.rect, 32.0, 32.0) => {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells.len(), letters.len(), "{at}: one cell per empty slot");
+        let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
+        for (cell, letter) in cells.into_iter().zip(letters) {
+            let texts: Vec<_> = painted
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Text(t)
+                        if cell.contains(t.galley.rect.translate(t.pos.to_vec2()).center()) =>
+                    {
+                        Some(t)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                texts.len(),
+                1,
+                "{at}: one painted text in the {letter} cell"
+            );
+            let t = texts[0];
+            assert_eq!(t.galley.job.text, letter, "{at}");
+            assert_eq!(t.galley.job.sections[0].format.color, dim, "{at}, {letter}");
+            let label = t.galley.rect.translate(t.pos.to_vec2());
+            same_offset(
+                label.left_bottom() - cell.left_bottom(),
+                d_letter.left_bottom() - d_chip.left_bottom(),
+                &at,
+            );
+        }
+        egui::DragAndDrop::clear_payload(&h.ctx);
         // a trailing-row tile's tag, in the same corner
         for (q, file, tag) in [
             ("gold", "gold_m.png, ", "_m"),

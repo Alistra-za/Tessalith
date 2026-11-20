@@ -4966,39 +4966,34 @@ impl AppModel {
     }
 }
 
-/// Delete a file a command created, if it still has the SHA-256 it was created with.
-/// Redo of a Duplicate: copy the source to the copy's path again, never over a file already there; the new
-/// copy's hash.
-fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
-    let fail = |e: std::io::Error| format!("could not copy {} again: {e}", cf.source.display());
-    let mut out = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&cf.path)
-    {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(format!(
-                "{} already exists, so redo does not copy over it. Move or delete it, then redo.",
-                cf.path.display()
-            ))
-        }
-        Err(e) => return Err(fail(e)),
-        Ok(f) => f,
-    };
-    // From here the file at `cf.path` is the one just created, so a failure removes it.
-    let copied =
-        std::fs::File::open(&cf.source).and_then(|mut src| std::io::copy(&mut src, &mut out));
+/// Write and hash the image created by Duplicate.
+fn write_copy(mut input: impl std::io::Read, path: &Path) -> std::io::Result<String> {
+    let mut out = std::fs::File::create_new(path)?;
+    let copied = std::io::copy(&mut input, &mut out);
     drop(out);
-    if let Err(e) = copied {
-        let _ = std::fs::remove_file(&cf.path);
-        return Err(fail(e));
-    }
-    history::sha256_of(&cf.path).ok_or_else(|| {
-        let _ = std::fs::remove_file(&cf.path);
-        format!("could not read the copy {}", cf.path.display())
-    })
+    copied
+        .and_then(|_| {
+            history::sha256_of(path).ok_or_else(|| std::io::Error::other("could not read the copy"))
+        })
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(path);
+        })
 }
 
+/// Redo Duplicate only while the original destination is free.
+fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
+    std::fs::File::open(&cf.source)
+        .and_then(|input| write_copy(input, &cf.path))
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("{} already exists, so redo does not copy over it. Move or delete it, then redo.", cf.path.display())
+            } else {
+                format!("could not copy {} again: {e}", cf.source.display())
+            }
+        })
+}
+
+/// Delete a file a command created, if it still has the SHA-256 it was created with.
 fn remove_created(cf: &history::CreatedFile) -> Result<(), String> {
     match history::sha256_of(&cf.path) {
         None => Ok(()), // already gone
@@ -5028,6 +5023,38 @@ mod tests {
     pub(super) fn bare_model() -> AppModel {
         let session = Arc::new(Session::new().expect("an encoder session"));
         AppModel::new(GuiSettings::default(), None, session)
+    }
+
+    #[test]
+    fn duplicate_preserves_a_file_created_after_the_name_was_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chosen.png");
+        std::fs::write(&path, b"foreign").unwrap();
+        let result = super::write_copy(&b"image"[..], &path);
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+    }
+
+    #[test]
+    fn duplicate_removes_its_partial_file_on_a_read_error() {
+        use std::io::{self, Read};
+        struct Failed;
+        impl Read for Failed {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("read failed halfway"))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.png");
+        let input = b"first bytes".as_slice().chain(Failed);
+        assert!(super::write_copy(input, &path).is_err());
+        assert!(
+            !path.exists(),
+            "a failed Duplicate must remove the partial file"
+        );
     }
 
     /// An idle model has nothing in flight, and `wait_idle` returns at once.

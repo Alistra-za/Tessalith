@@ -1076,6 +1076,351 @@ fn retyping_the_shared_normal_to_height_while_replace_is_open_keeps_both_slots()
 }
 
 #[test]
+fn pending_subtype_edit_refuses_replace_and_chip_release() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, normal, dest, copy) = filled_normal(d.path());
+    let DropOutcome::AskReplace { kind, existing } =
+        m.drop_choice(&normal, &dest, DropChoice::Move)
+    else {
+        panic!("the destination has its own normal");
+    };
+    let Ok(sdc_gui::model::sets::BorrowOutcome::AskReplace {
+        kind: borrowed_kind,
+        existing: borrowed,
+    }) = m.drop_borrow(&normal, ROCK, &dest)
+    else {
+        panic!("the chip asks to replace the same normal");
+    };
+    m.set_field(&normal, "subtype", serde_json::json!("height"));
+    assert!(m.full_plan_pending());
+    let before = documents(&m);
+    let why = "The shared source changed. Drag the chip again.";
+    assert_eq!(
+        m.replace_borrow(&normal, ROCK, &dest, borrowed_kind, &borrowed),
+        Err(why.into())
+    );
+    assert_eq!(documents(&m), before);
+    assert_eq!(m.drop_borrow(&normal, ROCK, &dest), Err(why.into()));
+    assert_eq!(documents(&m), before);
+    assert_eq!(
+        m.drop_replace(&normal, &dest, DropChoice::Move, kind, &existing),
+        Err(why.into())
+    );
+    assert_eq!(documents(&m), before);
+    idle(&mut m);
+    assert_eq!(normal_fill(&m, &dest), Some(SlotFill::Own { item: copy }));
+}
+
+#[test]
+fn a_fuzz_texture_cannot_share_its_lenders_coat() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    for file in ["rock01_cnr.png", "rock01_f.png"] {
+        std::fs::copy(root.join(NORMAL), root.join("landscape").join(file)).unwrap();
+    }
+    let (mut m, dest) = leaf_set(d.path());
+    let fuzz = "landscape/rock01_f.png";
+    m.decide(fuzz, Answer::Subtype(Subtype::PbrFuzz));
+    m.decide(
+        "landscape/rock01_cnr.png",
+        Answer::Subtype(Subtype::CoatNormal),
+    );
+    idle(&mut m);
+    let why = "The shared source changed. Drag the chip again.";
+    assert_eq!(
+        m.choice_refused(fuzz, &dest, DropChoice::Share).as_deref(),
+        Some(why)
+    );
+    let before = documents(&m);
+    assert_eq!(
+        m.drop_choice(fuzz, &dest, DropChoice::Share),
+        DropOutcome::Refused(why.into())
+    );
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Share), fuzz, &dest);
+    let label = "Share (borrow its finished output)";
+    let button = h.get_by_role_and_label(Role::Button, label);
+    assert!(button.accesskit_node().is_disabled());
+    assert_eq!(button.accesskit_node().description().as_deref(), Some(why));
+    button.click();
+    h.run();
+    press_enter(&mut h);
+    assert_eq!(h.state().1.drops.pending, Some(choice(fuzz, &dest, ROCK)));
+    h.key_press(egui::Key::Escape);
+    h.run();
+    let from = outside_sets(&h, "rock01_f.png").rect().center();
+    let to = card_of(&h, &dest).center();
+    drag_to(&mut h, from, to, egui::Modifiers::SHIFT);
+    assert_eq!(h.state().1.drops.pending, Some(choice(fuzz, &dest, ROCK)));
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
+fn requesting_close_during_a_drag_blocks_shift_duplicate_on_the_strip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = drag_normal_to_odd(three_cards(d.path()));
+    let (owner, strip, _) = h.state().1.drops.strip.clone().expect("strip on odd");
+    assert_eq!(owner, "landscape/odd");
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Duplicate);
+    assert_eq!(
+        h.state()
+            .0
+            .choice_refused(NORMAL, &owner, DropChoice::Duplicate),
+        None
+    );
+    assert!(!h.state_mut().0.request_close());
+    let before = documents(&h.state().0);
+    let files = files_under(d.path());
+    let at = strip.center();
+    h.input_mut().events.extend([
+        egui::Event::PointerMoved(at),
+        pointer_button(at, false, egui::Modifiers::SHIFT),
+    ]);
+    h.step();
+    assert_eq!(files_under(d.path()), files, "a modal owns this release");
+    assert_eq!(documents(&h.state().0), before);
+    assert!(h.state().0.dialog.is_some());
+    assert_eq!(h.state().1.drops.pending, None);
+}
+
+#[test]
+fn the_last_automatic_member_disables_share_before_replace() {
+    let d = tempfile::tempdir().unwrap();
+    let m = pbr_opened(d.path());
+    let dest = "landscape/leaf";
+    let mut h = harness(m);
+    open_choice(
+        &mut h,
+        Some(DropChoice::Share),
+        "landscape/rock01.png",
+        dest,
+    );
+    let label = "Share (borrow its finished output)";
+    let why =
+        format!("{dest} would have no texture of its own left; move another texture in first");
+    let button = h.get_by_label_contains(label);
+    assert!(
+        button.accesskit_node().is_disabled(),
+        "the last member cannot be replaced by a share"
+    );
+    assert_eq!(
+        button.accesskit_node().description().as_deref(),
+        Some(why.as_str())
+    );
+    assert_eq!(h.query_all_by_label_contains(DEFAULT_SUFFIX).count(), 0);
+    let before = documents(&h.state().0);
+    press_enter(&mut h);
+    assert_eq!(
+        h.state().1.drops.pending,
+        Some(choice("landscape/rock01.png", dest, ROCK))
+    );
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
+fn saving_and_restarting_forgets_the_drop_answer() {
+    use sdc_gui::app::SdcApp;
+    let d = tempfile::tempdir().unwrap();
+    let settings = d.path().join("prefs/gui.toml");
+    let start = |m| {
+        Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .with_size(egui::vec2(1600.0, 1000.0))
+            .build_ui_state(
+                |ui, app: &mut SdcApp| {
+                    sdc_gui::ui::draw_with(ui, &mut app.model, &mut app.state);
+                    app.sync_layout_at(ui.ctx(), std::time::Instant::now());
+                },
+                SdcApp::new(m),
+            )
+    };
+    let (mut m, dest) = leaf_set(d.path());
+    m.settings_path = Some(settings.clone());
+    let mut h = start(m);
+    h.state_mut().state.drops.pending = Some(choice(NORMAL, &dest, ROCK));
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "Share (borrow its finished output)")
+        .click();
+    h.run_steps(3);
+    idle(&mut h.state_mut().model);
+    assert_eq!(h.state().state.drops.last_choice, Some(DropChoice::Share));
+    h.state_mut().model.save().unwrap();
+    h.state_mut().model.save_settings();
+    eframe::App::on_exit(h.state_mut());
+    assert!(settings.is_file());
+    let root = h.state().model.root.clone().unwrap();
+    drop(h);
+    let (prefs, error) = sdc_gui::settings::GuiSettings::load(&settings);
+    assert_eq!(error, None);
+    let mut m = AppModel::new(prefs, Some(settings), session());
+    m.open_folder(root);
+    idle(&mut m);
+    assert!(matches!(
+        normal_fill(&m, &dest),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    let mut restarted = start(m);
+    restarted.state_mut().state.drops.pending = Some(choice(NORMAL, &dest, ROCK));
+    restarted.run_steps(3);
+    assert_eq!(restarted.state().state.drops.last_choice, None);
+    assert_eq!(
+        restarted
+            .query_all_by_label_contains(DEFAULT_SUFFIX)
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn dragging_a_shared_normal_retargets_borrowers_and_keeps_alpha_in_one_step() {
+    const SOURCE: &str = "pbr/iron";
+    const NORMAL_KEY: &str = "pbr/iron_n.png";
+    const CHIP: &str = "pbr/carrier";
+    const DEST: &str = "armor/steel";
+    const FAR: &str = "pbr/downstream";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = crate::normal_alpha::two_sets(d.path());
+    m.edit_docs(
+        "Set up the chip and downstream borrow",
+        None,
+        true,
+        |_, s| {
+            for (id, from) in [(CHIP, SOURCE), (FAR, DEST)] {
+                s.create_set(id);
+                s.set_shader(id, Some(engine::shader::Shader::Pbr));
+                s.set_borrow(id, 2, Some(from));
+            }
+        },
+    );
+    idle(&mut m);
+    let policy = |m: &AppModel| {
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(NORMAL_KEY, "alpha.policy")
+    };
+    assert_eq!(policy(&m), None);
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    assert_eq!(
+        entries
+            .iter()
+            .find(|e| e.id == FAR)
+            .unwrap()
+            .borrow
+            .get(&2)
+            .map(String::as_str),
+        Some(DEST)
+    );
+    let before = documents(&m);
+    let mut h = harness(m);
+    h.run();
+    drag_normal(&mut h, CHIP, DEST, egui::Modifiers::NONE);
+    let m = &mut h.state_mut().0;
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    for id in [DEST, FAR] {
+        assert_eq!(
+            entries
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap()
+                .borrow
+                .get(&2)
+                .map(String::as_str),
+            Some(SOURCE),
+            "lender of {id}"
+        );
+    }
+    assert_eq!(policy(m), Some(serde_json::json!("data")));
+    assert_eq!(m.sets_doc.as_ref().unwrap().auto_data(), [NORMAL_KEY]);
+    assert_eq!(m.history.undo.len(), before.2 + 1);
+    m.undo();
+    idle(m);
+    assert_eq!(documents(m), before);
+}
+
+#[test]
+fn an_explorer_replace_keeps_the_approved_slot_when_both_files_are_retyped() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, normal, dest, copy) = filled_normal(d.path());
+    let file = m.item(&normal).unwrap().input.clone();
+    let dropped = m.drop_file_on_slot(&dest, SlotKind::Normal, &[file]);
+    assert_eq!(dropped.item.as_deref(), Some(normal.as_str()));
+    let DropOutcome::AskReplace { kind, existing } = dropped.outcome else {
+        panic!("the Explorer drop asks before moving over the destination normal");
+    };
+    assert_eq!(kind, SlotKind::Normal);
+    m.edit_docs("Retype both normals", None, true, |p, _| {
+        for key in [&normal, &copy] {
+            p.set_file_value(key, "subtype", &serde_json::json!("height"));
+        }
+    });
+    idle(&mut m);
+    assert_eq!(
+        view(&m, &dest).slots.get(&SlotKind::Height),
+        Some(&existing)
+    );
+    let before = documents(&m);
+    assert_eq!(
+        m.drop_replace(&normal, &dest, DropChoice::Move, kind, &existing),
+        Err("The destination slot changed. Drag the chip again.".into())
+    );
+    assert_eq!(documents(&m), before);
+}
+
+#[test]
+fn ordinary_replace_refuses_a_changed_occupant() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, normal, other, copy) = filled_normal(d.path());
+    let before = documents(&m);
+    assert_eq!(
+        m.drop_replace(
+            &normal,
+            &other,
+            DropChoice::Move,
+            SlotKind::Normal,
+            &SlotFill::Empty
+        ),
+        Err("The destination slot changed. Drag the chip again.".into())
+    );
+    assert_eq!(documents(&m), before);
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Move), &normal, &other);
+    press_enter(&mut h);
+    assert!(matches!(
+        h.state().1.drops.pending,
+        Some(Pending::Replace { .. })
+    ));
+    h.state_mut()
+        .0
+        .edit_docs("Change the occupant", None, true, |_, s| {
+            s.create_set("landscape/new_lender");
+            s.add_member("landscape/new_lender", &copy);
+            s.set_borrow(&other, 2, Some("landscape/new_lender"));
+        });
+    idle(&mut h.state_mut().0);
+    assert!(
+        matches!(normal_fill(&h.state().0, &other), Some(SlotFill::Borrowed { item, .. }) if item == copy)
+    );
+    let before = documents(&h.state().0);
+    let name = h.state().0.item(&copy).unwrap().name.clone();
+    h.get_by_role_and_label(Role::Button, &format!("Replace {name}"))
+        .click();
+    h.run();
+    assert_eq!(
+        documents(&h.state().0),
+        before,
+        "Replace must keep the unapproved borrower"
+    );
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Refused(why)) if why.starts_with("The destination slot changed"))
+    );
+}
+
+#[test]
 fn a_borrow_replace_click_refuses_a_now_owned_file() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, leaf, normal, other, copy) = filled_normal(d.path());

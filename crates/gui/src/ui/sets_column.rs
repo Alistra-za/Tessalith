@@ -85,11 +85,12 @@ pub enum Pending {
         set: String,
         from: String,
     },
-    /// `choice` is what the replace answers: `drop_replace(item, set, choice)`.
+    /// The slot and occupant shown when the user was asked.
     Replace {
         item: String,
         set: String,
-        existing: String,
+        kind: SlotKind,
+        existing: SlotFill,
         choice: DropChoice,
     },
     BorrowReplace {
@@ -1192,7 +1193,11 @@ fn folded_row(
             )
         });
         let remove = match off {
-            Some(why) => remove.on_disabled_hover_text(why),
+            Some(why) => {
+                ui.ctx()
+                    .accesskit_node_builder(remove.id, |n| n.set_description(why.as_str()));
+                remove.on_disabled_hover_text(why)
+            }
             None => remove.on_hover_text("Remove from set"),
         };
         if remove.clicked() {
@@ -1235,6 +1240,17 @@ fn group_hidden(model: &AppModel, hidden: &[&Docked]) -> Arc<[FoldedHelper]> {
                     fills: vec![d.target],
                 });
             }
+        }
+    }
+    let mut seen = HashSet::new();
+    let duplicates: HashSet<_> = groups
+        .iter()
+        .filter(|g| !seen.insert(g.file.as_str()))
+        .map(|g| g.file.clone())
+        .collect();
+    for group in &mut groups {
+        if duplicates.contains(&group.file) {
+            group.file.clone_from(&group.key);
         }
     }
     groups.into()
@@ -2010,6 +2026,15 @@ pub fn draw(
     st: &mut DropState,
     cmds: &mut SlotCmdState,
 ) {
+    let modal = super::drop_blocked(ui.ctx(), model, st, cmds);
+    if modal
+        && (egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx())
+            || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx())
+            || egui::DragAndDrop::has_payload_of_type::<DragSet>(ui.ctx()))
+    {
+        // The opening frame belongs to the dialog, including a release over last frame's strip.
+        egui::DragAndDrop::clear_payload(ui.ctx());
+    }
     ui.horizontal_wrapped(|ui| {
         super::columns::collapse_arrow(ui, model, crate::ui::Column::Sets);
         ui.heading("Sets");
@@ -2209,7 +2234,6 @@ pub fn draw(
     } else {
         None
     };
-    let modal = files && super::os_drop_blocked(&ctx, model, st, cmds);
     let pointer = if image {
         ctx.pointer_latest_pos()
     } else {
@@ -2446,10 +2470,11 @@ pub fn draw(
                         None => Some(Pending::Choice { item, set, from }),
                     };
                 }
-                DropOutcome::AskReplace { existing } => {
+                DropOutcome::AskReplace { kind, existing } => {
                     st.pending = Some(Pending::Replace {
                         item,
                         set,
+                        kind,
                         existing,
                         choice: DropChoice::Move,
                     })
@@ -3874,9 +3899,10 @@ pub const DEFAULT_HINT: &str =
 
 fn choose(model: &mut AppModel, item: String, set: String, c: DropChoice) -> Option<Pending> {
     match model.drop_choice(&item, &set, c) {
-        DropOutcome::AskReplace { existing } => Some(Pending::Replace {
+        DropOutcome::AskReplace { kind, existing } => Some(Pending::Replace {
             item,
             set,
+            kind,
             existing,
             choice: c,
         }),
@@ -3945,8 +3971,11 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             let footer = vec![("Cancel".to_string(), Role::Plain, ModalAnswer::Close)];
             (format!("{name} is in {from}"), None, footer)
         }
-        Pending::Replace { set, existing, .. }
-        | Pending::BorrowReplace {
+        Pending::Replace { set, existing, .. } => {
+            let key = existing.item().expect("Replace has an occupant");
+            replace_prompt(set, model.item(key).map_or(key, |i| &i.name))
+        }
+        Pending::BorrowReplace {
             set,
             existing:
                 BorrowOccupant::Own { item: existing } | BorrowOccupant::Borrowed { item: existing, .. },
@@ -4053,10 +4082,14 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
         (
             ModalAnswer::Replace,
             Pending::Replace {
-                item, set, choice, ..
+                item,
+                set,
+                choice,
+                kind,
+                existing,
             },
         ) => model
-            .drop_replace(&item, &set, choice)
+            .drop_replace(&item, &set, choice, kind, &existing)
             .err()
             .map(Pending::Refused),
         (

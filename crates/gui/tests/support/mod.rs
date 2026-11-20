@@ -11,6 +11,24 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Complete a fixture's ordinary drop immediately, approving exactly the returned occupant.
+pub fn accept_drop(
+    m: &mut AppModel,
+    item: &str,
+    set: &str,
+    choice: sdc_gui::model::sets::DropChoice,
+) -> Result<(), String> {
+    use sdc_gui::model::sets::DropOutcome;
+    match m.drop_choice(item, set, choice) {
+        DropOutcome::AskReplace { kind, existing } => {
+            m.drop_replace(item, set, choice, kind, &existing)
+        }
+        DropOutcome::Joined => Ok(()),
+        DropOutcome::Refused(why) => Err(why),
+        DropOutcome::AskChoice { .. } => unreachable!("the fixture supplied its choice"),
+    }
+}
+
 pub fn shapes<S>(h: &egui_kittest::Harness<'_, S>) -> Vec<egui::Shape> {
     fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
         match s {

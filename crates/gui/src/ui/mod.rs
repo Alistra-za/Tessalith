@@ -153,8 +153,8 @@ pub fn draw_with(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
     draw_with_scan(ui, model, state, None);
 }
 
-/// Backlog T21: a modal open now owns the window: an OS drop under it is ignored, and no strip shows (Note JW2).
-fn os_drop_blocked(
+/// A pending or visible modal owns the window, including Explorer and in-app drops (Note JW2).
+fn drop_blocked(
     ctx: &egui::Context,
     model: &AppModel,
     drops: &sets_column::DropState,
@@ -188,7 +188,7 @@ pub fn draw_with_scan(
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).
     // Backlog T21: a modal open at this frame's start owns the window; a drop under it is ignored.
-    let modal = os_drop_blocked(ui.ctx(), model, &state.drops, &state.slot_cmds);
+    let modal = drop_blocked(ui.ctx(), model, &state.drops, &state.slot_cmds);
     let paths: Vec<std::path::PathBuf> = if modal {
         Vec::new()
     } else {
