@@ -789,6 +789,9 @@ pub(super) fn preset_entries(ui: &mut egui::Ui, model: &mut AppModel) -> Option<
             }
         }
     });
+    if picked.is_some() {
+        ui.close();
+    }
     picked.filter(|p| *p != cur)
 }
 
@@ -843,7 +846,6 @@ fn scroll_preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
 fn preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
     if let Some(p) = preset_entries(ui, model) {
         model.set_preset(p);
-        ui.close();
     }
     ui.separator();
     if ui

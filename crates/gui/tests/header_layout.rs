@@ -332,11 +332,9 @@ fn assert_header_row(h: &H, w: f32, meshes: bool, project: bool) {
 fn long_destination_keeps_its_width_until_all_optional_controls_move() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    choose_export(
-        &mut m,
-        d.path()
-            .join("Installed texture projects")
-            .join("High resolution landscape overhaul - mountains and snow"),
+    m.sets_doc.as_mut().unwrap().set_export_folder(
+        r"C:\Mods\Installed texture projects\High resolution landscape overhaul - mountains and snow"
+            .as_ref(),
     );
     let mut h = harness(m, 2400.0, false);
     let normal = h.get_by_label_contains("Export to: ").rect().width();
@@ -455,6 +453,42 @@ fn overflow_preset_can_select_an_installed_preset() {
     let mut h = harness(opened(d.path()), 800.0, false);
     open_moved_item(&mut h, "Preset");
     pick_installed_preset(&mut h);
+}
+
+#[test]
+fn picking_the_current_preset_closes_both_pickers() {
+    for requested in [false, true] {
+        for use_default in [true, false] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = opened(d.path());
+            let current = if use_default {
+                None
+            } else {
+                Some(m.preset_choices()[0].clone())
+            };
+            m.set_preset(current.clone());
+            let label = current.clone().unwrap_or_else(|| {
+                format!(
+                    "default ({})",
+                    engine::presets::default_preset_for(m.target)
+                )
+            });
+            let mut h = harness(m, 800.0, false);
+            if requested {
+                h.state_mut().0.choose_preset = Some(h.ctx.cumulative_pass_nr());
+                h.run_steps(4);
+            } else {
+                open_moved_item(&mut h, "Preset");
+            }
+            h.get_by_role_and_label(Role::Button, &label).click();
+            h.run_steps(4);
+            assert!(
+                h.query_by_role_and_label(Role::Button, &label).is_none(),
+                "clicking {label} left the preset picker open, requested={requested}"
+            );
+            assert_eq!(h.state().0.project_preset(), current);
+        }
+    }
 }
 
 #[test]
