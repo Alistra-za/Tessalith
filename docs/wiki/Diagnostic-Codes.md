@@ -99,7 +99,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `SET-MISSING-COMPANION` | info | A roughness bake lacks a usable normal, or its normal lacks a roughness companion. A lender skips the missing-roughness Info when its normal supplies a borrower with an eligible roughness member. Also raised for an `_msn` without `_s` (except Eye) or a `_flow` without `_n`. <!-- D:R8,JS2 --> | Add the companion or ignore the Info. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
-| `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
+| `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the companion's original image. |
 | `SET-BAKE-RATIO` | warning | Tessalith no longer raises it. A size difference from the `_n` does not by itself prevent the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
 | `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |

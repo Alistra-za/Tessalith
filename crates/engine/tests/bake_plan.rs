@@ -313,7 +313,10 @@ fn a_lone_n_or_a_lone_rmaos_in_a_pbr_set_is_set_missing_companion_info() {
         let (p, _) = plan(req(d.path(), &[setting]));
         assert_eq!(job(&p, "iron_n.png").profile.mips.normal_base, base);
         for (tail, needle) in [
-            ("iron_n.png", "no roughness bake"),
+            (
+                "iron_n.png",
+                "no _rmaos or _rfaos in this set, so there is no roughness bake",
+            ),
             ("steel_rmaos.png", "without the variance bake"),
         ] {
             let j = job(&p, tail);
@@ -360,7 +363,12 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
             .unwrap();
         assert_eq!(w.severity, Severity::Warning);
         if tail == "iron_n.png" {
-            assert!(w.message.contains("no roughness bake"), "{}", w.message);
+            assert!(
+                w.message
+                    .contains("no roughness bake. Supply the original image"),
+                "{}",
+                w.message
+            );
         }
         assert!(
             w.data["companion"].as_str().unwrap().ends_with(".dds"),
@@ -385,7 +393,12 @@ fn a_dds_roughness_outside_the_batch_explains_the_missing_bake() {
         .find(|w| w.code == Code::SetCompanionDds)
         .unwrap();
     assert!(w.message.contains("not in this batch"), "{}", w.message);
-    assert!(w.message.contains("no roughness bake"), "{}", w.message);
+    assert!(
+        w.message
+            .contains("no roughness bake. Supply the original image"),
+        "{}",
+        w.message
+    );
 }
 
 /// Review Focus 2: converting one file of a set leaves the other on disk.

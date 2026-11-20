@@ -210,7 +210,7 @@ fn missing_borrowed_normal(cx: &BakeCtx, owner: &TextureSet, j: &mut ResolvedJob
 fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut ResolvedJob) {
     if let Some(f) = member_file(cx, set, InputKind::Dds, is_roughness_suffix) {
         let msg = format!(
-            "the set's roughness member is only a DDS ({}), so there is no roughness bake",
+            "the set's roughness member is only a DDS ({}), so there is no roughness bake. Supply the original image.",
             f.path.display()
         );
         note(j, Code::SetCompanionDds, msg, Some(&f.path));
@@ -219,7 +219,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
     match sibling_outside(&j.input, is_roughness_suffix, outside, cx.aliases) {
         Some((p, true)) => {
             let msg = format!(
-                "the set's roughness member is only a DDS ({}) and is not in this batch, so there is no roughness bake",
+                "the set's roughness member is only a DDS ({}) and is not in this batch, so there is no roughness bake. Supply the original image.",
                 p.display()
             );
             note(j, Code::SetCompanionDds, msg, Some(&p));
@@ -229,7 +229,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
         None => note(
             j,
             Code::SetMissingCompanion,
-            "no _rmaos or _rfaos in this PBR set, so there is no roughness bake".into(),
+            "no _rmaos or _rfaos in this set, so there is no roughness bake".into(),
             None,
         ),
     }

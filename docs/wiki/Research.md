@@ -44,7 +44,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 
 ## Why renormalise normal mips?
 
-- A box of unit normals has a shorter average vector when the directions differ. Unity HDRP and other engines use this loss to widen GGX roughness. Tessalith uses a vMF fit with a default clamp of 0.25. If all directions agree, even a map authored at length 0.9 adds zero roughness. The length written to the normal map follows [the profile setting](Project-Config.md#normal-length-by-output).
+- A box of unit normals has a shorter average vector when the directions differ. Unity HDRP and other engines use this loss to widen GGX roughness. Tessalith uses a vMF fit to estimate the added variance from that average vector's length. See the [clamp and normal length settings](Project-Config.md#mipmaps) and the [variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake).
 - Quantisation noise alone on a flat normal map lifts roughness at lower mips, so a noise floor at L = 0.999 adds no variance (about a 2° tilt).
 
 ## Why the BC4/BC5 search?

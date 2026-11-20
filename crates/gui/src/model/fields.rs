@@ -529,7 +529,7 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "mips.filter" => "How each smaller mipmap is averaged. Box is the default. Tent, Mitchell and Kaiser are for sRGB colour. With see-through alpha the only other choice is Tent.",
         "mips.edge" => "How Tent, Mitchell and Kaiser read past the texture's edge: Wrap for a tiling texture, Clamp for one that doesn't tile. Box ignores it.",
         "mips.normal" => "How normal-map mipmaps are built. Renormalise and bake also bakes the detail each mipmap loses into the roughness stored in the same texture.",
-        "mips.normal_base" => "Renormalise to unit length is the default. Keep as authored preserves the average authored length in lower mips of XYZ tangent-space base normals and coat normals. On other normal maps it keeps the full-size level only.",
+        "mips.normal_base" => "Renormalise to unit length is the default. Keep as authored preserves the average authored length in lower mips of XYZ tangent-space base normals and coat normals, up to what XYZ can hold. On other normal maps it keeps the full-size level only.",
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",

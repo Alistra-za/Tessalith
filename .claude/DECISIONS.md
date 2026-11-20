@@ -206,7 +206,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 
 ### Bake
 
-- The roughness member decodes its own normal input and averages the post-resize unit directions in a box pyramid (default clamp t = 0.25). A mismatched aspect or non-power-of-two size uses those directions fitted to the member before reduction (HD2). [E, R4, R5, HD2, LA3]
+- The roughness member decodes its own normal input and averages the post-resize unit directions in a box pyramid (default clamp t = 0.25). Equal sizes pair directly. For unequal sizes, a mismatched aspect or a non-power-of-two dimension requires fitting those directions to the member before reduction (HD2). [E, R4, R5, HD2, LA3]
 - The bake decision lives on the `_n` (`renormalize_bake`); shared roughness never bakes; a borrowed `_n` bakes the borrower's own roughness; a plain normal bakes in a PBR-set shader's set, and an explicit `mips.normal = renormalize` still opts out. [R6, R7, M4-final-1, JS2]
 - `_cnr` self-bakes angular spread into its data alpha (coat roughness) by default. Under Keep its RGB length is independent of that switch. [R2, LA3]
 - An 8-bit noise floor: a footprint with average length ≥ the floor bakes nothing. [M4-final-2]
