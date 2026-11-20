@@ -400,11 +400,9 @@ fn a_stale_fit_fails_instead_of_baking() {
     );
 }
 
-/// Controller correction to R1: the bake reads the `_n`'s mip 0 as written. A uniformly short flat `_n` (|n| = 0.5,
-/// every texel pointing up) adds no roughness under the default `renormalize`, and adds roughness under `keep`.
 #[test]
-fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
-    let mean_mip_1 = |base: Option<NormalBase>| {
+fn flat_short_normal_adds_no_roughness_in_either_base_mode() {
+    let levels = |base: Option<NormalBase>| {
         let d = tempfile::tempdir().unwrap();
         let n = d.path().join("in/iron_n.png");
         std::fs::create_dir_all(n.parent().unwrap()).unwrap();
@@ -414,6 +412,7 @@ fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
             .unwrap();
         let r = rmaos(d.path(), 32);
         let mut p = plan(d.path(), &r, &n, base.is_some(), false);
+        p.jobs[0].profile.format = Format::Rgba8;
         if let Some(b) = base {
             p.jobs[0]
                 .bake
@@ -424,16 +423,113 @@ fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
                 .normal_base = b;
         }
         assert_eq!(run(p).0.converted, 1);
-        mean_r(d.path(), 1)
+        [0, 1, 2].map(|level| mean_r(d.path(), level))
     };
-    let plain = mean_mip_1(None);
-    let default = mean_mip_1(Some(NormalBase::Renormalize));
-    let keep = mean_mip_1(Some(NormalBase::Keep));
-    assert!(
-        (default - plain).abs() < 1.0,
-        "default {default} vs unbaked {plain}"
-    );
-    assert!(keep > plain + 2.0, "keep {keep} vs unbaked {plain}");
+    let plain = levels(None);
+    assert_eq!(plain, [100.0; 3]);
+    for base in [NormalBase::Renormalize, NormalBase::Keep] {
+        assert_eq!(levels(Some(base)), plain, "{base:?}");
+    }
+}
+
+#[test]
+fn keep_bake_changes_only_angular_roughness() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("in");
+    let dir = input.join("textures/pbr");
+    std::fs::create_dir_all(&dir).unwrap();
+    ImageBuffer::from_fn(8, 8, |x, _| {
+        Rgb([
+            if x < 4 {
+                128u8
+            } else if x % 2 == 0 {
+                146
+            } else {
+                109
+            },
+            128,
+            189,
+        ])
+    })
+    .save(dir.join("iron_n.png"))
+    .unwrap();
+    for name in ["iron_rmaos.png", "skin_rfaos.png"] {
+        ImageBuffer::from_fn(8, 8, |x, y| Rgba([40u8, x as u8 * 17, 225, y as u8 * 13]))
+            .save(dir.join(name))
+            .unwrap();
+    }
+    let outputs = |base, mode| {
+        let out = d.path().join(format!("{base}-{mode}"));
+        let mut req = BatchRequest::new(vec![input.clone()], out, Target::Cs);
+        req.recursive = true;
+        req.accept = AcceptSuggestions::High;
+        req.on_existing = OnExisting::IfChanged;
+        req.borrowed_normal
+            .insert("textures/pbr/skin".into(), "textures/pbr/iron".into());
+        req.overrides = [
+            "format=rgba8",
+            "color.tag=unorm",
+            "file:**/iron_n.png.subtype=pbr_normal",
+            "file:**/skin_rfaos.png.subtype=skin_rfaos",
+            &format!("file:**/iron_n.png.mips.normal_base={base}"),
+            &format!("file:**/iron_n.png.mips.normal={mode}"),
+        ]
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .into();
+        let resolve = || {
+            Engine::new()
+                .unwrap()
+                .plan(
+                    req.clone(),
+                    &Reporter::new(Arc::new(NullSink), "rough"),
+                    &CancelToken::default(),
+                )
+                .unwrap()
+        };
+        let p = resolve();
+        let members = [Subtype::Rmaos, Subtype::SkinRfaos].map(|st| {
+            let j = p.jobs.iter().find(|j| j.profile.subtype == st).unwrap();
+            assert_eq!(
+                j.bake.as_ref().map(|b| &b.normal),
+                (mode == "renormalize_bake").then_some(&dir.join("iron_n.png"))
+            );
+            j.output.clone()
+        });
+        let (s, ev) = run(p);
+        assert_eq!(s.converted, 3, "{ev:#?}");
+        assert_eq!(run(resolve()).0.up_to_date, 3);
+        members.map(|path| {
+            let f = read_dds(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(f.format, Format::Rgba8.pixel_format(false));
+            [0, 1, 2].map(|level: usize| {
+                let (w, h, r) = &f.levels[level];
+                let Decoded::Ldr(px) = decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap()
+                else {
+                    panic!("expected RGBA8");
+                };
+                px
+            })
+        })
+    };
+    let plain = outputs("keep", "renormalize");
+    let unit = outputs("renormalize", "renormalize_bake");
+    let kept = outputs("keep", "renormalize_bake");
+    for member in 0..2 {
+        for level in 0..=2 {
+            let width = 8 >> level;
+            for (i, px) in kept[member][level].iter().enumerate() {
+                let off = &plain[member][level][i];
+                let reference = &unit[member][level][i];
+                assert_eq!(&px[1..], &off[1..]);
+                if level == 0 || i % width < width / 2 {
+                    assert_eq!(px, off, "member {member} mip {level} texel {i}");
+                } else {
+                    assert!(reference[0] > off[0]);
+                    assert_eq!(px, reference, "member {member} mip {level} texel {i}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

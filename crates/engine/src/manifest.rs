@@ -33,7 +33,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
         | Subtype::Msn
-        | Subtype::CoatNormal
         | Subtype::GenericData
         | Subtype::PbrEmissive
         | Subtype::HdrSky
@@ -56,10 +55,14 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
         // A new sub-type in 3.0.0.
         Subtype::SkinWet | Subtype::SkinDetail => "3.0.0",
-        // 3.0.0: the variance bake adds nothing to mip 0 (Note HD1).
-        Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => "3.0.0",
-        // Keep requires XYZ storage on standalone tangent normals.
-        Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal => ENGINE_VERSION,
+        // Keep carries authored normal length and bakes angular spread (Note LA).
+        Subtype::Normal
+        | Subtype::LandscapeNormal
+        | Subtype::PbrNormal
+        | Subtype::CoatNormal
+        | Subtype::Rmaos
+        | Subtype::SkinRfaos
+        | Subtype::ComplexMaterial => ENGINE_VERSION,
     }
 }
 
@@ -605,9 +608,6 @@ mod tests {
                 st,
                 Subtype::SkinWet
                     | Subtype::SkinDetail
-                    | Subtype::Rmaos
-                    | Subtype::SkinRfaos
-                    | Subtype::ComplexMaterial
                     | Subtype::Diffuse
                     | Subtype::PbrAlbedo
                     | Subtype::UiSky
@@ -616,7 +616,13 @@ mod tests {
                 "3.0.0"
             } else if matches!(
                 st,
-                Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal
+                Subtype::Normal
+                    | Subtype::LandscapeNormal
+                    | Subtype::PbrNormal
+                    | Subtype::Rmaos
+                    | Subtype::SkinRfaos
+                    | Subtype::ComplexMaterial
+                    | Subtype::CoatNormal
             ) {
                 ENGINE_VERSION
             } else {

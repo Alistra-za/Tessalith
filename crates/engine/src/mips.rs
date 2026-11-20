@@ -17,9 +17,9 @@
 //! An *accumulation* chain is built by repeated box filtering of the unnormalised base; every output
 //! level is a *finalised* copy (√ back from squared roughness, renormalised vectors, clamps). Mip 0 is the base as
 //! authored, except a normal map's vectors, which are renormalised unless `mips.normal_base = keep` (DECISIONS R1); a
-//! vector chain accumulates from that written mip 0, so its lower levels and the variance bake see the stored vectors.
+//! kept XYZ tangent or coat normal carries its mean authored length separately from the vector mean.
 //! A `_cnr` with `mips.normal = renormalize_bake` (the default) widens its own coat roughness (alpha) from its own
-//! footprint lengths (DECISIONS R2); `mips.normal` is inert on every other sub-type here: the `_n` -> `_rmaos` bake
+//! mean unit directions (DECISIONS R2, LA3); `mips.normal` is inert on every other sub-type here: the `_n` -> `_rmaos` bake
 //! and the opt-in `normal` -> complex `_m` gloss bake (Note CL40) arrive through [`build_chain_with`].
 use crate::bake::{baked_roughness, variance_add, NormalVariance};
 use crate::config::*;
@@ -174,8 +174,7 @@ fn vector_length(px: &[f32; 4]) -> f32 {
 }
 
 /// Mip 0 as stored (spec §5.4, DECISIONS R1): a normal map's base vectors at unit length unless
-/// `mips.normal_base = keep`; anything else as authored. A vector chain accumulates from this level, so the levels
-/// below and the variance bake's footprint lengths average the vectors the file stores (controller correction to R1).
+/// `mips.normal_base = keep` and the output supports that base. Other domains keep the authored values.
 fn base_level(work: &Work, p: &Profile, output: Subtype) -> Rgba32F {
     let mut out = work.img.clone();
     if (p.mips.normal_base == NormalBase::Renormalize || output.needs_unit_base(p.format))
@@ -287,7 +286,7 @@ pub(crate) fn keeps_normal_lengths(
         && domain == Domain::Normal
         && matches!(
             output,
-            Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal
+            Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal | Subtype::CoatNormal
         )
         && stores_xyz(p.format)
 }
@@ -295,6 +294,18 @@ pub(crate) fn keeps_normal_lengths(
 fn kept_length(px: &[f32; 4]) -> f64 {
     let [x, y, z, _] = px.map(f64::from);
     (x * x + y * y + z * z).sqrt()
+}
+
+pub(crate) fn normalize_bake_direction(px: &mut [f32; 4], domain: Domain, base: NormalBase) {
+    // A finite kept vector can overflow the f32 sum of squares. Preserve the default bake's arithmetic.
+    if base == NormalBase::Keep && vector_length(px).is_infinite() {
+        let len = kept_length(px);
+        for c in &mut px[..3] {
+            *c = (f64::from(*c) / len) as f32;
+        }
+    } else {
+        normalize_vector(px, domain);
+    }
 }
 
 fn footprint_mean(
@@ -313,9 +324,16 @@ fn footprint_mean(
     mean
 }
 
-fn kept_normal_chain(base: &Rgba32F, levels: u32) -> Vec<Rgba32F> {
+fn kept_normal_chain(base: &Rgba32F, levels: u32, coat: Option<f64>) -> Vec<Rgba32F> {
     let mut out = Vec::with_capacity(levels as usize);
     out.push(base.clone());
+    let mut coat_directions = coat.map(|clamp| {
+        let mut directions = base.clone();
+        for px in &mut directions.px {
+            normalize_bake_direction(px, Domain::Normal, NormalBase::Keep);
+        }
+        (clamp, directions)
+    });
     let mut acc = None;
     // Half lengths fit the rolling f32 buffers even for a diagonal of f32::MAX components.
     let mut half_lengths: Vec<f32> = Vec::new();
@@ -357,6 +375,10 @@ fn kept_normal_chain(base: &Rgba32F, levels: u32) -> Vec<Rgba32F> {
             }
         }
         half_lengths = next_lengths;
+        if let Some((clamp, directions)) = &mut coat_directions {
+            *directions = box_down(directions);
+            bake_coat(&mut stored, directions, *clamp);
+        }
         out.push(stored);
         acc = Some(next);
     }
@@ -371,13 +393,13 @@ pub(crate) fn build_chain_for_output(
     output: Subtype,
 ) -> Vec<Rgba32F> {
     let n = level_count(work.img.width, work.img.height, &p.mips.levels);
+    let coat = coat_self_bake(p, work.domain, work.alpha_present);
     if keeps_normal_lengths(p, output, work.domain, n) {
-        return kept_normal_chain(&work.img, n);
+        return kept_normal_chain(&work.img, n, coat);
     }
     let weighted = weighted_rgb(work, p);
     let rough = bake.filter(|_| work.roughness_r_squared);
     let gloss = bake.filter(|_| p.subtype == Subtype::ComplexMaterial);
-    let coat = coat_self_bake(work, p);
     let filt = effective_filter(work, p);
     let mut out = Vec::with_capacity(n as usize);
     // Mip 0 stays as authored (Note HD1).
@@ -460,11 +482,11 @@ fn bake_gloss(level: &mut Rgba32F, index: usize, b: &NormalVariance) {
 
 /// `_cnr` self-bake (owner 2026-10-11, DECISIONS R2): the clamp `t` when a coat normal with
 /// `mips.normal = renormalize_bake` keeps a data alpha (its coat roughness), else `None`.
-fn coat_self_bake(work: &Work, p: &Profile) -> Option<f64> {
+pub(crate) fn coat_self_bake(p: &Profile, domain: Domain, alpha_present: bool) -> Option<f64> {
     (p.subtype == Subtype::CoatNormal
-        && work.domain == Domain::Normal
+        && domain == Domain::Normal
         && p.mips.normal == NormalMips::RenormalizeBake
-        && work.alpha_present
+        && alpha_present
         && p.alpha.policy == AlphaPolicy::Data)
         .then_some(p.mips.bake_clamp)
 }
@@ -549,6 +571,71 @@ mod tests {
         assert!((got - want).abs() < 1e-5, "{got} vs {want}");
         assert!(got > r + 0.01);
         assert_eq!(c[0].px[0][3], 0.4); // mip 0 keeps the source coat roughness
+    }
+
+    #[test]
+    fn kept_coat_carries_length_and_bakes_only_direction_changes() {
+        let mut img = Rgba32F::new(4, 4, [0.0, 0.0, 0.9, 0.2]);
+        for y in 0..4 {
+            *img.at_mut(2, y) = [0.14, 0.0, 0.48, 0.3];
+            *img.at_mut(3, y) = [-0.14, 0.0, 0.48, 0.5];
+        }
+        let w = work(img, Domain::Normal, true);
+        let mut p = profile(Subtype::CoatNormal);
+        p.mips.normal_base = NormalBase::Keep;
+        let baked = build_chain(&w, &p);
+        p.mips.normal = NormalMips::Renormalize;
+        let plain = build_chain(&w, &p);
+        assert_eq!(plain[0], w.img);
+        assert_eq!(baked[0], w.img);
+        for level in 1..=2 {
+            for y in 0..plain[level].height {
+                for x in 0..plain[level].width {
+                    let (radius, alpha, add): (f32, f64, f64) = match (level, x) {
+                        (1, 0) => (0.9, 0.2, 0.0),
+                        (1, _) => (0.5, 0.4, 0.019647),
+                        _ => (0.7, 0.3, 0.009906),
+                    };
+                    let a = plain[level].at(x, y);
+                    let b = baked[level].at(x, y);
+                    assert!((a[2] - radius).abs() < 1e-6, "mip {level} x{x}: {a:?}");
+                    assert_eq!(&a[..2], &[0.0, 0.0]);
+                    assert_eq!(&a[..3], &b[..3]);
+                    assert!((f64::from(a[3]) - alpha).abs() < 1e-6);
+                    if add == 0.0 {
+                        assert_eq!(a[3], b[3]);
+                    } else {
+                        assert!((f64::from(b[3]) - (alpha.powi(4) + add).powf(0.25)).abs() < 1e-5);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn large_finite_kept_vectors_bake_from_their_unit_directions() {
+        // The signed components are finite, but their squares exceed f32::MAX.
+        let mut img = Rgba32F::new(4, 4, [0.5, 0.5, 1e20, 0.25]);
+        for y in 0..4 {
+            *img.at_mut(2, y) = [0.28e20, 0.5, 0.96e20, 0.25];
+            *img.at_mut(3, y) = [-0.28e20, 0.5, 0.96e20, 0.25];
+        }
+        let (work, mut coat) = coat(img.clone());
+        coat.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work, &coat);
+        let mut normal = profile(Subtype::PbrNormal);
+        normal.mips.normal_base = NormalBase::Keep;
+        let lengths =
+            crate::bake::lengths_from(img, crate::ops::SourceTransfer::Stored, &normal, None)
+                .unwrap();
+        let external = NormalVariance::new(lengths, (4, 4), 0.25).unwrap();
+        for (level, x, want) in [(1, 0, 0.0_f64), (1, 1, 0.019647), (2, 0, 0.009906)] {
+            let add = f64::from(external.add_at(level, x, 0));
+            let alpha = f64::from(chain[level].at(x, 0)[3]);
+            let want_alpha = (0.25_f64.powi(4) + want).powf(0.25);
+            assert!((add - want).abs() < 1e-6 && (alpha - want_alpha).abs() < 1e-5,
+                "mip {level} x{x}: external add {add} vs {want}, coat alpha {alpha} vs {want_alpha}");
+        }
     }
 
     #[test]

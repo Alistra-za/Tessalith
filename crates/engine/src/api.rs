@@ -774,14 +774,21 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             0
         };
         let to = crate::resize::target_dims((w, h), p);
+        let domain = crate::ops::domain_for(p);
         let lengths = if crate::mips::keeps_normal_lengths(
             p,
             p.subtype,
-            crate::ops::domain_for(p),
+            domain,
             crate::mips::level_count(to.0, to.1, &p.mips.levels),
         ) {
-            // Two rolling f32 levels, each at most the first reduced size.
-            (u64::from(to.0) / 2).max(1) * (u64::from(to.1) / 2).max(1) * 8
+            let reduced = (u64::from(to.0) / 2).max(1) * (u64::from(to.1) / 2).max(1);
+            // Kept coat alpha also holds the unit base while reducing it into the first direction level.
+            let directions = if crate::mips::coat_self_bake(p, domain, true).is_some() {
+                (u64::from(to.0) * u64::from(to.1) + reduced) * 16
+            } else {
+                0
+            };
+            reduced * 8 + directions // two rolling f32 length levels
         } else {
             0
         };
@@ -4421,6 +4428,22 @@ mod tests {
         });
         assert!(admitted.load(Ordering::SeqCst));
         assert_eq!(*lock(&b.used), (n, 1));
+    }
+
+    #[test]
+    fn kept_coat_admits_its_lengths_and_self_bake_directions() {
+        let d = tempfile::tempdir().unwrap();
+        let mut j = png_job(d.path(), "coat.png", (8, 8), Subtype::CoatNormal);
+        j.profile.format = Format::Rgba8;
+        j.profile.alpha.policy = AlphaPolicy::Data;
+        j.profile.mips.normal = NormalMips::Renormalize;
+        let base = job_bytes(&j);
+        j.profile.mips.normal_base = NormalBase::Keep;
+        let lengths = 4 * 4 * 8;
+        j.profile.mips.normal = NormalMips::RenormalizeBake;
+        assert_eq!(job_bytes(&j), base + lengths + (8 * 8 + 4 * 4) * 16);
+        j.profile.mips.normal = NormalMips::Renormalize;
+        assert_eq!(job_bytes(&j), base + lengths);
     }
 
     /// Note DY: a filled job also holds its helper's decoded image.
