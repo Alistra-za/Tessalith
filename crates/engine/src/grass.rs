@@ -279,6 +279,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn kept_grass_keeps_a_short_base_and_unit_lower_normals() {
+        let mut p = profile();
+        p.mips.normal_base = NormalBase::Keep;
+        let mut src = Rgba32F::new(32, 64, [0.5, 0.5, 1.0, 12.0 / 255.0]);
+        src.px[..32 * 32].fill([1.0; 4]);
+        // The short patch touches the seam but leaves the CS detection corner intact.
+        for y in 32..34 {
+            for x in 0..2 {
+                *src.at_mut(x, y) = [0.5, 0.5, 0.75, (16 + x * 8) as f32 / 255.0];
+            }
+        }
+        let (_, chain) = build(src, &p, SourceTransfer::Stored).unwrap();
+        let base = &chain[0];
+        assert_eq!(base.at(0, 32).map(code8), [128, 128, 191, 16]);
+        assert_eq!(base.at(1, 33).map(code8), [128, 128, 191, 24]);
+        assert_eq!(base.at(0, 63).map(code8), [128, 128, 255, 12]);
+        let f = facts(base).unwrap();
+        assert!(f.corner_err < CS_GRASS_THRESHOLD - GRASS_GUARD_MARGIN);
+        assert!(f.bottom_unit_share >= GRASS_UNIT_SHARE);
+        for level in &chain[1..] {
+            let (top, bottom) = level.px.split_at(level.px.len() / 2);
+            assert!(top.iter().all(|px| *px == [1.0; 4]));
+            for px in bottom {
+                assert_eq!([px[0], px[1], px[2]].map(code8), [128, 128, 255]);
+            }
+        }
+        assert_eq!(code8(chain[1].at(0, 16)[3]), 20);
+        assert_eq!(code8(chain[2].at(0, 8)[3]), 14);
+
+        // The detector reads the BC7-decoded base corner.
+        let input = EncoderInput::Ldr(codes(base));
+        let encoded = crate::encode::encode_level(&input, 32, 64, &p, &Default::default()).unwrap();
+        let desc = crate::dds::DdsDesc {
+            width: 32,
+            height: 64,
+            format: p.format,
+            srgb: p.srgb_tag(),
+            header: crate::dds::resolve_header(p.format, p.srgb_tag(), p.header),
+        };
+        let bytes = crate::dds::dds_bytes(&desc, &[encoded]).unwrap();
+        let report = crate::validate::validate(&crate::validate::ValidationInput {
+            bytes: &bytes,
+            profile: &p,
+            encoder_input: Some(std::slice::from_ref(&input)),
+            base_coverage: None,
+            source_peak: None,
+            expected_levels: Some(1),
+        });
+        assert!(report.summary.passed, "{:?}", report.warnings);
+    }
+
     /// Each half is exactly what the existing path gives that half on its own: diffuse (with coverage preservation,
     /// §3.2) on top, normal map below. This is also the coverage test: a direct coverage-tolerance assertion on a
     /// binary dot source cannot pass, because `preserve_coverage` can only reach the cumulative counts of a level's

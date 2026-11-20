@@ -774,6 +774,17 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             0
         };
         let to = crate::resize::target_dims((w, h), p);
+        let lengths = if crate::mips::keeps_normal_lengths(
+            p,
+            p.subtype,
+            crate::ops::domain_for(p),
+            crate::mips::level_count(to.0, to.1, &p.mips.levels),
+        ) {
+            // Two rolling f32 levels, each at most the first reduced size.
+            (u64::from(to.0) / 2).max(1) * (u64::from(to.1) / 2).max(1) * 8
+        } else {
+            0
+        };
         // An enlarge holds its premultiplied copy and two grown images (up to ~1.3x the input) on top.
         let resize = if to == (w, h) {
             0
@@ -800,7 +811,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             let output = if dj.kind == GrassStack { 2 } else { 1 };
             texels * 16 * (colour + 1 + detail + output)
         });
-        texels * (filter + resize) + grass + derived
+        texels * (filter + resize) + grass + derived + lengths
     });
     // DECISIONS DS8: a cube holds every source plus three float cubes of its face size (base, blur copy, mip chain).
     let cube = job.cube.as_ref().map_or(0, |c| {

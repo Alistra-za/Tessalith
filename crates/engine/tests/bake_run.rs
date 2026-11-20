@@ -146,6 +146,84 @@ fn a_baked_member_is_rougher_and_records_its_normal() {
 }
 
 #[test]
+fn kept_normal_dds_preserves_length_at_two_lower_levels() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("iron_n.png");
+    let source = ImageBuffer::from_fn(4, 4, |x, y| {
+        Rgba(match (x % 2, y / 2) {
+            (0, 0) => [173u8, 116, 137, 16],
+            (1, 0) => [108, 144, 140, 124],
+            (0, _) => [131, 117, 187, 210],
+            _ => [144, 132, 169, 250],
+        })
+    });
+    source.save(&input).unwrap();
+    let mut req = BatchRequest::new(vec![input], d.path().join("out"), Target::Cs);
+    req.overrides = [
+        "file:*iron_n.png.subtype=normal",
+        "file:*iron_n.png.format=rgba8",
+        "file:*iron_n.png.color.tag=unorm",
+        "file:*iron_n.png.mips.normal_base=keep",
+        "file:*iron_n.png.alpha.policy=data",
+    ]
+    .map(|s| engine::overrides::parse_set(s).unwrap())
+    .into();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "kept-normal");
+    let p = Engine::new()
+        .unwrap()
+        .plan(req, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(p.jobs.len(), 1);
+    let output = p.jobs[0].output.clone();
+    let (summary, events) = run(p);
+    assert_eq!(summary.converted, 1, "{events:#?}");
+    let dds = read_dds(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(dds.format, Format::Rgba8.pixel_format(false));
+    assert_eq!(dds.levels.len(), 3);
+    for (level, (w, h, range)) in dds.levels.iter().enumerate() {
+        let Decoded::Ldr(pixels) =
+            decode_level(dds.format, *w, *h, &dds.data[range.clone()]).unwrap()
+        else {
+            panic!("expected RGBA8")
+        };
+        assert_eq!((*w, *h), (4 >> level, 4 >> level));
+        let side = 1 << level;
+        for y in 0..*h {
+            for x in 0..*w {
+                let got = pixels[(y * w + x) as usize];
+                if level == 0 {
+                    assert_eq!(got, source.get_pixel(x, y).0);
+                    continue;
+                }
+                // Reference each footprint directly to the signed base samples.
+                let mut sum = [0.0; 3];
+                let mut radius = 0.0;
+                let mut alpha = 0.0;
+                for dy in 0..side {
+                    for dx in 0..side {
+                        let [r, g, b, a] = source.get_pixel(side * x + dx, side * y + dy).0;
+                        let v = [r, g, b].map(|c| f64::from(c) / 127.5 - 1.0);
+                        radius += v.iter().map(|c| c * c).sum::<f64>().sqrt();
+                        for i in 0..3 {
+                            sum[i] += v[i];
+                        }
+                        alpha += f64::from(a);
+                    }
+                }
+                let area = f64::from(side * side);
+                let scale = radius / area / sum.iter().map(|c| c * c).sum::<f64>().sqrt();
+                let [r, g, b] = sum.map(|c| ((c * scale + 1.0) * 127.5).round() as u8);
+                let want = [r, g, b, (alpha / area).round() as u8];
+                assert!(
+                    got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1),
+                    "mip {level} ({x},{y}): {got:?}, expected {want:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn acknowledged_bc5_keep_fails_before_if_changed() {
     use engine::codes::{Code, Severity};
     use engine::manifest::output_key;
