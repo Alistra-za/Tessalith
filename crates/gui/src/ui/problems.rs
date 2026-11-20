@@ -135,8 +135,8 @@ struct Listed {
     hideable: bool,
     /// Review E2: the listed rows that are not notes (the empty and first-line texts).
     problem_rows: usize,
-    /// Visible NIF problems grouped just before the notes in the default list.
-    nif_problems: usize,
+    /// Visible NIF problems grouped at their highest severity in the default list.
+    nif_group: std::ops::Range<usize>,
     /// Review E2: the set's notes, not hidden, while a set filter is on (the Notes pill and the first line).
     set_notes: Option<usize>,
 }
@@ -193,17 +193,23 @@ fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
         )
     };
     let problem_rows = rows.iter().filter(|p| !p.is_note()).count();
-    let nif_problems = if f.is_none() && !model.nif_problems.is_empty() {
+    let nif_group = if f.is_none() && !model.nif_problems.is_empty() {
         let problems = &mut Arc::make_mut(&mut rows)[..problem_rows];
-        problems.sort_by_key(Problem::is_nif_problem);
-        problems.len() - problems.partition_point(|p| !p.is_nif_problem())
+        // The worklist already puts NIF blockers before NIF warnings. Keep the first one's position.
+        let start = problems
+            .iter()
+            .position(Problem::is_nif_problem)
+            .unwrap_or(problems.len());
+        let tail = &mut problems[start..];
+        tail.sort_by_key(|p| !p.is_nif_problem());
+        start..start + tail.partition_point(Problem::is_nif_problem)
     } else {
-        0
+        0..0
     };
     let l = Listed {
         set_notes,
         problem_rows,
-        nif_problems,
+        nif_group,
         suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
         hideable: all.iter().any(can_hide),
         all,
@@ -220,10 +226,7 @@ fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
 }
 
 pub(super) fn nif_problem_count(ui: &egui::Ui, model: &AppModel) -> usize {
-    if model.nif_problems.is_empty() {
-        return 0;
-    }
-    rows(ui, model, None).nif_problems
+    rows(ui, model, None).nif_group.len()
 }
 
 /// The `Kinds ▾` menu (Note HC4): one tick per kind of row the project has, unticked when hidden. The menu stays open,
@@ -1071,7 +1074,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         hidden_problems,
         hideable,
         problem_rows,
-        nif_problems,
+        nif_group,
         set_notes,
         ..
     } = rows(ui, model, model.bottom.filter.clone());
@@ -1178,7 +1181,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         ui.weak(text);
     }
     let row_h = ui.spacing().interact_size.y;
-    let heading = (nif_problems > 0).then_some(problem_rows - nif_problems);
+    let nif_problems = nif_group.len();
+    let heading = (!nif_group.is_empty()).then_some(nif_group.start);
     let m = &*model;
     // Review Focus 5: the focused row left the list (its question was answered) and egui dropped the focus, so the
     // row now at its index takes it, or the last row.

@@ -58,9 +58,9 @@ fn nif_edit_problems_are_named_as_such() {
     assert!(
         h.query_by_label(&format!("{NIF_HEADING} (2)"))
             .is_some_and(|header| {
-                other.bottom() <= header.rect().top()
-                    && header.rect().bottom() <= block.top()
+                header.rect().bottom() <= block.top()
                     && block.bottom() <= warning.top()
+                    && warning.bottom() <= other.top()
             }),
         "the warning follows the block under the two-row NIF heading"
     );
@@ -71,7 +71,50 @@ fn nif_edit_problems_are_named_as_such() {
         .set_nif_problems(vec![support::nif_problem_warning("Missing texture")].into());
     settle(&mut h);
     assert!(h.get_by_label(row).accesskit_node().is_focused());
-    assert!(h.get_by_label("Missing texture").rect().top() < warning.top());
+    assert!(warning.bottom() <= h.get_by_label("Missing texture").rect().top());
+}
+
+#[test]
+fn nif_edit_problems_keep_a_lone_blocker_ahead_of_project_warnings_and_checks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    for normal in ["a_n.png", "u_n.png"] {
+        support::give_a_check_at(&mut m, &d.path().join("textures/g").join(normal));
+    }
+    m.skipped_user_presets = ["first.toml", "second.toml"]
+        .map(|name| (name.into(), "invalid preset".into()))
+        .into();
+    m.set_nif_problems(
+        vec![NifProblem {
+            level: NifLevel::Blocks,
+            ..support::nif_problem_warning("Invalid shader")
+        }]
+        .into(),
+    );
+    m.show_tab(BottomTab::Problems);
+    let mut h = harness(m);
+    settle(&mut h);
+    let block = h.get_by_label("Invalid shader").rect();
+    assert!(
+        h.get_by_label(&format!("{NIF_HEADING} (1)"))
+            .rect()
+            .bottom()
+            <= block.top()
+    );
+    for name in ["first.toml", "second.toml"] {
+        let row = h
+            .get_by_label(&format!("Preset file {name} was skipped: invalid preset"))
+            .rect();
+        assert!(block.bottom() <= row.top(), "blocker before {name}");
+    }
+    let check = sdc_gui::model::code_text::code_line(engine::codes::Code::ChkZSign);
+    for key in ["g/a_n.png", "g/u_n.png"] {
+        let row = h.get_by_label(&format!("{key}: {check}")).rect();
+        assert!(
+            block.bottom() <= row.top(),
+            "blocker before the check on {key}"
+        );
+    }
 }
 
 #[test]
@@ -120,6 +163,28 @@ fn hover_problems(h: &mut Harness<'static, AppModel>) {
     let label = tab_label(cached_tab_counts(h.state()));
     h.get_by_label(&label).hover();
     h.run();
+}
+
+#[test]
+fn nif_edit_problems_build_the_collapsed_list_only_on_hover() {
+    use sdc_gui::model::bottom::filtered_builds;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.collapse_bottom();
+    let mut h = harness(m);
+    settle(&mut h);
+    let before = filtered_builds(h.state());
+    h.state_mut()
+        .set_nif_problems(vec![support::nif_problem_warning("Missing texture")].into());
+    settle(&mut h);
+    assert_eq!(
+        filtered_builds(h.state()),
+        before,
+        "collapsed without hover"
+    );
+    hover_problems(&mut h);
+    h.get_by_label("1 of these comes from the NIF you are editing.");
+    assert_eq!(filtered_builds(h.state()), before + 1);
 }
 
 #[test]
