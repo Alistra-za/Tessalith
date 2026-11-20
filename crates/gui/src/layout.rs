@@ -87,8 +87,8 @@ pub struct InitialWindow {
     pub maximized: bool,
 }
 
-/// Fit the saved window in pixels at its saved scale, then cap the size in points for every possible launch monitor.
-pub fn initial_window(layout: &LayoutSettings, monitors: &[(Rect, f32)]) -> InitialWindow {
+/// Fit the saved window at its saved scale, then cap it using the saved and reported monitor scales.
+pub fn initial_window(layout: &LayoutSettings, monitors: &[(Rect, Option<f32>)]) -> InitialWindow {
     let ppp = layout.window.map_or(1.0, |w| w.ppp);
     let (size, pos) = match layout.window {
         None => (DEFAULT_SIZE, None),
@@ -103,7 +103,10 @@ pub fn initial_window(layout: &LayoutSettings, monitors: &[(Rect, f32)]) -> Init
             )
         }
     };
-    let largest_ppp = monitors.iter().fold(ppp, |max, &(_, scale)| max.max(scale));
+    let largest_ppp = monitors
+        .iter()
+        .filter_map(|(_, scale)| *scale)
+        .fold(ppp, f32::max);
     InitialWindow {
         size: cap_to_surface(size, largest_ppp),
         pos,
@@ -116,7 +119,7 @@ pub fn initial_window(layout: &LayoutSettings, monitors: &[(Rect, f32)]) -> Init
 /// The monitors' work areas in pixels and native pixels per point, primary first. Empty when Windows cannot say.
 /// AG18 uses `windows-sys` because winit has no monitor list before the window exists.
 #[cfg(windows)]
-pub fn monitors() -> Vec<(Rect, f32)> {
+pub fn monitors() -> Vec<(Rect, Option<f32>)> {
     use windows_sys::Win32::Foundation::{LPARAM, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
@@ -126,7 +129,7 @@ pub fn monitors() -> Vec<(Rect, f32)> {
     };
     unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> i32 {
         // SAFETY: `out` is the `&mut Vec` passed below, alive for the whole enumeration.
-        let list = unsafe { &mut *(out as *mut Vec<(bool, Rect, f32)>) };
+        let list = unsafe { &mut *(out as *mut Vec<(bool, Rect, Option<f32>)>) };
         // SAFETY: `MONITORINFO` is a `repr(C)` struct of `u32`s and `RECT`s (four `i32`s), so all-zero bytes are a
         // valid value.
         let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
@@ -146,7 +149,7 @@ pub fn monitors() -> Vec<(Rect, f32)> {
         }
         1
     }
-    let mut list: Vec<(bool, Rect, f32)> = vec![];
+    let mut list: Vec<(bool, Rect, Option<f32>)> = vec![];
     // SAFETY: plain Win32 calls. The process is made per-monitor DPI aware first (winit does the same a moment later and
     // then finds it done), so the rectangles are real pixels and not scaled ones.
     unsafe {
@@ -163,21 +166,21 @@ pub fn monitors() -> Vec<(Rect, f32)> {
 }
 
 #[cfg(windows)]
-fn monitor_scale(monitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) -> f32 {
+fn monitor_scale(monitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) -> Option<f32> {
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::USER_DEFAULT_SCREEN_DPI;
 
     let (mut dpi_x, mut dpi_y) = (0, 0);
     // SAFETY: both outputs are live locals. Windows returns an error for an invalid monitor handle.
     if unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) } == 0 {
-        dpi_x as f32 / USER_DEFAULT_SCREEN_DPI as f32
+        Some(dpi_x as f32 / USER_DEFAULT_SCREEN_DPI as f32)
     } else {
-        5.0 // Windows supports up to 500% scaling. Keep the surface safe when the DPI query fails.
+        None
     }
 }
 
 #[cfg(not(windows))]
-pub fn monitors() -> Vec<(Rect, f32)> {
+pub fn monitors() -> Vec<(Rect, Option<f32>)> {
     vec![]
 }
 
@@ -509,7 +512,7 @@ mod tests {
         assert_eq!(cap_to_surface([1600.0, 900.0], 1.25), [1600.0, 900.0]);
     }
 
-    fn restored_size(monitors: &[(Rect, f32)]) -> [f32; 2] {
+    fn restored_size(monitors: &[(Rect, Option<f32>)]) -> [f32; 2] {
         let layout = LayoutSettings {
             window: Some(WindowSettings {
                 x: 10.0,
@@ -527,7 +530,7 @@ mod tests {
     #[test]
     fn the_initial_window_caps_the_monitor_fitted_size() {
         let monitor = Rect::from_min_size(egui::Pos2::ZERO, vec2(10000.0, 1600.0));
-        assert_eq!(restored_size(&[(monitor, 1.0)]), [4096.0, 800.0]);
+        assert_eq!(restored_size(&[(monitor, Some(1.0))]), [4096.0, 800.0]);
     }
 
     #[test]
@@ -550,13 +553,28 @@ mod tests {
             }),
             ..Default::default()
         };
-        let window = initial_window(&layout, &[(primary, 1.0), (launch, 2.0)]);
+        let window = initial_window(&layout, &[(primary, Some(1.0)), (launch, Some(2.0))]);
         assert_eq!(window.size, [4096.0, 900.0]);
     }
 
     #[cfg(windows)]
     #[test]
-    fn an_unavailable_monitor_dpi_uses_the_windows_maximum_scale() {
-        assert_eq!(monitor_scale(std::ptr::null_mut()), 5.0);
+    fn an_unavailable_monitor_dpi_preserves_a_fitting_window() {
+        let primary = Rect::from_min_size(egui::Pos2::ZERO, vec2(1920.0, 1080.0));
+        let secondary = primary.translate(vec2(1920.0, 0.0));
+        let layout = LayoutSettings {
+            window: Some(WindowSettings {
+                x: 0.0,
+                y: 0.0,
+                w: 1800.0,
+                h: 900.0,
+                ppp: 1.0,
+                maximized: false,
+            }),
+            ..Default::default()
+        };
+        let unknown = monitor_scale(std::ptr::null_mut());
+        let window = initial_window(&layout, &[(primary, Some(1.0)), (secondary, unknown)]);
+        assert_eq!(window.size, [1800.0, 900.0]);
     }
 }
