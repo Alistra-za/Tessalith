@@ -6,11 +6,11 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::sets::{
-    set_views, slot_shown, BorrowOccupant, DropChoice, DropOutcome, SlotCommand, SlotFill,
+    set_views, slot_shown, BorrowOccupant, DropChoice, DropOutcome, SetView, SlotCommand, SlotFill,
     SlotKind, SlotShown,
 };
 use sdc_gui::model::AppModel;
-use sdc_gui::ui::sets_column::Pending;
+use sdc_gui::ui::sets_column::{Pending, DEFAULT_HINT, DEFAULT_HOVER, DEFAULT_SUFFIX};
 use sdc_gui::ui::State;
 use std::path::Path;
 use std::time::Duration;
@@ -21,6 +21,17 @@ const ROCK: &str = "landscape/rock01";
 /// `pbr_ready` with a new set from leaf (pbr_albedo, Vanilla target) that borrows rock01's normal; returns the model,
 /// that set's id, and the normal's key.
 fn leaf_borrows_normal(dir: &std::path::Path) -> (sdc_gui::model::AppModel, String, String) {
+    let (mut m, id) = leaf_set(dir);
+    let normal = key_of(&m, "rock01_normal.png");
+    assert_eq!(
+        m.drop_choice(&normal, &id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    (m, id, normal)
+}
+
+fn leaf_set(dir: &Path) -> (AppModel, String) {
     let mut m = pbr_ready(dir);
     let leaf = key_of(&m, "leaf.png");
     m.set_field(&leaf, "subtype", serde_json::json!("pbr_albedo"));
@@ -29,13 +40,7 @@ fn leaf_borrows_normal(dir: &std::path::Path) -> (sdc_gui::model::AppModel, Stri
     idle(&mut m);
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
-    let normal = key_of(&m, "rock01_normal.png");
-    assert_eq!(
-        m.drop_choice(&normal, &id, DropChoice::Share),
-        DropOutcome::Joined
-    );
-    idle(&mut m);
-    (m, id, normal)
+    (m, id)
 }
 
 fn key_of(m: &sdc_gui::model::AppModel, name: &str) -> String {
@@ -76,15 +81,27 @@ fn on_card_of<'a>(h: &'a H, id: &str, label: &'a str) -> Vec<egui_kittest::Node<
 /// keeps its value across frames (`input_state/mod.rs` l.395, l.434). Kittest runs one frame per queued event, so
 /// the change lands in its own frame before the release, as `tests/ui_drive/steps.rs` (l.346-353) does.
 fn drag_to(h: &mut H, at: egui::Pos2, to: egui::Pos2, release: egui::Modifiers) {
+    drag_with_modifiers(h, at, to, egui::Modifiers::NONE, release);
+}
+
+fn drag_with_modifiers(
+    h: &mut H,
+    at: egui::Pos2,
+    to: egui::Pos2,
+    start: egui::Modifiers,
+    release: egui::Modifiers,
+) {
     let press = |pos, pressed, modifiers| egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
         pressed,
         modifiers,
     };
+    h.event(egui::Event::ModifiersChanged(start));
+    h.run_steps(1);
     h.hover_at(at);
     h.run();
-    h.event(press(at, true, egui::Modifiers::NONE));
+    h.event(press(at, true, start));
     h.run();
     for step in 1..=6 {
         h.event(egui::Event::PointerMoved(
@@ -717,4 +734,511 @@ fn refused_buttons_for_a_packed_map() {
         "Move it here",
         "a packed map follows its raw maps; move those, or share the finished map",
     );
+}
+
+const NORMAL: &str = "landscape/rock01_normal.png";
+
+/// `key_press` only queues the key; the run delivers it.
+fn press_enter(h: &mut H) {
+    h.key_press(egui::Key::Enter);
+    h.run();
+}
+
+fn open_choice(h: &mut H, last: Option<DropChoice>, item: &str, set: &str) {
+    h.state_mut().1.drops.last_choice = last;
+    h.state_mut().1.drops.pending = Some(choice(item, set, ROCK));
+    h.run();
+    h.run();
+}
+
+fn remembered_share() -> (tempfile::TempDir, H, String) {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Share), NORMAL, &id);
+    (d, h, id)
+}
+
+#[test]
+fn the_default_button_uses_the_selection_fill() {
+    let (_d, h, _) = remembered_share();
+    let b = h
+        .get_by_label_contains("Share (borrow its finished output)")
+        .rect();
+    let fill = h.ctx.global_style().visuals.selection.bg_fill;
+    assert!(shapes(&h)
+        .iter()
+        .any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == b && r.fill == fill)));
+}
+
+#[test]
+fn the_default_button_explains_enter_and_shift_on_hover() {
+    let (_d, mut h, _) = remembered_share();
+    h.get_by_label_contains("Share (borrow its finished output)")
+        .hover();
+    h.run_steps(4);
+    h.get_by_label(DEFAULT_HOVER);
+}
+
+#[test]
+fn the_choice_dialog_shows_the_keyboard_hint() {
+    let (_d, h, _) = remembered_share();
+    h.get_by_label(DEFAULT_HINT);
+}
+
+/// Note JW6 (A8-2): the default is named and Enter writes the borrow.
+#[test]
+fn enter_picks_the_remembered_share() {
+    let (_d, mut h, id) = remembered_share();
+    let label = format!("Share (borrow its finished output){DEFAULT_SUFFIX}");
+    h.get_by_role_and_label(Role::Button, &label);
+    assert!(h
+        .query_by_label(&format!("Move it here{DEFAULT_SUFFIX}"))
+        .is_none());
+    press_enter(&mut h);
+    assert_eq!(h.state().1.drops.pending, None);
+    idle(&mut h.state_mut().0);
+    assert!(matches!(
+        view(&h.state().0, &id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
+/// Note JW6: Enter on Duplicate writes one new image. Undo removes the copy.
+#[test]
+fn enter_picks_a_remembered_duplicate() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    let before = files_under(d.path());
+    open_choice(&mut h, Some(DropChoice::Duplicate), NORMAL, &id);
+    press_enter(&mut h);
+    idle(&mut h.state_mut().0);
+    let after = files_under(d.path());
+    let new: Vec<_> = after.iter().filter(|p| !before.contains(p)).collect();
+    assert_eq!(new.len(), 1, "one copy: {new:?}");
+    assert!(new[0].extension().is_some_and(|x| x == "png"), "{new:?}");
+    h.state_mut().0.undo();
+    idle(&mut h.state_mut().0);
+    assert_eq!(files_under(d.path()), before, "Undo removes the copy");
+}
+
+#[test]
+fn enter_picks_a_remembered_move() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Move), NORMAL, &id);
+    press_enter(&mut h);
+    idle(&mut h.state_mut().0);
+    assert!(view(&h.state().0, &id).members.iter().any(|k| k == NORMAL));
+    assert!(!view(&h.state().0, ROCK).members.iter().any(|k| k == NORMAL));
+}
+
+/// Note JW6: Enter on the frame the dialog opens does nothing (the Enter that ended something else).
+#[test]
+fn enter_on_the_opening_frame_does_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    h.state_mut().1.drops.pending = Some(choice(NORMAL, &id, ROCK));
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
+}
+
+/// Note JW6 (A8-1): a remembered answer refused for this item highlights nothing, and Enter does nothing.
+#[test]
+fn a_refused_remembered_answer_highlights_nothing_and_enter_does_nothing() {
+    // a helper with Duplicate remembered (A7)
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(ab(d.path()));
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Duplicate);
+    h.state_mut().1.drops.pending = Some(choice(AO, B, A));
+    h.run();
+    h.run();
+    assert_eq!(h.query_all_by_label_contains(DEFAULT_SUFFIX).count(), 0);
+    assert!(h.query_by_label(DEFAULT_HINT).is_none());
+    press_enter(&mut h);
+    assert_eq!(h.state().1.drops.pending, Some(choice(AO, B, A)));
+    // Under the default target, rock01 packs rock01_rmaos. It can be shared into odd.
+    let d2 = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d2.path());
+    let odd = key_of(&m, "odd.png");
+    let id = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    let rmaos = key_of(&m, "rock01_rmaos");
+    assert!(
+        m.choice_refused(&rmaos, &id, DropChoice::Move).is_some(),
+        "premise: Move of a packed map is refused"
+    );
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Move), &rmaos, &id);
+    assert_eq!(h.query_all_by_label_contains(DEFAULT_SUFFIX).count(), 0);
+    press_enter(&mut h);
+    assert_eq!(h.state().1.drops.pending, Some(choice(&rmaos, &id, ROCK)));
+}
+
+/// Note JW6 (A8-2): after a real drop opens the question, Enter picks the remembered answer.
+#[test]
+fn a_real_drop_then_enter_picks_the_remembered_answer() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_to(&mut h, from, to, egui::Modifiers::NONE);
+    assert_eq!(
+        h.state().1.drops.pending,
+        Some(choice(NORMAL, &id, ROCK)),
+        "no Shift: it asks"
+    );
+    h.run(); // Deliver Enter after the opening frame.
+    press_enter(&mut h);
+    assert_eq!(h.state().1.drops.pending, None);
+    idle(&mut h.state_mut().0);
+    assert!(matches!(
+        view(&h.state().0, &id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
+/// Note JW6 (A8-2): a remembered Duplicate into a filled slot leads to Replace, and Enter never presses Replace.
+#[test]
+fn enter_never_presses_replace() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    let steps = h.state().0.history.undo.len();
+    open_choice(
+        &mut h,
+        Some(DropChoice::Duplicate),
+        "landscape/rock01.png",
+        &id,
+    );
+    press_enter(&mut h);
+    let Some(Pending::Replace { choice: c, set, .. }) = h.state().1.drops.pending.clone() else {
+        panic!("Replace asks: {:?}", h.state().1.drops.pending)
+    };
+    assert_eq!((c, set.as_str()), (DropChoice::Duplicate, id.as_str()));
+    press_enter(&mut h);
+    assert!(
+        matches!(h.state().1.drops.pending, Some(Pending::Replace { .. })),
+        "Enter did nothing on Replace"
+    );
+    assert_eq!(h.state().0.history.undo.len(), steps, "nothing written");
+}
+
+#[test]
+fn choosing_duplicate_is_remembered_even_if_replace_is_cancelled() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let before = documents(&m);
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Move), "landscape/rock01.png", &id);
+    h.get_by_role_and_label(Role::Button, "Duplicate the source for this set")
+        .click();
+    h.run();
+    assert!(matches!(
+        h.state().1.drops.pending,
+        Some(Pending::Replace {
+            choice: DropChoice::Duplicate,
+            ..
+        })
+    ));
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert_eq!(h.state().1.drops.pending, None);
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Duplicate));
+    assert_eq!(documents(&h.state().0), before);
+}
+
+/// Note JW6: an answer is remembered; Cancel and a refused answer leave it as it was.
+#[test]
+fn an_answer_is_remembered_and_cancel_is_not() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, None, NORMAL, &id);
+    h.get_by_role_and_label(Role::Button, "Share (borrow its finished output)")
+        .click();
+    h.run();
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
+    open_choice(&mut h, Some(DropChoice::Share), NORMAL, &id);
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert_eq!(h.state().1.drops.pending, None);
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
+}
+
+/// Note JW6 (A8-1): "for the session": opening another folder keeps the remembered answer.
+#[test]
+fn the_remembered_answer_survives_opening_another_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, _id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Move);
+    h.run();
+    let d2 = tempfile::tempdir().unwrap();
+    h.state_mut().0.open_folder(support::mod_folder(d2.path()));
+    idle(&mut h.state_mut().0);
+    h.run();
+    h.run();
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Move));
+}
+
+/// Note JW6 (A8-3): Shift held at the drop answers with the remembered Share: no dialog, the borrow is written.
+#[test]
+fn shift_at_the_drop_skips_the_question_with_the_remembered_answer() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_to(&mut h, from, to, egui::Modifiers::SHIFT);
+    assert_eq!(h.state().1.drops.pending, None, "no question");
+    idle(&mut h.state_mut().0);
+    assert!(matches!(
+        view(&h.state().0, &id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
+/// Note JW6 (A8-3): with nothing remembered, or a refused answer, Shift still asks.
+#[test]
+fn shift_with_nothing_remembered_or_a_refused_answer_still_asks() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_to(&mut h, from, to, egui::Modifiers::SHIFT);
+    assert_eq!(
+        h.state().1.drops.pending,
+        Some(choice(NORMAL, &id, ROCK)),
+        "nothing remembered: it asks"
+    );
+    h.key_press(egui::Key::Escape);
+    h.run();
+    // a helper with Duplicate remembered
+    let d2 = tempfile::tempdir().unwrap();
+    let mut h = harness(ab(d2.path()));
+    h.run();
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Duplicate);
+    let from = helper_source(&h, "rock_ao.png");
+    let to = card_of(&h, B).center();
+    let before = (
+        documents(&h.state().0),
+        h.state().0.selection.clone(),
+        h.state().0.multi.clone(),
+    );
+    drag_to(&mut h, from, to, egui::Modifiers::SHIFT);
+    assert_eq!(
+        (
+            documents(&h.state().0),
+            h.state().0.selection.clone(),
+            h.state().0.multi.clone()
+        ),
+        before
+    );
+    assert_eq!(
+        h.state().1.drops.pending,
+        Some(choice(AO, B, A)),
+        "a refused answer: it asks"
+    );
+}
+
+#[test]
+fn shift_release_with_a_packed_map_and_remembered_move_still_asks() {
+    use sdc_gui::model::sets::DropChoice::Move;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let odd = key_of(&m, "odd.png");
+    let id = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    let item = key_of(&m, "rock01_rmaos");
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(Move);
+    let snapshot = |h: &H| {
+        let m = &h.state().0;
+        (documents(m), m.selection.clone(), m.multi.clone())
+    };
+    let before = snapshot(&h);
+    let at = outside_sets(&h, "rock01_rmaos").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_to(&mut h, at, to, egui::Modifiers::SHIFT);
+    assert_eq!(h.state().1.drops.pending, Some(choice(&item, &id, ROCK)));
+    assert_eq!(snapshot(&h), before);
+    for previous in [Move, DropChoice::Share] {
+        h.state_mut().1.drops.last_choice = Some(previous);
+        h.run();
+        let b = h.get_by_role_and_label(Role::Button, "Move it here");
+        assert!(b.accesskit_node().is_disabled());
+        b.click();
+        h.run();
+        assert_eq!(h.state().1.drops.pending, Some(choice(&item, &id, ROCK)));
+        assert_eq!(h.state().1.drops.last_choice, Some(previous));
+        assert_eq!(snapshot(&h), before);
+    }
+}
+
+/// Note JW6 (A8-5): Shift held from before the press still skips the question at the drop, and the drag selects
+/// nothing (a tile range-selects on a click only).
+#[test]
+fn shift_held_from_before_the_press_skips_the_question_and_selects_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = leaf_set(d.path());
+    let odd = key_of(&m, "odd.png");
+    m.select_item(&odd);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let before = h.state().0.selected_items();
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_with_modifiers(
+        &mut h,
+        from,
+        to,
+        egui::Modifiers::SHIFT,
+        egui::Modifiers::SHIFT,
+    );
+    assert_eq!(h.state().1.drops.pending, None, "no question");
+    assert_eq!(
+        h.state().0.selected_items(),
+        before,
+        "the drag range-selected nothing"
+    );
+    idle(&mut h.state_mut().0);
+    assert!(matches!(
+        view(&h.state().0, &id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+}
+
+/// Note JW6 (A8-5): a Shift-click on a Textures tile, with no move, range-selects as today.
+#[test]
+fn a_shift_click_on_a_tile_still_range_selects() {
+    let (d, d2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (mut m, _id) = leaf_set(d.path());
+    let (mut twin, _) = leaf_set(d2.path());
+    let odd = key_of(&m, "odd.png");
+    m.select_item(&odd);
+    twin.select_item(&odd);
+    twin.click_item(NORMAL, false, true);
+    let want = twin.selected_items();
+    assert!(want.len() >= 2, "premise: a range: {want:?}");
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let at = outside_sets(&h, "rock01_normal.png").rect().center();
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::SHIFT,
+    };
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+    h.run_steps(1);
+    h.hover_at(at);
+    h.run();
+    h.event(click(true));
+    h.event(click(false));
+    h.run();
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run();
+    assert_eq!(h.state().0.selected_items(), want);
+}
+
+fn helper_source(h: &H, file: &str) -> egui::Pos2 {
+    let row = format!("Helper {file}:");
+    h.query_all_by_role(Role::Button)
+        .filter(|n| !in_sets_column(h, n.rect()))
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(&row))
+        })
+        .unwrap_or_else(|| panic!("helper row for {file} outside the Sets column"))
+        .rect()
+        .center()
+}
+
+fn view(m: &AppModel, id: &str) -> SetView {
+    set_views(m).into_iter().find(|v| v.id == id).unwrap()
+}
+
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    walkdir::WalkDir::new(dir)
+        .sort_by_file_name()
+        .into_iter()
+        .map(Result::unwrap)
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_none_or(|x| x != "toml"))
+        .map(|e| e.into_path())
+        .collect()
+}
+
+/// Note JW6 (SC-13): Share explains why a memberless set cannot use a raw helper.
+#[test]
+fn share_into_an_empty_set_is_disabled_with_the_models_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    let set = "e/empty";
+    m.edit_docs("Create empty set", None, true, |_, s| s.create_set(set));
+    idle(&mut m);
+    assert_eq!(
+        m.drop_on_set(AO, set),
+        DropOutcome::AskChoice { from: A.into() }
+    );
+    let mut h = harness(m);
+    h.state_mut().1.drops.pending = Some(choice(AO, set, A));
+    assert_refused_button(
+        &mut h,
+        d.path(),
+        "Share (use this file here too, no copy)",
+        "e/empty has no texture of its own; move one in first",
+    );
+}
+
+/// A failed copy leaves the last successful answer in place, including when Shift skips Choice.
+#[test]
+fn a_copy_error_keeps_the_remembered_answer_and_shows_the_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    std::fs::remove_file(&m.item(NORMAL).unwrap().input).unwrap();
+    let before = documents(&m);
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Share), NORMAL, &id);
+    h.get_by_role_and_label(Role::Button, "Duplicate the source for this set")
+        .click();
+    h.run();
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Refused(why)) if why.starts_with("could not copy"))
+    );
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
+    h.key_press(egui::Key::Escape);
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Duplicate);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_to(&mut h, from, to, egui::Modifiers::SHIFT);
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Refused(why)) if why.starts_with("could not copy"))
+    );
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Duplicate));
+    assert_eq!(documents(&h.state().0), before);
 }

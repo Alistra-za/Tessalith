@@ -2733,6 +2733,16 @@ pub(crate) fn is_shareable_helper(item: &TextureItem) -> bool {
             .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
 }
 
+/// Note JW6: the edit or confirmation that follows a successful drop precheck.
+enum DropPlan {
+    ShareHelper(SetView),
+    Slot {
+        target: SetView,
+        slot: Option<SlotKind>,
+        existing: Option<SlotFill>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropOutcome {
     Joined,
@@ -3765,44 +3775,57 @@ impl AppModel {
         Some(reason(&all[i]))
     }
 
+    /// Note JW6: why the dialog cannot offer this answer. A choice that would ask Replace is usable.
+    pub fn choice_refused(&self, item: &str, set: &str, choice: DropChoice) -> Option<String> {
+        self.drop_precheck(item, set, choice).err()
+    }
+
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set
     /// already fills asks to replace first (spec §3.1); answer that with `drop_replace` and the same choice.
     pub fn drop_choice(&mut self, item: &str, set: &str, choice: DropChoice) -> DropOutcome {
-        if !self.sets_editable() {
-            return DropOutcome::Refused(READ_ONLY.into());
-        }
-        let target = match self.drop_target(set) {
-            Ok(t) => t,
+        let result = match self.drop_precheck(item, set, choice) {
             Err(e) => return DropOutcome::Refused(e),
+            Ok(DropPlan::ShareHelper(target)) => self.share_helper(item, &target),
+            Ok(DropPlan::Slot {
+                existing:
+                    Some(
+                        SlotFill::Own { item: existing }
+                        | SlotFill::Borrowed { item: existing, .. },
+                    ),
+                ..
+            }) => return DropOutcome::AskReplace { existing },
+            Ok(DropPlan::Slot { target, slot, .. }) => {
+                self.apply_choice(item, &target, slot, choice, None)
+            }
         };
+        match result {
+            Ok(()) => DropOutcome::Joined,
+            Err(e) => DropOutcome::Refused(e),
+        }
+    }
+
+    /// Note JW6: the dialog and the edit check the same destination before any write.
+    fn drop_precheck(&self, item: &str, set: &str, choice: DropChoice) -> Result<DropPlan, String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let target = self.drop_target(set)?;
         if choice == DropChoice::Share && self.item(item).is_some_and(is_shareable_helper) {
-            return match self.share_helper(item, &target) {
-                Ok(()) => DropOutcome::Joined,
-                Err(e) => DropOutcome::Refused(e),
-            };
+            self.share_helper_check(item, &target)?;
+            return Ok(DropPlan::ShareHelper(target));
         }
         let slot = self.item(item).and_then(slot_of);
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
             .then_some(from.as_deref())
             .flatten();
-        match self.occupant(&target, slot, share_from) {
-            Err(e) => return DropOutcome::Refused(e),
-            Ok(Some(
-                SlotFill::Own { item: existing } | SlotFill::Borrowed { item: existing, .. },
-            )) => {
-                // Checked first so a refusal (a packed map, a raw map to share) is not asked about.
-                if let Err(e) = self.choice_allowed(item, &target, slot, choice) {
-                    return DropOutcome::Refused(e);
-                }
-                return DropOutcome::AskReplace { existing };
-            }
-            Ok(_) => {}
-        }
-        match self.apply_choice(item, &target, slot, choice, None) {
-            Ok(()) => DropOutcome::Joined,
-            Err(e) => DropOutcome::Refused(e),
-        }
+        let existing = self.occupant(&target, slot, share_from)?;
+        self.choice_allowed(item, &target, slot, choice)?;
+        Ok(DropPlan::Slot {
+            target,
+            slot,
+            existing,
+        })
     }
 
     /// The answer to `AskReplace` for `choice`: the occupant leaves (it becomes a set of its own, or the borrow is
@@ -3832,8 +3855,8 @@ impl AppModel {
         DropChoice::offered(self.item(item).map(|i| i.kind)).to_vec()
     }
 
-    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
-    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+    /// Note HH5: true for the helper's own set, where there is no share line to write.
+    fn share_helper_check(&self, item: &str, target: &SetView) -> Result<bool, String> {
         // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
         // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
         // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
@@ -3843,7 +3866,7 @@ impl AppModel {
             None => self.is_no_set(item) && same_id(&automatic, &target.id),
         };
         if own {
-            return Ok(());
+            return Ok(true);
         }
         // The engine has nothing to read it into (a share into a memberless set is stale).
         if target.members.is_empty() {
@@ -3851,6 +3874,14 @@ impl AppModel {
                 "{} has no texture of its own; move one in first",
                 target.id
             ));
+        }
+        Ok(false)
+    }
+
+    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
+    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+        if self.share_helper_check(item, target)? {
+            return Ok(());
         }
         let name = self.item(item).map_or(item.to_string(), |i| i.name.clone());
         let (id, file) = (target.id.clone(), item.to_string());

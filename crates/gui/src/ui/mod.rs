@@ -163,7 +163,10 @@ pub fn draw_with_scan(
         .replace(model.folder_epoch)
         .is_some_and(|e| e != model.folder_epoch)
     {
-        state.drops = Default::default();
+        state.drops = sets_column::DropState {
+            last_choice: state.drops.last_choice,
+            ..Default::default()
+        };
         state.slot_cmds = Default::default();
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).

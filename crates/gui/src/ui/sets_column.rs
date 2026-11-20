@@ -17,8 +17,8 @@ use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, fill_proposals, is_shareable_helper, kind_text, member_tail, shader_options,
-    slot_of, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
-    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
+    slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome, FillProposal,
+    Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -155,6 +155,8 @@ pub struct SlotNote {
 
 #[derive(Debug, Default)]
 pub struct DropState {
+    /// Note JW6: the last answer for this run, kept when opening another folder.
+    pub last_choice: Option<DropChoice>,
     pub pending: Option<Pending>,
     /// Item 17: a file drop not yet taken by a slot card this frame (`ui::draw_with_scan` opens its folder after).
     pub file: Option<FileDrop>,
@@ -238,7 +240,7 @@ enum Act {
     Problems(String),
     SelectItem(String),
     Expand(String),
-    Drop(String, String),
+    Drop(String, String, bool),
     ShareBorrow {
         item: String,
         from: String,
@@ -2053,10 +2055,18 @@ pub fn draw(
             }
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::Expand(k) => super::after_commit(&ctx, model, move |m| m.expand(&k)),
-            Act::Drop(item, set) => match model.drop_on_set(&item, &set) {
+            Act::Drop(item, set, shift) => match model.drop_on_set(&item, &set) {
                 DropOutcome::Joined => {}
                 DropOutcome::AskChoice { from } => {
-                    st.pending = Some(Pending::Choice { item, set, from })
+                    let usable = |c| {
+                        model.drop_choices(&item).contains(&c)
+                            && model.choice_refused(&item, &set, c).is_none()
+                    };
+                    let skip = st.last_choice.filter(|&c| shift && usable(c));
+                    st.pending = match skip {
+                        Some(c) => choose(model, item, set, c),
+                        None => Some(Pending::Choice { item, set, from }),
+                    };
                 }
                 DropOutcome::AskReplace { existing } => {
                     st.pending = Some(Pending::Replace {
@@ -2773,7 +2783,11 @@ fn pill(
         acts.push(Act::Click(v.id.clone(), m.command, m.shift));
     }
     match dropped {
-        Some(Dropped::Item(p)) => acts.push(Act::Drop(p.0.clone(), v.id.clone())),
+        Some(Dropped::Item(p)) => acts.push(Act::Drop(
+            p.0.clone(),
+            v.id.clone(),
+            ui.input(|i| i.modifiers.shift),
+        )),
         Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
             item: p.item.clone(),
             from: p.from.clone(),
@@ -3362,6 +3376,26 @@ enum ModalAnswer {
     Close,
 }
 
+/// Note JW6: accessible name, hover and keyboard hint for the remembered answer.
+pub const DEFAULT_SUFFIX: &str = " (default, Enter)";
+pub const DEFAULT_HOVER: &str =
+    "Your last choice. Enter picks it; hold Shift as you drop to skip this question.";
+pub const DEFAULT_HINT: &str =
+    "Enter picks the highlighted choice. Hold Shift when you drop to skip this question.";
+
+fn choose(model: &mut AppModel, item: String, set: String, c: DropChoice) -> Option<Pending> {
+    match model.drop_choice(&item, &set, c) {
+        DropOutcome::AskReplace { existing } => Some(Pending::Replace {
+            item,
+            set,
+            existing,
+            choice: c,
+        }),
+        DropOutcome::Refused(why) => Some(Pending::Refused(why)),
+        _ => None,
+    }
+}
+
 /// The drop, delete and rename dialogs. Drawn by `ui::draw_with_scan` whether or not this column shows: a file
 /// dropped on a slot card asks its Replace here too (item 17).
 pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
@@ -3444,40 +3478,55 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     };
     let buttons: Vec<(&str, _, bool)> = footer.iter().map(|b| (b.0.as_str(), b.1, true)).collect();
     let mut answer = None;
+    let mut def = None;
     let (keys, clicked) =
         super::dialogs::dialog(ctx, "set-drop", true, 420.0, &title, &buttons, |ui| {
             if let Some(line) = &line {
                 ui.label(line);
             }
-            if matches!(p, Pending::Choice { .. }) {
+            if let Pending::Choice { item, set, .. } = &p {
                 // Note JW5: helpers have no Duplicate button; a raw helper shares the file itself.
                 let raw_helper = dragged.is_some_and(is_shareable_helper);
-                let kind = dragged.map(|i| i.kind);
-                let slot = dragged.and_then(slot_of);
                 let share = if raw_helper {
                     "Share (use this file here too, no copy)"
                 } else {
                     "Share (borrow its finished output)"
                 };
-                for &c in DropChoice::offered(kind) {
+                for c in model.drop_choices(item) {
                     let label = match c {
                         DropChoice::Move => "Move it here",
                         DropChoice::Share => share,
                         DropChoice::Duplicate => "Duplicate the source for this set",
                     };
-                    let refusal = if raw_helper && c == DropChoice::Share {
-                        None
-                    } else {
-                        c.slot_refusal(kind, slot)
-                    };
-                    let r = ui.add_enabled(refusal.is_none(), egui::Button::new(label));
+                    let refusal = model.choice_refused(item, set, c);
+                    let usable = refusal.is_none();
+                    let remembered = usable && st.last_choice == Some(c);
+                    let mut button = egui::Button::new(label);
+                    if remembered {
+                        def = Some(c);
+                        button = button.fill(ui.visuals().selection.bg_fill);
+                    }
+                    let mut r = ui.add_enabled(usable, button);
+                    if remembered {
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                true,
+                                format!("{label}{DEFAULT_SUFFIX}"),
+                            )
+                        });
+                        r = r.on_hover_text(DEFAULT_HOVER);
+                    }
                     if let Some(why) = refusal {
                         ui.ctx()
-                            .accesskit_node_builder(r.id, |b| b.set_description(why));
+                            .accesskit_node_builder(r.id, |b| b.set_description(why.as_str()));
                         r.on_disabled_hover_text(why);
                     } else if r.clicked() {
                         answer = Some(ModalAnswer::Choice(c));
                     }
+                }
+                if def.is_some() {
+                    ui.label(egui::RichText::new(DEFAULT_HINT).weak());
                 }
             }
         });
@@ -3486,22 +3535,20 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     }
     // Esc and a click outside cancel; Enter presses the OK of a refusal.
     let refusal = matches!(p, Pending::Refused(_));
+    if answer.is_none() && keys.enter {
+        answer = def.map(ModalAnswer::Choice);
+    }
     if answer.is_none() && (keys.cancel || (keys.enter && refusal)) {
         answer = Some(ModalAnswer::Close);
     }
     let Some(answer) = answer else { return };
     st.pending = match (answer, p) {
         (ModalAnswer::Choice(c), Pending::Choice { item, set, .. }) => {
-            match model.drop_choice(&item, &set, c) {
-                DropOutcome::AskReplace { existing } => Some(Pending::Replace {
-                    item,
-                    set,
-                    existing,
-                    choice: c,
-                }),
-                DropOutcome::Refused(why) => Some(Pending::Refused(why)),
-                _ => None,
+            let next = choose(model, item, set, c);
+            if !matches!(next, Some(Pending::Refused(_))) {
+                st.last_choice = Some(c);
             }
+            next
         }
         // The replace answers the choice that led to it (Move, Share or Duplicate); a refusal shows its reason.
         (
