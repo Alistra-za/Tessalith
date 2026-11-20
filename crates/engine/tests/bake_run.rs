@@ -224,6 +224,89 @@ fn kept_normal_dds_preserves_length_at_two_lower_levels() {
 }
 
 #[test]
+fn keep_upgrade_obeys_encode_version_scope() {
+    use engine::codes::Code;
+    use engine::manifest::{encode_version, output_key};
+    use engine::overrides::parse_set;
+
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("iron_n.png");
+    ImageBuffer::from_pixel(8, 8, Rgb([160u8, 112, 192]))
+        .save(&input)
+        .unwrap();
+    let engine = Engine::new().unwrap();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "keep-upgrade");
+    let resolve = |out: &str, base: Option<&str>, ev| {
+        let mut req = BatchRequest::new(vec![input.clone()], d.path().join(out), Target::Cs);
+        req.on_existing = OnExisting::IfChanged;
+        req.ev = ev;
+        req.overrides = [
+            "file:*iron_n.png.subtype=normal",
+            "file:*iron_n.png.format=rgba8",
+            "file:*iron_n.png.color.tag=unorm",
+        ]
+        .map(|s| parse_set(s).unwrap())
+        .into();
+        if let Some(base) = base {
+            req.overrides
+                .push(parse_set(&format!("file:*iron_n.png.mips.normal_base={base}")).unwrap());
+        }
+        engine.plan(req, &rep, &CancelToken::default()).unwrap()
+    };
+    let keep = |ev| resolve("out", Some("keep"), ev);
+    let seed = keep(EvScope::Off);
+    assert_eq!(seed.jobs.len(), 1);
+    let job = &seed.jobs[0];
+    assert_eq!(job.profile.subtype, Subtype::Normal);
+    assert_eq!(job.profile.mips.normal_base, NormalBase::Keep);
+    let output = job.output.clone();
+    let key = output_key(&seed.request.output_root, &output);
+    let manifest = Manifest::at(&seed.request.output_root);
+    let (s, events) = run(seed);
+    assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+    let kept_dds = std::fs::read(&output).unwrap();
+    let mut record = manifest.read().unwrap()[&key].raw.clone();
+    // Normal's encode-version arm before the Keep mip-chain change.
+    record["encode_version"] = "2.0.0".into();
+    let older = format!("{record}\n");
+    std::fs::write(manifest.path(), &older).unwrap();
+
+    for ev in [
+        EvScope::Off,
+        EvScope::matching(vec!["diffuse".parse().unwrap()]).unwrap(),
+    ] {
+        let (s, events) = run(keep(ev));
+        assert_eq!((s.converted, s.up_to_date, s.kept_older_encode), (0, 1, 1));
+        assert!(events
+            .iter()
+            .any(|e| matches!(&e.kind, EventKind::Warning(w)
+            if w.code == Code::OutKeptOlderEncode && w.data["by_subtype"]["normal"] == 1)));
+        assert_eq!(std::fs::read_to_string(manifest.path()).unwrap(), older);
+        assert_eq!(std::fs::read(&output).unwrap(), kept_dds);
+    }
+    let matching = EvScope::matching(vec!["normal".parse().unwrap()]).unwrap();
+    let (s, events) = run(keep(matching.clone()));
+    assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+    assert_eq!(
+        manifest.read().unwrap()[&key].encode_version.as_deref(),
+        Some(encode_version(Subtype::Normal))
+    );
+    let (s, _) = run(keep(matching));
+    assert_eq!((s.converted, s.up_to_date, s.kept_older_encode), (0, 1, 0));
+
+    let encode = |out, base| {
+        let p = resolve(out, base, EvScope::Off);
+        let path = p.jobs[0].output.clone();
+        let (s, events) = run(p);
+        assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+        std::fs::read(path).unwrap()
+    };
+    let explicit = encode("explicit", Some("renormalize"));
+    assert_ne!(explicit, kept_dds);
+    assert_eq!(encode("omitted", None), explicit);
+}
+
+#[test]
 fn acknowledged_bc5_keep_fails_before_if_changed() {
     use engine::codes::{Code, Severity};
     use engine::manifest::output_key;
