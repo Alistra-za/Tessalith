@@ -2061,7 +2061,7 @@ The owner: "if a normal is only ever in a pbr set, its alpha should always be dr
 
 ## Note JX — Shift+click opens a texture from a set card (owner, 2026-11-20)
 
-- **JX1** Clicking a texture thumbnail opens its set. Ctrl+click toggles the set in the selection. Shift+click opens the texture's settings, even if the texture is already selected behind another centre tab (FB7). This applies to slot chips, docked helpers and trailing members. Shift+click on empty card area still extends the set selection.
+- **JX1** Clicking a texture thumbnail without Shift follows the card's existing click rules (JV3). Shift+click opens the texture's settings, even if the texture is already selected behind another centre tab (FB7). This applies to slot chips, docked helpers and trailing members. Shift+click on empty card area still extends the set selection.
 - **JX2** On a focused thumbnail, Enter or Space opens the set. Holding Shift with either key opens the texture. Both routes wait for a focused edit to commit (FC8). The thumbnail's hover and accessible description give the Shift+click hint.
 - **JX3** Dragging a thumbnail still uses its usual payload (JW4). Double-click expands the texture with or without Shift. Right-click opens the slot or member menu. A plain click in the Textures column selects the texture. Go to set in Problems opens the indicated set.
 - **JX4** Clicking a helper in the open `+` list opens that texture without Shift (JW7).
