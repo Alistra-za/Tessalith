@@ -37,6 +37,15 @@ fn no_edit_controls(h: &app_harness::H) {
 }
 
 #[test]
+fn no_more_button_with_no_project() {
+    let mut h = app_harness::plain_harness(model());
+    h.set_size(eframe::egui::vec2(1100.0, 800.0));
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Settings…");
+    assert_eq!(h.query_all_by_label("More header items").count(), 0);
+}
+
+#[test]
 fn tools_is_hidden_with_no_project() {
     let mut h = app_harness::plain_harness(model());
     app_harness::settle(&mut h, 3);

@@ -15,18 +15,76 @@ type H = Harness<'static, (AppModel, State, MeshesModel)>;
 
 const WIDTHS: [f32; 4] = [1440.0, 1024.0, 800.0, 640.0];
 
-/// The controls every Textures header must show (plus "Export to: …", matched by its start, and Undo / Redo, found by
-/// `header_undo`).
-/// Found by role and name: egui 0.37 names the Preset combo like the "Preset" Label beside it.
-const CONTROLS: [(Role, &str); 7] = [
+/// Fixed, exactly named controls. The export action, path and history buttons have dynamic names.
+const CONTROLS: [(Role, &str); 5] = [
     (Role::Button, "Open"),
-    (Role::Button, "MO2…"),
-    (Role::ComboBox, "Preset"),
     (Role::Button, "Textures view"),
     (Role::Button, "Meshes view"),
     (Role::Button, "Settings…"),
     (Role::Button, "Save"),
 ];
+
+const MORE: &str = "More header items";
+
+fn reachable_controls(h: &mut H, w: f32) {
+    let panel = outer(h, "header");
+    for (role, label) in CONTROLS {
+        let r = widget(h, role, label).rect();
+        assert!(
+            panel.contains_rect(r) && r.right() <= w,
+            "{label} at {w}: {r:?}"
+        );
+    }
+    let export = h.state().0.export_text(&h.state().0.header_answer());
+    for r in [
+        header_undo(h, "Undo").rect(),
+        header_undo(h, "Redo").rect(),
+        h.get_by_label_contains("Export to: ").rect(),
+        widget(h, Role::Button, &export).rect(),
+    ] {
+        assert!(panel.contains_rect(r) && r.right() <= w, "at {w}: {r:?}");
+    }
+    if w == 640.0 {
+        let save = h.get_by_label("Save").rect();
+        let chip = h.get_by_label_contains("Export to: ").rect();
+        assert!(save.top() > h.get_by_label("Open").rect().bottom());
+        assert!(
+            chip.y_range().contains(save.center().y),
+            "{chip:?} vs {save:?}"
+        );
+    }
+    let mut moved = Vec::new();
+    for (role, label) in [
+        (Role::Button, "Tools"),
+        (Role::Button, "MO2…"),
+        (Role::ComboBox, "Preset"),
+    ] {
+        if let Some(n) = h.query_by_role_and_label(role, label) {
+            assert!(
+                panel.contains_rect(n.rect()) && n.rect().right() <= w,
+                "{label} at {w}"
+            );
+        } else {
+            moved.push(label);
+        }
+    }
+    if !moved.is_empty() {
+        let more = h.get_by_label(MORE);
+        assert_eq!(
+            more.accesskit_node().description().as_deref(),
+            Some("Show more header controls")
+        );
+        assert!(panel.contains_rect(more.rect()) && more.rect().right() <= w);
+        more.click();
+        h.run_steps(3);
+        for label in moved {
+            let r = h.get_by_role_and_label(Role::Button, label).rect();
+            assert!(r.left() >= 0.0 && r.right() <= w, "{label} at {w}: {r:?}");
+        }
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+    }
+}
 
 fn harness(m: AppModel, w: f32, meshes_view: bool) -> H {
     harness_sized(m, egui::vec2(w, 800.0), meshes_view)
@@ -95,14 +153,12 @@ fn assert_no_overlap(h: &H, id: &str, w: f32) {
 fn the_textures_header_never_overlaps() {
     let d = tempfile::tempdir().unwrap();
     for w in WIDTHS {
-        let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
+        let mut h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         assert_no_overlap(&h, "header", w);
         // Note AM: an idle scan row is not drawn (the source moved to MO2…).
         assert!(!panel_never_built(&h.ctx, "header"));
         assert!(panel_never_built(&h.ctx, "textures-scan"));
-        for (role, c) in CONTROLS {
-            widget(&h, role, c);
-        }
+        reachable_controls(&mut h, w);
         header_undo(&h, "Undo");
         header_undo(&h, "Redo");
         // Note FB1: Export reads "Review n files" until the project is clean.
@@ -147,22 +203,173 @@ fn the_header_is_one_row_in_the_spec_order() {
     assert_one_row_in_the_spec_order(&h);
 }
 
-/// Note CD2: the header is one row at 1280 pt (measured after Note FI16 took Mode out and FI5 fixed the Undo slot
-/// width). Note JI1's Settings… is narrower than the two column eyes it replaced: one row from 1210 pt (measured in
-/// 1 pt steps; 1209 wraps), pinned with 5 pt of slack each side; narrower, Save wraps onto the second line.
+/// Note CD2: the fixed controls stay on one row.
 #[test]
 fn the_header_is_one_row_from_1280() {
     let d = tempfile::tempdir().unwrap();
-    for (w, one_row) in [(1280.0, true), (1215.0, true), (1205.0, false)] {
+    for w in [1280.0, 1215.0, 1055.0] {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         let open = h.get_by_label("Open").rect().center().y;
         let save = h.get_by_label("Save").rect();
-        assert_eq!(
+        assert!(
             save.min.y <= open && open <= save.max.y,
-            one_row,
             "at {w}: Save {save:?}, Open's centre at y {open}"
         );
     }
+}
+
+#[test]
+fn the_header_is_one_row_at_1055_1100_and_1280_in_both_views() {
+    for meshes in [false, true] {
+        for w in [1055.0, 1100.0, 1280.0] {
+            let d = tempfile::tempdir().unwrap();
+            let h = harness(opened(d.path()), w, meshes);
+            let panel = outer(&h, "header");
+            let y = h.get_by_label("Open").rect().center().y;
+            let export = h.state().0.export_text(&h.state().0.header_answer());
+            let mut rects: Vec<_> = CONTROLS
+                .iter()
+                .map(|&(role, name)| (name, widget(&h, role, name).rect()))
+                .collect();
+            rects.extend([
+                ("Undo", header_undo(&h, "Undo").rect()),
+                ("Redo", header_undo(&h, "Redo").rect()),
+                ("Export to", h.get_by_label_contains("Export to: ").rect()),
+                ("Export", widget(&h, Role::Button, &export).rect()),
+            ]);
+            for (_, r) in &rects {
+                assert!(
+                    panel.contains_rect(*r) && r.right() <= w && (r.center().y - y).abs() < 1.0,
+                    "{w} px, meshes {meshes}, {panel:?}: {rects:?}"
+                );
+            }
+            let rows: std::collections::BTreeSet<_> = widgets(&h, "header")
+                .iter()
+                .map(|(_, _, r)| r.center().y.round() as i32)
+                .collect();
+            assert_eq!(
+                rows.len(),
+                1,
+                "{w} px, meshes {meshes}: {:?}",
+                widgets(&h, "header")
+            );
+            assert_no_overlap(&h, "header", w);
+        }
+    }
+}
+
+#[test]
+fn no_more_button_when_nothing_moved() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(opened(d.path()), 1600.0, false);
+    assert_eq!(h.query_all_by_label(MORE).count(), 0);
+}
+
+#[test]
+fn overflow_moves_tools_first_then_mo2_then_preset() {
+    use sdc_gui::ui::header::{overflow, HeaderWidths, Overflow};
+    let mut w = HeaderWidths {
+        fixed: 900.0,
+        tools: 70.0,
+        mo2: 60.0,
+        preset: 180.0,
+        more: 30.0,
+    };
+    for (avail, tools, mo2, preset) in [
+        (1300.0, false, false, false),
+        (1210.0, false, false, false),
+        (1170.0, true, false, false),
+        (1150.0, true, true, false),
+        (1000.0, true, true, true),
+    ] {
+        assert_eq!(
+            overflow(avail, &w),
+            Overflow { tools, mo2, preset },
+            "at {avail}"
+        );
+    }
+    w.tools = 0.0;
+    w.mo2 = 0.0;
+    assert_eq!(
+        overflow(1000.0, &w),
+        Overflow {
+            tools: false,
+            mo2: false,
+            preset: true
+        }
+    );
+}
+
+#[test]
+fn undo_is_sized_to_its_label_in_the_textures_view() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(opened(d.path()), 1600.0, false);
+    let undo = header_undo(&h, "Undo").rect();
+    assert!(undo.width() < 80.0, "{}", undo.width());
+    assert_eq!(header_undo(&h, "Redo").rect().width(), undo.width());
+}
+
+fn open_moved_item(h: &mut H, label: &str) {
+    assert!(
+        h.query_by_label(MORE).is_some(),
+        "{label} needs the overflow menu at 800 px"
+    );
+    h.get_by_label(MORE).click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, label).click();
+    h.run_steps(3);
+}
+
+#[test]
+fn overflow_tools_can_change_reencode() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "Tools");
+    h.get_by_label("Re-encode every output").click();
+    h.run_steps(3);
+    assert!(h.state().0.reencode_all);
+}
+
+#[test]
+fn overflow_mo2_opens_before_an_instance_is_chosen() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "MO2…");
+    h.get_by_label("Instance: none");
+    h.get_by_label("Scan a folder…");
+}
+
+#[test]
+fn overflow_preset_can_select_an_installed_preset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "Preset");
+    pick_installed_preset(&mut h);
+}
+
+fn pick_installed_preset(h: &mut H) {
+    let id = h.state_mut().0.preset_choices()[0].clone();
+    h.get_by_role_and_label(Role::Button, &id).click();
+    h.run_steps(3);
+    assert_eq!(h.state().0.project_preset(), Some(id));
+}
+
+#[test]
+fn choose_preset_from_review_reaches_the_overflow_presets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_preset(Some("missing".into()));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.open_review();
+    let mut h = harness(m, 800.0, false);
+    assert!(h
+        .query_by_role_and_label(Role::ComboBox, "Preset")
+        .is_none());
+    h.get_by_role_and_label(Role::Button, "Choose preset…")
+        .click();
+    h.run_steps(4);
+    pick_installed_preset(&mut h);
+    assert!(h.state().0.choose_preset.is_none());
 }
 
 /// The assertions of `the_header_is_one_row_in_the_spec_order`, on a 1600 px harness (P20: shared, not restated).
@@ -330,8 +537,7 @@ fn the_export_chip_holds_at_three_widths() {
     }
 }
 
-/// Note FI16 (owner O7): the Mode control left the header for the Presets tab; the Preset menu stays. Plus the plan's
-/// capture check as a test: at 1100, 1280 and 1600 px nothing overlaps and MO2… stands in the row.
+/// Note FI16: Mode is in Settings. Preset and MO2… stay reachable at every width.
 #[test]
 fn the_header_has_no_mode_control() {
     let d = tempfile::tempdir().unwrap();
@@ -345,7 +551,7 @@ fn the_header_has_no_mode_control() {
         (1600.0, false),
     ] {
         let m = pbr_opened(&d.path().join(format!("{w}-{meshes_view}")));
-        let h = harness(m, w, meshes_view);
+        let mut h = harness(m, w, meshes_view);
         assert_no_overlap(&h, "header", w);
         let header = outer(&h, "header");
         let inside = |r: egui::Rect| header.contains_rect(r);
@@ -363,8 +569,7 @@ fn the_header_has_no_mode_control() {
             }),
             "at {w}: the header has a Mode combo"
         );
-        widget(&h, Role::ComboBox, "Preset");
-        h.get_by_label("MO2…");
+        reachable_controls(&mut h, w);
     }
 }
 
@@ -569,11 +774,9 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
 fn the_meshes_header_never_overlaps() {
     let d = tempfile::tempdir().unwrap();
     for w in WIDTHS {
-        let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, true);
+        let mut h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, true);
         assert_no_overlap(&h, "header", w);
-        for c in ["Open", "MO2…", "Meshes view", "Save"] {
-            h.get_by_label(c);
-        }
+        reachable_controls(&mut h, w);
         header_undo(&h, "Undo");
         header_export_label(&h);
         // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).

@@ -314,8 +314,7 @@ fn the_start_screen_shows_more_even_with_a_gui_toml_folder() {
 
 type UndoH = Harness<'static, (AppModel, MeshesModel, Option<String>)>;
 
-/// The header with the Undo target stubbed: `None` is the Textures history (`Undo`), `Some(step)` a NIF edit whose next
-/// undo step is `step` (`Undo NIF edit: {step}`).
+/// The Meshes header before and during a NIF edit. The Textures history is active until there is a NIF target.
 fn undo_harness(dir: &std::path::Path) -> UndoH {
     let mut meshes = MeshesModel::new(None, MeshesSettings::default());
     meshes.procs = sdc_gui::model::meshes::no_procs;
@@ -326,7 +325,7 @@ fn undo_harness(dir: &std::path::Path) -> UndoH {
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, (m, me, step): &mut (AppModel, MeshesModel, Option<String>)| {
-                sdc_gui::ui::header::set_meshes_view(ui.ctx(), step.is_some());
+                sdc_gui::ui::header::set_meshes_view(ui.ctx(), true);
                 let target = step.as_ref().map(|s| UndoTarget {
                     can_undo: true,
                     can_redo: false,
@@ -353,6 +352,22 @@ fn undo_text_does_not_move_the_header() {
         h.get_by_label("MO2…").rect(),
         header_undo(&h, "Undo").rect(),
     );
+    let style = h.ctx.global_style();
+    let font = eframe::egui::TextStyle::Button.resolve(&style);
+    let expected = h.ctx.fonts_mut(|f| {
+        ["Undo NIF edit", "Redo NIF edit"]
+            .iter()
+            .map(|label| {
+                f.layout_no_wrap((*label).into(), font.clone(), eframe::egui::Color32::WHITE)
+                    .size()
+                    .x
+            })
+            .fold(0.0, f32::max)
+    }) + 2.0 * style.spacing.button_padding.x;
+    assert!(
+        (undo.width() - expected).abs() < 0.5,
+        "{undo:?} vs {expected}"
+    );
     let long = "Add alpha to every shape";
     h.state_mut().2 = Some(long.to_string());
     h.run_steps(4);
@@ -364,7 +379,7 @@ fn undo_text_does_not_move_the_header() {
     );
     assert_eq!(b.rect(), undo, "the slot");
     assert_eq!(h.get_by_label("MO2…").rect().min.x, mo2.min.x);
-    // The text is cut in the slot; the whole step is on hover.
+    // Opening the edit kept the same Meshes slot. The hover names the step.
     b.hover();
     h.run();
     h.get_by_label_contains(&format!("Undo NIF edit: {long}"));

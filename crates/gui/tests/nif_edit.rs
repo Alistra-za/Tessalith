@@ -11371,13 +11371,12 @@ fn the_edit_panel_has_no_undo_redo_of_its_own() {
     assert!(!support::header_undo(&h, "Undo")
         .accesskit_node()
         .is_disabled());
-    // The header's own text names the step.
-    let hdr = sdc_gui::ui::header::undo_button(
-        sdc_gui::ui::meshes::undo_target(&h.ctx).as_ref(),
-        true,
-        None,
-    );
-    assert!(hdr.text.starts_with("Undo NIF edit: "), "{}", hdr.text);
+    let target = sdc_gui::ui::meshes::undo_target(&h.ctx).unwrap();
+    let step = target.undo_label.as_ref().unwrap();
+    let hdr = sdc_gui::ui::header::undo_button(Some(&target), true, None);
+    assert_eq!(hdr.text, "Undo NIF edit");
+    assert_eq!(hdr.name, format!("Undo (NIF edit history): {step}"));
+    assert!(hdr.hover.contains(&format!("Undo NIF edit: {step}")));
     press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
     assert_eq!(nif(&h), (0, true), "Ctrl+Z undid the NIF step");
 }

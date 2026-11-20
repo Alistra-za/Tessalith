@@ -21,6 +21,40 @@ const MORE_TEXT: &str = "More ▾";
 const NOT_CHOSEN_TEXT: &str = "Export to: not chosen ▾";
 /// The fewest path characters Export to ▾ shows (K1).
 const PATH_MIN_CHARS: usize = 12;
+
+pub struct HeaderWidths {
+    pub fixed: f32,
+    pub tools: f32,
+    pub mo2: f32,
+    pub preset: f32,
+    pub more: f32,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Overflow {
+    pub tools: bool,
+    pub mo2: bool,
+    pub preset: bool,
+}
+
+impl Overflow {
+    fn any(&self) -> bool {
+        self.tools || self.mo2 || self.preset
+    }
+}
+
+/// Move optional controls in order. Each width includes its following gap.
+pub fn overflow(avail: f32, w: &HeaderWidths) -> Overflow {
+    let all = w.fixed + w.tools + w.mo2 + w.preset;
+    if all <= avail {
+        return Overflow::default();
+    }
+    Overflow {
+        tools: w.tools > 0.0,
+        mo2: w.mo2 > 0.0 && w.fixed + w.more + w.mo2 + w.preset > avail,
+        preset: w.preset > 0.0 && w.fixed + w.more + w.preset > avail,
+    }
+}
 /// Why the export folder cannot change now.
 pub const EXPORT_RUNNING_HOVER: &str = "An export is running: change the folder after it ends";
 /// The Tools item that makes the next export encode every recorded output again (Notes JA11, JA12).
@@ -81,11 +115,11 @@ pub fn draw(
 fn row(
     ui: &mut egui::Ui,
     model: &mut AppModel,
-    scan: Option<&mut crate::model::meshes::MeshesModel>,
+    mut scan: Option<&mut crate::model::meshes::MeshesModel>,
 ) {
     // Save and Export's height from the start, so every control centres on one line (not lower after the taller tabs).
     ui.set_row_height(2.0 * ui.spacing().interact_size.y);
-    // Make room for Tools at the existing one-row threshold without shortening the controls.
+    // Keep the compact spacing on narrow project headers.
     if model.root.is_some() && ui.available_width() < 1280.0 {
         ui.spacing_mut().item_spacing.x = 3.5;
     }
@@ -94,20 +128,79 @@ fn row(
     if edits {
         undo_redo(ui, model);
     }
-    ui.separator();
+    let separator = ui.separator().rect.width();
+    let gap = ui.spacing().item_spacing.x;
+    let end = measure_export_end(ui, model, edits);
+    let preset = preset_text(model);
+    let combo = (button_width(ui, &preset) + ui.spacing().icon_width + ui.spacing().icon_spacing)
+        .max(ui.spacing().combo_width);
+    // Open and history already occupy their measured widths. Reserve the rest of the fixed row.
+    let widths = HeaderWidths {
+        fixed: separator
+            + gap
+            + view_tabs_width(ui)
+            + button_width(ui, "Settings…")
+            + gap
+            + end.min_width,
+        tools: if model.root.is_some() {
+            button_width(ui, "Tools ▾") + gap
+        } else {
+            0.0
+        },
+        mo2: if scan.is_some() {
+            button_width(ui, "MO2…") + gap
+        } else {
+            0.0
+        },
+        preset: button_width(ui, "Preset") - 2.0 * ui.spacing().button_padding.x
+            + combo
+            + 2.0 * gap,
+        more: button_width(ui, "⋯") + gap,
+    };
+    let moved = overflow(room(ui), &widths);
     // Note JI1: the Mode control is in the Settings tab (FI16); MO2… stands alone, where the app has a scan model.
-    if let Some(m) = scan {
-        fit(ui, button_width(ui, "MO2…") + ui.spacing().item_spacing.x);
+    if let Some(m) = scan.as_deref_mut().filter(|_| !moved.mo2) {
+        fit(ui, widths.mo2);
         super::meshes::mo2_button(ui, m);
     }
-    preset_combo(ui, model);
-    if model.root.is_some() {
+    if !moved.preset {
+        preset_combo(ui, model, preset);
+    }
+    if model.root.is_some() && !moved.tools {
         tools_menu(ui, model);
+    }
+    if moved.any() {
+        overflow_menu(ui, model, scan, &moved);
     }
     ui.separator();
     view_toggle(ui);
     settings_button(ui, model);
-    right_end(ui, model, edits);
+    right_end(ui, model, edits, end);
+}
+
+fn overflow_menu(
+    ui: &mut egui::Ui,
+    model: &mut AppModel,
+    scan: Option<&mut crate::model::meshes::MeshesModel>,
+    moved: &Overflow,
+) {
+    let more = crate::look::menu_button_036(ui, "⋯", |ui| {
+        if moved.tools {
+            tools_menu(ui, model);
+        }
+        if let Some(scan) = scan.filter(|_| moved.mo2) {
+            super::meshes::mo2_button(ui, scan);
+        }
+        if moved.preset {
+            crate::look::menu_button_036(ui, "Preset", |ui| preset_menu(ui, model));
+        }
+    })
+    .response
+    .accessible_name("More header items")
+    .on_hover_text("Show more header controls");
+    if moved.preset {
+        requested_preset_menu(ui, model, &more);
+    }
 }
 
 /// Note JI1: "Settings…" where the column eyes were (they are the Settings tab's Columns group now), after the view
@@ -122,48 +215,75 @@ fn settings_button(ui: &mut egui::Ui, model: &mut AppModel) {
     super::commit_click(ui, &r, model, AppModel::open_settings_tab);
 }
 
+struct ExportEnd {
+    lead: &'static str,
+    full_path: Option<String>,
+    buttons_width: f32,
+    min_width: f32,
+}
+
+/// The overflow decision and the wrapped row reserve the same destination, Save and Export widths.
+fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd {
+    let gap = ui.spacing().item_spacing.x;
+    let full_path = model
+        .root
+        .as_ref()
+        .and_then(|_| model.export_folder_chosen())
+        .map(|p| p.display().to_string());
+    let lead = match (model.root.is_some(), full_path.is_some()) {
+        (false, _) => MORE_TEXT,
+        (true, false) => NOT_CHOSEN_TEXT,
+        (true, true) => "Export to:  ▾",
+    };
+    let buttons_width = if model.root.is_some() {
+        gap + button_width(ui, "Save")
+    } else {
+        0.0
+    } + if edits { gap + EXPORT_WIDTH } else { 0.0 };
+    let chip = full_path.as_ref().map_or_else(
+        || button_width(ui, lead),
+        |p| {
+            button_width(
+                ui,
+                &format!("Export to: {} ▾", elide_middle(p, PATH_MIN_CHARS)),
+            )
+        },
+    );
+    ExportEnd {
+        lead,
+        full_path,
+        buttons_width,
+        min_width: chip + buttons_width,
+    }
+}
+
 /// Export to ▾, Save and Export against the row's right edge; Save and Export two rows tall (A4).
-fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool) {
+fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool, end: ExportEnd) {
     let gap = ui.spacing().item_spacing.x;
     let h = 2.0 * ui.spacing().interact_size.y;
     let save_w = button_width(ui, "Save");
     let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
     // Note FI5: with a project open the menu reads `Export to: {folder} ▾` or `Export to: not chosen ▾`; with none it
     // is `More ▾` (the folder in `gui.toml` is not a texture project's destination).
-    let full = model
-        .root
-        .as_ref()
-        .and_then(|_| model.export_folder_chosen())
-        .map(|p| p.display().to_string());
-    // K1: what Export to's path may take is the room left after the button's own text, Save and Export.
-    let (lead, min_path, path) = match (&model.root, &full) {
-        (None, _) => (MORE_TEXT, 0.0, None),
-        (Some(_), None) => (NOT_CHOSEN_TEXT, 0.0, None),
-        (Some(_), Some(p)) => ("Export to:  ▾", PATH_MIN_CHARS as f32 * glyph, Some(p)),
-    };
-    let save_space = if model.root.is_some() {
-        gap + save_w
-    } else {
-        0.0
-    };
-    let others = save_space + if edits { gap + EXPORT_WIDTH } else { 0.0 };
-    let fixed = button_width(ui, lead) + others;
-    fit(ui, fixed + min_path);
+    let fixed = button_width(ui, end.lead) + end.buttons_width;
+    fit(ui, end.min_width);
     let mut chars =
         (((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize).max(PATH_MIN_CHARS);
-    let text = match path {
-        None => lead.to_string(),
+    let text = match end.full_path.as_ref() {
+        None => end.lead.to_string(),
         Some(p) => loop {
             let text = format!("Export to: {} ▾", elide_middle(p, chars));
             // A path's characters can be wider than '0': drop more until the trio fits (never below the minimum).
-            if chars <= PATH_MIN_CHARS || button_width(ui, &text) + others <= room(ui) - 0.5 {
+            if chars <= PATH_MIN_CHARS
+                || button_width(ui, &text) + end.buttons_width <= room(ui) - 0.5
+            {
                 break text;
             }
             chars -= 1;
         },
     };
-    push_right(ui, button_width(ui, &text) + others);
-    export_to_menu(ui, model, text, full);
+    push_right(ui, button_width(ui, &text) + end.buttons_width);
+    export_to_menu(ui, model, text, end.full_path);
     if model.root.is_some() {
         save_button(ui, model, egui::vec2(save_w, h));
     }
@@ -504,15 +624,13 @@ pub struct UndoButton {
 }
 
 /// The header's Undo (`undo`) or Redo button for the history it acts on (Note FC12, CI23 labelled): `Undo` for the
-/// Textures one, whose next step is `textures`, or `Undo NIF edit: {step}` while a NIF edit is the target (`nif`).
-/// The hover names the history; a long NIF step is shortened on the button only.
+/// Textures one, whose next step is `textures`, or `Undo NIF edit` while a NIF edit is the target (`nif`).
 pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>) -> UndoButton {
-    const MAX: usize = 40;
     let verb = if undo { "Undo" } else { "Redo" };
     let keys = super::actions::keys_text(if undo { "undo" } else { "redo" });
     // (the button's full text, what the hover says it does, enabled, the history, the accessible name). E28: the name
     // says the step, unshortened; while the NIF history is the target it also says whose history it is.
-    let (full, does, enabled, history, name) = match nif {
+    let (text, does, enabled, history, name) = match nif {
         Some(t) => {
             let (can, label) = if undo {
                 (t.can_undo, &t.undo_label)
@@ -530,7 +648,7 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
                 ),
             };
             (
-                text.clone(),
+                format!("{verb} NIF edit"),
                 text,
                 can,
                 "the NIF edit history; the Textures history is untouched",
@@ -558,11 +676,6 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
         (false, false) => format!("Nothing to {}", verb.to_lowercase()),
         (true, _) => format!("{does}  ({keys}). Acts on {history}."),
     };
-    let text = if full.chars().count() > MAX {
-        format!("{}…", full.chars().take(MAX - 1).collect::<String>())
-    } else {
-        full
-    };
     UndoButton {
         text,
         name,
@@ -575,10 +688,13 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
 fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
     // A20: the NIF history while a NIF edit is open in the Meshes view.
     let nif = super::meshes::undo_target(ui.ctx());
-    // Note FI5 (A19): a fixed slot, so a long NIF step label never moves the controls after it. `Undo NIF edit` is the
-    // widest text without a step (the Textures view draws `Undo` / `Redo`), so every no-step text fits whole.
+    let (undo_text, redo_text) = if meshes_view_active(ui.ctx()) {
+        ("Undo NIF edit", "Redo NIF edit")
+    } else {
+        ("Undo", "Redo")
+    };
     let slot = egui::vec2(
-        button_width(ui, "Undo NIF edit").max(button_width(ui, "Redo NIF edit")),
+        button_width(ui, undo_text).max(button_width(ui, redo_text)),
         ui.spacing().interact_size.y,
     );
     for undo in [true, false] {
@@ -588,12 +704,7 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
             model.redo_label()
         };
         let b = undo_button(nif.as_ref(), undo, textures);
-        // The text truncates inside the slot; the hover holds the whole step and the name stays `b.name`.
-        let r = ui
-            .add_enabled_ui(b.enabled, |ui| {
-                ui.add_sized(slot, egui::Button::new(&b.text).truncate())
-            })
-            .inner;
+        let r = ui.add_enabled(b.enabled, egui::Button::new(&b.text).min_size(slot));
         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, &b.name));
         let r = r
             .on_hover_text(b.hover.clone())
@@ -653,7 +764,7 @@ pub(super) fn preset_entries(ui: &mut egui::Ui, model: &mut AppModel) -> Option<
 }
 
 /// The project's preset (AM12), and Presets….
-fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
+fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel, text: String) {
     let mode = target_name(model.target);
     let gap = ui.spacing().item_spacing.x;
     fit(
@@ -661,48 +772,46 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
         button_width(ui, "Preset") + gap + ui.spacing().combo_width,
     );
     ui.label("Preset");
-    let text = preset_text(model);
-    // Note FC1 (AM14): see the popup below; taken before the menu body borrows the model.
-    let now = ui.ctx().cumulative_pass_nr();
-    let request = model.choose_preset.take().is_some_and(|at| now <= at + 2);
-    let mut picked = None;
-    let mut presets = false;
-    // K5: the popup always opens, so Presets… is reachable with no folder; only the presets need a project.
-    let mut body = |ui: &mut egui::Ui| {
-        if let Some(p) = preset_entries(ui, model) {
-            picked = Some(p);
-        }
-        ui.separator();
-        if ui
-            .button("Presets…")
-            .on_hover_text("Make and edit your own presets (saved in %APPDATA%\\sdc\\presets)")
-            .clicked()
-        {
-            presets = true;
-        }
-    };
+    // The combo's inner horizontal row must reserve the button's text height before it centres itself.
+    let interact_h = ui.spacing().interact_size.y;
+    ui.spacing_mut().interact_size.y = interact_h
+        .max(ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y);
     let combo = egui::ComboBox::from_id_salt("preset")
         .selected_text(text)
-        .show_ui_036(ui, |ui| body(ui))
+        .show_ui_036(ui, |ui| preset_menu(ui, model))
         .response;
+    ui.spacing_mut().interact_size.y = interact_h;
     let combo = super::name_input(combo, "Preset").on_hover_ui(|ui| {
         ui.label(format!(
             "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Settings…"
         ));
     });
-    // Note FC1 (AM14): a Problems row's `Choose preset…` opens the same menu under the combo, as a popup the header
-    // owns (egui 0.37, as 0.36, has no public way to open a combo: `ComboBox::widget_to_popup_id` is private). A
-    // request is taken by the next pass that draws this combo and honoured only within two passes of the click: one
-    // left while the combo was not drawn is dropped then, as stale, and never opens the menu later.
-    egui::Popup::menu(&combo)
+    requested_preset_menu(ui, model, &combo);
+}
+
+/// FC1: open the same choices under whichever header control currently holds Preset.
+fn requested_preset_menu(ui: &egui::Ui, model: &mut AppModel, anchor: &egui::Response) {
+    let now = ui.ctx().cumulative_pass_nr();
+    let request = model.choose_preset.take().is_some_and(|at| now <= at + 2);
+    egui::Popup::menu(anchor)
         .id(egui::Id::unique("preset_choose_menu"))
         .open_memory(request.then_some(egui::SetOpenCommand::Bool(true)))
-        .show(|ui| body(ui));
-    if presets {
-        model.open_presets();
-    }
-    if let Some(p) = picked {
+        .show(|ui| preset_menu(ui, model));
+}
+
+fn preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
+    if let Some(p) = preset_entries(ui, model) {
         model.set_preset(p);
+        ui.close();
+    }
+    ui.separator();
+    if ui
+        .button("Presets…")
+        .on_hover_text("Make and edit your own presets (saved in %APPDATA%\\sdc\\presets)")
+        .clicked()
+    {
+        model.open_presets();
+        ui.close();
     }
 }
 
