@@ -173,7 +173,9 @@ fn row(
         overflow_menu(ui, model, scan, &moved);
     }
     ui.separator();
-    view_toggle(ui);
+    if view_toggle(ui) {
+        model.centre_over_meshes = false;
+    }
     settings_button(ui, model);
     right_end(ui, model, edits, end);
 }
@@ -861,8 +863,8 @@ fn preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
 /// Top-level view toggle (plan A Task 12), kept in egui memory for the session. Note BH8: two tabs, taller than the
 /// row, rounded on top only; the selected one is filled and bold. R21: they show "Textures" / "Meshes" and keep the
 /// accessible names "Textures view" / "Meshes view".
-pub fn view_toggle(ui: &mut egui::Ui) {
-    let mut meshes = meshes_view_active(ui.ctx());
+pub fn view_toggle(ui: &mut egui::Ui) -> bool {
+    let meshes = meshes_view_active(ui.ctx());
     let tab = |ui: &mut egui::Ui, on: bool, text: &str, name: &str| {
         let rich = egui::RichText::new(text);
         let w = button_width(ui, "Textures") + 12.0;
@@ -885,14 +887,14 @@ pub fn view_toggle(ui: &mut egui::Ui) {
     fit(ui, view_tabs_width(ui));
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
-        if tab(ui, !meshes, "Textures", "Textures view").clicked() {
-            meshes = false;
+        let textures = tab(ui, !meshes, "Textures", "Textures view").clicked();
+        let meshes = tab(ui, meshes, "Meshes", "Meshes view").clicked();
+        if textures || meshes {
+            set_meshes_view(ui.ctx(), meshes);
         }
-        if tab(ui, meshes, "Meshes", "Meshes view").clicked() {
-            meshes = true;
-        }
-    });
-    set_meshes_view(ui.ctx(), meshes);
+        textures || meshes
+    })
+    .inner
 }
 
 /// The width `view_toggle` takes: two tabs and the spacing after them.

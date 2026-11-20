@@ -1120,9 +1120,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
         // Note JI2: the set's Also export tab, in 2D (the set editor is not drawn in 3D or over a preview).
         Some(Act::Recipe) => {
-            if let Some(k) = model.recipe_set() {
+            if let Some(target) = model.recipe_set() {
                 model.collapse();
-                model.select_set(&k);
+                model.select_target(target);
                 super::set_editor::show_also_tab(ui.ctx());
                 if model.settings.set_view_3d {
                     model.settings.set_view_3d = false;

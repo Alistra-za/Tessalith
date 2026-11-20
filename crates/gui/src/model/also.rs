@@ -1,7 +1,7 @@
 //! Track A (DECISIONS Note CN): "Also export as" Vanilla and Complex Material in the GUI model (Task 11, C1 under
 //! layout v2). The ticks and settings are `[export]` in `sdc.toml` (TA9), the location is `[project] also_location`
 //! in `sdc-project.toml` (TA10). Review opens whenever a tick is on, and its Export is the only way out (CA2).
-use super::{messages, sets, AppModel};
+use super::{messages, sets, AppModel, SetTarget};
 use crate::project::ProjectDoc;
 use engine::also::{AlsoSpec, AlsoSummary, Phase};
 use engine::config::Target;
@@ -134,21 +134,27 @@ impl AppModel {
         });
     }
 
-    /// Note JI2 (correction 6): the set Review's "Recipe settings…" opens, by key: the selected set when it is PBR, else
+    /// Note JI2 (correction 6): the set Review's "Recipe settings…" opens: the selected set when it is PBR, else
     /// the first PBR set in list order that is not skipped, else the first PBR set; `None` without a PBR set.
-    pub fn recipe_set(&self) -> Option<String> {
+    pub fn recipe_set(&self) -> Option<SetTarget> {
         let all = sets::views(self);
-        let pbr = || all.iter().filter(|v| is_pbr_set(v));
-        if let super::Selection::Set(k) = &self.selection {
-            if pbr().any(|v| &v.key == k) {
-                return Some(k.clone());
+        // Document-only cards have no engine shader pick. Their saved shader or borrowed diffuse identifies PBR.
+        let pbr = || {
+            all.iter().filter(|v| {
+                is_pbr_set(v)
+                    || (v.key.is_empty() && v.shader_choice.map_or(v.pbr, Shader::is_pbr_family))
+            })
+        };
+        if let Some(target) = self.selection.set_target() {
+            if let Some(v) = pbr().find(|v| target.matches(v)) {
+                return Some(SetTarget::view(v));
             }
         }
         let skip = self.also_config().skip;
         pbr()
             .find(|v| !skip.iter().any(|s| engine::sets::same_id(s, &v.id)))
             .or_else(|| pbr().next())
-            .map(|v| v.key.clone())
+            .map(SetTarget::view)
     }
 
     /// C2: set `id` is in `[export] skip`.

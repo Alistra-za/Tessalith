@@ -505,6 +505,19 @@ fn take_scroll_reset(ctx: &egui::Context) -> bool {
     })
 }
 
+/// The docked tool in place of the Meshes list, below the shared header and banner.
+pub fn centre_over_meshes(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
+    egui::CentralPanel::default().show(ui, |ui| {
+        let back = ui.link("Back to meshes");
+        commit_click(ui, &back, model, |m| m.centre_over_meshes = false);
+        centre(ui, model, state, false);
+    });
+    if model.centre_front() == CentreTab::Selection {
+        model.centre_over_meshes = false;
+        ui.ctx().request_repaint();
+    }
+}
+
 /// The centre: a docked Presets, JSON editor or Settings tab in front (Note FB7, JI1), else the preview of an expanded
 /// texture, else the settings of the selected texture or set, else a hint.
 fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: bool) {
@@ -516,6 +529,11 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
         CentreTab::Presets => return presets::view(ui, model),
         CentreTab::Json => return json_editor::view(ui, model),
         CentreTab::Settings => return settings_tab::view(ui, model),
+        CentreTab::Selection if model.centre_over_meshes => {
+            // A click on Selection opens Textures. Closing or popping the tool uncovers Meshes.
+            model.reveal_centre |= model.centre_tab == CentreTab::Selection;
+            return;
+        }
         CentreTab::Selection => {}
     }
     if model.root.is_none() {

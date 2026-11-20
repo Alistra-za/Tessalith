@@ -2,7 +2,7 @@
 use crate::model::heatmap::HeatImage;
 use crate::model::preview::{PreviewOut, SourceState};
 use crate::model::viewport3d::Look;
-use crate::model::AppModel;
+use crate::model::{AppModel, CentreTab};
 use crate::render::{PreviewRenderer, Slot};
 use eframe::{egui, egui_wgpu};
 use engine::session::SourcePreview;
@@ -179,11 +179,13 @@ impl SdcApp {
             model.palette_pick(&crate::model::nav::Pick::Texture(k));
         }
         if let Some(t) = model.show_in_meshes.take() {
+            model.centre_over_meshes = false;
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
+            model.centre_over_meshes = false;
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_nif_tab(&path, tab, field);
         }
@@ -415,6 +417,7 @@ impl eframe::App for SdcApp {
             self.model.nif_export_result(r);
         }
         if let Some(path) = self.model.nif_diff_request.take() {
+            self.model.centre_over_meshes = false;
             self.meshes.show_nif_diff(&path);
         }
         self.model
@@ -460,18 +463,25 @@ impl eframe::App for SdcApp {
             crate::ui::record_centre_rect(ui);
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
-            self.draw_meshes(ui);
+            if self.model.centre_over_meshes {
+                crate::ui::centre_over_meshes(ui, &mut self.model, &mut self.state);
+            } else {
+                self.draw_meshes(ui);
+            }
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
-            // Tools ▾ and the palette open the PGPatcher JSON editor in this view too (K4). Note FB7: a popped-out
-            // view shows here; one opened docked switches to the Textures view, whose centre column holds it.
+            // Consume reveals after popped tools too: their Show and Fix path actions target Textures.
             crate::ui::centre_tabs::popped(&ctx, &mut self.model);
             if std::mem::take(&mut self.model.reveal_centre) {
-                crate::ui::header::set_meshes_view(&ctx, false);
+                self.model.centre_over_meshes = self.model.centre_front() != CentreTab::Selection;
+                if !self.model.centre_over_meshes {
+                    crate::ui::header::set_meshes_view(&ctx, false);
+                }
                 ctx.request_repaint();
             }
         } else {
+            self.model.centre_over_meshes = false;
             self.paused_mesh_focus = None;
             crate::ui::draw_with_scan(ui, &mut self.model, &mut self.state, Some(&mut self.meshes));
         }

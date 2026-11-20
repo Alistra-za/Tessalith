@@ -12,18 +12,123 @@ use tempfile::TempDir;
 
 const BANNER_OPEN: &str = "Open a texture folder from the Meshes banner";
 
-fn model() -> AppModel {
+fn app_data() {
     static DATA: OnceLock<TempDir> = OnceLock::new();
     DATA.get_or_init(|| {
         let dir = tempfile::tempdir().unwrap();
         app_harness::redirect_app_data(dir.path());
         dir
     });
+}
+
+fn model() -> AppModel {
+    app_data();
     AppModel::new(
         support::settings_with_meshes_view(),
         None,
         support::session(),
     )
+}
+
+#[test]
+fn settings_opens_in_the_meshes_view_and_back_returns() {
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app_harness::plain_harness(support::opened(d.path()));
+    header::set_meshes_view(&h.ctx, true);
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Settings…").click();
+    app_harness::settle(&mut h, 3);
+    assert!(header::meshes_view_active(&h.ctx), "the view stays Meshes");
+    h.get_by_label("Settings tab");
+    h.get_by_label("Close Settings");
+    h.get_by_label_contains("Back to meshes").click();
+    app_harness::settle(&mut h, 3);
+    assert!(!h.state().model.centre_over_meshes);
+    h.get_by_label("NIFs");
+}
+
+#[test]
+fn settings_over_meshes_with_no_project_keeps_the_banner() {
+    app_data();
+    let m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    let mut h = app_harness::plain_harness(m);
+    header::set_meshes_view(&h.ctx, true);
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Settings…").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label_contains("No project open. This list");
+    h.get_by_label_contains("Back to meshes");
+    h.get_by_label_contains("App settings: these apply to every project");
+    assert!(h.query_by_label("Export without review").is_none());
+    assert!(header::meshes_view_active(&h.ctx));
+    h.get_by_label_contains("Back to meshes").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label_contains("No project open.");
+    assert_eq!(h.query_all_by_label_contains("Back to meshes").count(), 0);
+}
+
+#[test]
+fn settings_and_other_docked_tools_yield_to_meshes_or_view_navigation() {
+    use sdc_gui::ui::json_editor::WINDOW_TITLE;
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app_harness::plain_harness(support::opened(d.path()));
+    h.get_by_label("Meshes view").click();
+    app_harness::settle(&mut h, 3);
+    h.state_mut().model.open_presets();
+    app_harness::settle(&mut h, 3);
+    assert!(
+        h.state().model.centre_over_meshes,
+        "Presets opens over Meshes"
+    );
+    h.get_by_label("Close Presets");
+    h.state_mut().model.open_json_editor();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Presets tab");
+    h.get_by_label(&format!("Pop out {WINDOW_TITLE}")).click();
+    app_harness::settle(&mut h, 3);
+    assert!(h.state().model.json_editor_popped);
+    assert!(!h.state().model.centre_over_meshes);
+    h.get_by_label("NIFs");
+    h.get_by_label(&format!("Dock {WINDOW_TITLE}")).click();
+    app_harness::settle(&mut h, 3);
+    assert!(h.state().model.centre_over_meshes);
+    h.get_by_label(&format!("Close {WINDOW_TITLE}")).click();
+    app_harness::settle(&mut h, 3);
+    h.state_mut().model.open_presets();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Close Presets").click();
+    app_harness::settle(&mut h, 3);
+    assert!(!h.state().model.centre_over_meshes);
+    h.get_by_label("NIFs");
+    h.get_by_label("Settings…").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Textures view").click();
+    app_harness::settle(&mut h, 3);
+    assert!(!h.state().model.centre_over_meshes);
+    assert!(!header::meshes_view_active(&h.ctx));
+    h.get_by_label("Close Settings");
+    h.get_by_label("Meshes view").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("NIFs");
+    h.get_by_label("Settings…").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Meshes view").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("NIFs");
+    assert!(!h.state().model.centre_over_meshes);
+    h.get_by_label("Settings…").click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Selection tab").click();
+    app_harness::settle(&mut h, 3);
+    assert!(!header::meshes_view_active(&h.ctx));
+    assert!(!h.state().model.centre_over_meshes);
 }
 
 fn no_edit_controls(h: &app_harness::H) {

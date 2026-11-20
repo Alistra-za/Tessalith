@@ -744,9 +744,10 @@ pub struct AppModel {
     /// Note JI1: the Settings tab is open (a centre tab, or its own window when popped out, as Presets).
     pub settings_tab_open: bool,
     pub settings_tab_popped: bool,
-    /// Note FB7: a view was opened docked this frame; the Meshes view, which has no centre column, switches to
-    /// Textures to show it.
+    /// Reveal the front centre tab in the main window, including a Selection requested by a popped tool.
     pub reveal_centre: bool,
+    /// A docked tool currently covers the Meshes list.
+    pub centre_over_meshes: bool,
     /// Note AM: the presets folder as last scanned, and the creator's draft; made on first use (`presets_model`).
     pub presets: Option<presets::PresetsModel>,
     /// What the plan accepts (M6 Track E spec §2, DECISIONS Note U3): High suggestions, as the app runs. The M3-era test
@@ -1191,6 +1192,7 @@ impl AppModel {
             settings_tab_open: false,
             settings_tab_popped: false,
             reveal_centre: false,
+            centre_over_meshes: false,
             presets: None,
             accept: AcceptSuggestions::High,
             session: None,

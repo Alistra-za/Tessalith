@@ -10,7 +10,7 @@ use image::{ImageBuffer, Rgb, Rgba};
 use sdc_gui::model::bottom::{problems, At};
 use sdc_gui::model::export::{cli_command, RowState};
 use sdc_gui::model::review::DiskState;
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, SetTarget};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -1362,10 +1362,10 @@ fn recipe_set_prefers_the_selected_pbr_set_then_the_first_unskipped() {
     png(&arm.join("brass_rmaos.png"), [128, 255, 200, 255]);
     let mut m = project(d.path());
     let all = sdc_gui::model::sets::views(&m);
-    let pbr: Vec<(String, String)> = all
+    let pbr: Vec<(SetTarget, String)> = all
         .iter()
         .filter(|v| sdc_gui::model::also::is_pbr_set(v))
-        .map(|v| (v.key.clone(), v.id.clone()))
+        .map(|v| (SetTarget::view(v), v.id.clone()))
         .collect();
     assert_eq!(pbr.len(), 2, "brass and steel are PBR sets");
     let cup = all
@@ -1395,12 +1395,59 @@ fn recipe_set_prefers_the_selected_pbr_set_then_the_first_unskipped() {
         Some(&pbr[0].0),
         "all skipped: the first"
     );
-    m.select_set(&pbr[1].0);
+    m.select_target(pbr[1].0.clone());
     assert_eq!(
         m.recipe_set().as_ref(),
         Some(&pbr[1].0),
         "the selected PBR set"
     );
+
+    let target = add_keyless_pbr(&mut m);
+    m.select_target(target.clone());
+    m.set_skip_also(&steel_id(&m), false);
+    m.set_skip_also(&steel_key(&m), true);
+    idle(&mut m);
+    assert_eq!(m.recipe_set(), Some(target.clone()), "selected by id");
+    m.select_set(&cup);
+    m.set_skip_also(&steel_id(&m), true);
+    m.set_skip_also(&steel_key(&m), false);
+    idle(&mut m);
+    assert_eq!(m.recipe_set(), Some(target), "the unskipped key-less set");
+}
+
+// The new card's document id is also the steel card's engine key.
+fn add_keyless_pbr(m: &mut AppModel) -> SetTarget {
+    let id = steel_key(m);
+    let source = steel_id(m);
+    m.edit_docs("Create PBR borrower", None, true, |_, doc| {
+        doc.create_set(&id);
+        doc.set_borrow(&id, 1, Some(&source));
+    });
+    idle(m);
+    let all = sdc_gui::model::sets::views(m);
+    assert!(all.iter().any(|v| v.key == id && v.id == source));
+    assert!(all.iter().any(|v| v.key.is_empty() && v.id == id && v.pbr));
+    SetTarget::Id(id)
+}
+
+#[test]
+fn recipe_link_opens_the_keyless_pbr_cards_also_tab() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    let target = add_keyless_pbr(&mut m);
+    m.set_skip_also(&steel_key(&m), true);
+    idle(&mut m);
+    m.select_target(target.clone());
+    m.settings.set_view_3d = true;
+    m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
+    let mut h = ui_harness(m, 1600.0);
+    press(&mut h, |h| h.get_by_label("Recipe settings…"));
+    settle(&mut h);
+    assert_eq!(h.state().selection.set_target(), Some(target));
+    assert!(!h.state().settings.set_view_3d);
+    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
 }
 
 /// Note JI2 (Review Focus 1): with no PBR set there is no set to open, so the link is not drawn.

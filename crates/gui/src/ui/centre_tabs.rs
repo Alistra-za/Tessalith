@@ -109,6 +109,7 @@ pub fn controls(ui: &mut egui::Ui, model: &mut AppModel, tab: CentreTab) {
         if button(ui, "Dock", "Back into the centre column").clicked() {
             *popped = false;
             model.centre_tab = tab;
+            model.reveal_centre = true;
         }
     } else if button(
         ui,

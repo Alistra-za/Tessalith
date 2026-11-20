@@ -864,8 +864,7 @@ fn the_settings_button_shows_with_no_folder_and_in_meshes_view() {
         let r = h.get_by_role_and_label(Role::Button, "Settings…").rect();
         assert!(header.contains_rect(r), "meshes {meshes_view}: {r:?}");
         assert!(h.query_by_label("Textures column").is_none());
-        // A click puts the tab in front; from the Meshes view it also asks the app to show the centre (Note FB7:
-        // `app.rs` takes `reveal_centre` and switches to Textures; the Textures view's draw clears it itself).
+        // The Meshes header asks the app to show the docked tool. Textures already drew its centre.
         h.get_by_role_and_label(Role::Button, "Settings…").click();
         h.run_steps(3);
         let m = &h.state().0;
