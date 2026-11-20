@@ -277,7 +277,7 @@ impl AppModel {
     }
 
     /// Recompute the check maps when a plan landed, the sets document changed or a switch moved; then every
-    /// view-keyed cache rebuilds. Its key never includes `items_rev`, so its own `invalidate_views` cannot re-run it.
+    /// cache that reads the results sees the new rows. Its key omits `items_rev` so the refresh cannot re-run itself.
     pub(super) fn refresh_checks(&mut self) -> bool {
         let doc = self
             .sets_doc

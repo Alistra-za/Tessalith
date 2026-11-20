@@ -282,6 +282,15 @@ fn folded_helpers_are_grouped_once_per_change() {
     h.run_steps(2);
     assert_eq!(counts(), before, "two idle frames regrouped hidden helpers");
 
+    let model = h.state_mut();
+    let mut checks = model.settings.checks;
+    checks.parallax = !checks.parallax;
+    model.set_checks(checks);
+    assert!(model.poll(), "the changed artist checks completed");
+    h.run_steps(1);
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS G"));
+    assert_eq!(counts(), before, "artist checks regrouped hidden helpers");
+
     h.state_mut()
         .edit_docs("Swap two folded channels", None, true, |p, _| {
             for (file, fill) in [

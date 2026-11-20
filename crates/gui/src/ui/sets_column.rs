@@ -1109,7 +1109,7 @@ type FoldedBySlice = HashMap<(SlotKind, usize, usize), Arc<[FoldedHelper]>>;
 
 #[derive(Debug, Default)]
 pub(super) struct FoldedCache {
-    views: std::sync::Weak<Vec<SetView>>,
+    revisions: (u64, u64),
     by_set: HashMap<usize, FoldedBySlice>,
 }
 
@@ -1926,10 +1926,10 @@ pub fn draw(
         exporting: model.export.running.is_some(),
     };
     let views = crate::model::sets::views(model);
-    // A view snapshot covers the item and document revisions. Its set indices stay valid until it changes.
-    if st.folded.views.as_ptr() != Arc::as_ptr(&views) {
+    let revisions = model.set_content_revisions();
+    if st.folded.revisions != revisions {
         st.folded.by_set.clear();
-        st.folded.views = Arc::downgrade(&views);
+        st.folded.revisions = revisions;
     }
     let visible = model.visible_sets();
     let has_clear = filter_strips(ui, model, &views, &visible);

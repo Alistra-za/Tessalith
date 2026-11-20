@@ -704,8 +704,10 @@ pub struct AppModel {
     /// Game paths selected by PBR prefixes and TXST mappings. Only a successful full plan installs its paths.
     slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
     pending_slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
-    /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
+    /// Advances on item changes and on checks-only updates to Problems rows.
     items_rev: u64,
+    /// The last `items_rev` from an item or set invalidation.
+    item_content_rev: u64,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
     game_paths: (u64, Vec<String>),
     /// Note FI1: skipped DDS inputs' tile images by path, with the stamp they were decoded at; cleared on open and
@@ -1085,6 +1087,7 @@ impl AppModel {
             target: Target::Cs,
             items: vec![],
             items_rev: 0,
+            item_content_rev: 0,
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
@@ -3404,6 +3407,10 @@ impl AppModel {
         self.items_rev
     }
 
+    pub(crate) fn set_content_revisions(&self) -> (u64, u64) {
+        (self.item_content_rev, self.doc_rev())
+    }
+
     /// Tests: bumped whenever `last_inputs` changes, and per landed full plan (the checks' count).
     #[cfg(feature = "test-hooks")]
     pub fn plan_marks(&self) -> (u64, u64) {
@@ -3453,6 +3460,7 @@ impl AppModel {
     /// Call after writing `items` or `sets` in place (tests); a plan does it itself.
     pub fn invalidate_views(&mut self) {
         self.items_rev += 1;
+        self.item_content_rev = self.items_rev;
         self.item_index = self
             .items
             .iter()
@@ -3510,7 +3518,7 @@ impl AppModel {
     pub(crate) fn rows_changed(&mut self) {
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
-        self.invalidate_views();
+        self.items_rev += 1;
         self.carry_views(carried, &old_key, &BTreeSet::new(), true);
     }
 
