@@ -282,7 +282,10 @@ impl AppModel {
                 spec.start_candidates = [
                     chosen,
                     self.settings.last_export_folder.clone(),
-                    self.project_start(),
+                    self.root
+                        .as_deref()
+                        .or_else(|| self.settings.recent.first()?.parent())
+                        .map(std::path::Path::to_owned),
                 ]
                 .into_iter()
                 .flatten()

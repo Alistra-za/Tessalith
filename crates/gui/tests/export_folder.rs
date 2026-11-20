@@ -437,6 +437,27 @@ fn the_export_picker_sends_missing_start_candidates_to_the_worker_in_order() {
 }
 
 #[test]
+fn without_a_project_the_export_picker_passes_the_unchecked_recent_parent_to_the_worker() {
+    let d = tempfile::tempdir().unwrap();
+    let last = d.path().to_owned();
+    let recent_parent = d.path().join("missing");
+    let settings = GuiSettings {
+        last_export_folder: Some(last.clone()),
+        recent: vec![recent_parent.join("project")],
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend);
+
+    assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+    wait_picker(&mut m);
+    let spec = specs.lock().unwrap().pop().unwrap();
+    assert_eq!(spec.start_candidates, [last.clone(), recent_parent]);
+    assert_eq!(spec.start, Some(last));
+}
+
+#[test]
 fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fresh(d.path());
