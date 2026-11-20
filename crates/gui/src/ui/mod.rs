@@ -361,6 +361,13 @@ pub(crate) fn name_input(r: egui::Response, name: &str) -> egui::Response {
     r.accessible_name(name)
 }
 
+/// egui's disabled tooltip does not set the AccessKit description.
+fn disabled_reason(r: egui::Response, why: &str) -> egui::Response {
+    r.ctx
+        .accesskit_node_builder(r.id, |b| b.set_description(why));
+    r.on_disabled_hover_text(why)
+}
+
 /// Ends text input when the primary press lands in `rect`, so a commit-on-focus-loss field drawn later this frame
 /// commits before the release acts.
 pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {

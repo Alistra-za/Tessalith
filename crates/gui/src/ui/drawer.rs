@@ -91,8 +91,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
                     });
             });
     }
-    let exists = stats.is_dir(&model.export_root(), Instant::now());
-    let state = model.export_folder_check(exists);
+    let state = model.export_folder_check(|p| stats.file_type(p, Instant::now()));
     ui.horizontal(|ui| {
         if running {
             cancel = ui.button("Cancel").clicked();
@@ -116,7 +115,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
         open = match &state.folder {
             Ok(p) => r.on_hover_text(p.display().to_string()).clicked(),
             Err(why) => {
-                r.on_disabled_hover_text(why);
+                super::disabled_reason(r, why);
                 false
             }
         };

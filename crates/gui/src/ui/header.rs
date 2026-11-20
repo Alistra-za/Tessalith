@@ -413,8 +413,9 @@ fn marker_item(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 fn tools_menu(ui: &mut egui::Ui, model: &mut AppModel) {
-    let mut reencode = model.reencode_all;
-    let menu = crate::look::menu_button_036(ui, "Tools ▾", |ui| {
+    let config = egui::menu::MenuConfig::find(ui)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let menu = crate::look::menu_button_036_with_config(ui, "Tools ▾", config, |ui| {
         let available = shows_json_editor(model);
         let r = ui.add_enabled(available.is_ok(), egui::Button::new(JSON_EDITOR));
         let r = match available {
@@ -428,16 +429,16 @@ fn tools_menu(ui: &mut egui::Ui, model: &mut AppModel) {
             ui.close();
         }
         marker_item(ui, model);
-        ui.checkbox(&mut reencode, REENCODE_TEXT)
+        let mut reencode = model.reencode_all;
+        if ui
+            .checkbox(&mut reencode, REENCODE_TEXT)
             .on_hover_text(REENCODE_HOVER)
             .changed()
+        {
+            model.set_reencode_all(reencode);
+        }
     });
-    let button = menu.response.accessible_name("Tools");
-    if menu.inner == Some(true) {
-        model.set_reencode_all(reencode);
-        // The checkbox stays available to untick; choosing either dialog closes the menu.
-        egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
-    }
+    menu.response.accessible_name("Tools");
 }
 
 /// Starts a new line of a wrapped row unless `width` fits in what is left of this one. A nested layout (a combo, a
@@ -791,7 +792,7 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
         let r = ui.add_enabled(state.folder.is_ok(), egui::Button::new(state.label));
         open = match &state.folder {
             Ok(p) => r.on_hover_text(format!("Show {} in Explorer", p.display())),
-            Err(why) => r.on_disabled_hover_text(why),
+            Err(why) => super::disabled_reason(r, why),
         }
         .clicked();
         let running = model
@@ -896,6 +897,63 @@ fn status(ui: &mut egui::Ui, model: &mut AppModel) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_tools_keeps_the_checkbox_open_and_closes_on_a_command() {
+        use egui::Key;
+        use egui_kittest::kittest::Queryable as _;
+        use egui_kittest::Harness;
+
+        for nested in [false, true] {
+            let mut h = Harness::builder()
+                .with_context_setup(|ctx| {
+                    crate::fonts::install_system_fonts(ctx).expect("system fonts");
+                })
+                .build_ui_state(
+                    move |ui, m| {
+                        if nested {
+                            crate::look::menu_button_036(ui, "More", |ui| tools_menu(ui, m));
+                        } else {
+                            tools_menu(ui, m);
+                        }
+                    },
+                    AppModel::placeholder(Default::default()),
+                );
+            let press = |h: &mut Harness<'_, AppModel>, key| {
+                h.key_press(key);
+                h.run();
+            };
+            press(&mut h, Key::Tab);
+            if nested {
+                assert!(h.get_by_label("More").is_focused());
+                press(&mut h, Key::Enter);
+                press(&mut h, Key::ArrowDown);
+            }
+            assert!(h.get_by_label("Tools").is_focused());
+            press(&mut h, if nested { Key::ArrowRight } else { Key::Enter });
+            // The JSON command is disabled in this fixture.
+            if !h.get_by_label(MAKE_MARKER).is_focused() {
+                press(&mut h, Key::ArrowDown);
+            }
+            assert!(h.get_by_label(MAKE_MARKER).is_focused());
+            press(&mut h, Key::ArrowDown);
+            assert!(h.get_by_label(REENCODE_TEXT).is_focused());
+            press(&mut h, Key::Space);
+            assert!(h.state().reencode_all);
+            assert!(h.get_by_label(REENCODE_TEXT).is_focused());
+            press(&mut h, Key::ArrowUp);
+            assert!(h.get_by_label(MAKE_MARKER).is_focused());
+            press(&mut h, Key::Enter);
+            assert!(matches!(
+                h.state().dialog,
+                Some(crate::model::Dialog::MakeMarker)
+            ));
+            assert!(h.query_by_label(REENCODE_TEXT).is_none());
+            if nested {
+                assert!(h.query_by_label("Tools").is_none());
+            }
+        }
+    }
 
     #[test]
     fn undo_names_the_step() {

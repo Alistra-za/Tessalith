@@ -59,12 +59,25 @@ pub fn menu_button_036<R>(
     text: &str,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
+    menu_button_036_with_config(ui, text, egui::menu::MenuConfig::find(ui), add_contents)
+}
+
+pub(crate) fn menu_button_036_with_config<R>(
+    ui: &mut egui::Ui,
+    text: &str,
+    config: egui::menu::MenuConfig,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
     let (response, inner) = if egui::menu::is_in_menu(ui) {
         let button = egui::Button::new(text).right_text(SUBMENU_ARROW_036);
-        let (r, inner) = egui::menu::SubMenuButton::from_button(button).ui(ui, add_contents);
+        let (r, inner) = egui::menu::SubMenuButton::from_button(button)
+            .config(config)
+            .ui(ui, add_contents);
         (r.accessible_name(text), inner)
     } else {
-        egui::menu::MenuButton::new(text).ui(ui, add_contents)
+        egui::menu::MenuButton::new(text)
+            .config(config)
+            .ui(ui, add_contents)
     };
     egui::InnerResponse::new(inner.map(|i| i.inner), response)
 }

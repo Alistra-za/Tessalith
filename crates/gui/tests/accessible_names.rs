@@ -42,16 +42,51 @@ fn open_export_folder_names_both_buttons_and_paints_the_reason() {
         if exists {
             std::fs::create_dir(&out).unwrap();
         }
-        m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
-        let mut h = harness(m);
-        h.run();
-        h.get_by_label_contains("Export to: ").click();
-        h.run();
-        for name in [label.to_owned(), format!("Files: {label}")] {
-            let row = h.get_by_role_and_label(Role::Button, &name);
-            assert_eq!(row.accesskit_node().is_disabled(), !exists, "{name}");
-            assert!(painted_in(&h, row.rect()).contains(label), "{name}");
+        let why = match (chosen, exists) {
+            (false, _) => Some("No export folder chosen yet".to_owned()),
+            (true, false) => Some(format!(
+                "The export folder does not exist yet: {}. Export creates it.",
+                out.display()
+            )),
+            (true, true) => None,
+        };
+        assert_export_folder_buttons(m, label, why.as_deref());
+    }
+}
+
+#[test]
+fn a_file_at_the_saved_export_path_disables_both_buttons() {
+    let d = tempfile::tempdir().unwrap();
+    let out = d.path().join("export");
+    let mut m = opened_unchosen(&d.path().join("project"));
+    choose_export(&mut m, out.clone());
+    std::fs::write(&out, b"already here").unwrap();
+    let why = format!(
+        "A file already exists at {}. Choose another export folder.",
+        out.display()
+    );
+    assert_eq!(m.open_export_folder().unwrap_err(), why);
+    assert!(m.take_shell().is_empty());
+    assert_export_folder_buttons(m, "Open export folder (a file uses this path)", Some(&why));
+}
+
+fn assert_export_folder_buttons(mut m: AppModel, label: &str, why: Option<&str>) {
+    m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    for name in [label.to_owned(), format!("Files: {label}")] {
+        let row = h.get_by_role_and_label(Role::Button, &name);
+        assert_eq!(row.accesskit_node().is_disabled(), why.is_some(), "{name}");
+        if let Some(why) = why {
+            assert_eq!(
+                row.accesskit_node().description().as_deref(),
+                Some(why),
+                "{name}"
+            );
         }
+        assert!(painted_in(&h, row.rect()).contains(label), "{name}");
     }
 }
 
