@@ -7,7 +7,7 @@ use crate::analyse::{code8, CS_COMPLEX_GATE_CODE};
 use crate::config::*;
 use crate::coverage::preserve_coverage;
 use crate::image::Rgba32F;
-use crate::mips::build_chain;
+use crate::mips::build_chain_for_output;
 use crate::ops::{preprocess_with, Domain, SourceTransfer, Work};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use schemars::JsonSchema;
@@ -100,11 +100,11 @@ pub(crate) fn build(
     let (tp, bp) = (half_profile(p, false), half_profile(p, true));
     let tw = preprocess_with(top, &tp, transfer);
     let bw = preprocess_with(bottom, &bp, transfer);
-    let mut tc = build_chain(&tw, &tp);
+    let mut tc = build_chain_for_output(&tw, &tp, None, p.subtype);
     if tw.alpha_present && tp.coverage_enabled() {
         preserve_coverage(&mut tc, tp.alpha.threshold, tp.alpha.compare);
     }
-    let bc = build_chain(&bw, &bp);
+    let bc = build_chain_for_output(&bw, &bp, None, p.subtype);
     // Both half chains and the stacked chain are live together; `api::job_bytes` admits the extra chain (Note BB).
     let chain = tc
         .iter()
@@ -188,6 +188,7 @@ fn half_profile(p: &Profile, bottom: bool) -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mips::build_chain;
     use crate::presets::PresetRegistry;
 
     fn profile() -> Profile {

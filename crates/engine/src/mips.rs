@@ -176,9 +176,9 @@ pub(crate) fn normalize_vector(px: &mut [f32; 4], domain: Domain) {
 /// Mip 0 as stored (spec §5.4, DECISIONS R1): a normal map's base vectors at unit length unless
 /// `mips.normal_base = keep`; anything else as authored. A vector chain accumulates from this level, so the levels
 /// below and the variance bake's footprint lengths average the vectors the file stores (controller correction to R1).
-fn base_level(work: &Work, p: &Profile) -> Rgba32F {
+fn base_level(work: &Work, p: &Profile, output: Subtype) -> Rgba32F {
     let mut out = work.img.clone();
-    if p.mips.normal_base == NormalBase::Renormalize
+    if (p.mips.normal_base == NormalBase::Renormalize || output.needs_unit_base(p.format))
         && matches!(work.domain, Domain::Normal | Domain::Msn)
     {
         for px in &mut out.px {
@@ -273,6 +273,16 @@ pub fn build_chain(work: &Work, p: &Profile) -> Vec<Rgba32F> {
 /// `(min(α² + add, 1))^¼`, α the footprint mean of r²; every other value is bit-identical to [`build_chain`].
 /// A `complex_material` bakes its gloss (G) instead (Note CL40, [`bake_gloss`]); `bake` is ignored on anything else.
 pub fn build_chain_with(work: &Work, p: &Profile, bake: Option<&NormalVariance>) -> Vec<Rgba32F> {
+    build_chain_for_output(work, p, bake, p.subtype)
+}
+
+// A grass half uses a synthetic profile for filtering, but the stack owns its normal storage.
+pub(crate) fn build_chain_for_output(
+    work: &Work,
+    p: &Profile,
+    bake: Option<&NormalVariance>,
+    output: Subtype,
+) -> Vec<Rgba32F> {
     let n = level_count(work.img.width, work.img.height, &p.mips.levels);
     let weighted = weighted_rgb(work, p);
     let rough = bake.filter(|_| work.roughness_r_squared);
@@ -281,7 +291,7 @@ pub fn build_chain_with(work: &Work, p: &Profile, bake: Option<&NormalVariance>)
     let filt = effective_filter(work, p);
     let mut out = Vec::with_capacity(n as usize);
     // Mip 0 stays as authored (Note HD1).
-    out.push(base_level(work, p));
+    out.push(base_level(work, p, output));
     // `acc` is the unnormalised accumulation level; the first step reads the base directly unless roughness needs
     // squaring, so the base is not cloned a second time.
     let mut acc: Option<Rgba32F> = None;
@@ -468,6 +478,35 @@ mod tests {
         let c = build_chain(&work(img, Domain::Normal, true), &profile(Subtype::Normal));
         assert_eq!(c[0].px[0], [0.0, 0.0, 1.0, 0.7]);
         assert_eq!(c[0].px[1], [0.0, 0.0, 1.0, 0.7]); // the (specular) alpha is untouched
+    }
+
+    #[test]
+    fn invalid_xy_keep_uses_a_unit_base_in_the_raw_chain() {
+        let mut img = Rgba32F::new(2, 1, [0.3, 0.0, 0.4, 0.25]);
+        img.px[1] = [-0.15, 0.0, 0.2, 0.75];
+        let w = work(img, Domain::Normal, true);
+        for st in [
+            Subtype::Normal,
+            Subtype::LandscapeNormal,
+            Subtype::PbrNormal,
+        ] {
+            let mut p = profile(st);
+            p.mips.normal_base = NormalBase::Keep;
+            for fmt in [Format::Bc5, Format::Rg8, Format::Bc4, Format::R8] {
+                p.format = fmt;
+                let chain = build_chain(&w, &p);
+                for (px, want) in [
+                    (chain[0].px[0], [0.6, 0.0, 0.8, 0.25]),
+                    (chain[0].px[1], [-0.6, 0.0, 0.8, 0.75]),
+                    (chain[1].px[0], [0.0, 0.0, 1.0, 0.5]),
+                ] {
+                    assert!(
+                        px.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6),
+                        "{st:?} {fmt:?}: {px:?}, expected {want:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

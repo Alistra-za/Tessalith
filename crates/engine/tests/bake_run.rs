@@ -146,6 +146,123 @@ fn a_baked_member_is_rougher_and_records_its_normal() {
 }
 
 #[test]
+fn acknowledged_bc5_keep_fails_before_if_changed() {
+    use engine::codes::{Code, Severity};
+    use engine::manifest::output_key;
+    use engine::overrides::parse_set;
+
+    let d = tempfile::tempdir().unwrap();
+    let normal = bumpy_n(d.path(), 32, 0.0);
+    let rough = rmaos(d.path(), 32);
+    let resolve = |root: &str, base: &str, bake_off: bool| {
+        let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join(root), Target::Cs);
+        req.on_existing = OnExisting::IfChanged;
+        req.accept = AcceptSuggestions::High;
+        req.allow.insert(Code::FmtBc5Normal);
+        req.overrides = [
+            "file:*iron_n.png.subtype=pbr_normal",
+            "file:*iron_n.png.format=bc5",
+            "file:*iron_n.png.color.tag=unorm",
+            &format!("file:*iron_n.png.mips.normal_base={base}"),
+        ]
+        .into_iter()
+        .map(|s| parse_set(s).unwrap())
+        .collect();
+        if bake_off {
+            req.overrides
+                .push(parse_set("file:*iron_n.png.mips.normal=renormalize").unwrap());
+        }
+        let rep = Reporter::new(Arc::new(VecSink::default()), "bc5-keep");
+        Engine::new()
+            .unwrap()
+            .plan(req, &rep, &CancelToken::default())
+            .unwrap()
+    };
+    let seed = || {
+        let mut p = resolve("out", "renormalize", false);
+        assert_eq!(p.jobs.len(), 2);
+        for j in &mut p.jobs {
+            assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+            if j.input == normal {
+                assert_eq!(j.profile.format, Format::Bc5);
+                j.profile.mips.normal_base = NormalBase::Keep;
+            } else {
+                assert_eq!(j.input, rough);
+                let bake = j.bake.as_mut().unwrap();
+                assert_eq!(bake.normal, normal);
+                bake.normal_profile.mips.normal_base = NormalBase::Keep;
+            }
+        }
+        p
+    };
+    let p = seed();
+    let out = &d.path().join("out");
+    let normal_out = p
+        .jobs
+        .iter()
+        .find(|j| j.input == normal)
+        .unwrap()
+        .output
+        .clone();
+    let rough_out = p
+        .jobs
+        .iter()
+        .find(|j| j.input == rough)
+        .unwrap()
+        .output
+        .clone();
+    let normal_key = output_key(out, &normal_out);
+    let rough_key = output_key(out, &rough_out);
+    let (s, events) = run(p);
+    assert_eq!((s.converted, s.validation_failed), (2, 0), "{events:#?}");
+    assert_eq!(run(seed()).0.up_to_date, 2);
+    let manifest = Manifest::at(out);
+    let before = manifest.load().unwrap();
+    let stamp = SourceStamp::of(&normal_out).unwrap();
+    let bytes = std::fs::read(&normal_out).unwrap();
+    let baked = std::fs::read(&rough_out).unwrap();
+    assert_eq!(before[&normal_key].output_stamp, Some(stamp));
+    assert_eq!(before[&rough_key].sources.len(), 1);
+    assert!(before[&rough_key].sources[0].path.ends_with("iron_n.png"));
+
+    let p = resolve("out", "keep", false);
+    let n = p.jobs.iter().find(|j| j.input == normal).unwrap();
+    assert_eq!(
+        n.status,
+        JobStatus::Error {
+            codes: vec![Code::CfgInvalid]
+        }
+    );
+    let r = p.jobs.iter().find(|j| j.input == rough).unwrap();
+    assert!(r.bake.is_none());
+    assert!(r
+        .warnings
+        .iter()
+        .any(|w| w.code == Code::SetMissingCompanion && w.severity == Severity::Info));
+    let (s, events) = run(p);
+    assert_eq!(
+        (s.failed, s.converted, s.up_to_date, s.validation_failed),
+        (1, 1, 0, 0),
+        "{events:#?}"
+    );
+    assert!(events.iter().any(|e| e.job.as_ref() == Some(&normal_key) &&
+        matches!(&e.kind, EventKind::FileFailed { stage: Stage::Resolve, error } if error.contains("CFG-INVALID"))));
+    let after = manifest.load().unwrap();
+    assert_eq!(std::fs::read(&normal_out).unwrap(), bytes);
+    assert_eq!(SourceStamp::of(&normal_out), Some(stamp));
+    assert_eq!(after[&normal_key], before[&normal_key]);
+    assert!(after[&rough_key].sources.is_empty());
+    let plain = resolve("plain", "renormalize", true);
+    let r = plain.jobs.iter().find(|j| j.input == rough).unwrap();
+    assert!(r.bake.is_none());
+    let reference = r.output.clone();
+    assert_eq!(run(plain).0.converted, 2);
+    let rewritten = std::fs::read(rough_out).unwrap();
+    assert_ne!(rewritten, baked);
+    assert_eq!(rewritten, std::fs::read(reference).unwrap());
+}
+
+#[test]
 fn a_two_to_one_normal_leaves_mip_0_as_authored() {
     // Note HD1: the bake adds nothing to mip 0, even at shift 1.
     let d = tempfile::tempdir().unwrap();

@@ -32,9 +32,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::BacklightTint
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
-        | Subtype::Normal
-        | Subtype::LandscapeNormal
-        | Subtype::PbrNormal
         | Subtype::Msn
         | Subtype::CoatNormal
         | Subtype::GenericData
@@ -55,14 +52,14 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
         // if-changed; move that arm if it is ever reported (Note HR6).
-        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
-            ENGINE_VERSION
-        }
+        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
         // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
         // A new sub-type in 3.0.0.
-        Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
+        Subtype::SkinWet | Subtype::SkinDetail => "3.0.0",
         // 3.0.0: the variance bake adds nothing to mip 0 (Note HD1).
-        Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => ENGINE_VERSION,
+        Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => "3.0.0",
+        // Keep requires XYZ storage on standalone tangent normals.
+        Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal => ENGINE_VERSION,
     }
 }
 
@@ -615,6 +612,11 @@ mod tests {
                     | Subtype::PbrAlbedo
                     | Subtype::UiSky
                     | Subtype::SkinAlbedo
+            ) {
+                "3.0.0"
+            } else if matches!(
+                st,
+                Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal
             ) {
                 ENGINE_VERSION
             } else {
