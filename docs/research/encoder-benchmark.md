@@ -478,6 +478,43 @@ Two limits of this measurement:
 
 Result: nothing passed and the default stays (1, 1). The weight parameter and the measurement tool stay on the branch, unmerged.
 
+#### BC1 NVIDIA three-colour midpoint (2026-11-20, Note JZ)
+
+Does BC1 gain quality if the encoder scores the green midpoint that NVIDIA will decode from the packed endpoints? The trial kept rgbcx's NVIDIA table. It looked up green in the order of the two stored RGB565 words when scoring a three-colour fit or choosing endpoints for a solid block.
+
+For example, stored words `0x0000 0x0200` have green codes (0, 16). Selector 2 gives green 33 on NVIDIA. With words `0x0200 0x0800`, red puts green 16 first. The NVIDIA midpoint is then 32. AMD gives 33 in both cases. On a test block where all 16 texels chose the midpoint, the default search scored 64 units of squared error across both decoders. The packed bytes scored 32.
+
+The trial used level 18 on 93 opaque `rgb_real` images with transparent black off. Of 5,799,936 default blocks, 127,087 used three colours. In 7,693 blocks across 48 images, packing swapped the endpoints and changed a midpoint used by an image texel. These included 7,628 fitted blocks and 65 solids.
+
+**Decoder check.** Before scoring, texcore and rgbcx decoded the same bytes with their NVIDIA models. All 16 RGBA texels agreed on every block across 19 rows (1,763,180,544 comparisons). The original rgbcx NVIDIA and AMD decoders graded in-image RGB. The hardware evidence is the [RTX 4090 readback](#bc1-decoder-model-2026-10-29) of 4,096 random blocks on DX12 and Vulkan. The software checks cover every ordered green pair. Hardware coverage is limited to that sample, with no AMD or Intel readback.
+
+**Plain RGB.** C++ Dual (`cpp:18`) and the Rust default (`rust:w11`) matched byte for byte on every block and tied on both decoders on all 93 images. The per-image scores for W11, W21 and W31 reproduced the [decoder weights results](#bc1-decoder-weights-2026-11-15-note-hy18) to their published four decimal places.
+
+Each gain below is the mean per-image change in RGB PSNR against `rust:w11`. Brackets give paired 95% Student-t intervals (92 degrees of freedom). Weights list NVIDIA first. The default gap between decoder means was 0.2362 dB.
+
+| Candidate (weights) | NVIDIA gain [95% interval], dB | AMD gain [95% interval], dB | Decoder gap (dB) | Images where both fell |
+|---|---:|---:|---:|---:|
+| nv11 (1, 1) | +0.00139 [-0.00025, +0.00304] | +0.000004 [-0.000011, +0.000018] | 0.2348 | 0 |
+| nv21 (2, 1) | +0.01324 [+0.00760, +0.01888] | -0.01728 [-0.02407, -0.01049] | 0.2057 | 0 |
+| nv31 (3, 1) | +0.01705 [+0.00997, +0.02412] | -0.02661 [-0.03715, -0.01608] | 0.1926 | 0 |
+
+Against the legacy encoder at the same weights, nv11 changed 59,176 blocks, nv21 changed 65,171 and nv31 changed 70,707. The NVIDIA gains from the correction alone were 0.00139, 0.00197 and 0.00246 dB respectively. Both weighted candidates beat the default on NVIDIA and lost to it on AMD on all 93 images.
+
+**Other modes.** Each comparison uses the default (1, 1) encoder with the same settings. Masked blocks use weighted squared error, where a decrease is better.
+
+| Diagnostic | nv11 | nv21 | nv31 |
+|---|---:|---:|---:|
+| Perceptual BC1, images where both scores fell (of 93) | 12 | 2 | 2 |
+| Generated cutouts, blocks with higher error on both decoders (of 2,000) | 1 | 5 | 7 |
+| Generated cutouts, change in total error using each candidate's weights | -0.015052% | +0.024751% | +0.047103% |
+| Four-colour only, images where both scores fell (of 93) | 0 | 0 | 0 |
+
+Perceptual BC1 fails the per-image rule. All three corrections lowered total masked error at fixed weights, but only nv11 beat the default on that measure. The four-colour control exercises BC3's colour half. All its bytes matched the legacy row at each fixed weight. Fast search, real cutouts and complete BC3 textures need their own measurements.
+
+**Verdict.** All three candidates failed the 0.02 dB NVIDIA mean-gain floor. The interval for nv11 also includes zero. No candidate qualified. The speed run was not made because adoption required both quality and speed (NV-11 to NV-14). Using medians from the same run, a candidate had to take less than C++ Dual time divided by 1.6. Its added time over Rust default could use at most one third of the time Rust saved over C++ Dual. For historical reference only, plan D measured 27.3 us/block for C++ Dual, 4.02 for Rust default, 4.26 for legacy W21 and 4.03 for legacy W31.
+
+Reproduce the tables at `472ede38` on `research/bcenc-nv-table`. The evidence folder is `F:\ai\dds\bench\nv-table-2026-11-20`. The per-image scores and run logs are `plain`, `p` and `4c` (CSV and TXT). The generated cutout results are in `masked.txt`.
+
 ### Luma-weighted BC1 error (2026-10-31)
 
 rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`), and under cBC1Dual in `bc1_dual_err`. Weighting only those sums leaves the PCA axis, the least-squares fits and the cluster orderings unweighted. Tessalith ships it as `encoder.perceptual` on BC1 and BC3 colour (Rec.709, FM42; `vanilla-compact` turns it on).
