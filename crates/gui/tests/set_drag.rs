@@ -847,6 +847,30 @@ fn enter_cancels_unsaved_changes_above_choice() {
 }
 
 #[test]
+fn enter_on_the_close_request_frame_leaves_choice_pending() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, Some(DropChoice::Duplicate), NORMAL, &id);
+    let before = documents(&h.state().0);
+    let files = files_under(d.path());
+    assert!(!h.state_mut().0.request_close());
+    h.input_mut().events.push(egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.step();
+    assert_eq!(files_under(d.path()), files, "Choice must not duplicate");
+    assert_eq!(documents(&h.state().0), before);
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
+    h.run();
+    h.get_by_label("Unsaved changes");
+}
+
+#[test]
 fn escape_before_enter_in_one_frame_cancels_duplicate() {
     let d = tempfile::tempdir().unwrap();
     let (m, id) = leaf_set(d.path());
@@ -1052,6 +1076,26 @@ fn choosing_duplicate_is_remembered_even_if_replace_is_cancelled() {
     assert_eq!(documents(&h.state().0), before);
 }
 
+#[test]
+fn clicking_share_with_empty_memory_remembers_share() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    open_choice(&mut h, None, NORMAL, &id);
+    h.get_by_role_and_label(Role::Button, "Share (borrow its finished output)")
+        .click();
+    h.run();
+    idle(&mut h.state_mut().0);
+    assert_eq!(
+        normal_fill(&h.state().0, &id),
+        Some(SlotFill::Borrowed {
+            item: NORMAL.into(),
+            from: ROCK.into(),
+        })
+    );
+    assert_eq!(h.state().1.drops.last_choice, Some(DropChoice::Share));
+}
+
 /// Note JW6: an answer is remembered; Cancel and a refused answer leave it as it was.
 #[test]
 fn an_answer_is_remembered_and_cancel_is_not() {
@@ -1129,6 +1173,68 @@ fn release_then_change_shift(release: egui::Modifiers, after: egui::Modifiers) {
         assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
         assert_eq!(documents(&h.state().0), before);
     }
+}
+
+fn release(
+    pos: egui::Pos2,
+    button: egui::PointerButton,
+    modifiers: egui::Modifiers,
+) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button,
+        pressed: false,
+        modifiers,
+    }
+}
+
+fn assert_release_frame_asks<const N: usize>(
+    releases: impl FnOnce(egui::Pos2, egui::Pos2) -> [egui::Event; N],
+) {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = leaf_set(d.path());
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let to = card_of(&h, &id).center();
+    drag_over(&mut h, from, to, egui::Modifiers::NONE);
+    let before = documents(&h.state().0);
+    h.input_mut().events.extend(releases(from, to));
+    h.step();
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, &id, ROCK)));
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
+fn a_drop_asks_after_a_shift_secondary_release_then_a_plain_primary_release() {
+    use egui::{Modifiers, PointerButton};
+    assert_release_frame_asks(|outside, card| {
+        [
+            release(outside, PointerButton::Secondary, Modifiers::SHIFT),
+            release(card, PointerButton::Primary, Modifiers::NONE),
+        ]
+    });
+}
+
+#[test]
+fn a_drop_asks_without_one_primary_release_over_the_card() {
+    use egui::{Modifiers, PointerButton};
+    assert_release_frame_asks(|_, card| {
+        [release(card, PointerButton::Secondary, Modifiers::SHIFT)]
+    });
+    assert_release_frame_asks(|_, card| {
+        [
+            release(card, PointerButton::Primary, Modifiers::SHIFT),
+            release(card, PointerButton::Primary, Modifiers::SHIFT),
+        ]
+    });
+    assert_release_frame_asks(|outside, card| {
+        [
+            release(outside, PointerButton::Primary, Modifiers::SHIFT),
+            release(card, PointerButton::Secondary, Modifiers::NONE),
+        ]
+    });
 }
 
 #[test]

@@ -2834,14 +2834,16 @@ fn pill(
             p.0.clone(),
             v.id.clone(),
             ui.input(|i| {
-                i.events.iter().find_map(|event| match event {
+                let mut releases = i.events.iter().filter_map(|event| match event {
                     egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
                         pressed: false,
+                        pos,
                         modifiers,
-                        ..
-                    } => Some(modifiers.shift),
+                    } => Some(modifiers.shift && resp.interact_rect.contains(*pos)),
                     _ => None,
-                }) == Some(true)
+                });
+                releases.next() == Some(true) && releases.next().is_none()
             }),
         )),
         Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
@@ -3457,6 +3459,9 @@ fn choose(model: &mut AppModel, item: String, set: String, c: DropChoice) -> Opt
 pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
     if !matches!(st.pending, Some(Pending::Choice { .. })) {
         st.choice_options = None;
+    } else if model.dialog.is_some() {
+        // The foreground dialog draws later this frame. Leave its input (including Escape) for it.
+        return;
     }
     if matches!(st.pending, Some(Pending::Rename { .. })) {
         rename_modal(ctx, model, st);
