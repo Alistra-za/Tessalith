@@ -894,7 +894,7 @@ pub struct AppModel {
     /// A note in front of the counts: the step after open, or an Export cancelled by an edit (AF4).
     pub status_note: Option<String>,
     next_step_pending: bool,
-    /// The next replan retires only the sentence this open published.
+    /// The sentence to retire on a replan or a change to Export without review.
     shown_next_step: Option<String>,
     /// "Undid: <label>" / "Redid: <label>" in front of the status line until the next edit (item 2).
     undo_note: Option<String>,
@@ -1615,6 +1615,12 @@ impl AppModel {
         } else if let Err(e) = d.save(false) {
             self.save_failed(DocKind::Project, &e);
         }
+        if self
+            .take_shown_next_step()
+            .is_some_and(|step| self.status_line.contains(&step))
+        {
+            self.counts_status();
+        }
     }
 
     /// Where an export would write: the chosen folder, else `<root>/sdc-out` (only a place to name; Review blocks the
@@ -1864,9 +1870,7 @@ impl AppModel {
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
     /// partial plan first (`send_partial`).
     fn replan_with(&mut self, files_edit: bool) {
-        if let Some(shown) = self.shown_next_step.take() {
-            self.status_note.take_if(|note| *note == shown);
-        }
+        self.take_shown_next_step();
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
@@ -3692,24 +3696,35 @@ impl AppModel {
     /// What to do first when this folder's opening plans have settled.
     pub fn next_step_text(&self) -> Option<String> {
         self.root.as_ref()?;
-        let undecided = self.undecided();
+        let undecided = self.with_whole_view(|| self.undecided());
         if undecided > 0 {
             let who = code_text::counted(undecided, "texture needs", "textures need");
             return Some(format!("{who} a type: start with Undecided."));
         }
-        if self.has_problem_rows() {
-            let rows = code_text::counted(bottom::flagged(self).ready_rows, "problem", "problems");
+        let problems = self.with_whole_view(|| {
+            self.has_problem_rows()
+                .then(|| bottom::flagged(self).ready_rows)
+        });
+        if let Some(rows) = problems {
+            let rows = code_text::counted(rows, "problem", "problems");
             return Some(format!("{rows} to look at: open Problems."));
         }
         if self.export_folder_ref().is_none() {
             return Some("Next: choose where to export (Export to ▾).".into());
         }
-        let tail = if self.header_writes_now() {
+        let answer = self.header_answer();
+        let tail = if answer.now {
             "writes them."
         } else {
             "shows what will be written."
         };
-        Some(format!("Ready: {} {tail}", self.header_export_text()))
+        Some(format!("Ready: {} {tail}", self.export_text(&answer)))
+    }
+
+    fn take_shown_next_step(&mut self) -> Option<String> {
+        let shown = self.shown_next_step.take()?;
+        self.status_note.take_if(|note| *note == shown);
+        Some(shown)
     }
 
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.

@@ -1857,6 +1857,84 @@ fn nothing_written(d: &std::path::Path) -> bool {
     !d.join("export/textures/g/a.dds").exists() && !d.join("export/textures/g/u.dds").exists()
 }
 
+#[test]
+fn the_opening_step_counts_the_other_sets_problem_during_scoped_review() {
+    let d = tempfile::tempdir().unwrap();
+    support::add_ready_set(d.path(), "clean");
+    let root = d.path().join("textures");
+    let arm = root.join("pbr/arm");
+    support::colour(&arm.join("steel.png"), 200);
+    support::flat(&arm.join("steel_n.png"));
+    support::colour(&arm.join("steel_rmaos.png"), 30);
+    let mut doc = sdc_gui::sets_doc::SetsDoc::open(&root);
+    doc.set_value("pbr/arm/steel", "parallax", Some(serde_json::json!(true)));
+    doc.set_export_folder(&d.path().join("export"));
+    doc.save(false).unwrap();
+
+    let mut m = AppModel::new(GuiSettings::default(), None, support::session());
+    m.hold_plan_results = true;
+    m.open_folder(root);
+    while !m.needs_write() {
+        for msg in held_plan(&mut m) {
+            m.handle_held(msg);
+        }
+    }
+    let follow_up = held_plan(&mut m);
+    assert!(
+        m.status_note.is_none(),
+        "the recorder's plan has yet to land"
+    );
+    assert_eq!(m.undecided(), 0);
+    assert_eq!(flagged(&m).ready_rows, 1);
+    m.export_sets([key_of(&m, "g/clean")].into(), "Export set g/clean".into());
+    assert!(m.review.is_some() && m.export_scope().is_some());
+    assert!(!m.has_problem_rows(), "the set in Review is clean");
+    land_plan(&mut m, follow_up);
+    assert!(m.review.is_some() && m.export_scope().is_some());
+    let line = format!(
+        "1 problem to look at: open Problems. {}",
+        m.status_line_counts()
+    );
+    let h = harness(m);
+    assert_eq!(
+        h.query_all_by_label(&line).count(),
+        1,
+        "{}",
+        h.state().status_line
+    );
+}
+
+#[test]
+fn changing_export_without_review_retires_the_opening_step() {
+    let d = tempfile::tempdir().unwrap();
+    support::opened_chosen_decided(d.path()).save().unwrap();
+    let root = d.path().join("textures");
+    let mut m = AppModel::new(GuiSettings::default(), None, support::session());
+    m.open_folder(root.clone());
+    let mut h = harness(m);
+    settle(&mut h);
+    assert!(!h.state().needs_write());
+    let ready = "Ready: Review 4 files… shows what will be written.";
+    let counts = h.state().status_line_counts();
+    h.get_by_label(&format!("{ready} {counts}"));
+
+    h.state_mut().open_settings_tab();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    h.run();
+    assert!(sdc_gui::sets_doc::SetsDoc::open(&root).export_without_review());
+    assert_eq!(h.state().header_export_text(), "Export 4 files now");
+    assert_eq!(
+        h.query_all_by_label_contains(ready).count(),
+        0,
+        "{}",
+        h.state().status_line
+    );
+    h.get_by_label(&counts);
+    assert!(h.state().status_note.is_none());
+}
+
 /// Round 2, ruling 3c-25 (finding 5, B5): a scoped click never arms a write. With Review open and a plan pending, a
 /// click on Export set opens its scoped Review at once; pressing Close before the plan lands must not leave a
 /// whole-project write behind.
