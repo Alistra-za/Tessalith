@@ -224,38 +224,148 @@ fn the_header_is_one_row_at_1055_1100_and_1280_in_both_views() {
         for w in [1055.0, 1100.0, 1280.0] {
             let d = tempfile::tempdir().unwrap();
             let h = harness(opened(d.path()), w, meshes);
-            let panel = outer(&h, "header");
-            let y = h.get_by_label("Open").rect().center().y;
-            let export = h.state().0.export_text(&h.state().0.header_answer());
-            let mut rects: Vec<_> = CONTROLS
-                .iter()
-                .map(|&(role, name)| (name, widget(&h, role, name).rect()))
-                .collect();
-            rects.extend([
-                ("Undo", header_undo(&h, "Undo").rect()),
-                ("Redo", header_undo(&h, "Redo").rect()),
-                ("Export to", h.get_by_label_contains("Export to: ").rect()),
-                ("Export", widget(&h, Role::Button, &export).rect()),
-            ]);
-            for (_, r) in &rects {
-                assert!(
-                    panel.contains_rect(*r) && r.right() <= w && (r.center().y - y).abs() < 1.0,
-                    "{w} px, meshes {meshes}, {panel:?}: {rects:?}"
-                );
-            }
-            let rows: std::collections::BTreeSet<_> = widgets(&h, "header")
-                .iter()
-                .map(|(_, _, r)| r.center().y.round() as i32)
-                .collect();
-            assert_eq!(
-                rows.len(),
-                1,
-                "{w} px, meshes {meshes}: {:?}",
-                widgets(&h, "header")
-            );
-            assert_no_overlap(&h, "header", w);
+            assert_header_row(&h, w, meshes, true);
         }
     }
+}
+
+#[test]
+fn the_1055_header_fits_long_fields_pending_nif_edits_and_launch() {
+    let d = tempfile::tempdir().unwrap();
+    for meshes in [false, true] {
+        let mut m = opened(d.path());
+        let preset = "High resolution landscape and architecture ".repeat(4);
+        m.set_preset(Some(preset.clone()));
+        choose_export(
+            &mut m,
+            d.path()
+                .join("Long destination for a texture overhaul")
+                .join("Landscape textures at full resolution"),
+        );
+        m.set_nif_review_rows(vec![nif_row(r"meshes\landscape\rock.nif", None)]);
+        assert_eq!(m.project_preset(), Some(preset));
+        let mut h = harness(m, 1055.0, meshes);
+        if meshes {
+            let step = "Change the shader type on the mountain cliff shape";
+            let target = sdc_gui::ui::meshes::UndoTarget {
+                can_undo: true,
+                can_redo: false,
+                undo_label: Some(step.into()),
+                redo_label: None,
+            };
+            h.ctx
+                .data_mut(|d| d.insert_temp(egui::Id::unique("nif-undo-target"), Some(target)));
+            h.run_steps(1);
+            h.get_by_label(&format!("Undo (NIF edit history): {step}"));
+        }
+        assert_eq!(h.state().0.nif_review_rows().len(), 1);
+        h.get_by_label(MORE);
+        assert_header_row(&h, 1055.0, meshes, true);
+
+        let empty = AppModel::new(Default::default(), None, session());
+        let h = harness(empty, 1055.0, meshes);
+        assert!(h.query_by_label(MORE).is_none());
+        assert_header_row(&h, 1055.0, meshes, false);
+    }
+}
+
+fn assert_header_row(h: &H, w: f32, meshes: bool, project: bool) {
+    let panel = outer(h, "header");
+    let y = h.get_by_label("Open").rect().center().y;
+    assert_eq!(h.state().0.root.is_some(), project);
+    let mut rects: Vec<_> = CONTROLS
+        .iter()
+        .filter(|(_, name)| project || *name != "Save")
+        .map(|&(role, name)| (name, widget(h, role, name).rect()))
+        .collect();
+    if project || (meshes && !h.state().0.nif_review_rows().is_empty()) {
+        let export = h.state().0.export_text(&h.state().0.header_answer());
+        rects.extend([
+            ("Undo", header_undo(h, "Undo").rect()),
+            ("Redo", header_undo(h, "Redo").rect()),
+            ("Export", widget(h, Role::Button, &export).rect()),
+        ]);
+    }
+    let dest = if project {
+        h.get_by_label_contains("Export to: ")
+    } else {
+        h.get_by_label("More export options")
+    };
+    rects.push(("Export to", dest.rect()));
+    let mut moved = false;
+    for (role, name) in [
+        (Role::Button, "Tools"),
+        (Role::Button, "MO2…"),
+        (Role::ComboBox, "Preset"),
+    ] {
+        if let Some(node) = h.query_by_role_and_label(role, name) {
+            rects.push((name, node.rect()));
+        } else if project || name != "Tools" {
+            moved = true;
+        }
+    }
+    if moved {
+        rects.push((MORE, h.get_by_label(MORE).rect()));
+    } else {
+        assert!(h.query_by_label(MORE).is_none());
+    }
+    for (_, r) in &rects {
+        assert!(
+            panel.contains_rect(*r) && r.right() <= w && (r.center().y - y).abs() < 1.0,
+            "{w} px, meshes {meshes}, {panel:?}: {rects:?}"
+        );
+    }
+    let rows: std::collections::BTreeSet<_> = widgets(h, "header")
+        .iter()
+        .map(|(_, _, r)| r.center().y.round() as i32)
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "{w} px, meshes {meshes}: {:?}",
+        widgets(h, "header")
+    );
+    assert_no_overlap(h, "header", w);
+}
+
+#[test]
+fn long_destination_keeps_its_width_until_all_optional_controls_move() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    choose_export(
+        &mut m,
+        d.path()
+            .join("Installed texture projects")
+            .join("High resolution landscape overhaul - mountains and snow"),
+    );
+    let mut h = harness(m, 2400.0, false);
+    let normal = h.get_by_label_contains("Export to: ").rect().width();
+    let mut moved_one = false;
+    let mut shortened = false;
+    for w in (1000..=2150).rev().step_by(20) {
+        h.set_size(egui::vec2(w as f32, 800.0));
+        h.run_steps(3);
+        let width = h.get_by_label_contains("Export to: ").rect().width();
+        let any_visible = h
+            .query_by_role_and_label(Role::ComboBox, "Preset")
+            .is_some()
+            || h.query_by_label("MO2…").is_some()
+            || h.query_by_label("Tools").is_some();
+        if any_visible {
+            assert!(
+                (width - normal).abs() < 0.5,
+                "at {w}: {width} vs full {normal} with an optional control still in the header"
+            );
+            moved_one |= h.query_by_label(MORE).is_some();
+        } else {
+            h.get_by_label(MORE);
+            shortened |= width + 1.0 < normal;
+        }
+    }
+    assert!(
+        moved_one && shortened,
+        "exercise both movement and path shortening"
+    );
 }
 
 #[test]
@@ -345,6 +455,110 @@ fn overflow_preset_can_select_an_installed_preset() {
     let mut h = harness(opened(d.path()), 800.0, false);
     open_moved_item(&mut h, "Preset");
     pick_installed_preset(&mut h);
+}
+
+#[test]
+fn short_preset_popups_reach_the_last_choice_and_editor() {
+    for requested in [false, true] {
+        for editor in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = opened(d.path());
+            let dir = d.path().join("presets");
+            std::fs::create_dir(&dir).unwrap();
+            for n in 0..32 {
+                let id = format!("user-{n:02}");
+                let base = engine::presets::default_preset_for(m.target);
+                std::fs::write(
+                    dir.join(format!("{id}.toml")),
+                    format!(
+                    "schema_version = 1\nid = \"{id}\"\nversion = \"1.0.0\"\nbase = \"{base}\"\n"
+                ),
+                )
+                .unwrap();
+            }
+            m.user_presets = Some(dir);
+            let choices = m.preset_choices();
+            assert!(choices.len() >= 32);
+            let last = choices.last().unwrap();
+            let mut h = harness_sized(m, egui::vec2(800.0, 320.0), false);
+            if requested {
+                h.state_mut().0.choose_preset = Some(h.ctx.cumulative_pass_nr());
+                h.run_steps(4);
+            } else {
+                open_moved_item(&mut h, "Preset");
+            }
+            let label = if editor { "Presets…" } else { last };
+            h.get_by_role_and_label(Role::Button, &choices[0]).hover();
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1600.0),
+                source: egui::MouseWheelSource::Wheel,
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(45);
+            let row = h.query_by_role_and_label(Role::Button, label);
+            assert!(
+                row.as_ref()
+                    .is_some_and(|r| h.ctx.content_rect().contains_rect(r.rect())),
+                "{label} outside the short popup, requested={requested}: {:?}",
+                row.map(|r| r.rect())
+            );
+            h.get_by_role_and_label(Role::Button, label).click();
+            h.run_steps(4);
+            if editor {
+                assert!(h.state().0.presets_open);
+            } else {
+                assert_eq!(h.state().0.project_preset().as_ref(), Some(last));
+            }
+        }
+    }
+}
+
+#[test]
+fn keyboard_more_reaches_mo2_and_selects_a_preset() {
+    use egui::Key;
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    let choice = h.state_mut().0.preset_choices()[0].clone();
+    assert_ne!(h.state().0.project_preset().as_ref(), Some(&choice));
+    let press = |h: &mut H, key| {
+        h.key_press(key);
+        h.run_steps(3);
+    };
+    for _ in 0..12 {
+        if h.get_by_label(MORE).is_focused() {
+            break;
+        }
+        press(&mut h, Key::Tab);
+    }
+    assert!(h.get_by_label(MORE).is_focused());
+    press(&mut h, Key::Enter);
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("Tools").is_focused());
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("MO2…").is_focused());
+    press(&mut h, Key::ArrowRight);
+    let scan = h.query_by_role_and_label(Role::Button, "Scan");
+    assert!(
+        scan.is_some_and(|n| n.accesskit_node().is_disabled()),
+        "Scan is disabled before choosing an instance"
+    );
+    press(&mut h, Key::ArrowLeft);
+    assert!(h.get_by_label("MO2…").is_focused());
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("Preset").is_focused());
+    press(&mut h, Key::ArrowRight);
+    for _ in 0..3 {
+        if h.get_by_role_and_label(Role::Button, &choice).is_focused() {
+            break;
+        }
+        press(&mut h, Key::ArrowDown);
+    }
+    assert!(h.get_by_role_and_label(Role::Button, &choice).is_focused());
+    press(&mut h, Key::Enter);
+    assert_eq!(h.state().0.project_preset(), Some(choice));
 }
 
 fn pick_installed_preset(h: &mut H) {

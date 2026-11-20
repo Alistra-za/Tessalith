@@ -886,6 +886,18 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
     header_export_action(h).expect("the header Export button")
 }
 
+/// Reveal a header button at either its inline or overflow location.
+pub fn reveal_header_control<S>(h: &mut egui_kittest::Harness<'_, S>, name: &str) {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable as _;
+
+    if h.query_by_role_and_label(Role::Button, name).is_none() {
+        h.get_by_label("More header items").click();
+        h.run_steps(3);
+    }
+    h.get_by_role_and_label(Role::Button, name);
+}
+
 pub fn settings_with_meshes_view() -> GuiSettings {
     let mut settings = GuiSettings::default();
     settings.layout.meshes_view = true;

@@ -37,7 +37,7 @@ fn the_meshes_view_keeps_the_header() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(sdc_gui::ui::header::meshes_view_active(&h.ctx));
-    for l in ["Save", "Meshes view", "MO2…"] {
+    for l in ["Save", "Meshes view"] {
         h.get_by_label(l);
     }
     support::header_undo(&h, "Undo");
@@ -56,4 +56,5 @@ fn the_meshes_view_keeps_the_header() {
     }
     h.get_by_label_contains(" problems");
     assert!(h.query_by_label_contains("Export NIF").is_none());
+    support::reveal_header_control(&mut h, "MO2…");
 }

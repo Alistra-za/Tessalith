@@ -141,7 +141,7 @@ fn row(
             + view_tabs_width(ui)
             + button_width(ui, "Settings…")
             + gap
-            + end.min_width,
+            + end.normal_width,
         tools: if model.root.is_some() {
             button_width(ui, "Tools ▾") + gap
         } else {
@@ -192,7 +192,7 @@ fn overflow_menu(
             super::meshes::mo2_button(ui, scan);
         }
         if moved.preset {
-            crate::look::menu_button_036(ui, "Preset", |ui| preset_menu(ui, model));
+            super::path_picker::menu(ui, "Preset", |ui| scroll_preset_menu(ui, model));
         }
     })
     .response
@@ -220,9 +220,10 @@ struct ExportEnd {
     full_path: Option<String>,
     buttons_width: f32,
     min_width: f32,
+    normal_width: f32,
 }
 
-/// The overflow decision and the wrapped row reserve the same destination, Save and Export widths.
+/// Reserve the full destination for overflow and its shortest form for wrapping.
 fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd {
     let gap = ui.spacing().item_spacing.x;
     let full_path = model
@@ -249,7 +250,12 @@ fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd
             )
         },
     );
+    let normal_width = full_path
+        .as_ref()
+        .map_or(chip, |p| button_width(ui, &format!("Export to: {p} ▾")))
+        + buttons_width;
     ExportEnd {
+        normal_width,
         lead,
         full_path,
         buttons_width,
@@ -262,25 +268,25 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool, end: ExportEn
     let gap = ui.spacing().item_spacing.x;
     let h = 2.0 * ui.spacing().interact_size.y;
     let save_w = button_width(ui, "Save");
-    let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
-    // Note FI5: with a project open the menu reads `Export to: {folder} ▾` or `Export to: not chosen ▾`; with none it
-    // is `More ▾` (the folder in `gui.toml` is not a texture project's destination).
-    let fixed = button_width(ui, end.lead) + end.buttons_width;
     fit(ui, end.min_width);
-    let mut chars =
-        (((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize).max(PATH_MIN_CHARS);
     let text = match end.full_path.as_ref() {
         None => end.lead.to_string(),
-        Some(p) => loop {
-            let text = format!("Export to: {} ▾", elide_middle(p, chars));
-            // A path's characters can be wider than '0': drop more until the trio fits (never below the minimum).
-            if chars <= PATH_MIN_CHARS
-                || button_width(ui, &text) + end.buttons_width <= room(ui) - 0.5
-            {
-                break text;
+        Some(p) if end.normal_width <= room(ui) => format!("Export to: {p} ▾"),
+        Some(p) => {
+            let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
+            let fixed = button_width(ui, end.lead) + end.buttons_width;
+            let mut chars =
+                (((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize).max(PATH_MIN_CHARS);
+            loop {
+                let text = format!("Export to: {} ▾", elide_middle(p, chars));
+                if chars <= PATH_MIN_CHARS
+                    || button_width(ui, &text) + end.buttons_width <= room(ui) - 0.5
+                {
+                    break text;
+                }
+                chars -= 1;
             }
-            chars -= 1;
-        },
+        }
     };
     push_right(ui, button_width(ui, &text) + end.buttons_width);
     export_to_menu(ui, model, text, end.full_path);
@@ -571,6 +577,10 @@ fn fit(ui: &mut egui::Ui, width: f32) {
 
 /// The width a button with `text` takes.
 fn button_width(ui: &egui::Ui, text: &str) -> f32 {
+    #[cfg(test)]
+    if matches!(text, "Undo" | "Redo" | "Undo NIF edit" | "Redo NIF edit") {
+        tests::HISTORY_MEASURES.set(tests::HISTORY_MEASURES.get() + 1);
+    }
     let galley = egui::WidgetText::from(text).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
@@ -684,19 +694,38 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
     }
 }
 
-/// The Undo and Redo buttons (item 2): disabled with no history, the step's label in the hover text.
-fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
-    // A20: the NIF history while a NIF edit is open in the Meshes view.
-    let nif = super::meshes::undo_target(ui.ctx());
+fn history_slot_width(ui: &egui::Ui) -> f32 {
     let (undo_text, redo_text) = if meshes_view_active(ui.ctx()) {
         ("Undo NIF edit", "Redo NIF edit")
     } else {
         ("Undo", "Redo")
     };
-    let slot = egui::vec2(
-        button_width(ui, undo_text).max(button_width(ui, redo_text)),
-        ui.spacing().interact_size.y,
-    );
+    let font = egui::FontSelection::default()
+        .resolve_with_fallback(ui.style(), egui::TextStyle::Button.into());
+    let key = egui::Id::unique((
+        undo_text,
+        redo_text,
+        font,
+        ui.ctx().pixels_per_point().to_bits(),
+        ui.spacing().button_padding.x.to_bits(),
+    ));
+    let id = egui::Id::unique("header-history-width");
+    if let Some((_, width)) = ui
+        .data(|d| d.get_temp::<(egui::Id, f32)>(id))
+        .filter(|(saved, _)| *saved == key)
+    {
+        return width;
+    }
+    let width = button_width(ui, undo_text).max(button_width(ui, redo_text));
+    ui.data_mut(|d| d.insert_temp(id, (key, width)));
+    width
+}
+
+/// The Undo and Redo buttons (item 2): disabled with no history, the step's label in the hover text.
+fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
+    // A20: the NIF history while a NIF edit is open in the Meshes view.
+    let nif = super::meshes::undo_target(ui.ctx());
+    let slot = egui::vec2(history_slot_width(ui), ui.spacing().interact_size.y);
     for undo in [true, false] {
         let textures = if undo {
             model.undo_label()
@@ -796,7 +825,19 @@ fn requested_preset_menu(ui: &egui::Ui, model: &mut AppModel, anchor: &egui::Res
     egui::Popup::menu(anchor)
         .id(egui::Id::unique("preset_choose_menu"))
         .open_memory(request.then_some(egui::SetOpenCommand::Bool(true)))
-        .show(|ui| preset_menu(ui, model));
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| scroll_preset_menu(ui, model));
+}
+
+fn scroll_preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
+    ui.spacing_mut().scroll = crate::look::thin_scroll();
+    let height = ui
+        .spacing()
+        .combo_height
+        .min(ui.ctx().content_rect().height() - ui.spacing().menu_margin.sum().y);
+    egui::ScrollArea::vertical()
+        .max_height(height)
+        .show(ui, |ui| preset_menu(ui, model));
 }
 
 fn preset_menu(ui: &mut egui::Ui, model: &mut AppModel) {
@@ -1061,6 +1102,77 @@ mod tests {
             if nested {
                 assert!(h.query_by_label("Tools").is_none());
             }
+        }
+    }
+
+    thread_local! {
+        pub(super) static HISTORY_MEASURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn history_width_reuses_the_measured_slot_on_unchanged_frames() {
+        use egui_kittest::kittest::Queryable as _;
+
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .build_ui_state(
+                |ui, (model, meshes, padding, size): &mut (AppModel, bool, f32, f32)| {
+                    set_meshes_view(ui.ctx(), *meshes);
+                    ui.spacing_mut().button_padding.x = *padding;
+                    ui.style_mut().override_font_id = Some(egui::FontId::proportional(*size));
+                    ui.horizontal(|ui| undo_redo(ui, model));
+                },
+                (AppModel::placeholder(Default::default()), false, 4.0, 13.0),
+            );
+        for (meshes, padding, size, scale) in [
+            (false, 5.0, 13.0, 1.0),
+            (true, 5.0, 13.0, 1.0),
+            (true, 12.0, 13.0, 1.0),
+            (true, 12.0, 20.0, 1.0),
+            (true, 12.0, 20.0, 1.5),
+        ] {
+            h.state_mut().1 = meshes;
+            h.state_mut().2 = padding;
+            h.state_mut().3 = size;
+            HISTORY_MEASURES.set(0);
+            h.set_pixels_per_point(scale);
+            h.run_steps(2);
+            let font = egui::FontId::proportional(size);
+            let labels = if meshes {
+                ["Undo NIF edit", "Redo NIF edit"]
+            } else {
+                ["Undo", "Redo"]
+            };
+            let expected = h.ctx.fonts_mut(|f| {
+                labels
+                    .into_iter()
+                    .map(|text| {
+                        f.layout_no_wrap(text.into(), font.clone(), egui::Color32::WHITE)
+                            .size()
+                            .x
+                    })
+                    .fold(0.0, f32::max)
+            }) + 2.0 * padding;
+            for label in ["Undo", "Redo"] {
+                let width = h.get_by_label(label).rect().width();
+                assert!(
+                    (width - expected).abs() < 0.5,
+                    "{label}: {width} vs {expected}"
+                );
+            }
+            assert!(
+                HISTORY_MEASURES.get() >= 2,
+                "sizing change must measure the pair"
+            );
+            HISTORY_MEASURES.set(0);
+            h.run_steps(1);
+            assert_eq!(
+                HISTORY_MEASURES.get(),
+                0,
+                "unchanged frame measured history labels"
+            );
         }
     }
 

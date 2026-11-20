@@ -20,6 +20,7 @@ use crate::app_harness::{plain_harness_no_mo2, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
 use crate::invariants::{arm, strike, Entry, Pressed};
+use crate::support::reveal_header_control;
 use eframe::egui::{Key, Pos2, Rect, Vec2};
 use sdc_gui::app::SdcApp;
 use sdc_gui::model::bottom::BottomTab;
@@ -258,7 +259,7 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "tools menu",
         fixture: "demo",
-        open: nothing,
+        open: |h| reveal_header_control(h, "Tools"),
         steps: &[r#"{"op":"click","at":{"label":"Tools","role":"Button"}}"#],
         act: None,
         marker: &[has("Re-encode every output")],
@@ -476,7 +477,7 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "mo2 popup",
         fixture: "demo",
-        open: nothing,
+        open: |h| reveal_header_control(h, "MO2…"),
         steps: &[r#"{"op":"click","at":{"label":"MO2…"}}"#],
         act: None,
         marker: &[has("Scan a folder…")],

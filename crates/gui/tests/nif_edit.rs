@@ -2606,7 +2606,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(6);
     // The shared header and the open bottom panel are still there.
-    for l in ["Save", "MO2…", "Files"] {
+    for l in ["Save", "Files"] {
         h.get_by_label(l);
     }
     support::header_export_label(&h);
@@ -2689,6 +2689,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     // Minor 5: an untouched session is idle, not blocked: weak text, no red.
     h.get_by_label("No edits to export.");
     assert!(h.query_by_label("Blocked: No edits to export.").is_none());
+    support::reveal_header_control(&mut h, "MO2…");
 }
 
 // ---- v2 A18: Controllers (scalars) and Extra data tabs ----
