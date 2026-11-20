@@ -1024,20 +1024,27 @@ mod marker {
     #[test]
     fn the_export_menu_offers_the_tool() {
         let d = tempfile::tempdir().unwrap();
-        let mut h = Harness::builder()
-            .with_context_setup(|ctx| {
-                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-            })
-            .with_size(egui::vec2(1400.0, 900.0))
-            .build_ui_state(
-                |ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m),
-                cube_model(d.path(), FLAT),
-            );
-        h.run();
-        h.get_by_label_contains("Export to").click();
-        h.run();
-        h.get_by_label("Make marker cube…").click();
-        h.run();
-        assert_eq!(h.state().dialog, Some(Dialog::MakeMarker));
+        for (model, menu) in [
+            (cube_model(d.path(), FLAT), "Tools"),
+            (
+                AppModel::new(GuiSettings::default(), None, support::session()),
+                "More export options",
+            ),
+        ] {
+            let mut h = Harness::builder()
+                .with_context_setup(|ctx| {
+                    sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+                })
+                .with_size(egui::vec2(1400.0, 900.0))
+                .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model);
+            h.run();
+            h.get_by_label(menu).click();
+            h.run();
+            h.get_by_label("Make marker cube…").click();
+            h.run();
+            assert_eq!(h.state().dialog, Some(Dialog::MakeMarker));
+            h.get_by_label("Marker colour");
+            h.get_by_label("Save…");
+        }
     }
 }

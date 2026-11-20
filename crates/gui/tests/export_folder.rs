@@ -260,6 +260,14 @@ fn the_header_says_the_folder_is_not_chosen() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Export to: not chosen");
     assert_eq!(h.query_all_by_label("More export options").count(), 0);
+    h.get_by_label("Export to: not chosen").click();
+    h.run();
+    h.get_by_label("Open export folder (none chosen yet)")
+        .hover();
+    h.run();
+    h.get_by_label("No export folder chosen yet");
+    h.key_press(eframe::egui::Key::Escape);
+    h.run();
     // Once chosen it names the folder.
     let m = h.state_mut();
     m.set_export_folder(d.path().join("out"));
@@ -267,6 +275,15 @@ fn the_header_says_the_folder_is_not_chosen() {
     h.run();
     assert_eq!(h.query_all_by_label_contains("Export to:").count(), 1);
     assert_eq!(h.query_all_by_label("Export to: not chosen").count(), 0);
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    h.get_by_label("Open export folder (not created yet: export creates it)")
+        .hover();
+    h.run();
+    h.get_by_label(&format!(
+        "The export folder does not exist yet: {}. Export creates it.",
+        d.path().join("out").display()
+    ));
 }
 
 /// Note FI5 (A4, Important 7): with no project the `gui.toml` folder is not shown (it vanishes when one opens), so the

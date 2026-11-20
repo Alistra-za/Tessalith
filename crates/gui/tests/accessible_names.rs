@@ -22,6 +22,39 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
 }
 
+#[test]
+fn open_export_folder_names_both_buttons_and_paints_the_reason() {
+    let d = tempfile::tempdir().unwrap();
+    for (chosen, exists, label) in [
+        (false, false, "Open export folder (none chosen yet)"),
+        (
+            true,
+            false,
+            "Open export folder (not created yet: export creates it)",
+        ),
+        (true, true, "Open export folder"),
+    ] {
+        let mut m = opened_unchosen(&d.path().join(format!("{chosen}-{exists}")));
+        let out = d.path().join(format!("out-{chosen}-{exists}"));
+        if chosen {
+            choose_export(&mut m, out.clone());
+        }
+        if exists {
+            std::fs::create_dir(&out).unwrap();
+        }
+        m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
+        let mut h = harness(m);
+        h.run();
+        h.get_by_label_contains("Export to: ").click();
+        h.run();
+        for name in [label.to_owned(), format!("Files: {label}")] {
+            let row = h.get_by_role_and_label(Role::Button, &name);
+            assert_eq!(row.accesskit_node().is_disabled(), !exists, "{name}");
+            assert!(painted_in(&h, row.rect()).contains(label), "{name}");
+        }
+    }
+}
+
 /// Every progress node (a spinner, a bar) with no name: its value and rect.
 fn unnamed_progress<S>(h: &Harness<'_, S>) -> Vec<String> {
     h.query_all_by_role(Role::ProgressIndicator)

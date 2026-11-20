@@ -53,6 +53,11 @@ pub fn spawn(req: &ShellRequest) {
     let _ = c.spawn();
 }
 
+pub struct ExportFolderState {
+    pub label: &'static str,
+    pub folder: Result<PathBuf, String>,
+}
+
 impl AppModel {
     /// The requests queued since the last call; the app starts Explorer for each.
     pub fn take_shell(&mut self) -> Vec<ShellRequest> {
@@ -60,29 +65,39 @@ impl AppModel {
     }
 
     /// The export folder, or why "Open export folder" is off: Explorer would show some other folder instead.
-    pub fn export_folder_state(&self) -> Result<PathBuf, String> {
+    pub fn export_folder_state(&self) -> ExportFolderState {
         self.export_folder_check(self.export_root().is_dir())
     }
 
     /// [`Self::export_folder_state`] with the stat result given (the drawer passes a cached one).
-    pub fn export_folder_check(&self, exists: bool) -> Result<PathBuf, String> {
+    pub fn export_folder_check(&self, exists: bool) -> ExportFolderState {
         if self.export_folder_chosen().is_none() {
-            return Err("No export folder chosen yet".into());
+            return ExportFolderState {
+                label: "Open export folder (none chosen yet)",
+                folder: Err("No export folder chosen yet".into()),
+            };
         }
         let p = self.export_root();
         if exists {
-            Ok(p)
+            ExportFolderState {
+                label: "Open export folder",
+                folder: Ok(p),
+            }
         } else {
-            Err(format!(
-                "The export folder does not exist yet: {}. Export creates it.",
-                p.display()
-            ))
+            ExportFolderState {
+                label: "Open export folder (not created yet: export creates it)",
+                folder: Err(format!(
+                    "The export folder does not exist yet: {}. Export creates it.",
+                    p.display()
+                )),
+            }
         }
     }
 
     /// Open the export folder in Explorer; the reason when it cannot.
     pub fn open_export_folder(&mut self) -> Result<(), String> {
         self.export_folder_state()
+            .folder
             .map(|p| self.shell.push(ShellRequest::Open(p)))
     }
 

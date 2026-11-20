@@ -464,7 +464,7 @@ impl eframe::App for SdcApp {
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
-            // Export to ▾ and the palette open the PGPatcher JSON editor in this view too (K4). Note FB7: a popped-out
+            // Tools ▾ and the palette open the PGPatcher JSON editor in this view too (K4). Note FB7: a popped-out
             // view shows here; one opened docked switches to the Textures view, whose centre column holds it.
             crate::ui::centre_tabs::popped(&ctx, &mut self.model);
             if std::mem::take(&mut self.model.reveal_centre) {

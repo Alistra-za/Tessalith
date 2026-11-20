@@ -306,7 +306,7 @@ pub static ACTIONS: &[Action] = &[
             &[],
             |m, _| m.open_json_editor(),
         ),
-        |m| m.target == engine::config::Target::Cs && m.root.is_some() && m.sets_doc.is_some(),
+        |m| super::header::shows_json_editor(m).is_ok(),
     ),
     a("presets", "Open the preset creator", Global, &[], |m, _| {
         m.open_presets()

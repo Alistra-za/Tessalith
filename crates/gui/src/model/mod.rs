@@ -360,7 +360,7 @@ pub enum Dialog {
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
     Rename(rename::RenameDialog),
-    /// Export to ▾: Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
+    /// Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
     MakeMarker,
     Error(String),
 }
@@ -923,7 +923,7 @@ pub struct AppModel {
     pub last_recipe: rename::Recipe,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
-    /// Note JA11: **Re-encode every output** in the Export to ▾ menu. Off at start and never saved: the next export
+    /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
     /// encodes every output that has a record again (`OnExisting::Reencode`), and clears it as it starts (JA12).
     pub reencode_all: bool,
     pub preview: preview::PreviewModel,

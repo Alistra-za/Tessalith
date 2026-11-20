@@ -92,7 +92,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             });
     }
     let exists = stats.is_dir(&model.export_root(), Instant::now());
-    let folder = model.export_folder_check(exists);
+    let state = model.export_folder_check(exists);
     ui.horizontal(|ui| {
         if running {
             cancel = ui.button("Cancel").clicked();
@@ -111,8 +111,9 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
                 "The command that reproduces this export from the saved sdc.toml. Set edits in sdc-project.toml and mesh evidence are not carried",
             )
             .clicked();
-        let r = ui.add_enabled(folder.is_ok(), egui::Button::new("Open export folder"));
-        open = match &folder {
+        let r = ui.add_enabled(state.folder.is_ok(), egui::Button::new(state.label))
+            .accessible_name(format!("Files: {}", state.label));
+        open = match &state.folder {
             Ok(p) => r.on_hover_text(p.display().to_string()).clicked(),
             Err(why) => {
                 r.on_disabled_hover_text(why);

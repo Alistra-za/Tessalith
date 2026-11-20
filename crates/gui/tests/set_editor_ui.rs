@@ -895,12 +895,18 @@ fn the_header_has_the_json_editor_and_the_also_export_tab_has_no_pgpatcher_keys(
     let mut h = harness(m);
     h.run();
     // Note JI2: the set panel's second tab is Also export (no drawer body); the TruePBR box is on its Material tab.
-    // Opened first: the Material tab's row has its own JSON editor button.
+    // Both launchers are on screen when Tools opens over the Material tab.
+    h.get_by_label("Tools").click();
+    h.run();
+    h.get_by_label("Material: PGPatcher JSON editor…");
+    h.get_by_label(sdc_gui::ui::header::JSON_EDITOR);
+    h.key_press(eframe::egui::Key::Escape);
+    h.run();
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Also export")
         .click();
     h.run();
-    // R14: the editor is an entry of Export to ▾.
-    h.get_by_label_contains("Export to: ").click();
+    // R14: the editor is available from the header.
+    h.get_by_label("Tools").click();
     h.run();
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR);
     // Close the menu again before the tab checks.

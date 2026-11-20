@@ -1,4 +1,4 @@
-//! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · Settings…, then
+//! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset · Tools | the view tabs · Settings…, then
 //! Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
 use super::meshes::UndoTarget;
 use crate::look::Combo036 as _;
@@ -9,9 +9,9 @@ use eframe::egui;
 use engine::config::Target;
 use engine::presets::AlsoTarget;
 
-/// The Export to ▾ entry that opens the PGPatcher JSON editor (R14; was the header's PG JSON Editor, Note BH7).
+/// The Tools entry that opens the PGPatcher JSON editor (R14).
 pub const JSON_EDITOR: &str = "PGPatcher JSON editor…";
-/// The Export to ▾ entry that opens the marker cube dialog (cubemap GUI, Task 6).
+/// The marker cube command in Tools, or More before a project opens.
 pub const MAKE_MARKER: &str = "Make marker cube…";
 /// Export's width; Note CD1 puts it beside Save at the right edge.
 const EXPORT_WIDTH: f32 = 240.0;
@@ -23,7 +23,7 @@ const NOT_CHOSEN_TEXT: &str = "Export to: not chosen ▾";
 const PATH_MIN_CHARS: usize = 12;
 /// Why the export folder cannot change now.
 pub const EXPORT_RUNNING_HOVER: &str = "An export is running: change the folder after it ends";
-/// Export to ▾'s item that makes the next export encode every recorded output again (Notes JA11, JA12).
+/// The Tools item that makes the next export encode every recorded output again (Notes JA11, JA12).
 pub const REENCODE_TEXT: &str = "Re-encode every output";
 const REENCODE_HOVER: &str =
     "Encode every output again, even when nothing changed. Files Tessalith has no record of are kept.";
@@ -76,7 +76,7 @@ pub fn draw(
     status(ui, model);
 }
 
-/// A4, left to right: Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · Settings…, then Export to ▾ · Save ·
+/// A4, left to right: Open ▾ · Undo · Redo | MO2… · Preset · Tools | the view tabs · Settings…, then Export to ▾ · Save ·
 /// Export pushed to the right edge.
 fn row(
     ui: &mut egui::Ui,
@@ -85,6 +85,10 @@ fn row(
 ) {
     // Save and Export's height from the start, so every control centres on one line (not lower after the taller tabs).
     ui.set_row_height(2.0 * ui.spacing().interact_size.y);
+    // Make room for Tools at the existing one-row threshold without shortening the controls.
+    if model.root.is_some() && ui.available_width() < 1280.0 {
+        ui.spacing_mut().item_spacing.x = 3.5;
+    }
     open_menu(ui, model);
     let edits = super::edit_controls_visible(ui.ctx(), model);
     if edits {
@@ -97,6 +101,9 @@ fn row(
         super::meshes::mo2_button(ui, m);
     }
     preset_combo(ui, model);
+    if model.root.is_some() {
+        tools_menu(ui, model);
+    }
     ui.separator();
     view_toggle(ui);
     settings_button(ui, model);
@@ -380,9 +387,57 @@ fn also_items(
     out
 }
 
-/// The PGPatcher JSON editor is offered: cs mode, a folder open and its `sdc-project.toml` loaded.
-fn shows_json_editor(model: &AppModel) -> bool {
-    model.target == Target::Cs && model.root.is_some() && model.sets_doc.is_some()
+/// The first unmet condition for editing the project's PGPatcher JSON.
+pub(super) fn shows_json_editor(model: &AppModel) -> Result<(), &'static str> {
+    if model.root.is_none() {
+        Err("Open a folder first.")
+    } else if model.target != Target::Cs {
+        Err("Switch to Community Shaders mode in Settings.")
+    } else if model.sets_doc.is_none() {
+        Err("Load the project's sets document first.")
+    } else {
+        Ok(())
+    }
+}
+
+fn marker_item(ui: &mut egui::Ui, model: &mut AppModel) {
+    if ui
+        .add_enabled(!model.picker.busy(), egui::Button::new(MAKE_MARKER))
+        .on_hover_text("Write a 1×1 marker cube (a solid F0 colour and roughness) that Community Shaders reads")
+        .on_disabled_hover_text(picker::BUSY_HOVER)
+        .clicked()
+    {
+        model.open_marker_dialog();
+        ui.close();
+    }
+}
+
+fn tools_menu(ui: &mut egui::Ui, model: &mut AppModel) {
+    let mut reencode = model.reencode_all;
+    let menu = crate::look::menu_button_036(ui, "Tools ▾", |ui| {
+        let available = shows_json_editor(model);
+        let r = ui.add_enabled(available.is_ok(), egui::Button::new(JSON_EDITOR));
+        let r = match available {
+            Ok(()) => r.on_hover_text(
+                "Edit the whole PGPatcher JSON: its file name, every set's entry and the delete sections",
+            ),
+            Err(why) => r.on_disabled_hover_text(why),
+        };
+        if r.clicked() {
+            model.open_json_editor();
+            ui.close();
+        }
+        marker_item(ui, model);
+        ui.checkbox(&mut reencode, REENCODE_TEXT)
+            .on_hover_text(REENCODE_HOVER)
+            .changed()
+    });
+    let button = menu.response.accessible_name("Tools");
+    if menu.inner == Some(true) {
+        model.set_reencode_all(reencode);
+        // The checkbox stays available to untick; choosing either dialog closes the menu.
+        egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
+    }
 }
 
 /// Starts a new line of a wrapped row unless `width` fits in what is left of this one. A nested layout (a combo, a
@@ -716,17 +771,13 @@ pub(super) fn export_folder_off(model: &AppModel) -> Option<&'static str> {
 }
 
 /// Export to ▾ (A4): `text` shows the folder cut in the middle; the hover and the accessible name keep all of it (K8).
-/// Without a chosen folder (`full` None) it is "Export to: not chosen ▾", or "More ▾" with no project (Note FI5). Entries: Choose export folder…, Open export folder
-/// and, in cs mode, the PGPatcher JSON editor (R14); the Also export ticks and Re-encode every output (JA12).
+/// With no project the button reads "More ▾" and also offers the standalone marker tool.
 fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: Option<String>) {
     let mut choose = false;
     let mut open = false;
-    let mut json = false;
-    let mut marker = false;
     let mut tick = None;
-    let mut reencode = model.reencode_all;
     // A click inside keeps it open (egui's default closes on any click), so the ticks can be set without reopening;
-    // the three entries below close it themselves.
+    // commands that open a folder or dialog close it themselves.
     let r = super::path_picker::menu(ui, &text, |ui| {
         let off = export_folder_off(model);
         let r = ui.add_enabled(off.is_none(), egui::Button::new("Choose export folder…"));
@@ -737,8 +788,8 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
         choose = r.clicked();
         // A2: stat only while the menu is open.
         let state = model.export_folder_state();
-        let r = ui.add_enabled(state.is_ok(), egui::Button::new("Open export folder"));
-        open = match &state {
+        let r = ui.add_enabled(state.folder.is_ok(), egui::Button::new(state.label));
+        open = match &state.folder {
             Ok(p) => r.on_hover_text(format!("Show {} in Explorer", p.display())),
             Err(why) => r.on_disabled_hover_text(why),
         }
@@ -749,32 +800,10 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
             .is_some()
             .then_some(EXPORT_RUNNING_HOVER);
         tick = also_items(ui, model, running);
-        // Note JA11: read when the next export starts, which clears it (JA12); a tick during an export waits for the
-        // next one.
-        let why = model.root.is_none().then_some("Open a folder first");
-        let r = ui.add_enabled(
-            why.is_none(),
-            egui::Checkbox::new(&mut reencode, REENCODE_TEXT),
-        );
-        match why {
-            Some(w) => r.on_disabled_hover_text(w),
-            None => r.on_hover_text(REENCODE_HOVER),
-        };
-        if shows_json_editor(model) {
-            json = ui
-                .button(JSON_EDITOR)
-                .on_hover_text(
-                    "Edit the whole PGPatcher JSON: its file name, every set's entry and the delete sections",
-                )
-                .clicked();
+        if model.root.is_none() {
+            marker_item(ui, model);
         }
-        // Always offered: the file is saved wherever the user says, so it needs no project.
-        marker = ui
-            .add_enabled(!model.picker.busy(), egui::Button::new(MAKE_MARKER))
-            .on_hover_text("Write a 1×1 marker cube (a solid F0 colour and roughness) that Community Shaders reads")
-            .on_disabled_hover_text(picker::BUSY_HOVER)
-            .clicked();
-        if choose || open || json || marker {
+        if choose || open {
             ui.close();
         }
     });
@@ -801,16 +830,9 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
         // As the Files tab's: the entry is enabled only when the folder is there.
         let _ = model.open_export_folder();
     }
-    if json {
-        model.open_json_editor();
-    }
-    if marker {
-        model.open_marker_dialog();
-    }
     if let Some((t, on)) = tick {
         model.set_also_tick(t, on);
     }
-    model.set_reencode_all(reencode);
 }
 
 fn status(ui: &mut egui::Ui, model: &mut AppModel) {

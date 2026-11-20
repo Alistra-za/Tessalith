@@ -20,7 +20,7 @@ pub enum PickerPurpose {
     SaveReport,
     /// Review's Also section: where the PBR, Vanilla and CM folders go (TA10).
     AlsoLocation,
-    /// Export to ▾: where the marker cube is saved.
+    /// Where the marker cube is saved.
     MakeMarker,
     /// Map to target…: the project's target mod folder (Note HL4).
     TargetMod,

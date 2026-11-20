@@ -656,6 +656,7 @@ fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f
             ui.add_space(8.0);
             if ui
                 .small_button("PGPatcher JSON editor…")
+                .accessible_name("Material: PGPatcher JSON editor…")
                 .on_hover_text(
                     "Every set's entry and the delete sections of the PGPatcher JSON, in one view",
                 )

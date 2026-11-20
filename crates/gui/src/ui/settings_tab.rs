@@ -274,7 +274,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                             r
                         };
                         // Stat only while the tab is drawn (rule 9.4).
-                        let state = model.export_folder_state();
+                        let state = model.export_folder_state().folder;
                         let r = button(ui, state.is_ok(), "Open", OPEN_NAME);
                         let open = match &state {
                             Ok(p) => r.on_hover_text(format!("Show {} in Explorer", p.display())),

@@ -37,6 +37,24 @@ fn no_edit_controls(h: &app_harness::H) {
 }
 
 #[test]
+fn tools_is_hidden_with_no_project() {
+    let mut h = app_harness::plain_harness(model());
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("Settings…");
+    assert_eq!(h.query_all_by_label("Tools").count(), 0);
+    h.get_by_label("More export options").click();
+    h.run_steps(3);
+    h.get_by_label("Make marker cube…").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().model.dialog,
+        Some(sdc_gui::model::Dialog::MakeMarker)
+    );
+    h.get_by_label("Marker colour");
+    h.get_by_label("Save…");
+}
+
+#[test]
 fn a_launch_with_no_project_shows_the_start_card_even_after_meshes() {
     let mut m = model();
     let dir = tempfile::tempdir().unwrap();
@@ -139,7 +157,7 @@ fn a_no_project_files_tab_stays_hidden_even_when_saved_open() {
         h.query_by_label("Files").is_none(),
         "the Files tab is visible"
     );
-    assert!(h.query_by_label("Open export folder").is_none());
+    assert!(h.query_by_label_contains("Open export folder").is_none());
 }
 
 const MESSAGES_REASON: &str = "Open a texture folder or edit a NIF in Meshes to see Messages.";

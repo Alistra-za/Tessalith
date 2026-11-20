@@ -303,12 +303,13 @@ fn open_export_folder_is_disabled_until_the_folder_exists() {
     let mut h = drawer_harness(model_with(d.path(), &out, ExportModel::default()));
     h.run();
     assert!(h
-        .get_by_label("Open export folder")
+        .get_by_label("Files: Open export folder (not created yet: export creates it)")
         .accesskit_node()
         .is_disabled());
-    let why = h.state().0.export_folder_state().unwrap_err();
+    let why = h.state().0.export_folder_state().folder.unwrap_err();
     assert!(why.contains("does not exist yet"), "{why}");
-    h.get_by_label("Open export folder").click();
+    h.get_by_label("Files: Open export folder (not created yet: export creates it)")
+        .click();
     h.run();
     assert!(
         h.state().0.shell.is_empty(),
@@ -320,10 +321,10 @@ fn open_export_folder_is_disabled_until_the_folder_exists() {
     h.run();
     h.run();
     assert!(!h
-        .get_by_label("Open export folder")
+        .get_by_label("Files: Open export folder")
         .accesskit_node()
         .is_disabled());
-    h.get_by_label("Open export folder").click();
+    h.get_by_label("Files: Open export folder").click();
     h.run();
     assert_eq!(h.state_mut().0.take_shell(), vec![ShellRequest::Open(out)]);
 }

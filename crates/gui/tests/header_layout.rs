@@ -172,6 +172,7 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         ("Undo", header_undo(h, "Undo").rect()),
         ("Redo", header_undo(h, "Redo").rect()),
         ("Preset", widget(h, Role::ComboBox, "Preset").rect()),
+        ("Tools", h.get_by_label("Tools").rect()),
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
         ("Settings…", h.get_by_label("Settings…").rect()),
@@ -467,7 +468,62 @@ fn a_running_export_shows_progress_in_the_header() {
     assert!(p.top() >= export.bottom() - 0.5 && (p.left() - export.left()).abs() < 1.0);
 }
 
-/// Note BH7, R14: Export to ▾ → PGPatcher JSON editor… opens the editor, whose top field renames the JSON.
+#[test]
+fn tools_holds_the_json_editor_marker_and_reencode() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()), 1600.0, false);
+    h.get_by_label("Tools").click();
+    h.run();
+    h.get_by_label("PGPatcher JSON editor…");
+    h.get_by_label("Make marker cube…");
+    h.get_by_role_and_label(Role::CheckBox, "Re-encode every output")
+        .hover();
+    h.run();
+    h.get_by_label("Encode every output again, even when nothing changed. Files Tessalith has no record of are kept.");
+}
+
+#[test]
+fn export_to_holds_only_export_things() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened_unchosen(d.path()), 1600.0, false);
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    for gone in [
+        "Make marker cube…",
+        "Re-encode every output",
+        "PGPatcher JSON editor…",
+    ] {
+        assert_eq!(h.query_all_by_label(gone).count(), 0, "{gone}");
+    }
+    h.get_by_label("Choose export folder…");
+    h.get_by_label("Open export folder (none chosen yet)");
+}
+
+#[test]
+fn tools_explains_why_the_json_editor_is_disabled() {
+    let d = tempfile::tempdir().unwrap();
+    for (vanilla, reason) in [
+        (true, "Switch to Community Shaders mode in Settings."),
+        (false, "Load the project's sets document first."),
+    ] {
+        let mut m = pbr_opened(&d.path().join(vanilla.to_string()));
+        if vanilla {
+            m.target = engine::config::Target::Vanilla;
+        } else {
+            m.sets_doc = None;
+        }
+        let mut h = harness(m, 1600.0, false);
+        h.get_by_label("Tools").click();
+        h.run();
+        let json = h.get_by_label("PGPatcher JSON editor…");
+        assert!(json.accesskit_node().is_disabled());
+        json.hover();
+        h.run();
+        h.get_by_label(reason);
+    }
+}
+
+/// Note BH7, R14: Tools ▾ → PGPatcher JSON editor… opens the editor, whose top field renames the JSON.
 #[test]
 fn pg_json_editor_opens_the_editor_with_the_name_field() {
     let d = tempfile::tempdir().unwrap();
@@ -475,7 +531,7 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
     assert!(h
         .query_by_label(sdc_gui::ui::json_editor::NAME_LABEL)
         .is_none());
-    h.get_by_label_contains("Export to: ").click();
+    h.get_by_label("Tools").click();
     h.run_steps(2);
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR).click();
     h.run_steps(2);

@@ -51,8 +51,7 @@ fn presets_opens_as_a_centre_tab() {
 fn json_editor_opens_as_a_centre_tab() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()));
-    // The same menu item as before: Export to ▾ → PGPatcher JSON editor….
-    h.get_by_label_contains("Export to: ").click();
+    h.get_by_label("Tools").click();
     h.run();
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR).click();
     h.run();
