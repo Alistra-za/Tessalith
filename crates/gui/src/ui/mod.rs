@@ -203,12 +203,7 @@ pub fn draw_with_scan(
     let previous_strip = state.drops.strip.take();
     state.drops.file = (!paths.is_empty()).then(|| {
         // Note JW2: a release on the previous strip belongs to Sets even if the editor now occupies that space.
-        // Explorer usually supplies no button event; use the OS cursor in that case.
-        let release = previous_strip
-            .as_ref()
-            .and_then(|_| ui.input(sets_column::image_releases).0);
-        let pos = release
-            .or_else(|| drop_pos(ui.ctx()))
+        let pos = drop_pos(ui.ctx())
             .filter(|&p| sets_column::strip_owner_at(&previous_strip, p).is_none());
         sets_column::FileDrop { paths, pos }
     });
@@ -546,19 +541,26 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
 
 /// Item 17 (DECISIONS AG98): where a file from Explorer was dropped, in this window's points. winit 0.30 reports a
 /// drop without a position and no mouse moves reach the window during the drag, so the pointer egui knows is stale:
-/// on Windows the cursor is read from the OS and placed with the window's inner position. Elsewhere, and without
-/// viewport information (tests), the last pointer position egui has.
+/// on Windows the cursor is read from the OS and placed with the window's inner position, or is unknown if the
+/// lookup fails. Elsewhere, and without viewport information (tests), use egui's last pointer position.
 fn drop_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
     #[cfg(feature = "test-hooks")]
     paint_counts::Work::DropPosition.built();
-    os_cursor(ctx).or_else(|| ctx.input(|i| i.pointer.latest_pos()))
+    #[cfg(windows)]
+    if let Some(inner) = ctx.input(|i| i.viewport().inner_rect) {
+        return os_cursor(ctx, inner);
+    }
+    ctx.pointer_latest_pos()
 }
 
 #[cfg(windows)]
-fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
+fn os_cursor(ctx: &egui::Context, inner: egui::Rect) -> Option<egui::Pos2> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    let inner = ctx.input(|i| i.viewport().inner_rect)?;
+    #[cfg(feature = "test-hooks")]
+    if ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("failed-cursor-lookup")) == Some(true)) {
+        return None;
+    }
     let mut p = POINT { x: 0, y: 0 };
     // SAFETY: GetCursorPos writes one POINT through a valid pointer.
     if unsafe { GetCursorPos(&mut p) } == 0 {
@@ -569,9 +571,10 @@ fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
     Some(egui::pos2(p.x as f32 / ppp, p.y as f32 / ppp) - inner.min.to_vec2())
 }
 
-#[cfg(not(windows))]
-fn os_cursor(_: &egui::Context) -> Option<egui::Pos2> {
-    None
+/// Simulate GetCursorPos failing in this harness's viewport.
+#[cfg(all(windows, feature = "test-hooks"))]
+pub fn fail_cursor_lookup(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("failed-cursor-lookup"), true));
 }
 
 /// The two resizable columns of the Textures view.

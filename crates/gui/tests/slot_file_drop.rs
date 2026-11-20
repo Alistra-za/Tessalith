@@ -293,9 +293,50 @@ fn drop_on_card_scrolled_out_of_view_opens_folder_not_slot() {
     );
 }
 
-/// Note JW2: previous paint owns the release even if the set card is no longer drawn.
+#[cfg(windows)]
 #[test]
-fn an_explorer_drop_uses_the_last_release_on_the_previous_strip_or_bridge() {
+fn a_failed_native_lookup_skips_the_editor_slot_under_the_stale_pointer() {
+    use eframe::egui;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == LEAF)
+        .unwrap()
+        .key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let slot = slot_rect(&h, "Normal _n").center();
+    h.hover_at(slot);
+    h.run();
+    assert_eq!(h.ctx.pointer_latest_pos(), Some(slot));
+    let inner = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .inner_rect = Some(inner);
+    sdc_gui::ui::fail_cursor_lookup(&h.ctx);
+    let path = file(&h.state().0, NORMAL);
+    let folder = path.parent().unwrap().to_owned();
+    h.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(path)));
+    h.step();
+    idle(&mut h.state_mut().0);
+    assert!(
+        !members(&h.state().0, LEAF).iter().any(|key| key == NORMAL),
+        "the stale pointer must not deliver the file to the editor slot"
+    );
+    assert!(
+        matches!(&h.state().0.dialog, Some(sdc_gui::model::Dialog::OpenUnsaved(p)) if p == &folder)
+    );
+}
+
+/// Note JW2: previous paint owns a file under the OS cursor even if the set card is no longer drawn.
+#[test]
+fn an_explorer_drop_uses_the_cursor_on_the_previous_strip_or_bridge() {
     use eframe::egui;
     let d = tempfile::tempdir().unwrap();
     let other = tempfile::tempdir().unwrap();
@@ -305,9 +346,9 @@ fn an_explorer_drop_uses_the_last_release_on_the_previous_strip_or_bridge() {
     let bridge = egui::vec2(0.0, 17.0);
     let beside = egui::vec2(48.0, 0.0);
     for (release, pointer, opens_folder) in [
-        (Some(strip), beside, true),
-        (Some(bridge), beside, true),
-        (Some(beside), strip, false),
+        (Some(beside), strip, true),
+        (Some(beside), bridge, true),
+        (Some(strip), beside, false),
         (None, strip, true),
         (None, beside, false),
     ] {
@@ -362,7 +403,7 @@ fn an_explorer_drop_uses_the_last_release_on_the_previous_strip_or_bridge() {
                     .slot_note
                     .as_ref()
                     .is_some_and(|n| n.error),
-                "the release was on an editor slot"
+                "the OS cursor was on an editor slot"
             );
             assert!(h.state().0.dialog.is_none());
         }
@@ -371,6 +412,67 @@ fn an_explorer_drop_uses_the_last_release_on_the_previous_strip_or_bridge() {
             "the hidden column has no current strip"
         );
     }
+}
+
+#[test]
+fn an_explorer_drop_on_a_visible_card_clears_the_strip_and_stops_polling() {
+    use eframe::egui;
+    use sdc_gui::model::Dialog;
+    use sdc_gui::ui::paint_counts::Work::DropPosition;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened_plain(d.path()));
+    h.run();
+    let card = h
+        .get_by_label_contains("Set landscape/rock01, position ")
+        .rect();
+    h.hover_at(card.center());
+    h.run();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&polls);
+    h.ctx.set_repaint_observer(move |info| {
+        if info.delay == Duration::from_millis(50) {
+            seen.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+    let reads = DropPosition.count();
+    let counts = || (DropPosition.count() - reads, polls.load(Ordering::Relaxed));
+    let path = file(&h.state().0, NORMAL);
+    let folder = path.parent().unwrap().to_owned();
+    h.input_mut().hovered_files.push(egui::HoveredFile {
+        path: Some(path.clone()),
+        ..Default::default()
+    });
+    h.run_steps(2);
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK)
+    );
+    assert_eq!(counts(), (2, 2));
+
+    // egui-winit clears hovered_files when it delivers DroppedFile.
+    h.input_mut().hovered_files.clear();
+    h.input_mut().dropped_files.push(Arc::new(Dropped(path)));
+    h.step();
+    assert!(matches!(&h.state().0.dialog, Some(Dialog::OpenUnsaved(p)) if p == &folder));
+    assert!(
+        h.state().1.drops.strip.is_none(),
+        "delivery clears the painted strip"
+    );
+    assert_eq!(
+        counts(),
+        (3, 2),
+        "delivery reads the cursor once and ends polling"
+    );
+    h.run_steps(3);
+    assert!(h.state().1.drops.strip.is_none());
+    assert_eq!(
+        counts(),
+        (3, 2),
+        "idle frames after delivery do no more polling"
+    );
 }
 
 /// Trace-debug #52: a folder change closes the Sets column's modal and the Slot commands window.

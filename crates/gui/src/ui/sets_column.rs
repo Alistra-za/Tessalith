@@ -4765,8 +4765,8 @@ fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
     });
 }
 
-/// Note JW2: the last release owns the drop. Only a single Shift-primary release can use a remembered answer.
-pub(super) fn image_releases(i: &egui::InputState) -> (Option<egui::Pos2>, Option<egui::Pos2>) {
+/// Note JW2: the last release owns an in-app drop. Only a single Shift-primary release can use a remembered answer.
+fn image_releases(i: &egui::InputState) -> (Option<egui::Pos2>, Option<egui::Pos2>) {
     if !i.pointer.any_released() {
         return (None, None);
     }
