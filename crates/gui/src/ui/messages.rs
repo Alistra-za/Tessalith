@@ -132,6 +132,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             });
         }
     });
+    if model.messages.unread() > 0 {
+        model.messages.mark_read();
+        ui.ctx().request_repaint(); // The tab strip drew the previous count.
+    }
 }
 
 /// The Messages tab's text: "Messages", plus the unread count.

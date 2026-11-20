@@ -123,9 +123,21 @@ pub fn after_device_loss_folder(
 
 /// Check the same access the planner needs before the folder goes into Recent.
 pub fn checked_folder(path: PathBuf) -> Result<PathBuf, String> {
+    checked_folder_with(path, |p| std::fs::read_dir(p))
+}
+
+fn checked_folder_with<I>(
+    path: PathBuf,
+    list: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<PathBuf, String>
+where
+    I: Iterator<Item = std::io::Result<std::fs::DirEntry>>,
+{
     std::path::absolute(&path)
         .and_then(|absolute| {
-            std::fs::read_dir(&absolute)?.next().transpose()?;
+            for entry in list(&absolute)? {
+                entry?;
+            }
             // Windows grants listing entries and reading folder attributes separately.
             std::fs::metadata(&absolute)?;
             Ok(absolute)
@@ -421,6 +433,18 @@ pub fn install_in(dir: Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_arg_reports_an_error_after_the_first_directory_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("texture.png"), []).unwrap();
+        let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+        let expected = format!("Could not open {}. {error}", dir.path().display());
+        let result = checked_folder_with(dir.path().to_owned(), |path| {
+            Ok(std::fs::read_dir(path)?.chain(std::iter::once(Err(error))))
+        });
+        assert_eq!(result, Err(expected));
+    }
 
     #[test]
     fn folder_arg_takes_the_first_existing_folder() {

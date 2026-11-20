@@ -177,16 +177,19 @@ mod tests {
 
     #[test]
     fn folder_arg_stores_dot_as_an_absolute_recent_folder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let argument = std::path::Path::new(".").join(dir.path().file_name().unwrap());
+        assert_eq!(
+            std::path::absolute(&argument).unwrap(),
+            dir.path(),
+            "only open the test-owned project"
+        );
         let saved = dir.path().join("gui.toml");
         let mut model = AppModel::placeholder(settings::GuiSettings::default());
         model.settings_path = Some(saved.clone());
-        open_startup_folder(&mut model, [".".into()], None);
-        assert_eq!(
-            settings::GuiSettings::load(&saved).0.recent,
-            [std::env::current_dir().unwrap()]
-        );
-        assert_eq!(model.settings.recent, [std::env::current_dir().unwrap()]);
+        open_startup_folder(&mut model, [argument.into_os_string()], None);
+        assert_eq!(settings::GuiSettings::load(&saved).0.recent, [dir.path()]);
+        assert_eq!(model.settings.recent, [dir.path()]);
     }
 
     #[test]

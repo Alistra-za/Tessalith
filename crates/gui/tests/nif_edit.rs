@@ -11096,6 +11096,49 @@ fn right_click_on_the_3d_view_offers_export_this_nif() {
     assert!(!h.state().meshes.edit.as_ref().unwrap().doc.pending());
 }
 
+#[test]
+fn exporting_the_last_nif_keeps_its_unseen_message_unread() {
+    let out = tempfile::tempdir().unwrap();
+    let (_d, mut h) = no_project_app(Some(out.path()), 1);
+    let (_, path, bytes) = nif_out(&h);
+    assert_eq!(h.state().model.nif_review_rows().len(), 1);
+    h.get_by_label_contains("Messages").click();
+    h.run_steps(4);
+    h.get_by_label("Clear");
+    assert_eq!(h.state().model.messages.unread(), 0);
+
+    right_click_3d(&mut h);
+    let read = h.state().model.messages.len();
+    h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+        .click();
+    h.run_steps(6);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    let model = &h.state().model;
+    assert!(model.nif_review_rows().is_empty());
+    assert!(h.query_by_label_contains("Messages").is_none());
+    assert_eq!(
+        model.messages.entries().next_back().unwrap().text,
+        "NIF edits written: 1 file"
+    );
+    let unread = model.messages.unread();
+    assert_eq!(
+        unread,
+        model.messages.len() - read,
+        "the tab never drew these entries"
+    );
+    assert_eq!(
+        model
+            .messages
+            .entries()
+            .rev()
+            .take(unread)
+            .filter(|e| e.text == "NIF edits written: 1 file")
+            .count(),
+        1,
+        "the export result is unread"
+    );
+}
+
 /// Q5: the model keeps the result for the app to hand over.
 #[test]
 fn quick_export_keeps_its_result_for_the_app() {

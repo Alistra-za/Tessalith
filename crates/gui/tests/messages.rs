@@ -125,9 +125,13 @@ fn the_log_keeps_500_counts_unread_and_clears() {
     assert_eq!(m.entries().next().unwrap().time, "12:00:00");
     assert_eq!(m.unread(), LOG_CAP);
     m.set_open(true);
+    assert_eq!(m.unread(), LOG_CAP, "opening alone shows no entries");
+    m.mark_read();
     assert_eq!(m.unread(), 0);
     m.log(Severity::Warning, "while open");
-    assert_eq!(m.unread(), 0, "an open panel reads as it goes");
+    assert_eq!(m.unread(), 1, "the next frame has yet to draw this entry");
+    m.mark_read();
+    assert_eq!(m.unread(), 0);
     m.set_open(false);
     m.log(Severity::Error, "closed");
     assert_eq!(m.unread(), 1);
