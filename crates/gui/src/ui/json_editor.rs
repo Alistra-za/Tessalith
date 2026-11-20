@@ -154,8 +154,21 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
     });
 }
 
+fn show_set(ctx: &egui::Context, model: &mut AppModel, target: SetTarget) {
+    super::after_commit(ctx, model, move |m| m.go_to_target(target, None));
+}
+
 /// The editor, in the centre column or in its popped-out window (Note FB7).
 pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
+    let nav_id = egui::Id::unique("json-editor-nav");
+    let mut nav = ui.data(|d| d.get_temp::<Nav>(nav_id)).unwrap_or_default();
+    // Show is below the fields. Start its commit before they draw so each can observe focus loss.
+    if let Some((pass, target)) = nav.show.take() {
+        if pass + 1 == ui.ctx().cumulative_pass_nr() {
+            show_set(ui.ctx(), model, target);
+        }
+    }
+    let editing = ui.ctx().text_edit_focused();
     let mut acts: Vec<Act> = vec![];
     let read_only = model.sets_read_only_reason();
     ui.horizontal_wrapped(|ui| {
@@ -187,8 +200,6 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
     let (entries, issues) = (&built.entries, &built.issues);
     let sections = model.sections();
     let hits = delete_hits(model);
-    let nav_id = egui::Id::unique("json-editor-nav");
-    let mut nav = ui.data(|d| d.get_temp::<Nav>(nav_id)).unwrap_or_default();
     ui.weak(format!(
         "{} set entr{} · {} delete section{}. Edits here and in a set's TruePBR settings are the same edits.",
         entries.len(),
@@ -260,7 +271,11 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
                 }
                 model.remove_section(i);
             }
-            Act::Select(target) => model.go_to_target(target, None),
+            Act::Select(target) if editing => {
+                nav.show = Some((ui.ctx().cumulative_pass_nr(), target));
+                ui.ctx().request_repaint();
+            }
+            Act::Select(target) => show_set(ui.ctx(), model, target),
             Act::Fold(id) => {
                 if !nav.closed.remove(&id) {
                     nav.closed.insert(id);
@@ -1064,6 +1079,8 @@ struct Nav {
     current: Option<Spot>,
     /// Scroll to this at the next draw.
     scroll: Option<Spot>,
+    /// The clicked Show target, valid only on the editor's next consecutive pass.
+    show: Option<(u64, SetTarget)>,
 }
 
 type Entries = [(SetView, EntryInput)];

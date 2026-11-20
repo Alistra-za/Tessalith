@@ -173,6 +173,48 @@ fn a_view_click_commits_the_overlay_json_name_once() {
 }
 
 #[test]
+fn json_show_commits_the_focused_name_before_selecting_the_set() {
+    use sdc_gui::model::{pbr_export::written_json_entries, CentreTab, SetTarget};
+    use sdc_gui::sets_doc::SetsDoc;
+
+    app_data();
+    for meshes in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = support::pbr_opened(d.path());
+        let target = SetTarget::view(&written_json_entries(&m)[0].0).selection();
+        m.select_item("landscape/rock01.png");
+        let mut h = app_harness::plain_harness_no_mo2(m);
+        header::set_meshes_view(&h.ctx, meshes);
+        h.state_mut().model.open_json_editor();
+        app_harness::settle(&mut h, 3);
+        assert_eq!(h.state().model.centre_over_meshes, meshes);
+        assert_ne!(h.state().model.selection, target);
+        let steps = h.state().model.history.undo.len();
+        h.get_by_label("JSON file name").click();
+        h.run_steps(2);
+        h.event(eframe::egui::Event::Text("Shown pack".into()));
+        h.run_steps(2);
+        assert!(h.get_by_label("JSON file name").is_focused());
+        assert_eq!(h.state().model.history.undo.len(), steps);
+        h.get_by_label("Show").click_accesskit();
+        app_harness::settle(&mut h, 3);
+        let m = &mut h.state_mut().model;
+        m.save().unwrap();
+        assert_eq!(
+            SetsDoc::open(m.root.as_deref().unwrap())
+                .json_name()
+                .as_deref(),
+            Some("Shown pack"),
+            "Show commits the focused JSON name"
+        );
+        assert_eq!(m.history.undo.len(), steps + 1);
+        assert_eq!(m.selection, target);
+        assert_eq!(m.centre_front(), CentreTab::Selection);
+        assert!(!header::meshes_view_active(&h.ctx));
+    }
+}
+
+#[test]
 fn invalid_header_mo2_pick_shows_the_error_above_the_open_tool() {
     app_data();
     let d = tempfile::tempdir().unwrap();
