@@ -575,7 +575,7 @@ fn paint_letter_on(
     p.galley(at, g, colour);
 }
 
-/// Note JW7: a non-helper trailing tile paints its slot letter, or its member tail.
+/// Note HP9: a non-helper trailing tile paints its slot letter, or its member tail.
 /// `kind` is the slot the member owns in the set, if any. The tail is read with `v.skin || v.shared`, as the input
 /// names are (`input_name.rs`).
 fn tile_tag(model: &AppModel, v: &SetView, key: &str, kind: Option<SlotKind>) -> String {
@@ -4765,7 +4765,7 @@ fn record_line(ui: &mut egui::Ui, v: &SetView, map: &TxstMap, ignored: bool) {
     });
 }
 
-/// Note JW2: the last release owns an in-app drop. Only a single Shift-primary release can use a remembered answer.
+/// Note JW1: the last release owns an in-app drop. Only a single Shift-primary release can use a remembered answer (JW6).
 fn image_releases(i: &egui::InputState) -> (Option<egui::Pos2>, Option<egui::Pos2>) {
     if !i.pointer.any_released() {
         return (None, None);
