@@ -210,9 +210,24 @@ fn review_replans_for_a_new_ready_set() {
 
 #[test]
 fn review_replans_only_once_for_two_differing_previews() {
+    check_review_replans_once(false);
+}
+
+#[test]
+fn review_replans_only_once_when_scan_starts_while_waiting_for_mesh_votes() {
+    check_review_replans_once(true);
+}
+
+fn check_review_replans_once(start_scan: bool) {
     use sdc_gui::worker::WorkerMsg;
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened_chosen_decided(d.path());
+    let dbdir = tempfile::tempdir().unwrap();
+    if start_scan {
+        let db = dbdir.path().join("scan.db");
+        drop(modscan::store::Store::open(&db).unwrap());
+        m.scan_db = Some(db);
+    }
     m.hold_plan_results = true;
     support::add_ready_set(d.path(), "b");
     m.open_review();
@@ -230,6 +245,17 @@ fn review_replans_only_once_for_two_differing_previews() {
         if settled == 4 {
             assert_eq!(m.generation(), generation + 1, "first mismatch replans");
             assert!(m.full_plan_pending());
+            if start_scan {
+                for msg in held_plan(&mut m) {
+                    m.handle_held(msg);
+                }
+                assert!(m.votes_pending(), "the reconciliation plan awaits votes");
+                assert_eq!(m.generation(), generation + 1);
+                m.scan_started();
+                assert!(!m.votes_pending(), "scan delivered the retained votes");
+                assert_eq!(m.generation(), generation + 2, "follow-up plan started");
+                assert!(m.full_plan_pending());
+            }
             while m.full_plan_pending() {
                 for msg in held_plan(&mut m) {
                     m.handle_held(msg);
@@ -261,6 +287,30 @@ fn review_replans_only_once_for_two_differing_previews() {
     m.open_review();
     idle(&mut m);
     assert_eq!(m.export_files(), 10);
+}
+
+#[test]
+fn changing_group_exclusion_refreshes_the_open_review_request() {
+    use sdc_gui::model::set_groups::GroupTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.move_to_group(&["g/a".into()], GroupTarget::New("Armor".into()))
+        .unwrap();
+    export_and_compare(&mut m, d.path());
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.review_writes().current.len(), 4);
+    m.set_group_excluded("Armor", true).unwrap();
+    assert_eq!(m.written_text(), "2 files · checking which changed…");
+    assert!(m.review_gate().is_ok());
+    idle(&mut m);
+    m.set_group_excluded("Armor", true).unwrap();
+    assert_eq!(m.written_text(), "Will be written (0) · Up to date (2)");
+    let root = m.output_root().join("textures/g");
+    assert_eq!(
+        m.review_writes().current,
+        [root.join("u.dds"), root.join("u_n.dds")]
+    );
 }
 
 #[test]

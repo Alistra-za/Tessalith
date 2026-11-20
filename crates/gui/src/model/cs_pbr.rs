@@ -434,6 +434,7 @@ impl AppModel {
         // Note BM: a texture-set block that comes or goes is shader-pick input, so that edit plans again.
         if super::sets::cs_txst_sets(self) != txst {
             // A sets-document edit: no partial plan.
+            self.new_review_request();
             self.replan_after_edit(false);
         }
     }

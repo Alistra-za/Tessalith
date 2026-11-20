@@ -17,6 +17,15 @@ pub struct ExportScope {
 }
 
 impl AppModel {
+    /// The scope selected at an Export click. Host expansion and rekeying use the same Review request.
+    pub(super) fn choose_scope(&mut self, scope: Option<ExportScope>) {
+        if self.export_scope.as_ref().map(|s| &s.requested) != scope.as_ref().map(|s| &s.requested)
+        {
+            self.new_review_request();
+        }
+        self.set_scope(scope);
+    }
+
     /// `in_run` for set id `id`.
     pub(super) fn in_run_id(&self, id: &str) -> bool {
         self.in_run(&engine::sets::set_key(&self.sets_root(), id))
@@ -62,7 +71,7 @@ impl AppModel {
             .map(|k| set_key(&new, &set_id(old, k)))
             .collect();
         let label = scope.label.clone();
-        self.begin_scope(keys, label);
+        self.set_scope(Some(ExportScope::new(keys, label)));
     }
 
     /// For Selection and the Problems filter (`Set`, `SetNotes`, `SetChecks`), a key under the old root
@@ -141,17 +150,9 @@ impl AppModel {
         if self.export.running.is_some() {
             return;
         }
-        self.begin_scope(keys, label);
+        self.choose_scope(Some(ExportScope::new(keys, label)));
         self.export_decided();
         self.end_idle_scope();
-    }
-
-    fn begin_scope(&mut self, keys: BTreeSet<String>, label: String) {
-        self.set_scope(Some(ExportScope {
-            requested: keys.clone(),
-            keys,
-            label,
-        }));
     }
 
     /// Resolve hosts after the plan settles, when mirrored jobs have their new output paths.
@@ -213,5 +214,15 @@ impl AppModel {
             }
         }
         keys
+    }
+}
+
+impl ExportScope {
+    fn new(keys: BTreeSet<String>, label: String) -> Self {
+        Self {
+            requested: keys.clone(),
+            keys,
+            label,
+        }
     }
 }

@@ -275,6 +275,7 @@ impl AppModel {
         let refresh = self.settings.checks.low_detail != c.low_detail;
         self.settings.checks = c;
         if refresh {
+            self.new_review_request();
             self.invalidate_currency();
             self.request_currency();
         }
