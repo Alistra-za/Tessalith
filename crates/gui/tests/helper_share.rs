@@ -776,20 +776,6 @@ fn editing_b(dir: &Path, helper: &str) -> AppModel {
     m
 }
 
-fn flat_shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
-    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
-        match s {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
-            s => out.push(s.clone()),
-        }
-    }
-    let mut out = vec![];
-    for c in &h.output().shapes {
-        flat(&c.shape, &mut out);
-    }
-    out
-}
-
 /// Note JW3 (A5-1): a shared-helper row is outlined in the strong text colour with the link mark, never amber.
 #[test]
 fn a_shared_helper_row_is_outlined_neutral_with_the_link_mark() {
@@ -806,7 +792,7 @@ fn a_shared_helper_row_is_outlined_neutral_with_the_link_mark() {
         .find(|r| centre.contains(r.center()))
         .expect("the row's name");
     let strong = h.ctx.global_style().visuals.strong_text_color();
-    let shapes = flat_shapes(&h);
+    let shapes = shapes(&h);
     let stop = h
         .get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
         .rect();

@@ -31,20 +31,6 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
     h
 }
 
-fn shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
-    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
-        match s {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
-            s => out.push(s.clone()),
-        }
-    }
-    let mut out = vec![];
-    for c in &h.output().shapes {
-        flat(&c.shape, &mut out);
-    }
-    out
-}
-
 /// rock01's name on its card.
 fn name_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
     name_of(h, ROCK)

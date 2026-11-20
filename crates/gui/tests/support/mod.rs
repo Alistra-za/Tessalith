@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 //! A folder like a small mod: a diffuse with varying alpha (needs an alpha decision), a normal with no stated green
 //! convention, a 3 px diffuse (blocked by DIM-SMALL), a plain diffuse, and roughness + AO that pack `_rmaos`.
+use eframe::egui;
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use image::{ImageBuffer, Luma, Rgb, Rgba};
@@ -9,6 +10,20 @@ use sdc_gui::settings::GuiSettings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+
+pub fn shapes<S>(h: &egui_kittest::Harness<'_, S>) -> Vec<egui::Shape> {
+    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            s => out.push(s.clone()),
+        }
+    }
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, &mut out);
+    }
+    out
+}
 
 pub fn mod_folder(dir: &Path) -> PathBuf {
     let r = dir.join("textures/landscape");

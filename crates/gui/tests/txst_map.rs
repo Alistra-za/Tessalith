@@ -15,7 +15,7 @@ use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
 use std::path::Path;
 use std::time::Duration;
-use support::session;
+use support::{session, shapes};
 
 pub const X: &str = "textures/s/x";
 
@@ -1089,20 +1089,6 @@ fn a_record_slot_another_set_writes_is_borrowed() {
     assert!(c.filled.contains_key(&2) && c.filled.contains_key(&3));
 }
 
-fn flat_shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
-    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
-        match s {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
-            s => out.push(s.clone()),
-        }
-    }
-    let mut out = vec![];
-    for c in &h.output().shapes {
-        flat(&c.shape, &mut out);
-    }
-    out
-}
-
 /// Note JW3 (A5-1, HG7): a record fill is a `SlotFill::Borrowed` chip, drawn by the same `chip_row` arm as a borrow
 /// line, so it takes the neutral outline too, never amber.
 #[test]
@@ -1130,7 +1116,7 @@ fn a_record_fill_chip_is_outlined_neutral() {
         .get_by_label_contains(&format!("Set {M}, position "))
         .rect();
     let strong = h.ctx.global_style().visuals.strong_text_color();
-    let shapes = flat_shapes(&h);
+    let shapes = shapes(&h);
     for label in ["N", "SK", "DETAIL_N"] {
         let chips: Vec<_> = h
             .query_all_by_role_and_label(egui::accesskit::Role::Button, label)
