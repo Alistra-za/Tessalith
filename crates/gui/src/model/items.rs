@@ -216,8 +216,7 @@ pub fn helper_target_text(h: &HelperReport) -> String {
     target_line(h, "not used", |_, t| fill_text(t))
 }
 
-/// Note HP12: `helper_target_text` for the trailing-row tile, which paints the tag "unused" and so names itself with
-/// that word.
+/// Note JW7: the trailing helper tile keeps "unused" in its accessible name and hover.
 pub fn helper_tag_text(h: &HelperReport) -> String {
     target_line(h, "unused", |_, t| fill_text(t))
 }
@@ -240,7 +239,7 @@ pub fn used_by(h: &HelperReport) -> Option<String> {
     (h.fills.is_empty() && !bases.is_empty()).then(|| bases.join(", "))
 }
 
-/// `word` is how a helper that fills nothing is called ("not used", or "unused" where a tag paints that).
+/// `word` describes a helper that fills nothing ("not used", or "unused" on a set card).
 fn target_line(
     h: &HelperReport,
     word: &str,

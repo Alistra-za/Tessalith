@@ -72,7 +72,7 @@ fn paint_cached<T: Clone + Send + Sync + 'static>(
     value
 }
 
-/// Measurements of set-editor paint work on the current GUI thread.
+/// Measurements of paint work on the current GUI thread.
 #[cfg(feature = "test-hooks")]
 pub mod paint_counts {
     use std::cell::Cell;
@@ -86,9 +86,13 @@ pub mod paint_counts {
         OutputLine,
         Format,
         Picker,
+        FoldedNames,
+        FoldedGroups,
+        FoldedItemLookups,
+        DropPosition,
     }
 
-    thread_local! { static BUILDS: Cell<[usize; 7]> = const { Cell::new([0; 7]) }; }
+    thread_local! { static BUILDS: Cell<[usize; 11]> = const { Cell::new([0; 11]) }; }
 
     impl Work {
         pub(super) fn built(self) {
@@ -166,6 +170,19 @@ pub(crate) fn new_project_line(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
+/// A pending or visible modal owns the window, including Explorer and in-app drops (Note JW2).
+fn drop_blocked(
+    ctx: &egui::Context,
+    model: &AppModel,
+    drops: &sets_column::DropState,
+    cmds: &slot_commands::SlotCmdState,
+) -> bool {
+    model.dialog.is_some()
+        || drops.pending.is_some()
+        || cmds.open.is_some()
+        || ctx.memory(|m| m.top_modal_layer()).is_some()
+}
+
 /// [`draw_with`] with the mod scan's row under the header (the app passes its Meshes model; tests pass `None`).
 pub fn draw_with_scan(
     ui: &mut egui::Ui,
@@ -180,15 +197,15 @@ pub fn draw_with_scan(
         .replace(model.folder_epoch)
         .is_some_and(|e| e != model.folder_epoch)
     {
-        state.drops = Default::default();
+        state.drops = sets_column::DropState {
+            last_choice: state.drops.last_choice,
+            ..Default::default()
+        };
         state.slot_cmds = Default::default();
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).
     // Backlog T21: a modal open at this frame's start owns the window; a drop under it is ignored.
-    let modal = model.dialog.is_some()
-        || state.drops.pending.is_some()
-        || state.slot_cmds.open.is_some()
-        || ui.ctx().memory(|m| m.top_modal_layer()).is_some();
+    let modal = drop_blocked(ui.ctx(), model, &state.drops, &state.slot_cmds);
     let paths: Vec<std::path::PathBuf> = if modal {
         Vec::new()
     } else {
@@ -200,9 +217,12 @@ pub fn draw_with_scan(
                 .collect()
         })
     };
-    state.drops.file = (!paths.is_empty()).then(|| sets_column::FileDrop {
-        paths,
-        pos: drop_pos(ui.ctx()),
+    let previous_strip = state.drops.strip.take();
+    state.drops.file = (!paths.is_empty()).then(|| {
+        // Note JW2: a release on the previous strip belongs to Sets even if the editor now occupies that space.
+        let pos = drop_pos(ui.ctx())
+            .filter(|&p| sets_column::strip_owner_at(&previous_strip, p).is_none());
+        sets_column::FileDrop { paths, pos }
     });
     // First, before any widget sees the keys (items 5 and 19).
     actions::keys(ui.ctx(), model, state.drops.pending.is_some());
@@ -289,6 +309,7 @@ pub fn draw_with_scan(
             columns::SETS_MIN..=ui.available_width() - floor,
             model,
             |ui, model| {
+                drops.strip = previous_strip;
                 sets_column::draw(ui, model, thumbs, drops, cmds);
             },
         );
@@ -566,17 +587,26 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
 
 /// Item 17 (DECISIONS AG98): where a file from Explorer was dropped, in this window's points. winit 0.30 reports a
 /// drop without a position and no mouse moves reach the window during the drag, so the pointer egui knows is stale:
-/// on Windows the cursor is read from the OS and placed with the window's inner position. Elsewhere, and without
-/// viewport information (tests), the last pointer position egui has.
+/// on Windows the cursor is read from the OS and placed with the window's inner position, or is unknown if the
+/// lookup fails. Elsewhere, and without viewport information (tests), use egui's last pointer position.
 fn drop_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
-    os_cursor(ctx).or_else(|| ctx.input(|i| i.pointer.latest_pos()))
+    #[cfg(feature = "test-hooks")]
+    paint_counts::Work::DropPosition.built();
+    #[cfg(windows)]
+    if let Some(inner) = ctx.input(|i| i.viewport().inner_rect) {
+        return os_cursor(ctx, inner);
+    }
+    ctx.pointer_latest_pos()
 }
 
 #[cfg(windows)]
-fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
+fn os_cursor(ctx: &egui::Context, inner: egui::Rect) -> Option<egui::Pos2> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    let inner = ctx.input(|i| i.viewport().inner_rect)?;
+    #[cfg(feature = "test-hooks")]
+    if ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("failed-cursor-lookup")) == Some(true)) {
+        return None;
+    }
     let mut p = POINT { x: 0, y: 0 };
     // SAFETY: GetCursorPos writes one POINT through a valid pointer.
     if unsafe { GetCursorPos(&mut p) } == 0 {
@@ -587,9 +617,10 @@ fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
     Some(egui::pos2(p.x as f32 / ppp, p.y as f32 / ppp) - inner.min.to_vec2())
 }
 
-#[cfg(not(windows))]
-fn os_cursor(_: &egui::Context) -> Option<egui::Pos2> {
-    None
+/// Simulate GetCursorPos failing in this harness's viewport.
+#[cfg(all(windows, feature = "test-hooks"))]
+pub fn fail_cursor_lookup(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("failed-cursor-lookup"), true));
 }
 
 /// The two resizable columns of the Textures view.

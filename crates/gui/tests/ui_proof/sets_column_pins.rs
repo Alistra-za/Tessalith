@@ -1089,7 +1089,6 @@ fn a_search_keeps_its_match_in_cut_titles() {
             {
                 n.scroll_to_me();
             }
-            h.run();
             crate::app_harness::quiet(&mut h);
             let title = h
                 .query_all_by_label(id)
@@ -1744,16 +1743,6 @@ fn tile_named(h: &crate::app_harness::H, prefix: &str) -> egui::Rect {
     r[0]
 }
 
-/// The one text painted in `tile`.
-fn any_text(h: &crate::app_harness::H, tile: egui::Rect) -> String {
-    let found: Vec<_> = coloured_texts(h)
-        .into_iter()
-        .filter(|(_, r, _)| tile.expand(1.0).contains(r.center()))
-        .collect();
-    assert_eq!(found.len(), 1, "one painted text in {tile:?}: {found:?}");
-    found[0].0.clone()
-}
-
 fn same_offset(a: egui::Vec2, b: egui::Vec2, at: &str) {
     assert!(
         (a.x - b.x).abs() <= 1.0 && (a.y - b.y).abs() <= 1.0,
@@ -1768,10 +1757,8 @@ fn labels_sit_bottom_left_on_every_tile() {
         let search = |s: &str| {
             format!(r#"{{"op":"type","text":"{s}","at":{{"placeholder":"Search sets"}}}}"#)
         };
-        // an empty chip's letter sits where the D chip's does, dimmed
-        let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
+        let (_d, mut h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
         let at = format!("cobble at {w}x{h_px}");
-        let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
         // the letter reads on the chip's own fill in both themes
         for v in [egui::Visuals::dark(), egui::Visuals::light()] {
             let dim = sdc_gui::ui::sets_column::dim_letter_colour(&v);
@@ -1784,7 +1771,6 @@ fn labels_sit_bottom_left_on_every_tile() {
         }
         let card = one_node(&h, "Set architecture/stone/cobble, ");
         let mut d_off = None;
-        let mut empties = vec![];
         for n in h.query_all(egui_kittest::kittest::by()) {
             if n.accesskit_node().raw_bounds().is_none() {
                 continue;
@@ -1793,22 +1779,83 @@ fn labels_sit_bottom_left_on_every_tile() {
             if !card.contains_rect(r) || !near(r, 32.0, 32.0) {
                 continue;
             }
-            let label = n.accesskit_node().label().unwrap_or_default();
-            match n.accesskit_node().role() {
-                Role::Button if label == "D" => d_off = Some((r, "D")),
-                Role::Label => empties.push(r),
+            let a = n.accesskit_node();
+            let name = a.label().or_else(|| a.value()).unwrap_or_default();
+            match a.role() {
+                Role::Button if name == "D" => d_off = Some(r),
+                // Note JW1: an empty slot has no chip at rest; its letter is painted in the drag strip (set_drag.rs).
+                // Missing, cleared and linked chips keep their own names and interactive roles.
+                _ if name.ends_with(", empty") => {
+                    panic!("{at}: an empty chip {name:?} in the card at rest: {r:?}")
+                }
                 _ => {}
             }
         }
-        let (d_chip, d_text) = d_off.expect("the D chip");
-        let (d_off, ..) = tile_label(&h, d_chip, d_text);
-        assert!(!empties.is_empty(), "{at}: the card has an empty chip");
-        for chip in empties {
-            let letter = any_text(&h, chip);
-            let (off, colour, _) = tile_label(&h, chip, &letter);
-            same_offset(off, d_off, &format!("{at}, empty {letter}"));
-            assert_eq!(colour, dim, "{at}, empty {letter}: the dim letter colour");
+        let d_chip = d_off.expect("the D chip");
+        let (d_off, _, d_letter) = tile_label(&h, d_chip, "D");
+        let views = sets::views(&h.state().model);
+        let v = views
+            .iter()
+            .find(|v| v.id == "architecture/stone/cobble")
+            .unwrap();
+        let letters: Vec<_> = v.empty.iter().map(|&k| sets::chip_letter(v, k)).collect();
+        assert!(!letters.is_empty(), "{at}: the card has empty slots");
+        h.hover_at(card.center());
+        egui::DragAndDrop::set_payload(
+            &h.ctx,
+            sdc_gui::ui::sets_column::DragItem(
+                v.members.first().expect("cobble has a texture").clone(),
+            ),
+        );
+        h.run_steps(3);
+        let (owner, strip, _) = h.state().state.drops.strip.as_ref().expect("visible strip");
+        assert_eq!(owner, &v.id);
+        // Start at the foreground strip's background. Text on the card underneath is covered.
+        let shapes = crate::support::shapes(&h);
+        let start = shapes
+            .iter()
+            .rposition(|s| matches!(s, egui::Shape::Rect(r) if r.rect == *strip))
+            .expect("strip background");
+        let painted = &shapes[start + 1..];
+        let cells: Vec<_> = painted
+            .iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Rect(r) if strip.contains_rect(r.rect) && near(r.rect, 32.0, 32.0) => {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells.len(), letters.len(), "{at}: one cell per empty slot");
+        let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
+        for (cell, letter) in cells.into_iter().zip(letters) {
+            let texts: Vec<_> = painted
+                .iter()
+                .filter_map(|shape| match shape {
+                    egui::Shape::Text(t)
+                        if cell.contains(t.galley.rect.translate(t.pos.to_vec2()).center()) =>
+                    {
+                        Some(t)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                texts.len(),
+                1,
+                "{at}: one painted text in the {letter} cell"
+            );
+            let t = texts[0];
+            assert_eq!(t.galley.job.text, letter, "{at}");
+            assert_eq!(t.galley.job.sections[0].format.color, dim, "{at}, {letter}");
+            let label = t.galley.rect.translate(t.pos.to_vec2());
+            same_offset(
+                label.left_bottom() - cell.left_bottom(),
+                d_letter.left_bottom() - d_chip.left_bottom(),
+                &at,
+            );
         }
+        egui::DragAndDrop::clear_payload(&h.ctx);
         // a trailing-row tile's tag, in the same corner
         for (q, file, tag) in [
             ("gold", "gold_m.png, ", "_m"),
@@ -1819,25 +1866,125 @@ fn labels_sit_bottom_left_on_every_tile() {
             let (off, ..) = tile_label(&h, tile, tag);
             same_offset(off, d_off, &format!("{q} at {w}x{h_px}"));
         }
+        // Note JW7: a helper in the trailing row is a 20 px tile with no painted tag; its name keeps "unused".
         let (_d, h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
-        let tile = tile_named(&h, "crate_metallic.png, ");
-        let (off, _, label) = tile_label(&h, tile, "unused");
-        same_offset(off, d_off, &format!("crate at {w}x{h_px}"));
-        assert!(tile.contains_rect(label), "unused inside its tile");
-        // Task 3 review: no helper badge covers the label
+        let tile = one(&h, "crate_metallic.png, unused: no targets chosen");
+        assert!(
+            near(tile, 20.0, 20.0),
+            "crate at {w}x{h_px}: a badge-size tile, got {tile:?}"
+        );
+        assert!(
+            (drawn_badge(&h, tile).center() - tile.center())
+                .abs()
+                .max_elem()
+                <= 0.5
+        );
+        assert!(
+            !coloured_texts(&h)
+                .iter()
+                .any(|(t, r, _)| t == "unused" && tile.expand(1.0).contains(r.center())),
+            "crate at {w}x{h_px}: no tag painted on the tile"
+        );
         for b in crate_card(&h).badges {
             assert_eq!(
-                shared_area(b, label),
+                shared_area(b, tile),
                 0.0,
-                "badge {b:?} covers the label {label:?}"
+                "badge {b:?} covers the tile {tile:?}"
             );
         }
     }
 }
 
-/// Note HP: an empty chip is named "<letter>, empty", and no Label inside a set card has an empty name.
+/// Note JW7 (A9): a helper whose fills land on no chip of its set is a 20 px tile in the trailing row too.
 #[test]
-fn empty_chips_are_named_and_no_card_label_is_nameless() {
+fn a_helper_whose_fills_land_on_no_chip_is_a_small_tile() {
+    let (_d, h) = crate::replay_with(
+        "helpers",
+        |h| {
+            let fill = F::Packed {
+                suffix: "m",
+                channel: 0,
+            };
+            let m = &mut h.state_mut().model;
+            m.set_target(engine::config::Target::Vanilla);
+            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            m.set_shader("props/crate", Some(engine::shader::Shader::Envmap));
+            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            m.set_helper_fills("props/crate_metallic.png", Some(vec![fill]));
+            crate::app_harness::settle(h, 3);
+            let m = &h.state().model;
+            let v = sets::views(m);
+            let crate_set = v.iter().find(|v| v.id == "props/crate").unwrap();
+            assert_eq!(
+                crate_set.shader.as_ref().unwrap().shader,
+                engine::shader::Shader::Envmap
+            );
+            let report = m
+                .item("props/crate_metallic.png")
+                .unwrap()
+                .helper
+                .as_ref()
+                .unwrap();
+            assert!(report.fills.contains(&fill));
+            assert_eq!(sdc_gui::model::helpers::fill_slot(fill), None);
+        },
+        &[SEARCH],
+    );
+    let names = named_from(&h, "crate_metallic.png, ");
+    assert_eq!(
+        names.len(),
+        1,
+        "one node, the trailing tile, and no badge: {names:?}"
+    );
+    assert!(
+        !names[0].contains("unused"),
+        "premise: it fills something, only no chip of crate: {names:?}"
+    );
+    let tile = one(&h, &names[0]);
+    assert!(near(tile, 20.0, 20.0), "a badge-size tile, got {tile:?}");
+}
+
+/// Note JW7: roughness stays on Coat while RMAOS is locked. Linking Coat leaves just its trailing tile.
+#[test]
+fn a_helper_whose_second_chip_is_linked_returns_to_the_trailing_row() {
+    for linked in [false, true] {
+        let (_d, h) = crate::replay_with(
+            "helpers",
+            |h| {
+                let m = &mut h.state_mut().model;
+                let id = "props/crate";
+                m.edit_docs("Lock RMAOS", None, false, |_, s| s.set_lock(id, 6, true));
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+                m.set_pgp_lock(id, 6, true).unwrap();
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+                if linked {
+                    m.set_slot_command(
+                        id,
+                        7,
+                        sets::SlotCommand::Path(r"textures\other\coat_cnr.dds".into()),
+                    )
+                    .unwrap();
+                }
+                crate::app_harness::settle(h, 3);
+            },
+            &[SEARCH],
+        );
+        let names = named_from(&h, "crate_roughness.png, ");
+        assert_eq!(names.len(), 1, "{names:?}");
+        if linked {
+            one(&h, "CNR, path coat_cnr.dds");
+            assert_ne!(names[0], "crate_roughness.png, fills CNR alpha");
+            assert!(near(one(&h, &names[0]), 20.0, 20.0));
+        } else {
+            assert_eq!(names, ["crate_roughness.png, fills CNR alpha"]);
+        }
+    }
+}
+
+/// Note HP: no Label inside a set card has an empty name. Note JW1: an empty slot has no chip at rest, and the card
+/// node's description lists the empty slots.
+#[test]
+fn no_card_label_is_nameless_and_the_card_lists_its_empty_slots() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
         let (_d, h) = crate::replay(
@@ -1863,8 +2010,26 @@ fn empty_chips_are_named_and_no_card_label_is_nameless() {
             "{at}: nameless Label in the card: {labels:?}"
         );
         assert!(
-            labels.iter().any(|l| l == "G, empty"),
-            "{at}: an empty G chip, got {labels:?}"
+            !labels.iter().any(|l| l == "G, empty"),
+            "{at}: no empty G chip at rest, got {labels:?}"
+        );
+        let description = h
+            .query_all(egui_kittest::kittest::by())
+            .find(|n| {
+                n.accesskit_node().raw_bounds().is_some()
+                    && n.accesskit_node()
+                        .label()
+                        .is_some_and(|l| l.starts_with("Set architecture/stone/cobble, "))
+            })
+            .and_then(|n| n.accesskit_node().description())
+            .unwrap_or_default();
+        let letters: Vec<&str> = description
+            .strip_prefix("Empty: ")
+            .map(|s| s.split(", ").collect())
+            .unwrap_or_default();
+        assert!(
+            letters.contains(&"G"),
+            "{at}: the card lists G as empty, got {description:?}"
         );
     }
 }

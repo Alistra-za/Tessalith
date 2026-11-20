@@ -1,6 +1,6 @@
 //! The user's texture sets (M3b spec §3, §6.1): views for the Sets column and set editor, shared-slot ownership,
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
-use super::history::{sha256_of, CreatedFile};
+use super::history::CreatedFile;
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
 use super::txst_map::{fill_from_records, link_slots, record_shared_sets};
 use super::AppModel;
@@ -342,6 +342,10 @@ pub enum MatchFrom {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetView {
+    /// Note JW1: empty cells of the final linked row, in display order.
+    pub empty: Vec<SlotKind>,
+    /// Note JW1: the card description and last hover line, or an empty string for a full card.
+    pub empty_line: String,
     /// The engine key (`""` for a created set with no members yet).
     pub key: String,
     pub id: String,
@@ -437,6 +441,53 @@ pub struct SlotLink {
     pub kind: Option<SlotKind>,
     /// The row this link fills: `kind`, or for a typed path `link_row_kind(v, n)`. `None` for game slot 5.
     pub row: Option<SlotKind>,
+}
+
+/// The displayed occupant the user agreed to replace. Keep the full key or path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOccupant {
+    Own { item: String },
+    Borrowed { item: String, from: String },
+    Record { path: String },
+}
+
+impl BorrowOccupant {
+    fn from_shown(shown: SlotShown<'_>) -> Option<Self> {
+        match shown {
+            SlotShown::Own { item } => Some(Self::Own { item: item.into() }),
+            SlotShown::Borrowed { item, from } => Some(Self::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            }),
+            SlotShown::Record { path } => Some(Self::Record { path: path.into() }),
+            _ => None,
+        }
+    }
+
+    fn matches(&self, shown: &SlotShown<'_>) -> bool {
+        match (self, shown) {
+            (Self::Own { item }, SlotShown::Own { item: current }) => item == current,
+            (
+                Self::Borrowed { item, from },
+                SlotShown::Borrowed {
+                    item: current,
+                    from: owner,
+                },
+            ) => item == current && same_id(from, owner),
+            (Self::Record { path }, SlotShown::Record { path: current }) => path == current,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOutcome {
+    Joined,
+    AskReplace {
+        kind: SlotKind,
+        existing: BorrowOccupant,
+    },
+    Refused(String),
 }
 
 /// What the exported JSON carries for a kind's row, in the order `slots_of` writes it.
@@ -686,6 +737,8 @@ impl SetView {
             filled: BTreeMap::new(),
             fill_off: BTreeMap::new(),
             record_supplied: BTreeMap::new(),
+            empty: vec![],
+            empty_line: String::new(),
             rfaos: false,
             created: false,
             missing: vec![],
@@ -962,6 +1015,29 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
         .collect()
 }
 
+/// A chip's letter (A3): the slot's suffix in capitals, "D" for the diffuse.
+pub fn chip_letter(v: &SetView, k: SlotKind) -> String {
+    match k.suffix() {
+        "" => "D".to_string(),
+        _ if k == SlotKind::Rmaos => v.slot_text(k).to_string(),
+        s => s.to_uppercase(),
+    }
+}
+
+/// Note JW1: resolve the empty slots once, after links and record fills, for each rebuilt card.
+fn finish_empty(views: &mut [SetView]) {
+    for v in views {
+        for cell in view_row(v) {
+            if matches!(slot_shown(v, cell.kind), SlotShown::Empty) {
+                v.empty_line
+                    .push_str(if v.empty.is_empty() { "Empty: " } else { ", " });
+                v.empty_line.push_str(&chip_letter(v, cell.kind));
+                v.empty.push(cell.kind);
+            }
+        }
+    }
+}
+
 /// `v`'s slot cards as the exported JSON reads them (review E1): `shared_cells(slot_row(…))`, where a card that holds
 /// a link takes the link's kind. `slot_row` keeps the first kind of a shared card when neither is filled, so a link
 /// to the other kind (a `_f` on slot 7) would read empty.
@@ -1223,6 +1299,9 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
+    /// Full model checks for drop choices on this test thread.
+    pub static DROP_PRECHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+
     /// Test probe: how many times the plan's output paths were built on this thread (ruling 3b-F14).
     static ENGINE_INPUT_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -1406,6 +1485,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     }
     // Review E1: after `finish_view` (`exports_json` reads `json`) and the short names (a link names its source's).
     link_slots(m, &mut views);
+    finish_empty(&mut views);
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
@@ -1663,6 +1743,14 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
         .retain(|w| !missing_map_slot(w).is_some_and(|n| bits & (1 << (n - 1)) != 0));
 }
 
+/// The own file a numbered borrow reads, including the first kind when two kinds share a number.
+fn own_in_slot(slots: BTreeMap<SlotKind, SlotFill>, n: u8) -> Option<(SlotKind, String)> {
+    slots.into_iter().find_map(|(k, f)| match f {
+        SlotFill::Own { item } if k.slot_number() == Some(n) => Some((k, item)),
+        _ => None,
+    })
+}
+
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
 /// for no such set); `lender_borrow` gives set `id`'s own `borrow.slot<n>` line (Note JN1: a chain is followed).
 fn entry_view(
@@ -1713,11 +1801,7 @@ fn entry_view(
             let Some(src) = own(&cur) else {
                 break Err(hops > 0);
             };
-            let found = src.into_iter().find_map(|(k, f)| match f {
-                SlotFill::Own { item } if k.slot_number() == Some(*slot) => Some((k, item)),
-                _ => None,
-            });
-            if let Some(found) = found {
+            if let Some(found) = own_in_slot(src, *slot) {
                 break Ok(found);
             }
             match lender_borrow(&cur, *slot) {
@@ -1944,6 +2028,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
     // with one rebuilt every view above), so the link index is not built.
     link_slots(m, &mut rebuilt);
+    finish_empty(&mut rebuilt);
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {
@@ -2031,14 +2116,8 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     plan_outputs(m, &views(m), None)
 }
 
-/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
-pub(super) fn plan_outputs(
-    m: &AppModel,
-    views: &[SetView],
-    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
-) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
-    #[cfg(feature = "test-hooks")]
-    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
+/// Membership edits in the order the engine applies them.
+fn membership_edits(m: &AppModel) -> Vec<SetEdit> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut edits = vec![];
     for e in entries.iter().filter(|e| e.created) {
@@ -2078,6 +2157,18 @@ pub(super) fn plan_outputs(
             });
         }
     }
+    edits
+}
+
+/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
+pub(super) fn plan_outputs(
+    m: &AppModel,
+    views: &[SetView],
+    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
+) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    #[cfg(feature = "test-hooks")]
+    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
+    let edits = membership_edits(m);
     let mut paths = BTreeMap::new();
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
     let mut named = output_name_paths(m, views);
@@ -2636,10 +2727,60 @@ pub enum DropChoice {
     Duplicate,
 }
 
+impl DropChoice {
+    pub(crate) fn offered(kind: Option<ItemKind>) -> &'static [Self] {
+        if kind == Some(ItemKind::Helper) {
+            &[Self::Move, Self::Share]
+        } else {
+            &[Self::Move, Self::Share, Self::Duplicate]
+        }
+    }
+
+    /// Item-only refusals for slot drops. A raw helper shared as a file bypasses the slot.
+    pub(crate) fn slot_refusal(
+        self,
+        kind: Option<ItemKind>,
+        slot: Option<SlotKind>,
+    ) -> Option<&'static str> {
+        match self {
+            Self::Move if kind == Some(ItemKind::Packed) => Some(PACKED_MOVE),
+            Self::Duplicate if kind == Some(ItemKind::Packed) => Some(PACKED_DUPLICATE),
+            Self::Duplicate if kind == Some(ItemKind::Helper) => Some(HELPER_DUPLICATE),
+            Self::Share if slot.is_none() && kind == Some(ItemKind::Helper) =>
+                Some("Only a raw helper can be shared as a file."),
+            Self::Share if slot.is_none() =>
+                Some("only a finished texture can be shared; duplicate the source to use it in two sets"),
+            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
+            Self::Share if slot.is_some_and(|s| s.slot_number().is_none()) =>
+                Some("Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"),
+            _ => None,
+        }
+    }
+}
+
+/// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
+pub(crate) fn is_shareable_helper(item: &TextureItem) -> bool {
+    item.kind == ItemKind::Helper
+        && item
+            .helper
+            .as_ref()
+            .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
+}
+
+/// Note JW6: the edit or confirmation that follows a successful drop precheck.
+enum DropPlan {
+    ShareHelper(SetView),
+    Slot {
+        target: SetView,
+        slot: Option<SlotKind>,
+        existing: Option<SlotFill>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropOutcome {
     Joined,
-    AskReplace { existing: String },
+    AskReplace { kind: SlotKind, existing: SlotFill },
     AskChoice { from: String },
     Refused(String),
 }
@@ -2656,8 +2797,14 @@ pub enum SlotCommand {
 }
 
 pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
+/// Note JW5: why a helper is never duplicated (a helper is shared as the file itself, Note HH5).
+pub const HELPER_DUPLICATE: &str = "a helper cannot be duplicated; share it instead";
 const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
+const PACKED_DUPLICATE: &str =
+    "A packed map cannot be duplicated. Share its finished output or move its raw maps.";
+const SHARED_SOURCE_CHANGED: &str = "The shared source changed. Drag the chip again.";
+const DESTINATION_SLOT_CHANGED: &str = "The destination slot changed. Drag the chip again.";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.
 const NO_FILES_LEFT: &str = "no texture of this set is left in the folder";
 
@@ -2915,6 +3062,20 @@ pub(crate) fn written_game_path(job: &engine::policy::ResolvedJob) -> String {
     }
 }
 
+/// Sharing adds no member to keep an automatic set alive after Replace.
+fn share_keeps_member(target: &SetView, existing: Option<&SlotFill>) -> Result<(), String> {
+    if matches!(existing, Some(SlotFill::Own { .. }))
+        && target.members.len() == 1
+        && !target.created
+    {
+        return Err(format!(
+            "{} would have no texture of its own left; move another texture in first",
+            target.id
+        ));
+    }
+    Ok(())
+}
+
 /// Empty `slot` of set `id` in the document: its own occupant leaves the set, a borrow is dropped. Part of a replace.
 fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Option<SlotFill>) {
     match existing {
@@ -3160,10 +3321,7 @@ impl AppModel {
             .iter()
             .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
             .and_then(|(k, _)| k.slot_number())?;
-        let first = own.into_iter().find_map(|(k, f)| match f {
-            SlotFill::Own { item } if k.slot_number() == Some(n) => Some(item),
-            _ => None,
-        })?;
+        let (_, first) = own_in_slot(own, n)?;
         (first == item).then_some((v.id, n))
     }
 
@@ -3425,7 +3583,10 @@ impl AppModel {
             return DropOutcome::Refused(why);
         }
         // Note HH5: a no-set helper can be shared, so it asks too; every other no-set texture moves.
-        if from.is_none() && self.is_no_set(item) && self.is_shareable_helper(item) {
+        if from.is_none()
+            && self.is_no_set(item)
+            && self.item(item).is_some_and(is_shareable_helper)
+        {
             return DropOutcome::AskChoice {
                 from: "no set".into(),
             };
@@ -3502,44 +3663,222 @@ impl AppModel {
         }
     }
 
+    /// Note JW4: share the source of a displayed borrow. An effective slot command explains its refusal on the card's status line.
+    pub fn drop_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+    ) -> Result<BorrowOutcome, String> {
+        self.share_borrow(item, from, set, None)
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    /// Recheck the source, commands and displayed occupant before accepting Replace.
+    pub fn replace_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        kind: SlotKind,
+        existing: &BorrowOccupant,
+    ) -> Result<(), String> {
+        self.share_borrow(item, from, set, Some((kind, existing)))
+            .and_then(|out| match out {
+                BorrowOutcome::Joined => Ok(()),
+                BorrowOutcome::Refused(why) => Err(why),
+                BorrowOutcome::AskReplace { .. } => unreachable!("the occupant was confirmed"),
+            })
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    fn share_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        confirmed: Option<(SlotKind, &BorrowOccupant)>,
+    ) -> Result<BorrowOutcome, String> {
+        if !self.sets_editable() {
+            return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
+        }
+        if self.pick_waits().is_some() || membership_edits(self) != self.landed_membership {
+            return Err(SHARED_SOURCE_CHANGED.into());
+        }
+        let target = match self.drop_target(set) {
+            Ok(target) => target,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        let source = self
+            .item(item)
+            .and_then(|it| Some((it, slot_of(it)?, self.lent_slot(item)?.0)));
+        let Some((it, kind, owner)) = source.filter(|(_, _, owner)| same_id(owner, from)) else {
+            return Ok(BorrowOutcome::Refused(SHARED_SOURCE_CHANGED.into()));
+        };
+        if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner) {
+            return Err(why);
+        }
+        let shown = slot_shown(&target, kind);
+        if confirmed
+            .is_some_and(|(approved, existing)| approved != kind || !existing.matches(&shown))
+        {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        }
+        let set = &target.id;
+        let name = &it.name;
+        if same_id(set, &owner) {
+            self.status_line = format!("Nothing to share: {name} is already in {set}.");
+            return Ok(BorrowOutcome::Joined);
+        }
+        if matches!(shown, SlotShown::Borrowed {item: current, from} if current == item && same_id(from, &owner))
+        {
+            self.status_line = format!("{set} already shares {name} from {owner}.");
+            return Ok(BorrowOutcome::Joined);
+        }
+        if let Some(why) = slot_conflict(&target.slots.keys().copied().collect::<Vec<_>>(), kind) {
+            return Ok(BorrowOutcome::Refused(why));
+        }
+        let raw = match self.occupant(&target, Some(kind), None) {
+            Ok(raw) => raw,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        if confirmed.is_none() {
+            if let Some(existing) = BorrowOccupant::from_shown(shown) {
+                if let Err(why) = self
+                    .choice_allowed(item, &target, Some(kind), DropChoice::Share)
+                    .and_then(|()| share_keeps_member(&target, raw.as_ref()))
+                {
+                    return Ok(BorrowOutcome::Refused(why));
+                }
+                return Ok(BorrowOutcome::AskReplace { kind, existing });
+            }
+        }
+        Ok(
+            match self.apply_choice(item, &target, Some(kind), DropChoice::Share, raw) {
+                Ok(()) => BorrowOutcome::Joined,
+                Err(why) => BorrowOutcome::Refused(why),
+            },
+        )
+    }
+
+    /// Note JW4: the membership edit can turn on an otherwise dormant slot command, e.g. by lending an albedo.
+    fn borrow_command_refusal(
+        &self,
+        target: &SetView,
+        kind: SlotKind,
+        item: &str,
+        from: &str,
+    ) -> Option<String> {
+        let n = kind.game_slot()?;
+        let path = slot_string(&target.settings, n)?;
+        let reason = |v: &SetView| {
+            let row = v.linked.get(&n).and_then(|l| l.row).unwrap_or(kind);
+            let slot = v.slot_text(row);
+            let set = &target.id;
+            if path.is_empty() {
+                format!("{set}'s {slot} is cleared: use Use this file or Unlink first.")
+            } else {
+                format!("{set}'s {slot} is linked to {path}: Unlink it first.")
+            }
+        };
+        if super::pbr_export::writes_entry(self, target) {
+            return Some(reason(target));
+        }
+        let mut result = target.clone();
+        if let Some(SlotFill::Own { item }) = result.slots.insert(
+            kind,
+            SlotFill::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            },
+        ) {
+            result.members.retain(|key| key != &item);
+        }
+        finish_view(self, &mut result);
+        if !super::pbr_export::writes_entry(self, &result) {
+            return None;
+        }
+        if path.is_empty() {
+            return Some(reason(&result));
+        }
+        // Resolve the projected link against every lender's outputs, in normal display order.
+        let mut all = set_views(self);
+        let i = all.iter().position(|v| same_id(&v.id, &target.id))?;
+        all[i] = result;
+        link_slots(self, &mut all);
+        Some(reason(&all[i]))
+    }
+
+    /// Note JW6: why the dialog cannot offer this answer. A choice that would ask Replace is usable.
+    pub fn choice_refused(&self, item: &str, set: &str, choice: DropChoice) -> Option<String> {
+        self.drop_precheck(item, set, choice, None).err()
+    }
+
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set
     /// already fills asks to replace first (spec §3.1); answer that with `drop_replace` and the same choice.
     pub fn drop_choice(&mut self, item: &str, set: &str, choice: DropChoice) -> DropOutcome {
-        if !self.sets_editable() {
-            return DropOutcome::Refused(READ_ONLY.into());
-        }
-        let target = match self.drop_target(set) {
-            Ok(t) => t,
+        let result = match self.drop_precheck(item, set, choice, None) {
             Err(e) => return DropOutcome::Refused(e),
+            Ok(DropPlan::ShareHelper(target)) => self.share_helper(item, &target),
+            Ok(DropPlan::Slot {
+                slot: Some(kind),
+                existing: Some(existing),
+                ..
+            }) => return DropOutcome::AskReplace { kind, existing },
+            Ok(DropPlan::Slot { target, slot, .. }) => {
+                self.apply_choice(item, &target, slot, choice, None)
+            }
         };
-        if choice == DropChoice::Share && self.is_shareable_helper(item) {
-            return match self.share_helper(item, &target) {
-                Ok(()) => DropOutcome::Joined,
-                Err(e) => DropOutcome::Refused(e),
-            };
+        match result {
+            Ok(()) => DropOutcome::Joined,
+            Err(e) => DropOutcome::Refused(e),
         }
+    }
+
+    /// Note JW6: the dialog and the edit check the same destination before any write.
+    fn drop_precheck(
+        &self,
+        item: &str,
+        set: &str,
+        choice: DropChoice,
+        approved: Option<(SlotKind, &SlotFill)>,
+    ) -> Result<DropPlan, String> {
+        #[cfg(feature = "test-hooks")]
+        DROP_PRECHECKS.with(|n| n.set(n.get() + 1));
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let target = self.drop_target(set).map_err(|why| {
+            if approved.is_some() {
+                DESTINATION_SLOT_CHANGED.into()
+            } else {
+                why
+            }
+        })?;
         let slot = self.item(item).and_then(slot_of);
+        if approved
+            .is_some_and(|(kind, old)| slot != Some(kind) || target.slots.get(&kind) != Some(old))
+        {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        }
+        if choice == DropChoice::Share && self.item(item).is_some_and(is_shareable_helper) {
+            self.share_helper_check(item, &target)?;
+            return Ok(DropPlan::ShareHelper(target));
+        }
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
             .then_some(from.as_deref())
             .flatten();
-        match self.occupant(&target, slot, share_from) {
-            Err(e) => return DropOutcome::Refused(e),
-            Ok(Some(
-                SlotFill::Own { item: existing } | SlotFill::Borrowed { item: existing, .. },
-            )) => {
-                // Checked first so a refusal (a packed map, a raw map to share) is not asked about.
-                if let Err(e) = self.choice_allowed(item, &target, slot, choice) {
-                    return DropOutcome::Refused(e);
-                }
-                return DropOutcome::AskReplace { existing };
-            }
-            Ok(_) => {}
+        let existing = self.occupant(&target, slot, share_from)?;
+        self.choice_allowed(item, &target, slot, choice)?;
+        if choice == DropChoice::Share {
+            share_keeps_member(&target, existing.as_ref())?;
         }
-        match self.apply_choice(item, &target, slot, choice, None) {
-            Ok(()) => DropOutcome::Joined,
-            Err(e) => DropOutcome::Refused(e),
-        }
+        Ok(DropPlan::Slot {
+            target,
+            slot,
+            existing,
+        })
     }
 
     /// The answer to `AskReplace` for `choice`: the occupant leaves (it becomes a set of its own, or the borrow is
@@ -3549,32 +3888,42 @@ impl AppModel {
         item: &str,
         set: &str,
         choice: DropChoice,
+        kind: SlotKind,
+        approved: &SlotFill,
     ) -> Result<(), String> {
-        if !self.sets_editable() {
-            return Err(READ_ONLY.into());
+        if let Some(wait) = self.pick_waits() {
+            self.status_line = if wait == PICK_PLANNING {
+                "Tessalith is still planning. Try again in a moment."
+            } else {
+                "The plan must run again first."
+            }
+            .into();
+            return Err(self.status_line.clone());
         }
-        let target = self.drop_target(set)?;
-        let slot = self.item(item).and_then(slot_of);
-        let from = self.set_of_item(item).map(|f| f.id);
-        let share_from = (choice == DropChoice::Share)
-            .then_some(from.as_deref())
-            .flatten();
-        let existing = self.occupant(&target, slot, share_from)?;
-        self.apply_choice(item, &target, slot, choice, existing)
+        if !approved.is_filled() {
+            return Err(self
+                .choice_refused(item, set, choice)
+                .unwrap_or_else(|| DESTINATION_SLOT_CHANGED.into()));
+        }
+        let DropPlan::Slot {
+            target,
+            slot,
+            existing: Some(existing),
+        } = self.drop_precheck(item, set, choice, Some((kind, approved)))?
+        else {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        };
+        self.apply_choice(item, &target, slot, choice, Some(existing))
     }
 
-    /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
-    pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
-        self.item(item).is_some_and(|i| {
-            i.kind == ItemKind::Helper
-                && i.helper
-                    .as_ref()
-                    .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
-        })
+    /// Note JW5: the answers the drop dialog offers for `item`, in order: Move, Share, and Duplicate unless the
+    /// item is a helper (`ItemKind::Helper`).
+    pub fn drop_choices(&self, item: &str) -> Vec<DropChoice> {
+        DropChoice::offered(self.item(item).map(|i| i.kind)).to_vec()
     }
 
-    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
-    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+    /// Note HH5: true for the helper's own set, where there is no share line to write.
+    fn share_helper_check(&self, item: &str, target: &SetView) -> Result<bool, String> {
         // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
         // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
         // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
@@ -3584,7 +3933,7 @@ impl AppModel {
             None => self.is_no_set(item) && same_id(&automatic, &target.id),
         };
         if own {
-            return Ok(());
+            return Ok(true);
         }
         // The engine has nothing to read it into (a share into a memberless set is stale).
         if target.members.is_empty() {
@@ -3592,6 +3941,14 @@ impl AppModel {
                 "{} has no texture of its own; move one in first",
                 target.id
             ));
+        }
+        Ok(false)
+    }
+
+    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
+    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+        if self.share_helper_check(item, target)? {
+            return Ok(());
         }
         let name = self.item(item).map_or(item.to_string(), |i| i.name.clone());
         let (id, file) = (target.id.clone(), item.to_string());
@@ -3632,13 +3989,10 @@ impl AppModel {
         if choice == DropChoice::Move {
             self.leaves_locked(item)?;
         }
+        if let Some(why) = choice.slot_refusal(self.item(item).map(|i| i.kind), slot) {
+            return Err(why.into());
+        }
         match choice {
-            DropChoice::Move if self.is_packed(item) => Err(PACKED_MOVE.into()),
-            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
-            DropChoice::Share if slot.is_some_and(|s| s.slot_number().is_none()) => Err(
-                "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
-                    .into(),
-            ),
             // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
             DropChoice::Share
                 if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail))
@@ -3649,15 +4003,11 @@ impl AppModel {
                     target.id
                 ))
             }
-            DropChoice::Share if slot.is_none() => Err(
-                "only a finished texture can be shared; duplicate the source to use it in two sets"
-                    .into(),
-            ),
             DropChoice::Share if self.set_of_item(item).is_none() => {
                 Err("the texture is in no set".into())
             }
-            DropChoice::Duplicate if self.is_packed(item) => {
-                Err("a packed map cannot be duplicated; duplicate its raw maps".into())
+            DropChoice::Share if self.lent_slot(item).is_none() => {
+                Err(SHARED_SOURCE_CHANGED.into())
             }
             _ => Ok(()),
         }
@@ -3695,15 +4045,7 @@ impl AppModel {
                 Ok(())
             }
             DropChoice::Share => {
-                // Sharing adds no member: a set whose only texture leaves would vanish from the engine's sets.
-                if matches!(&existing, Some(SlotFill::Own { .. }))
-                    && target.members.len() == 1
-                    && !target.created
-                {
-                    return Err(format!(
-                        "{id} would have no texture of its own left; move another texture in first"
-                    ));
-                }
+                share_keeps_member(target, existing.as_ref())?;
                 let fid = self.set_of_item(item).map(|f| f.id).unwrap_or_default();
                 let n = slot.and_then(SlotKind::slot_number).unwrap_or_default();
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {
@@ -3766,7 +4108,7 @@ impl AppModel {
             return Err(READ_ONLY.into());
         }
         if self.is_packed(item) {
-            return Err("a packed map cannot be duplicated; duplicate its raw maps".into());
+            return Err(PACKED_DUPLICATE.into());
         }
         let src = self
             .item(item)
@@ -3817,11 +4159,9 @@ impl AppModel {
             .strip_prefix(&root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .map_err(|_| "the copy would be outside the folder".to_string())?;
-        std::fs::copy(&src, &dst).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
-        let Some(sha256) = sha256_of(&dst) else {
-            let _ = std::fs::remove_file(&dst);
-            return Err("could not read the copy".into());
-        };
+        let sha256 = std::fs::File::open(&src)
+            .and_then(|input| super::write_copy(input, &dst))
+            .map_err(|e| format!("could not copy {}: {e}", src.display()))?;
         let id = set.to_string();
         let before = self.sets_doc.as_ref().map(|d| d.text());
         self.edit_docs(&format!("Duplicate into {id}"), None, true, move |_, s| {

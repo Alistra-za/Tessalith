@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 //! A folder like a small mod: a diffuse with varying alpha (needs an alpha decision), a normal with no stated green
 //! convention, a 3 px diffuse (blocked by DIM-SMALL), a plain diffuse, and roughness + AO that pack `_rmaos`.
+use eframe::egui;
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use image::{ImageBuffer, Luma, Rgb, Rgba};
@@ -34,6 +35,38 @@ pub fn check_close(m: &mut AppModel, dirty: (bool, bool), recovery: (bool, bool)
     .map(|(_, path, text)| (path.to_owned(), text))
     .collect();
     assert_eq!(m.recovery_snapshot(), expected, "recovery");
+}
+
+/// Complete a fixture's ordinary drop immediately, approving exactly the returned occupant.
+pub fn accept_drop(
+    m: &mut AppModel,
+    item: &str,
+    set: &str,
+    choice: sdc_gui::model::sets::DropChoice,
+) -> Result<(), String> {
+    use sdc_gui::model::sets::DropOutcome;
+    match m.drop_choice(item, set, choice) {
+        DropOutcome::AskReplace { kind, existing } => {
+            m.drop_replace(item, set, choice, kind, &existing)
+        }
+        DropOutcome::Joined => Ok(()),
+        DropOutcome::Refused(why) => Err(why),
+        DropOutcome::AskChoice { .. } => unreachable!("the fixture supplied its choice"),
+    }
+}
+
+pub fn shapes<S>(h: &egui_kittest::Harness<'_, S>) -> Vec<egui::Shape> {
+    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
+            s => out.push(s.clone()),
+        }
+    }
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, &mut out);
+    }
+    out
 }
 
 pub fn mod_folder(dir: &Path) -> PathBuf {

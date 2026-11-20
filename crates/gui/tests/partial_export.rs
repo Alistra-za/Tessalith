@@ -79,11 +79,9 @@ fn group(m: &mut AppModel, name: &str, ids: &[&str]) {
 
 /// Share `item` into set `to`, replacing its own occupant.
 fn share(m: &mut AppModel, item: &str, to: &str) {
-    if matches!(
-        m.drop_choice(item, to, DropChoice::Share),
-        DropOutcome::AskReplace { .. }
-    ) {
-        m.drop_replace(item, to, DropChoice::Share).unwrap();
+    if let DropOutcome::AskReplace { kind, existing } = m.drop_choice(item, to, DropChoice::Share) {
+        m.drop_replace(item, to, DropChoice::Share, kind, &existing)
+            .unwrap();
     }
     idle(m);
 }

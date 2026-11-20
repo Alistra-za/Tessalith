@@ -94,6 +94,14 @@
 - Advanced Skin treats an authored `landscape_normal` as an extra map and skips it for roughness baking. A borrowed Normal slot can show one texture while roughness bakes from the lending set’s highest-priority eligible normal. The borrower can bake from the lender’s own normal even when the lender’s slot shows a borrowed one. [How the bake picks its normal](docs/wiki/Texture-Packing.md#variance-and-gloss-bake).
 - When an `_f` takes a fuzz map’s output name, the unused-map Note uses the file’s resolved type, including a type set by a rule. It names a PBR fuzz texture or kept `_f.dds` ahead of a height map at that name.
 
+- Empty shader slots are hidden at rest. Hover the status pill to list them, or drag a texture or files from Explorer over the card to see them beside it. Dropping Explorer files on the card or its strip still opens the files’ folder.
+- A slot shared from another set is outlined in the text colour with two linked rings.
+- Drag a shared chip onto another set to share the same file there too. Previously, the borrowed chip could not be dragged. Linked or cleared destinations tell you which command to remove first.
+- Dragging a helper onto a set no longer offers **Duplicate**. Sharing a raw helper uses the file itself.
+- The set-drop question highlights your last accepted answer (Move, Share or Duplicate) if it is available. Hold Shift at release to use it. With no button focused, Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. The documents change when the drop completes. Duplicate creates its copy at that point. If Replace opens, both wait for confirmation.
+- Replace waits for a successful plan after a texture type changes. Undo keeps a file that replaced a duplicate with different contents while the copy was finishing.
+- Helpers no longer take a full tile on a set card. A slot shows at most two helper thumbnails. Click the **+**, with or without a number, to list the rest.
+
 ## 3.0.0
 
 ### Main

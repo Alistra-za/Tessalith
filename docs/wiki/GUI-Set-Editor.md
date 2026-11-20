@@ -93,7 +93,7 @@ The set editor's second tab holds the [Also export as Vanilla and CM](Set-Shader
 
 ## Shared helpers
 
-Under the slot rows, each helper the set shares ([Sets column](GUI-Sets-Column.md#moving-textures-between-sets)) has a row with its name, outlined amber. Click the row to open the helper; its panel lists every set that shares it under **Shared with**. A shared helper is offered in the channel source pickers above. **✕** (**Stop sharing**) takes it out of this set only; the file stays where it is. If the file is deleted from disk, the share clears itself and Messages says so. <!-- D:HH7 -->
+Under the slot rows, each helper the set shares ([Sets column](GUI-Sets-Column.md#moving-textures-between-sets)) has a row with its name, outlined in the text colour, with two linked rings before the name. Click the row to open the helper. **Shared with** lists every set sharing it. Channel source pickers include shared helpers. **✕** (**Stop sharing**) removes it from this set only. The file stays put. Deleting the file clears the share and adds a line to Messages. <!-- D:HH7 -->
 
 ## Mapping to a target
 
@@ -111,7 +111,7 @@ An empty slot of a mapped set reads one of three ways:
 
 | Row | Meaning |
 |---|---|
-| Amber, borrowed | Another set in the project writes the record's path. Nothing is added to `sdc-project.toml`, and one `_n` is written. <!-- D:HG7 --> |
+| The other set's file, dot hover **borrowed from {set}** | Another set in the project writes the record's path. Nothing is added to `sdc-project.toml`, and one `_n` is written. <!-- D:HG7 --> |
 | Grey **From record: body_s.dds** | No set writes the path. The slot counts as supplied: no missing-map warning. |
 | **empty** | The record names nothing for the slot. |
 

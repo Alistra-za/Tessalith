@@ -769,8 +769,10 @@ pub struct AppModel {
     /// Game paths selected by PBR prefixes and TXST mappings. Only a successful full plan installs its paths.
     slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
     pending_slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
-    /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
+    /// Advances on item changes and on checks-only updates to Problems rows.
     items_rev: u64,
+    /// The last `items_rev` from an item or set invalidation.
+    item_content_rev: u64,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
     game_paths: (u64, Vec<String>),
     /// Note FI1: skipped DDS inputs' tile images by path, with the stamp they were decoded at; cleared on open and
@@ -1050,6 +1052,8 @@ pub struct AppModel {
     close_ready: bool,
     /// The engine inputs the latest plan was requested with (DECISIONS P1: two-pass planning).
     last_inputs: Option<EngineInputs>,
+    /// Membership edits applied to the sets on screen. A newer request can still be in flight.
+    landed_membership: Vec<engine::sets::SetEdit>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
     /// A cleanup waiting for the plan that shows its new defaults (the note is written then).
@@ -1199,6 +1203,7 @@ impl AppModel {
             items: vec![],
             input_count: 0,
             items_rev: 0,
+            item_content_rev: 0,
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
@@ -1354,6 +1359,7 @@ impl AppModel {
             fuzz_note: None,
             missing_preset_id: None,
             last_inputs: None,
+            landed_membership: Vec::new(),
             auto_replans: 0,
             type_pending: None,
             type_base: None,
@@ -1419,6 +1425,7 @@ impl AppModel {
         self.disarm_write();
         self.continue_after_plan = None;
         self.last_inputs = None;
+        self.landed_membership.clear();
         self.slot_paths.clear();
         self.pending_slot_paths.clear();
         self.inputs_rev += 1;
@@ -2292,6 +2299,9 @@ impl AppModel {
                         // Note FC14: the edit planned fine; a later failure is not its fault.
                         self.replan_pushes.1 = None;
                         self.landed_sig = Some(self.plan_sig.1);
+                        if let Some(inputs) = &self.last_inputs {
+                            self.landed_membership.clone_from(&inputs.set_edits);
+                        }
                         self.apply_plan(view)
                     }
                     Err(f) => self.plan_failed(f),
@@ -3916,14 +3926,17 @@ impl AppModel {
             .map(|n| (n.text.clone(), n.lines.clone()))
     }
 
-    /// The plan generation, bumped once per `replan` (tests: one plan per bulk apply).
-    #[cfg(feature = "test-hooks")]
+    /// The plan generation, bumped once per `replan`.
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
     pub fn items_rev(&self) -> u64 {
         self.items_rev
+    }
+
+    pub(crate) fn set_content_revisions(&self) -> (u64, u64) {
+        (self.item_content_rev, self.doc_rev())
     }
 
     /// Tests: bumped whenever `last_inputs` changes, and per landed full plan (the checks' count).
@@ -3975,6 +3988,7 @@ impl AppModel {
     /// Call after writing `items` or `sets` in place (tests); a plan does it itself.
     pub fn invalidate_views(&mut self) {
         self.items_rev += 1;
+        self.item_content_rev = self.items_rev;
         self.item_index = self
             .items
             .iter()
@@ -4032,7 +4046,7 @@ impl AppModel {
     pub(crate) fn rows_changed(&mut self) {
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
-        self.invalidate_views();
+        self.items_rev += 1;
         self.carry_views(carried, &old_key, &BTreeSet::new(), true);
     }
 
@@ -5586,39 +5600,47 @@ impl AppModel {
     }
 }
 
-/// Delete a file a command created, if it still has the SHA-256 it was created with.
-/// Redo of a Duplicate: copy the source to the copy's path again, never over a file already there; the new
-/// copy's hash.
-fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
-    let fail = |e: std::io::Error| format!("could not copy {} again: {e}", cf.source.display());
-    let mut out = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&cf.path)
-    {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(format!(
-                "{} already exists, so redo does not copy over it. Move or delete it, then redo.",
-                cf.path.display()
-            ))
+/// Write and hash the image created by Duplicate.
+fn write_copy(mut input: impl std::io::Read, path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{ErrorKind, Write};
+
+    let mut out = std::fs::File::create_new(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = [0; 8192];
+    let copied = loop {
+        let n = match input.read(&mut buf) {
+            Ok(0) => break Ok(hex::encode(hash.finalize())),
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => break Err(e),
+        };
+        if let Err(e) = out.write_all(&buf[..n]) {
+            break Err(e);
         }
-        Err(e) => return Err(fail(e)),
-        Ok(f) => f,
+        hash.update(&buf[..n]);
     };
-    // From here the file at `cf.path` is the one just created, so a failure removes it.
-    let copied =
-        std::fs::File::open(&cf.source).and_then(|mut src| std::io::copy(&mut src, &mut out));
     drop(out);
-    if let Err(e) = copied {
-        let _ = std::fs::remove_file(&cf.path);
-        return Err(fail(e));
-    }
-    history::sha256_of(&cf.path).ok_or_else(|| {
-        let _ = std::fs::remove_file(&cf.path);
-        format!("could not read the copy {}", cf.path.display())
+    copied.inspect_err(|_| {
+        // shortcut: the path may have been replaced, use handle-owned cleanup once persist_noclobber lands (SC-45).
+        let _ = std::fs::remove_file(path);
     })
 }
 
+/// Redo Duplicate only while the original destination is free.
+fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
+    std::fs::File::open(&cf.source)
+        .and_then(|input| write_copy(input, &cf.path))
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("{} already exists, so redo does not copy over it. Move or delete it, then redo.", cf.path.display())
+            } else {
+                format!("could not copy {} again: {e}", cf.source.display())
+            }
+        })
+}
+
+/// Delete a file a command created, if it still has the SHA-256 it was created with.
 fn remove_created(cf: &history::CreatedFile) -> Result<(), String> {
     match history::sha256_of(&cf.path) {
         None => Ok(()), // already gone
@@ -5644,6 +5666,66 @@ mod tests {
     pub(super) fn bare_model() -> AppModel {
         let session = Arc::new(Session::new().expect("an encoder session"));
         AppModel::new(GuiSettings::default(), None, session)
+    }
+
+    #[test]
+    fn duplicate_preserves_a_file_created_after_the_name_was_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chosen.png");
+        std::fs::write(&path, b"foreign").unwrap();
+        let result = super::write_copy(&b"image"[..], &path);
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+    }
+
+    #[test]
+    fn undo_keeps_a_replacement_swapped_in_at_the_end_of_duplicate() {
+        use std::io::{self, Read};
+        struct SwapAtEof<'a>(&'a Path);
+        impl Read for SwapAtEof<'_> {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                std::fs::rename(self.0, self.0.with_extension("moved"))?;
+                std::fs::write(self.0, b"foreign")?;
+                Ok(0)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.png");
+        let input = b"image".as_slice().chain(SwapAtEof(&path));
+        let sha256 = write_copy(input, &path).unwrap();
+        assert_eq!(
+            Some(&sha256),
+            history::sha256_of(&path.with_extension("moved")).as_ref()
+        );
+        let copy = history::CreatedFile {
+            source: dir.path().join("source.png"),
+            path: path.clone(),
+            sha256,
+        };
+        assert!(remove_created(&copy).unwrap_err().contains("undo keeps it"));
+        assert_eq!(std::fs::read(path).unwrap(), b"foreign");
+    }
+
+    #[test]
+    fn duplicate_removes_its_partial_file_on_a_read_error() {
+        use std::io::{self, Read};
+        struct Failed;
+        impl Read for Failed {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("read failed halfway"))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.png");
+        let input = b"first bytes".as_slice().chain(Failed);
+        assert!(super::write_copy(input, &path).is_err());
+        assert!(
+            !path.exists(),
+            "a failed Duplicate must remove the partial file"
+        );
     }
 
     /// An idle model has nothing in flight, and `wait_idle` returns at once.

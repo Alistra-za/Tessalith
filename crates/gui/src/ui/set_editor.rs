@@ -4,7 +4,7 @@ use super::columns::{border_of, bulk_menu, status_text, AMBER, RED};
 use super::sets_column::{DropState, Pending, SlotNote};
 use super::settings_panel::alpha_choice;
 use super::slot_commands::SlotCmdState;
-use super::status::{dot, Status};
+use super::status::{dot, shared_stroke, Status};
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
 use crate::model::bottom::{
@@ -718,11 +718,12 @@ fn file_drop(model: &mut AppModel, drops: &mut DropState, set: &str, slot: SlotK
     };
     drops.slot_note = match r.outcome {
         crate::model::sets::DropOutcome::Refused(why) => Some(line(why, true)),
-        crate::model::sets::DropOutcome::AskReplace { existing } => {
+        crate::model::sets::DropOutcome::AskReplace { kind, existing } => {
             if let Some(item) = r.item {
                 drops.pending = Some(Pending::Replace {
                     item,
                     set: set.to_string(),
+                    kind,
                     existing,
                     choice: crate::model::sets::DropChoice::Move,
                 });
@@ -2109,8 +2110,8 @@ fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut
     }
 }
 
-/// Note HH7: one row per helper the set shares (it belongs to another set, or to no set): its thumbnail and name,
-/// outlined amber as a borrowed slot is, and a `✕` that stops sharing it. A click on the row selects the helper.
+/// Notes HH7, JW3: each shared helper shows its thumbnail, link mark and name inside a neutral outline.
+/// A click on the row selects the helper, and the `✕` stops sharing it.
 /// `why` is the read-only reason (empty when the project takes edits), which turns off only the ✕.
 fn shared_rows(
     ui: &mut egui::Ui,
@@ -2138,6 +2139,13 @@ fn shared_rows(
                     if let Some(t) = thumbs.get(ui.ctx(), i) {
                         ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(20.0, 20.0)));
                     }
+                    let (mark, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());
+                    super::sets_column::link_mark(
+                        ui.painter(),
+                        mark,
+                        ui.visuals().strong_text_color(),
+                    );
                     // truncate() shows the full name on hover; not selectable, so a click reaches the row.
                     ui.add(
                         egui::Label::new(format!("{} (shared)", i.name))
@@ -2167,7 +2175,7 @@ fn shared_rows(
         ui.painter().rect_stroke(
             row.response.rect.expand(2.0),
             2.0,
-            egui::Stroke::new(1.0, AMBER),
+            shared_stroke(ui.visuals(), 1.0),
             egui::StrokeKind::Inside,
         );
     }

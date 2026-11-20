@@ -2434,7 +2434,7 @@ fn open_slot_files(dir: &Path) {
 }
 
 /// `open_slot_files`, opened as the app opens them.
-fn two_sets(dir: &Path) -> AppModel {
+pub(super) fn two_sets(dir: &Path) -> AppModel {
     open_slot_files(dir);
     let m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     let ids: Vec<String> = sdc_gui::model::sets::views(&m)
@@ -2530,8 +2530,8 @@ fn share(m: &mut AppModel, item: &str, into: &str) {
 fn share_replacing(m: &mut AppModel, item: &str, into: &str) {
     use sdc_gui::model::sets::{DropChoice, DropOutcome};
     match m.drop_choice(item, into, DropChoice::Share) {
-        DropOutcome::AskReplace { .. } => m
-            .drop_replace(item, into, DropChoice::Share)
+        DropOutcome::AskReplace { kind, existing } => m
+            .drop_replace(item, into, DropChoice::Share, kind, &existing)
             .expect("shared"),
         other => panic!("not a filled slot: {other:?}"),
     }
@@ -3568,7 +3568,9 @@ fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
 fn drop_now(m: &mut AppModel, item: &str, into: &str, choice: sdc_gui::model::sets::DropChoice) {
     use sdc_gui::model::sets::DropOutcome;
     match m.drop_choice(item, into, choice) {
-        DropOutcome::AskReplace { .. } => m.drop_replace(item, into, choice).expect("dropped"),
+        DropOutcome::AskReplace { kind, existing } => m
+            .drop_replace(item, into, choice, kind, &existing)
+            .expect("dropped"),
         DropOutcome::Joined => {}
         other => panic!("{other:?}"),
     }
@@ -5388,11 +5390,12 @@ fn keep_alpha_waits_for_a_pending_replace() {
     let d = tempfile::tempdir().unwrap();
     two_sets_files(d.path());
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
-    assert!(matches!(
-        m.drop_choice(IRON_N, "armor/steel", DropChoice::Share),
-        DropOutcome::AskReplace { .. }
-    ));
-    m.drop_replace(IRON_N, "armor/steel", DropChoice::Share)
+    let DropOutcome::AskReplace { kind, existing } =
+        m.drop_choice(IRON_N, "armor/steel", DropChoice::Share)
+    else {
+        panic!("steel's normal requires Replace");
+    };
+    m.drop_replace(IRON_N, "armor/steel", DropChoice::Share, kind, &existing)
         .unwrap();
     assert_eq!(
         m.keep_alpha(IRON_N).unwrap_err(),

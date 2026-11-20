@@ -912,9 +912,13 @@ pub fn markdown_table() -> String {
             .iter()
             .filter(|a| a.area == area && !a.keys.is_empty())
         {
+            let (area, detail) = if a.id == "dialog-enter" {
+                ("[Dialogs](GUI-Guide.md#dialogs)", ". In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click.")
+            } else {
+                (area.title(), "")
+            };
             s.push_str(&format!(
-                "| {} | {} | {} |\n",
-                area.title(),
+                "| {area} | {} | {}{detail} |\n",
                 keys_text(a.id),
                 a.label
             ));

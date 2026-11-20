@@ -58,7 +58,8 @@ pub fn modal_keys(
     let outside_click = shown.backdrop_response.clicked();
     Keys {
         cancel: shown.should_close() && (outside || !outside_click),
-        enter: was_open
+        enter: shown.is_top_modal
+            && was_open
             && ctx.memory(|m| m.focused().is_none())
             && ctx.input(|i| i.key_pressed(egui::Key::Enter)),
     }

@@ -6,12 +6,698 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::Subtype;
 use sdc_gui::model::bulk::MenuAction;
-use sdc_gui::model::sets::{set_views, slot_row, view_row, views, SlotCommand, SlotFill, SlotKind};
+use sdc_gui::model::sets::{set_views, view_row, views, SlotCommand, SlotFill, SlotKind};
 use sdc_gui::model::AppModel;
 use std::time::Duration;
 use support::*;
 
 const ROCK: &str = "landscape/rock01";
+
+/// `pbr_opened_plain` plus `rock01_metallic.png` and `rock01_specular.png`: four raw helpers on rock01's RMAOS.
+fn four_helpers(dir: &std::path::Path) -> AppModel {
+    four_helper_files(dir);
+    let m = pbr_opened_plain(dir);
+    let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    let on_rmaos = sdc_gui::model::helpers::docked(&m, &v)
+        .iter()
+        .filter(|d| d.slot == SlotKind::Rmaos)
+        .count();
+    assert_eq!(on_rmaos, 4, "premise: four helpers fill rock01's RMAOS");
+    m
+}
+
+fn four_helper_files(dir: &std::path::Path) -> std::path::PathBuf {
+    let r = support::mod_folder(dir).join("landscape");
+    for n in ["rock01_metallic.png", "rock01_specular.png"] {
+        image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([x as u8 * 3]))
+            .save(r.join(n))
+            .unwrap();
+    }
+    r
+}
+
+/// Note JW7 (A9, "Never large"): one badge and "+3" on the RMAOS chip; the folded three are not drawn again as
+/// tiles; "+3" is a button that lists them, and a row selects its helper.
+#[test]
+fn folded_helpers_sit_behind_plus_k_and_never_as_tiles() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    h.run();
+    let card = card_of(&h, ROCK);
+
+    // A node on the card named for one of the four helpers: the badge, or (before this task) a trailing tile.
+    const HELPERS: [&str; 4] = [
+        "rock01_roughness.png, ",
+        "rock01_ao.png, ",
+        "rock01_metallic.png, ",
+        "rock01_specular.png, ",
+    ];
+    let helper_nodes = |h: &Harness<'static, AppModel>| {
+        h.query_all(egui_kittest::kittest::by())
+            .filter(|n| n.accesskit_node().raw_bounds().is_some() && card.contains_rect(n.rect()))
+            .filter(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| HELPERS.iter().any(|f| l.starts_with(f)))
+            })
+            .count()
+    };
+    assert_eq!(
+        helper_nodes(&h),
+        1,
+        "only the one badge names a helper on the card (today: 1 + 3 tiles)"
+    );
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    );
+    assert!(card.contains_rect(more.rect()));
+    more.click();
+    h.run();
+    let rows: Vec<String> = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| l.starts_with("rock01_") && l.contains(", fills RMAOS"))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        4,
+        "the badge and the three rows of the list: {rows:?}"
+    );
+    let removes = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| l.starts_with("Remove rock01_") && l.ends_with(" from set"))
+        .count();
+    assert_eq!(removes, 3);
+    let remove = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .find(|l| l.starts_with("Remove rock01_") && l.ends_with(" from set"))
+        .expect("open popup");
+    let file = remove["Remove ".len()..]
+        .trim_end_matches(" from set")
+        .to_string();
+    h.get_by_label_contains(&format!("{file}, fills RMAOS"))
+        .click();
+    h.run();
+    let key = h
+        .state()
+        .items
+        .iter()
+        .find(|i| i.name == file)
+        .unwrap()
+        .key
+        .clone();
+    assert_eq!(h.state().selection, sdc_gui::model::Selection::Item(key));
+}
+
+/// Note JW7: the ✕ of a list row removes that helper from the set, as one step.
+#[test]
+fn a_folded_helper_is_removed_from_its_row() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    h.run();
+    let steps = h.state().history.undo.len();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    let x = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Remove rock01_"))
+        })
+        .expect("a ✕");
+    let file = x.accesskit_node().label().unwrap()["Remove ".len()..]
+        .trim_end_matches(" from set")
+        .to_string();
+    x.click();
+    h.run();
+    let m = h.state_mut();
+    idle(m);
+    let key = m.items.iter().find(|i| i.name == file).unwrap().key.clone();
+    let v = set_views(m).into_iter().find(|v| v.id == ROCK).unwrap();
+    assert!(!v.members.contains(&key), "{file} left rock01");
+    assert_eq!(m.history.undo.len(), steps + 1);
+    m.undo();
+    idle(m);
+    assert!(set_views(m)
+        .iter()
+        .find(|v| v.id == ROCK)
+        .unwrap()
+        .members
+        .contains(&key));
+}
+
+/// Note JW7: a row of the "+K" list drags its helper as a texture, and the list stays open after a click on a row.
+#[test]
+fn a_folded_helper_drags_from_its_row() {
+    use egui::accesskit::Role;
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    h.run();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    let remove = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .find(|l| l.starts_with("Remove rock01_") && l.ends_with(" from set"))
+        .expect("open popup");
+    let file = remove["Remove ".len()..]
+        .trim_end_matches(" from set")
+        .to_string();
+    let label = format!("{file}, fills RMAOS");
+    h.get_by_label_contains(&label).click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, &remove);
+    let at = h.get_by_label_contains(&label).rect().center();
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.hover_at(at);
+    h.run();
+    h.event(press(true));
+    h.run();
+    for step in 1..=4 {
+        h.event(egui::Event::PointerMoved(
+            at + egui::vec2(-6.0 * step as f32, 0.0),
+        ));
+        h.run_steps(2);
+    }
+    let key = h
+        .state()
+        .items
+        .iter()
+        .find(|i| i.name == file)
+        .unwrap()
+        .key
+        .clone();
+    let got = egui::DragAndDrop::payload::<DragItem>(&h.ctx).map(|p| p.0.clone());
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.event(press(false));
+    h.run();
+    assert_eq!(got, Some(key), "the row drags its helper");
+}
+
+#[test]
+fn a_closed_unhovered_overflow_builds_no_display_names() {
+    use sdc_gui::ui::paint_counts::Work::FoldedNames;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    let ctx = h.ctx.clone();
+    assert!(!egui::Popup::is_any_open(&ctx));
+    assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+    // kittest requires an AccessKit tree for its own steps. Draw these two ordinary frames directly.
+    ctx.disable_accesskit();
+    let before = FoldedNames.count();
+    for _ in 0..2 {
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            sdc_gui::ui::draw(ui, h.state_mut())
+        });
+        out.textures_delta.clear();
+        assert!(out
+            .shapes
+            .iter()
+            .any(|s| matches!(&s.shape, egui::Shape::Text(t)
+            if t.galley.job.text == "+3")));
+    }
+    assert_eq!(
+        FoldedNames.count(),
+        before,
+        "two idle frames built folded names"
+    );
+    ctx.enable_accesskit();
+    h.run_steps(2);
+    let before_open = FoldedNames.count();
+    h.get_by_role_and_label(
+        egui::Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    h.get_by_role_and_label(egui::Role::Button, "Remove rock01_metallic.png from set");
+    assert!(
+        FoldedNames.count() > before_open,
+        "the open list builds its names"
+    );
+}
+
+#[test]
+fn folded_helpers_are_grouped_once_per_change() {
+    use sdc_gui::ui::paint_counts::Work::{FoldedGroups, FoldedItemLookups};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    let more = "3 more helpers fill RMAOS in landscape/rock01";
+    let description = |h: &Harness<'static, AppModel>| {
+        h.get_by_role_and_label(egui::Role::Button, more)
+            .accesskit_node()
+            .description()
+            .unwrap()
+    };
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS G"));
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(h.ctx.input(|i| i.pointer.hover_pos().is_none()));
+    let counts = || (FoldedGroups.count(), FoldedItemLookups.count());
+    let before = counts();
+    h.run_steps(2);
+    assert_eq!(counts(), before, "two idle frames regrouped hidden helpers");
+
+    let model = h.state_mut();
+    let mut checks = model.settings.checks;
+    checks.parallax = !checks.parallax;
+    model.set_checks(checks);
+    assert!(model.poll(), "the changed artist checks completed");
+    h.run_steps(1);
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS G"));
+    assert_eq!(counts(), before, "artist checks regrouped hidden helpers");
+
+    h.state_mut()
+        .edit_docs("Swap two folded channels", None, true, |p, _| {
+            for (file, fill) in [
+                ("landscape/rock01_metallic.png", "rmaos.r"),
+                ("landscape/rock01_roughness.png", "rmaos.g"),
+            ] {
+                p.set_file_value(
+                    file,
+                    engine::helper::FILLS_FIELD,
+                    &serde_json::json!([fill]),
+                );
+            }
+        });
+    idle(h.state_mut());
+    h.run_steps(2);
+    assert!(description(&h).contains("rock01_metallic.png, fills RMAOS R"));
+    assert_eq!(
+        counts(),
+        (before.0 + 1, before.1 + 3),
+        "one rebuild for the three hidden files"
+    );
+}
+
+#[test]
+fn overflow_name_identifies_each_visible_set_with_the_same_count_and_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let r = four_helper_files(d.path());
+    for tail in ["", "_normal", "_roughness", "_ao", "_metallic", "_specular"] {
+        std::fs::copy(
+            r.join(format!("rock01{tail}.png")),
+            r.join(format!("rock02{tail}.png")),
+        )
+        .unwrap();
+    }
+    let mut m = pbr_opened_plain(d.path());
+    let other = "landscape/rock02";
+    m.decide(
+        "landscape/rock02.png",
+        sdc_gui::model::Answer::Subtype(Subtype::PbrAlbedo),
+    );
+    m.set_shader(other, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let labels = [ROCK, other].map(|set| {
+        let card = card_of(&h, set);
+        let hits: Vec<_> = h
+            .query_all_by_role(egui::Role::Button)
+            .filter(|n| card.contains_rect(n.rect()))
+            .filter_map(|n| n.accesskit_node().label())
+            .filter(|name| name.starts_with("3 more helpers fill RMAOS"))
+            .collect();
+        assert_eq!(hits.len(), 1, "one three-helper overflow on {set}");
+        hits.into_iter().next().unwrap()
+    });
+    assert_eq!(
+        labels,
+        [ROCK, other].map(|set| format!("3 more helpers fill RMAOS in {set}"))
+    );
+}
+
+#[test]
+fn overflow_name_uses_the_singular_for_one_helper_filling_two_channels() {
+    use engine::helper::FillTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.set_helper_fills("landscape/rock01_ao.png", Some(vec![]));
+    m.set_helper_fills(
+        "landscape/rock01_roughness.png",
+        Some(vec![
+            FillTarget::Packed {
+                suffix: "rmaos",
+                channel: 0,
+            },
+            FillTarget::Packed {
+                suffix: "rmaos",
+                channel: 1,
+            },
+        ]),
+    );
+    m.edit_docs("Lock one RMAOS corner", None, false, |_, s| {
+        s.set_lock(ROCK, 6, true)
+    });
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let card = card_of(&h, ROCK);
+    let names: Vec<_> = h
+        .query_all_by_role(egui::Role::Button)
+        .filter(|n| card.contains_rect(n.rect()))
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|name| name.starts_with("1 more helper"))
+        .collect();
+    assert_eq!(names, ["1 more helper fills RMAOS in landscape/rock01"]);
+}
+
+/// Note JW7 (A9-2): the "+K" hover lists the folded helpers and ends with "Click to list them.".
+#[test]
+fn plus_k_says_it_lists_them() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    h.run();
+    let more = h
+        .get_by_role_and_label(
+            Role::Button,
+            "3 more helpers fill RMAOS in landscape/rock01",
+        )
+        .rect();
+    h.hover_at(more.center());
+    h.run();
+    h.get_by_label_contains("Click to list them.");
+}
+
+fn folded_ao_files(dir: &std::path::Path, count: usize) -> AppModel {
+    let root = mod_folder(dir);
+    let keys: Vec<_> = (0..count - 2)
+        .map(|n| format!("layer{n}/rock01_ao.png"))
+        .collect();
+    for key in &keys {
+        let path = root.join(key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::copy(root.join("landscape/rock01_ao.png"), path).unwrap();
+    }
+    let mut m = pbr_opened_plain(dir);
+    m.edit_docs("Dock the helpers on one locked chip", None, true, |_, s| {
+        s.set_lock(ROCK, 6, true);
+        for key in &keys {
+            s.add_member(ROCK, key);
+        }
+    });
+    idle(&mut m);
+    if count == 4 {
+        use engine::{config::RawMap, helper::HelperRole};
+        for (key, role) in keys.iter().zip([RawMap::Metallic, RawMap::Specular]) {
+            m.set_helper_role(key, Some(HelperRole::Raw(role)));
+        }
+        idle(&mut m);
+    } else {
+        // A four-channel map cannot supply ten distinct fills. Exercise the renderer with that many reported rows.
+        for item in &mut m.items {
+            if keys.contains(&item.key) {
+                let report = std::sync::Arc::make_mut(item.helper.as_mut().unwrap());
+                report.fills = vec![engine::helper::FillTarget::Packed {
+                    suffix: "rmaos",
+                    channel: 2,
+                }];
+            }
+        }
+        m.invalidate_views();
+    }
+    m
+}
+
+#[test]
+fn folded_helpers_with_matching_names_use_project_paths() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(folded_ao_files(d.path(), 4));
+    h.run();
+    h.get_by_label("4 more helpers fill RMAOS in landscape/rock01")
+        .click();
+    h.run();
+    for dir in ["layer0", "layer1", "landscape"] {
+        let path = format!("{dir}/rock01_ao.png");
+        h.get_by_role_and_label(egui::Role::Button, &format!("Remove {path} from set"));
+        assert_eq!(
+            h.query_all_by_label_contains(&format!("{path}, fills RMAOS"))
+                .filter(|n| n.accesskit_node().role() == egui::Role::Button)
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn folded_overflow_paints_nine_then_only_plus_at_ten() {
+    for (count, expected) in [(9, "+9"), (10, "+")] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = harness(folded_ao_files(d.path(), count));
+        h.run();
+        let cell = h
+            .get_by_label(&format!("{count} more helpers fill RMAOS in {ROCK}"))
+            .rect();
+        let labels: Vec<_> = shapes(&h)
+            .into_iter()
+            .filter_map(|s| {
+                let egui::Shape::Text(t) = s else { return None };
+                cell.contains(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    .then(|| t.galley.job.text.clone())
+            })
+            .collect();
+        assert_eq!(labels, [expected], "{count} folded helpers");
+    }
+}
+
+/// Note JW7: on a read-only project file the ✕ of a list row is off, with the read-only reason on hover.
+#[test]
+fn a_folded_helpers_remove_is_off_when_the_project_is_read_only() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = four_helpers(d.path());
+    m.save().unwrap();
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    assert_eq!(
+        sdc_gui::model::helpers::docked(&m, &v)
+            .iter()
+            .filter(|d| d.slot == SlotKind::Rmaos)
+            .count(),
+        4
+    );
+    let why = m
+        .sets_read_only_reason()
+        .expect("premise: the project file is read-only");
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    h.run();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    let x = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Remove rock01_"))
+        })
+        .expect("a ✕");
+    assert_eq!(
+        x.accesskit_node().description().as_deref(),
+        Some(why.as_str())
+    );
+    assert!(x.accesskit_node().is_disabled(), "the ✕ is off");
+    let at = x.rect().center();
+    // The reason may already be drawn elsewhere (a banner, a Problems row), so the hover is one more node.
+    let shown = h.query_all_by_label(&why).count();
+    // egui suppresses a tooltip if the pointer moved within 0.1 s of the click that opened the list.
+    h.run_steps(6);
+    h.hover_at(at);
+    h.run();
+    assert!(
+        h.query_all_by_label(&why).count() > shown,
+        "the ✕'s hover gives the reason"
+    );
+}
+
+#[test]
+fn a_folded_helper_with_two_channels_has_one_remove() {
+    use egui::accesskit::Role;
+    use engine::helper::FillTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    let key = "landscape/rock01_roughness.png";
+    let packed = |channel| FillTarget::Packed {
+        suffix: "rmaos",
+        channel,
+    };
+    m.set_helper_fills(key, Some(vec![packed(0), packed(1)]));
+    idle(&mut m);
+    m.edit_docs("Lock one RMAOS corner", None, false, |_, s| {
+        s.set_lock(ROCK, 6, true)
+    });
+    idle(&mut m);
+    let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    let dock = sdc_gui::model::helpers::docked(&m, &v);
+    let on_chip: Vec<_> = dock.iter().filter(|d| d.slot == SlotKind::Rmaos).collect();
+    assert_eq!(on_chip.len(), 3, "roughness R and G, plus AO");
+    assert_eq!(
+        on_chip
+            .iter()
+            .filter(|d| d.helper == key)
+            .map(|d| d.target)
+            .collect::<Vec<_>>(),
+        [packed(0), packed(1)]
+    );
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "2 more helpers fill RMAOS in landscape/rock01",
+    );
+    assert!(card_of(&h, ROCK).contains_rect(more.rect()));
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert_eq!(
+        more.accesskit_node().description().as_deref(),
+        Some("rock01_ao.png, fills RMAOS B\nrock01_roughness.png, fills RMAOS R, RMAOS G\nClick to list them."),
+        "the closed overflow describes its files and their grouped fills"
+    );
+    more.click();
+    h.run();
+    let rows: Vec<_> = h
+        .query_all_by_role(Role::Button)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|name| name.starts_with("rock01_roughness.png, fills "))
+        .collect();
+    assert_eq!(rows, ["rock01_roughness.png, fills RMAOS R, RMAOS G"]);
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::Button, "Remove rock01_roughness.png from set")
+            .count(),
+        1
+    );
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(h
+        .query_by_label("Remove rock01_roughness.png from set")
+        .is_none());
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "2 more helpers fill RMAOS in landscape/rock01",
+    );
+    let at = more.rect();
+    assert!(shapes(&h).iter().any(|s| matches!(s, egui::Shape::Text(t)
+        if t.galley.job.text == "+2" && at.contains(t.visual_bounding_rect().center()))));
+    more.hover();
+    h.run();
+    h.get_by_label("rock01_roughness.png, fills RMAOS R, RMAOS G");
+    h.get_by_label("Click to list them.");
+}
+
+fn helper_tiles(h: &Harness<'static, AppModel>, card: egui::Rect, file: &str) -> Vec<egui::Rect> {
+    let prefix = format!("rock01_{file}.png, ");
+    h.query_all_by_role(egui::Role::Button)
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|s| s.starts_with(&prefix))
+        })
+        .map(|n| n.rect())
+        .filter(|r| card.contains_rect(*r))
+        .collect()
+}
+
+/// Note JW7: one free corner lists all four files without trailing copies.
+#[test]
+fn folded_helpers_follow_the_free_corners() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = four_helpers(d.path());
+    m.edit_docs("Lock one RMAOS corner", None, false, |_, s| {
+        s.set_lock(ROCK, 6, true)
+    });
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let card = card_of(&h, ROCK);
+    for file in ["roughness", "metallic", "ao", "specular"] {
+        assert!(
+            helper_tiles(&h, card, file).is_empty(),
+            "trailing copy of {file}"
+        );
+    }
+    h.get_by_role_and_label(
+        Role::Button,
+        "4 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    for file in ["roughness", "metallic", "ao", "specular"] {
+        h.get_by_role_and_label(Role::Button, &format!("Remove rock01_{file}.png from set"));
+        h.get_by_label_contains(&format!("rock01_{file}.png, fills RMAOS"));
+    }
+    on_card(&h, ROCK)[0].click();
+    h.run();
+    assert!(h
+        .query_by_label("Remove rock01_roughness.png from set")
+        .is_none());
+}
+
+/// Note JW7: with both corners locked, each file has its own small hit in the trailing row.
+#[test]
+fn folded_helpers_without_a_free_corner_stay_on_the_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = four_helpers(d.path());
+    m.edit_docs("Lock one RMAOS corner", None, false, |_, s| {
+        s.set_lock(ROCK, 6, true)
+    });
+    idle(&mut m);
+    m.set_pgp_lock(ROCK, 6, true).unwrap();
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    assert!(h
+        .query_by_label_contains("more helpers fill RMAOS")
+        .is_none());
+    let card = card_of(&h, ROCK);
+    for file in ["roughness", "metallic", "ao", "specular"] {
+        let tiles = helper_tiles(&h, card, file);
+        assert_eq!(tiles.len(), 1, "one tile for {file}");
+        assert_eq!(tiles[0].size(), egui::Vec2::splat(20.0), "{file}");
+    }
+}
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
@@ -29,20 +715,6 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
         s.interaction.show_tooltips_only_when_still = false;
     });
     h
-}
-
-fn shapes(h: &Harness<'static, AppModel>) -> Vec<egui::Shape> {
-    fn flat(s: &egui::Shape, out: &mut Vec<egui::Shape>) {
-        match s {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, out)),
-            s => out.push(s.clone()),
-        }
-    }
-    let mut out = vec![];
-    for c in &h.output().shapes {
-        flat(&c.shape, &mut out);
-    }
-    out
 }
 
 /// rock01's name on its card.
@@ -63,18 +735,18 @@ fn card_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
     card_of(h, ROCK)
 }
 
-/// A card: the smallest painted rect holding the set's name and the chip row below it.
+/// A drawn card has its position label inside the full-id card node.
 fn card_of(h: &Harness<'static, AppModel>, id: &str) -> egui::Rect {
-    let name = name_of(h, id);
-    shapes(h)
-        .iter()
-        .filter_map(|s| match s {
-            egui::Shape::Rect(r) => Some(r.rect),
-            _ => None,
-        })
-        .filter(|r| r.contains_rect(name) && r.height() > name.height() + 40.0)
-        .min_by(|a, b| a.area().total_cmp(&b.area()))
-        .expect("the card's frame")
+    let prefix = format!("Set {id}, position ");
+    let card = h.get_by_label_contains(&prefix);
+    let label = card.accesskit_node().label().unwrap();
+    let position = format!("Position {}", label.strip_prefix(&prefix).unwrap());
+    assert!(
+        h.query_all_by_label(&position)
+            .any(|n| card.rect().contains_rect(n.rect())),
+        "{id} is drawn"
+    );
+    card.rect()
 }
 
 /// The nodes labelled `label` inside rock01's card (K11: every card has a "D").
@@ -195,23 +867,29 @@ fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     );
 }
 
+/// Note JW1 (A4-1, A4-3): the filled slots have one chip each; the empty ones have none at rest, and the card's
+/// description and the pill's hover list them.
 #[test]
-fn slot_chips_are_labelled_and_empty_ones_are_dim() {
+fn slot_chips_are_labelled_and_empty_ones_hide_at_rest() {
+    const LINE: &str = "Empty: G, P, CNR, S";
     let d = tempfile::tempdir().unwrap();
     let m = pbr_opened_plain(d.path());
-    // A4: the plain PBR shader uses Height and the fixture has no `_p`.
     let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
-    let row = slot_row(v.shader.as_ref(), &v.slots);
+    let row = sdc_gui::model::sets::view_row(&v);
     assert!(
-        row.iter()
-            .any(|c| c.kind == SlotKind::Height && c.fill == SlotFill::Empty),
+        row.iter().any(|c| c.kind == SlotKind::Height
+            && matches!(
+                sdc_gui::model::sets::slot_shown(&v, c.kind),
+                sdc_gui::model::sets::SlotShown::Empty
+            )),
         "{row:?}"
     );
+    assert_eq!(v.empty_line, LINE);
+    let pill = sdc_gui::model::sets::kind_text(&m, &v);
     let mut h = harness(m);
     h.run();
-    // A chip with docked helpers is named "<letter>, <file>, filled by <helpers>" (Note HN).
     let card = card_of(&h, ROCK);
-    for l in ["D", "N", "RMAOS", "P"] {
+    for l in ["D", "N", "RMAOS"] {
         let prefix = format!("{l}, ");
         let named = h
             .query_all_by_label_contains(&prefix)
@@ -223,16 +901,93 @@ fn slot_chips_are_labelled_and_empty_ones_are_dim() {
                     .starts_with(&prefix)
             })
             .count();
-        // an empty chip is named "<letter>, empty" (Note HP)
-        let empty = format!("{l}, empty");
-        let n = on_card(&h, l).len() + on_card(&h, &empty).len() + named;
-        assert_eq!(n, 1, "one {l:?} chip on rock01's card");
+        assert_eq!(
+            on_card(&h, l).len() + named,
+            1,
+            "one {l:?} chip on rock01's card"
+        );
     }
-    assert!(h.query_by_label_contains("Height _p (empty)").is_none());
-    on_card(&h, "P, empty")[0].hover();
+    for l in ["G", "P", "CNR", "S"] {
+        assert!(
+            on_card(&h, &format!("{l}, empty")).is_empty(),
+            "no {l} chip at rest"
+        );
+        assert!(on_card(&h, l).is_empty(), "no {l} chip at rest");
+    }
+    assert_eq!(empty_letters(&h, ROCK), ["G", "P", "CNR", "S"]);
+    let status = h
+        .query_all_by_role_and_label(egui::accesskit::Role::Label, pill)
+        .find(|n| card.contains_rect(n.rect()))
+        .expect("the status pill");
+    status.hover();
     h.run();
     h.run();
-    h.get_by_label("Height _p (empty)");
+    let tooltip = h
+        .get_by_label_contains(LINE)
+        .accesskit_node()
+        .value()
+        .expect("the pill's hover text");
+    assert_eq!(tooltip.lines().last(), Some(LINE));
+}
+
+/// Note JW1 (A4-3, spec detail 4): an off-screen card's stand-in node carries the same "Empty: …" description.
+#[test]
+fn a_stand_in_carries_the_empty_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    let seed = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    assert_eq!(seed.empty_line, "Empty: G, P, CNR, S");
+    let rock = m.sets.iter().find(|s| s.key == seed.key).unwrap().clone();
+    m.sets = (0..60)
+        .map(|i| {
+            let mut s = rock.clone();
+            if i > 0 {
+                s.key = format!("{}{i:04}", rock.key);
+            }
+            s
+        })
+        .collect();
+    m.invalidate_views();
+    let all = set_views(&m);
+    let total = all.len();
+    let (index, last) = all
+        .iter()
+        .enumerate()
+        .find(|(_, v)| v.key == format!("{}0059", rock.key))
+        .unwrap();
+    assert!(index >= 50 && last.empty_line == seed.empty_line);
+    let mut h = many(m);
+    h.run();
+    assert!(
+        pos_rect(&h, index + 1, total).is_none(),
+        "premise: the last card is a stand-in, not drawn"
+    );
+    let prefix = format!("Set {}, position ", last.id);
+    let node = h
+        .query_all(egui_kittest::kittest::by())
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(&prefix))
+        })
+        .expect("the stand-in's node");
+    assert_eq!(
+        node.accesskit_node().description().as_deref(),
+        Some(last.empty_line.as_str())
+    );
+}
+
+/// The letters of a card's "Empty: …" description (Note JW1).
+fn empty_letters(h: &Harness<'static, AppModel>, id: &str) -> Vec<String> {
+    let prefix = format!("Set {id}, position ");
+    let card = h.get_by_label_contains(&prefix);
+    card.accesskit_node()
+        .description()
+        .and_then(|d| {
+            d.strip_prefix("Empty: ")
+                .map(|s| s.split(", ").map(str::to_string).collect())
+        })
+        .unwrap_or_default()
 }
 
 #[test]
@@ -376,35 +1131,19 @@ fn drags_a_texture(h: &mut Harness<'static, AppModel>, at: egui::Pos2) -> bool {
     dragging
 }
 
-/// K13: a borrowed chip is outlined amber, says where it is from in its one hover, and is never offered for
-/// dragging (dragging it would move another set's member). An own chip still drags.
-#[test]
-fn a_borrowed_chip_is_amber_and_offers_no_drag() {
-    use sdc_gui::model::sets::DropChoice;
-    use sdc_gui::model::sets::DropOutcome;
-    let d = tempfile::tempdir().unwrap();
-    // pbr_export.rs::vanilla_borrow: a new set from leaf borrows rock01's normal.
-    let mut m = pbr_ready(d.path());
-    let leaf = m
-        .items
-        .iter()
-        .find(|i| i.name == "leaf.png")
-        .unwrap()
-        .key
-        .clone();
+fn leaf_borrowing(dir: &std::path::Path) -> (AppModel, String, String) {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let mut m = pbr_ready(dir);
+    let key =
+        |m: &AppModel, name: &str| m.items.iter().find(|i| i.name == name).unwrap().key.clone();
+    let leaf = key(&m, "leaf.png");
     m.set_field(&leaf, "subtype", serde_json::json!("pbr_albedo"));
     idle(&mut m);
     let id = m.drop_new_set(&leaf).unwrap();
     idle(&mut m);
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
-    let normal = m
-        .items
-        .iter()
-        .find(|i| i.name == "rock01_normal.png")
-        .unwrap()
-        .key
-        .clone();
+    let normal = key(&m, "rock01_normal.png");
     assert!(matches!(
         m.drop_choice(&normal, &id, DropChoice::Share),
         DropOutcome::Joined
@@ -419,21 +1158,104 @@ fn a_borrowed_chip_is_amber_and_offers_no_drag() {
         "{:?}",
         v.slots
     );
+    (m, id, normal)
+}
+
+/// Press on `at` and move past the drag threshold: the borrow now in flight, as (item, from). The payload is cleared
+/// before the release, so nothing is dropped.
+fn drags_a_borrow(h: &mut Harness<'static, AppModel>, at: egui::Pos2) -> Option<(String, String)> {
+    use sdc_gui::ui::sets_column::DragBorrow;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.hover_at(at);
+    h.run();
+    h.event(press(true));
+    h.run();
+    for step in 1..=4 {
+        h.event(egui::Event::PointerMoved(
+            at + egui::vec2(6.0 * step as f32, 0.0),
+        ));
+        h.run_steps(2); // the payload pass, then the painted one
+    }
+    let got =
+        egui::DragAndDrop::payload::<DragBorrow>(&h.ctx).map(|p| (p.item.clone(), p.from.clone()));
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.event(press(false));
+    h.run();
+    got
+}
+
+/// Note JW4: a dragged shared chip has the same ghost as a dragged texture.
+#[test]
+fn a_dragged_shared_chip_shows_the_ghost() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id, _normal) = leaf_borrowing(d.path());
+    let mut h = harness(m);
+    h.run();
+    let at = on_card_of(&h, &id, "N")[0].rect().center();
+    let p = start_drag(&mut h, at);
+    assert!(egui::DragAndDrop::has_payload_of_type::<
+        sdc_gui::ui::sets_column::DragBorrow,
+    >(&h.ctx));
+    let want = p + egui::vec2(12.0, 12.0);
+    let bounds = |s: &egui::Shape| match s {
+        egui::Shape::Rect(r) => Some(r.rect),
+        egui::Shape::Mesh(m) => Some(m.calc_bounds()),
+        _ => None,
+    };
+    assert!(shapes(&h)
+        .iter()
+        .filter_map(bounds)
+        .any(|r| (r.min - want).length() < 1.0 && (r.width() - 40.0).abs() < 0.5));
+    egui::DragAndDrop::clear_payload(&h.ctx);
+}
+
+/// Note JW4: a borrowed chip keeps its neutral outline and offers its source for sharing.
+#[test]
+fn a_borrowed_chip_is_outlined_neutral_and_drags_as_a_share() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id, normal) = leaf_borrowing(d.path());
     let mut h = harness(m);
     h.run();
     let chip = on_card_of(&h, &id, "N");
     assert_eq!(chip.len(), 1, "the borrower's N chip");
     let at = chip[0].rect();
-    let amber = |h: &Harness<'static, AppModel>, r: egui::Rect| {
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let stroked = |h: &Harness<'static, AppModel>, r: egui::Rect, c: egui::Color32| {
         shapes(h).iter().any(|s| {
-            matches!(s, egui::Shape::Rect(x) if x.rect == r
-                && x.stroke.width == 2.0
-                && x.stroke.color == sdc_gui::ui::status::AMBER)
+            matches!(s, egui::Shape::Rect(x) if x.rect == r && x.stroke.width == 2.0 && x.stroke.color == c)
         })
     };
-    assert!(amber(&h, at), "the borrowed chip is outlined amber");
+    let backing = |chip: egui::Rect| {
+        egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0))
+    };
+    let rings = |chip| {
+        shapes(&h)
+            .iter()
+            .filter(|s| {
+                matches!(s, egui::Shape::Circle(c)
+        if c.stroke.width == 1.5 && c.stroke.color == strong && backing(chip).contains(c.center))
+            })
+            .count()
+    };
+    assert!(
+        stroked(&h, at, strong),
+        "the borrowed chip has the neutral 2 px outline"
+    );
+    assert!(!stroked(&h, at, sdc_gui::ui::status::AMBER), "and no amber");
+    assert!(shapes(&h).iter().any(|s| matches!(s, egui::Shape::Rect(r)
+        if r.rect == backing(at) && r.fill == h.ctx.global_style().visuals.panel_fill)));
+    assert_eq!(rings(at), 2);
     let own = on_card(&h, "N")[0].rect();
-    assert!(!amber(&h, own), "rock01's own N chip is not");
+    assert!(
+        !stroked(&h, own, strong) && rings(own) == 0,
+        "rock01's own N chip has neither"
+    );
+    assert!(!stroked(&h, own, sdc_gui::ui::status::AMBER));
     h.hover_at(at.center());
     h.run();
     h.run();
@@ -447,11 +1269,22 @@ fn a_borrowed_chip_is_amber_and_offers_no_drag() {
     h.get_by_label_contains("rock01_normal.png\nborrowed from landscape/rock01");
     assert!(
         !drags_a_texture(&mut h, at.center()),
-        "a borrowed chip offers no drag"
+        "a borrowed chip carries no texture payload"
+    );
+    assert_eq!(
+        drags_a_borrow(&mut h, at.center()),
+        Some((normal.clone(), "landscape/rock01".to_string())),
+        "it drags as a share of rock01's normal"
     );
     assert!(
         drags_a_texture(&mut h, own.center()),
         "an own chip still drags"
+    );
+    on_card_of(&h, &id, "N")[0].click_secondary();
+    h.run();
+    assert!(
+        h.query_by_label("Remove from set").is_none(),
+        "a borrowed chip cannot be removed from here"
     );
 }
 
@@ -513,6 +1346,37 @@ fn a_texture_dragged_over_a_card_outlines_it() {
     h.event(press(false));
     h.run();
     assert!(!top_is_outline(&h), "the outline goes with the drag");
+}
+
+/// Note JW4: the accepting card draws its outline above the card frame for a share too.
+#[test]
+fn a_borrow_dragged_over_a_card_outlines_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, leaf, _) = leaf_borrowing(d.path());
+    let mut h = harness(m);
+    h.run();
+    let at = on_card_of(&h, &leaf, "N")[0].rect().center();
+    start_drag(&mut h, at);
+    let card = card_rect(&h);
+    h.event(egui::Event::PointerMoved(card.center()));
+    h.run_steps(3);
+    let stroke = shapes(&h)
+        .into_iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if (r.rect.min - card.min).length() < 1.0
+                    && (r.rect.max - card.max).length() < 1.0
+                    && r.stroke.width > 0.0 =>
+            {
+                Some(r.stroke)
+            }
+            _ => None,
+        })
+        .next_back();
+    assert_eq!(
+        stroke,
+        Some(h.ctx.global_style().visuals.widgets.active.bg_stroke)
+    );
 }
 
 /// Press `at` and move it 30 pt in 3 steps (the button stays down); returns where the pointer ends.
@@ -959,7 +1823,8 @@ fn a_linked_chip_is_filled_and_named_for_its_set() {
     assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
     h.state_mut().undo();
     h.run();
-    assert_eq!(on_card_of(&h, "arch/leaf", "D, empty").len(), 1);
+    assert!(empty_letters(&h, "arch/leaf").contains(&"D".to_string()));
+    assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
 }
 
 #[test]

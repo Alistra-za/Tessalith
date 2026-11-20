@@ -135,6 +135,46 @@ fn no_set_ao(dir: &Path) -> AppModel {
 
 // ---- the drop ----
 
+/// Note JW5 (A7-1): a helper is shared, never duplicated, wherever it comes from.
+#[test]
+fn a_helper_is_never_duplicated() {
+    use sdc_gui::model::sets::HELPER_DUPLICATE;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ab(d.path());
+    assert_eq!(m.drop_choices(AO), [DropChoice::Move, DropChoice::Share]);
+    assert_eq!(
+        m.drop_choices("a/rock.png"),
+        [DropChoice::Move, DropChoice::Share, DropChoice::Duplicate]
+    );
+    let before = files_under(d.path());
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Duplicate),
+        DropOutcome::Refused(HELPER_DUPLICATE.into())
+    );
+    assert_eq!(
+        m.drop_replace(
+            AO,
+            B,
+            DropChoice::Duplicate,
+            SlotKind::Rmaos,
+            &sdc_gui::model::sets::SlotFill::Empty
+        ),
+        Err(HELPER_DUPLICATE.to_string())
+    );
+    // A helper without a raw role still has no slot and cannot be shared as a file.
+    m.items.iter_mut().find(|i| i.key == AO).unwrap().helper = None;
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Share),
+        DropOutcome::Refused("Only a raw helper can be shared as a file.".into())
+    );
+    assert_eq!(m.drop_choices(AO), [DropChoice::Move, DropChoice::Share]);
+    assert_eq!(
+        m.drop_choice(AO, B, DropChoice::Duplicate),
+        DropOutcome::Refused(HELPER_DUPLICATE.into())
+    );
+    assert_eq!(files_under(d.path()), before, "no file is copied");
+}
+
 #[test]
 fn share_writes_one_line_and_no_file() {
     let d = tempfile::tempdir().unwrap();
@@ -743,6 +783,58 @@ fn editing_b(dir: &Path, helper: &str) -> AppModel {
     let key = view(&m, B).key;
     m.select_set(&key);
     m
+}
+
+/// Note JW3 (A5-1): a shared-helper row is outlined in the strong text colour with the link mark, never amber.
+#[test]
+fn a_shared_helper_row_is_outlined_neutral_with_the_link_mark() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(editing_b(d.path(), AO), 1100.0);
+    h.get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
+        .scroll_to_me();
+    h.run();
+    h.run();
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre");
+    let name = h
+        .query_all_by_label("rock_ao.png (shared)")
+        .map(|n| n.rect())
+        .find(|r| centre.contains(r.center()))
+        .expect("the row's name");
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let shapes = shapes(&h);
+    let stop = h
+        .get_by_role_and_label(Role::Button, "Stop sharing rock_ao.png")
+        .rect();
+    let row = shapes
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if r.stroke.width == 1.0
+                    && r.rect.contains_rect(name)
+                    && r.rect.contains_rect(stop)
+                    && r.rect.height() <= name.height().max(stop.height()).max(20.0) + 6.0 =>
+            {
+                Some(r)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+        .expect("the shared row outline");
+    assert_eq!(row.stroke.color, strong);
+    let right = name.left() - h.ctx.global_style().spacing.item_spacing.x;
+    let mark = egui::Rect::from_center_size(
+        egui::pos2(right - 6.0, name.center().y),
+        egui::Vec2::splat(12.0),
+    );
+    assert!(row.rect.contains_rect(mark));
+    assert_eq!(
+        shapes
+            .iter()
+            .filter(|s| matches!(s, egui::Shape::Circle(c)
+        if c.stroke.width == 1.5 && c.stroke.color == strong && mark.contains(c.center)))
+            .count(),
+        2
+    );
 }
 
 #[test]

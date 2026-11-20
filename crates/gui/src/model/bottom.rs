@@ -1204,7 +1204,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Rows only count once the export has ended: `revision` bumps on every engine event (R9).
     if m.export.running.is_none() {
         // K2: an engine CHK-* row is a check row and follows its switch. The switches are not in `ProblemsKey`:
-        // a switch change reaches this build through `refresh_checks`' `invalidate_views()`.
+        // a switch change reaches this build through `refresh_checks`' `rows_changed()`.
         let on = &m.settings.checks;
         // Note FC3 (CN67): the DERIVE result the user acts on is a Warning row that opens the report; the other
         // Info results stay on the row's hover (P11).

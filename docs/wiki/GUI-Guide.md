@@ -88,12 +88,12 @@ For Ctrl+A in Textures and Sets, see [Selecting several](GUI-Bulk-and-Rename.md#
 | JSON editor | F8 | Next error in the PGPatcher JSON editor |
 | JSON editor | Shift+F8 | Previous error in the PGPatcher JSON editor |
 | Problems list | Enter or Space | Accept the focused Problems row's suggestion and go to the next row |
-| Dialogs | Enter | Press the dialog's safe default |
+| [Dialogs](GUI-Guide.md#dialogs) | Enter | Press the dialog's safe default. In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. |
 | Dialogs | Esc | Cancel the dialog |
 
 ## Dialogs
 
 - **Esc**, or a click outside, cancels. The rename dialogs, **Copy settings** and **Fill from names** ignore a click outside, so a stray click can't lose what you typed.
-- **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 -->
+- In most dialogs, **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 --> In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. The documents change when the drop completes. Duplicate creates its copy at that point. If Replace opens, both wait for confirmation. <!-- D:JW6 -->
 
 Where to go next: [Troubleshooting](Troubleshooting.md) covers crash recovery.

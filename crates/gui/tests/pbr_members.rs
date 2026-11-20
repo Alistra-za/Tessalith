@@ -9,7 +9,7 @@ use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
-use support::session;
+use support::{accept_drop, session};
 
 const DIFFUSE: &str = "m/rock01.png";
 const N: &str = "m/rock01_n.png";
@@ -307,8 +307,7 @@ fn only_the_own_diffuse_leads_not_a_borrowed_slot_or_a_non_diffuse() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     // leaf's diffuse slot borrows rock01's diffuse; leaf_n stays its own member.
-    let _ = m.drop_choice(DIFFUSE, "m/leaf", DropChoice::Share);
-    let _ = m.drop_replace(DIFFUSE, "m/leaf", DropChoice::Share);
+    accept_drop(&mut m, DIFFUSE, "m/leaf", DropChoice::Share).unwrap();
     idle(&mut m);
     let v = set_views(&m);
     let leaf = v.iter().find(|v| v.id == "m/leaf").unwrap();
