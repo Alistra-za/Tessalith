@@ -708,6 +708,8 @@ impl SetsDoc {
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
         self.f.save(force)?;
         self.sidecar_pending_save = false;
+        // Review must see a successful save even when the dirty flag was already clear.
+        self.f.rev = next_rev();
         Ok(())
     }
 

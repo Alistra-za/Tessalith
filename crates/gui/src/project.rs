@@ -627,6 +627,39 @@ impl ProjectDoc {
         self.f.restore(text);
     }
 
+    /// Crash recovery marks only the type and alpha values it restores differently from disk.
+    pub(crate) fn restore_recovery(&mut self, text: &str) -> bool {
+        fn values(doc: &DocumentMut) -> BTreeMap<&str, (Option<&str>, Option<&str>)> {
+            doc.get("files")
+                .and_then(Item::as_table_like)
+                .into_iter()
+                .flat_map(TableLike::iter)
+                .filter_map(|(key, entry)| {
+                    let subtype = entry.get("subtype").and_then(Item::as_str);
+                    let alpha = entry
+                        .get("alpha")
+                        .and_then(|a| a.get("policy"))
+                        .and_then(Item::as_str);
+                    (subtype.is_some() || alpha.is_some()).then_some((key, (subtype, alpha)))
+                })
+                .collect()
+        }
+
+        let old = self.text();
+        self.restore(text);
+        if self.text() == old {
+            return false;
+        }
+        let saved = self
+            .saved_text()
+            .parse()
+            .expect("serialized files document");
+        if values(&self.f.doc) != values(&saved) {
+            self.mark_type_alpha_edit();
+        }
+        true
+    }
+
     pub(crate) fn restore_snapshot(&mut self, text: &str) {
         if self.read_only() {
             return;

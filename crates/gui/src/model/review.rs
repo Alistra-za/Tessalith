@@ -222,7 +222,7 @@ pub(super) struct WritesKey {
     /// `gui.toml`'s export folder, used with no project document.
     settings_export: Option<PathBuf>,
     project_unsaved: bool,
-    doc_unsaved: bool,
+    doc_dirty: bool,
     reencode_all: bool,
     nif_rows: u64,
     /// Ruling 3c-51 (c): the Tree Anim evidence the PGPatcher JSON's auto flags read (as the JSON editor's key).
@@ -548,8 +548,8 @@ impl AppModel {
             scope: self.writes_scope(),
             root: self.root.clone(),
             settings_export: self.settings.export_folder.clone(),
-            project_unsaved: self.project_unsaved(),
-            doc_unsaved: self.sets_unsaved(),
+            project_unsaved: self.pending_files_save().is_some(),
+            doc_dirty: self.sets_doc.as_ref().is_some_and(|s| s.is_dirty()),
             reencode_all: self.reencode_all,
             nif_rows: self.nif_rows_rev,
             evidence: self.evidence_rev,
@@ -579,26 +579,12 @@ impl AppModel {
             && k.scope == self.writes_scope()
             && k.root == self.root
             && k.settings_export == self.settings.export_folder
-            && k.project_unsaved == self.project_unsaved()
-            && k.doc_unsaved == self.sets_unsaved()
+            && k.project_unsaved == self.pending_files_save().is_some()
+            && k.doc_dirty == self.sets_doc.as_ref().is_some_and(|s| s.is_dirty())
             && k.reencode_all == self.reencode_all
             && k.nif_rows == self.nif_rows_rev
             && k.evidence == self.evidence_rev
             && k.answer.as_ref() == self.review.as_ref().and_then(|r| r.json_answer.as_ref())
-    }
-
-    /// `save()` writes `sdc.toml`: it has unsaved edits, or a blame still holds some (Note FP7).
-    fn project_unsaved(&self) -> bool {
-        self.project
-            .as_ref()
-            .is_some_and(|p| p.is_dirty() || (self.ignored_by_plan && p.has_stashed_edits()))
-    }
-
-    /// `save()` writes `sdc-project.toml`: unsaved edits in a document that takes them.
-    fn sets_unsaved(&self) -> bool {
-        self.sets_doc
-            .as_ref()
-            .is_some_and(|s| s.is_dirty() && !s.read_only())
     }
 
     /// Ruling 3c-50: a write decided only from what exists before the run (the documents, a destination and its recorded
@@ -825,7 +811,7 @@ impl AppModel {
             })
         };
         // `save()` first: `sdc.toml` when it holds unsaved edits.
-        if let (Some(p), true) = (&self.project, self.project_unsaved()) {
+        if let (Some(p), Some(_)) = (&self.project, self.pending_files_save()) {
             put(p.path().to_path_buf(), HOVER_SDC_TOML, false);
         }
         if let (Some(d), Some(r)) = (doc, &preview) {
@@ -835,7 +821,7 @@ impl AppModel {
                 self.writes_fs_query();
                 std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes())
             };
-            if self.sets_unsaved() || recorded {
+            if d.needs_save() || recorded {
                 put(
                     d.path().to_path_buf(),
                     HOVER_PROJECT_TOML,

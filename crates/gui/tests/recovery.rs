@@ -123,6 +123,54 @@ fn toast_undo_reverts_and_deletes_the_file() {
     assert_eq!(text(&m), ORIGINAL);
     assert!(!m.is_dirty(), "back at the saved text");
     assert!(!rec.exists(), "the user rejected the recovered edits");
+    assert!(!m.unsaved(), "undoing a recovered target leaves no edits");
+    assert!(m.request_close());
+}
+
+#[test]
+fn toast_undo_of_sets_only_recovery_leaves_the_files_document_clean() {
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    std::fs::write(root.join("sdc.toml"), ORIGINAL).unwrap();
+    let sets = root.join("sdc-project.toml");
+    let renamed = "[[sets]]\nid = \"landscape/new\"\nrenamed_from = \"landscape/rock01\"\n";
+    std::fs::write(recovery_path(&sets), renamed).unwrap();
+    let mut m = open(root);
+    assert_eq!(sets_text(&m), renamed);
+    assert!(m.sets_user_dirty());
+    assert!(!m.project.as_ref().unwrap().user_dirty());
+    m.undo_crash_restore();
+    assert!(!m.unsaved());
+    assert!(m.request_close());
+}
+
+#[test]
+fn recovery_marks_changes_to_type_or_alpha_values() {
+    let entry = "[files.'landscape/rock01.png']\n";
+    for (saved, recovered, marked) in [
+        ("", "subtype = 'diffuse'\n", true),
+        ("alpha.policy = 'blend'\n", "", true),
+        (
+            "alpha.policy = 'blend'\n",
+            "alpha = { policy = 'cutout' }\n",
+            true,
+        ),
+        (
+            "subtype = 'diffuse'\nalpha.policy = 'blend'\n",
+            "alpha = { policy = \"blend\" }\nsubtype = \"diffuse\" # kept\n",
+            false,
+        ),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let saved = format!("{entry}{saved}");
+        let recovered = format!("{entry}{recovered}");
+        let (mut m, _, _) = crashed(d.path(), &saved, &recovered);
+        assert_eq!(text(&m), recovered);
+        m.undo_crash_restore();
+        assert_eq!(text(&m), saved);
+        assert_eq!(m.unsaved(), marked, "{recovered}");
+        assert_eq!(m.request_close(), !marked);
+    }
 }
 
 const SETS_SAVED: &str = "# saved\n";

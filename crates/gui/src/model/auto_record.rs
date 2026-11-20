@@ -244,11 +244,11 @@ impl AppModel {
                 only_if: Some(json!(Subtype::SkinAlbedo)),
             })
             .collect();
-        self.automatic_step = true;
+        self.automatic_step = Some(super::AutomaticStep::FuzzSwitch);
         self.edit_docs(&label, Some(merge.clone()), true, |p, _| {
             p.touch_switch(&cleared)
         });
-        self.automatic_step = false;
+        self.automatic_step = None;
         self.reencode_follow = Some(merge.clone());
         self.fuzz_switch = Some(FuzzSwitch {
             merge,

@@ -2601,6 +2601,97 @@ fn review_lists_every_file_the_export_changes() {
     assert_every_changed_file_is_listed(m, d.path());
 }
 
+/// Capture Review before the click, then inspect the synchronous save before any export finisher runs.
+fn export_and_get_project_list(m: &mut AppModel) -> Vec<std::path::PathBuf> {
+    m.header_export_clicked();
+    assert!(m.review.is_some() && m.review_gate().is_ok());
+    assert!(
+        m.review_json().is_empty(),
+        "this run has no JSON hash to record"
+    );
+    let list = m.review_writes();
+    m.export_from_review();
+    assert!(m.export.running.is_some(), "{:?}", m.dialog);
+    list.also_updated.iter().map(|e| e.path.clone()).collect()
+}
+
+#[test]
+fn review_lists_save_first_rewrite_after_undoing_a_saved_type_edit() {
+    use std::time::SystemTime;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.save().unwrap();
+    let file = m.project.as_ref().unwrap().path().to_owned();
+    let saved = std::fs::read(&file).unwrap();
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(86_400);
+    std::fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    let key = "g/a.png";
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(key, "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    m.set_field(key, "subtype", serde_json::json!("normal"));
+    idle(&mut m);
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(key, "subtype"),
+        Some(serde_json::json!("normal"))
+    );
+    m.undo();
+    idle(&mut m);
+    let doc = m.project.as_ref().unwrap();
+    assert_eq!(doc.text().as_bytes(), saved);
+    assert!(!doc.is_dirty() && doc.user_dirty());
+    let list = export_and_get_project_list(&mut m);
+    assert_ne!(std::fs::metadata(&file).unwrap().modified().unwrap(), old);
+    assert_eq!(std::fs::read(&file).unwrap(), saved);
+    idle(&mut m);
+    assert!(
+        list.contains(&file),
+        "Review omitted the rewritten sdc.toml"
+    );
+}
+
+#[test]
+fn review_lists_save_first_write_of_a_quiet_sidecar_difference() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.save().unwrap();
+    let doc = m.sets_doc.as_ref().unwrap();
+    let file = doc.path().to_owned();
+    let side = doc.sidecar_path();
+    std::fs::create_dir_all(side.parent().unwrap()).unwrap();
+    let hash_record = r#"{"last_json_sha256":"side"}"#;
+    std::fs::write(&side, hash_record).unwrap();
+    let before = std::fs::read_to_string(&file).unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    let doc = m.sets_doc.as_ref().unwrap();
+    let expected = doc.text();
+    assert!(!doc.is_dirty() && !m.unsaved());
+    assert_ne!(before, expected);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+    let list = export_and_get_project_list(&mut m);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), expected);
+    assert!(!m
+        .review_writes()
+        .also_updated
+        .iter()
+        .any(|e| e.path == file));
+    idle(&mut m);
+    assert_eq!(std::fs::read_to_string(&side).unwrap(), hash_record);
+    assert!(
+        list.contains(&file),
+        "Review omitted the reconciled sdc-project.toml"
+    );
+}
+
 #[test]
 fn review_lists_every_file_with_an_also_tick() {
     let d = tempfile::tempdir().unwrap();

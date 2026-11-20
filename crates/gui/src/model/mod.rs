@@ -464,6 +464,17 @@ impl PartialEq for Resolved {
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AutomaticStep {
+    FuzzSwitch,
+    Recovery,
+}
+
+enum FilesSave {
+    Live,
+    Stashed,
+}
+
 pub struct AppModel {
     /// The file pickers (Task 6); one dialog at a time, shared with the sub-models.
     pub picker: picker::Picker,
@@ -650,11 +661,9 @@ pub struct AppModel {
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
     batch: bool,
-    /// Note JS7 (N-33 as the owner narrowed it, N-37, N8-h): true while a step that is not the user's own alpha edit
-    /// writes: the recorder's or the fuzz switch's automatic step, and the crash restore, which reinstates both
-    /// documents as the snapshot recorded them. The shared-alpha follow-on and the unlisting ride only the user's own
-    /// steps.
-    automatic_step: bool,
+    /// Note JS7 (N-33, N-37, N8-h): the fuzz switch and crash restore skip the shared-alpha follow-on
+    /// and unlisting. History distinguishes the automatic subtype switch from a recovery of other fields.
+    automatic_step: Option<AutomaticStep>,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
     pub multi: bulk::MultiSelection,
@@ -1046,7 +1055,7 @@ impl AppModel {
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
-            automatic_step: false,
+            automatic_step: None,
             selection: Selection::None,
             multi: Default::default(),
             bulk: Default::default(),
@@ -2827,7 +2836,7 @@ impl AppModel {
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .filter(|_| !self.automatic_step)
+            .filter(|_| self.automatic_step.is_none())
             .map(|(p, s)| {
                 let listed = !s.auto_data().is_empty();
                 if self.target != engine::config::Target::Cs && !listed {
@@ -3990,7 +3999,7 @@ impl AppModel {
         // Note JS7 (N-33, N-37): a user's step that plans again runs the shared-alpha follow-on; its starting point is
         // read before the step. An automatic step (the recorder, the fuzz switch) and a step that does not plan (JSON
         // hash records, set groups, the crash restore) do not.
-        let user = !self.automatic_step;
+        let user = self.automatic_step.is_none();
         // N8-o: the `[files]` keys are walked at most once per document state: `pre` indexes the project document
         // before the edit (for the starting point and the list reader), `post` after it (for the unlisting and the
         // follow-on). Neither is built when no reader needs it.
@@ -4064,7 +4073,8 @@ impl AppModel {
         // The opening fuzz switch writes a subtype automatically. Replaying it is a user's write.
         let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit)
             != previous_type_alpha
-            || (self.automatic_step && before.sdc_toml != after.sdc_toml);
+            || (self.automatic_step == Some(AutomaticStep::FuzzSwitch)
+                && before.sdc_toml != after.sdc_toml);
         self.drop_undo_note();
         let files_edit = before.project == after.project;
         self.history.push(history::Command {
@@ -4358,12 +4368,10 @@ impl AppModel {
         // Only a document whose text really changed counts as restored: `restore` ignores text that does not parse.
         let mut restored = vec![];
         // Note JS7 (N8-h): the restore reinstates the list as the snapshot recorded it: no unlisting, no follow-on.
-        self.automatic_step = true;
+        self.automatic_step = Some(AutomaticStep::Recovery);
         self.edit_docs(LABEL, None, false, |p, s| {
             if let Some((path, t)) = project {
-                let old = p.text();
-                p.restore(&t);
-                if p.text() != old {
+                if p.restore_recovery(&t) {
                     restored.push(path);
                 }
             }
@@ -4374,11 +4382,8 @@ impl AppModel {
                     restored.push(path);
                 }
             }
-            if !restored.is_empty() && !p.read_only() {
-                p.mark_type_alpha_edit();
-            }
         });
-        self.automatic_step = false;
+        self.automatic_step = None;
         // shortcut: a file that does not parse as TOML restores nothing, shows no notice and stays on disk (the
         // other document's file, if it restored, is the only one the toast's Undo deletes); give it a notice if one
         // is ever seen.
@@ -5050,6 +5055,15 @@ impl AppModel {
         self.replan();
     }
 
+    fn pending_files_save(&self) -> Option<FilesSave> {
+        let p = self.project.as_ref()?;
+        if self.ignored_by_plan && p.has_stashed_edits() {
+            Some(FilesSave::Stashed)
+        } else {
+            (p.is_dirty() || p.user_dirty()).then_some(FilesSave::Live)
+        }
+    }
+
     /// Save pending edits to `sdc.toml`, then persist any pending sets text, including an automatic listing.
     /// Return the first write error and show its dialog.
     pub fn save(&mut self) -> Result<(), SaveError> {
@@ -5057,26 +5071,12 @@ impl AppModel {
         let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit);
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
-        if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
-            match p.save_stashed() {
-                Ok(w) => {
-                    if w {
-                        crate::crash_log::discard_recovery(p.path());
-                    }
-                    wrote |= w;
-                }
-                Err(e) => {
-                    self.save_failed(DocKind::SdcToml, &e);
-                    return Err(e);
-                }
-            }
-        }
-        if let Some(p) = self
-            .project
-            .as_mut()
-            .filter(|p| p.is_dirty() || p.user_dirty())
-        {
-            if let Err(e) = p.save(false) {
+        if let (Some(source), Some(p)) = (self.pending_files_save(), self.project.as_mut()) {
+            let result = match source {
+                FilesSave::Live => p.save(false),
+                FilesSave::Stashed => p.save_stashed().map(|_| ()),
+            };
+            if let Err(e) = result {
                 self.save_failed(DocKind::SdcToml, &e);
                 return Err(e);
             }
