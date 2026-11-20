@@ -61,6 +61,19 @@ enum Dropped {
     Borrow(Arc<DragBorrow>),
 }
 
+impl Dropped {
+    fn onto_set(self, set: &str, shift: bool) -> Act {
+        match self {
+            Self::Item(p) => Act::Drop(p.0.clone(), set.to_owned(), shift),
+            Self::Borrow(p) => Act::ShareBorrow {
+                item: p.item.clone(),
+                from: p.from.clone(),
+                set: set.to_owned(),
+            },
+        }
+    }
+}
+
 /// Drag payload: a set, by id (reordering).
 #[derive(Debug, Clone)]
 pub struct DragSet(pub String);
@@ -2234,6 +2247,18 @@ pub fn draw(
             let id = ui.scope_id().with(("set-card", &v.key, &v.id));
             let selected = sel_sets.contains(&v.id);
             let mut card = |ui: &mut egui::Ui| {
+                let shift = || {
+                    shift_release.is_some_and(|pos| match shift_strip {
+                        Some(owner) => owner == v.id,
+                        None => previous_zone_contains(&ctx, id, pos),
+                    })
+                };
+                // Last frame's strip can belong to a card that scrolled off screen this frame.
+                if editing.on && release.is_some() && strip_owner == Some(v.id.as_str()) {
+                    if let Some(payload) = take_image(&ctx) {
+                        acts.push(payload.onto_set(&v.id, shift()));
+                    }
+                }
                 let probe =
                     egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
                 if ui.is_rect_visible(probe) {
@@ -2241,10 +2266,7 @@ pub fn draw(
                         image: image && next_strip.is_none(),
                         strip_owner,
                         release,
-                        shift: shift_release.is_some_and(|pos| match shift_strip {
-                            Some(owner) => owner == v.id,
-                            None => previous_zone_contains(&ctx, id, pos),
-                        }),
+                        shift: shift(),
                         frame_x,
                         dragging: dragged.as_deref() == Some(v.id.as_str()),
                         selected,
@@ -2868,7 +2890,7 @@ fn pill(
             ui.set_opacity(0.5);
         }
         let covered = look.strip_owner.is_some() && !owns;
-        let (zone, mut dropped) = item_zone(
+        let (zone, dropped) = item_zone(
             ui,
             editing.on && !covered,
             look.release,
@@ -3184,9 +3206,6 @@ fn pill(
             hit.max.x = hit.max.x.min(zone.rect.right());
             (painted, hit.intersect(clip))
         });
-        if owns && editing.on && look.release.is_some() && dropped.is_none() {
-            dropped = take_image(ui.ctx());
-        }
         (dropped, strip)
     });
     let (dropped, strip) = scoped.inner;
@@ -3202,14 +3221,8 @@ fn pill(
         let m = ui.input(|i| i.modifiers);
         acts.push(Act::Click(v.id.clone(), m.command, m.shift));
     }
-    match dropped {
-        Some(Dropped::Item(p)) => acts.push(Act::Drop(p.0.clone(), v.id.clone(), look.shift)),
-        Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
-            item: p.item.clone(),
-            from: p.from.clone(),
-            set: v.id.clone(),
-        }),
-        None => {}
+    if let Some(payload) = dropped {
+        acts.push(payload.onto_set(&v.id, look.shift));
     }
     let hovered_by_set = editing.reorder && resp.dnd_hover_payload::<DragSet>().is_some();
     // K9: only while a set hovers, since `take_payload` would take a dragged texture too.

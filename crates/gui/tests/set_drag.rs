@@ -1854,8 +1854,7 @@ fn shift_changed_after_release_up_still_shares() {
     release_then_change_shift(egui::Modifiers::SHIFT, egui::Modifiers::NONE);
 }
 
-fn drag_normal_to_odd(dir: &Path) -> H {
-    let mut m = three_cards(dir);
+fn drag_normal_to_odd(mut m: AppModel) -> H {
     let odd = "landscape/odd";
     m.set_shader(odd, Some(engine::shader::Shader::Pbr));
     idle(&mut m);
@@ -1871,7 +1870,7 @@ fn drag_normal_to_odd(dir: &Path) -> H {
 
 fn assert_strip_release_asks(events: impl FnOnce(egui::Pos2, egui::Pos2) -> Vec<egui::Event>) {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drag_normal_to_odd(d.path());
+    let mut h = drag_normal_to_odd(three_cards(d.path()));
     let odd = "landscape/odd";
     let (owner, strip, bridge) = h.state().1.drops.strip.clone().expect("strip on odd");
     let at = strip.center();
@@ -1908,6 +1907,41 @@ fn a_secondary_only_release_on_the_strip_asks() {
 }
 
 #[test]
+fn a_secondary_only_strip_release_asks_when_its_owner_scrolls_off_screen() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    m.edit_docs("Add sets below the drop target", None, true, |_, sets| {
+        for i in 0..20 {
+            sets.create_set(&format!("landscape/z{i:02}"));
+        }
+    });
+    idle(&mut m);
+    let mut h = drag_normal_to_odd(m);
+    let (owner, strip, _) = h.state().1.drops.strip.clone().expect("strip on odd");
+    let at = strip.center();
+    assert_eq!(owner, "landscape/odd");
+    assert!(!card_of(&h, &owner).contains(at));
+    let far = "landscape/z19";
+    assert!(try_card_of(&h, far).is_none());
+    let before = documents(&h.state().0);
+
+    h.state_mut().0.nav.reveal_set = Some(sdc_gui::model::SetTarget::Id(far.into()));
+    h.input_mut().events.push(release(
+        at,
+        egui::PointerButton::Secondary,
+        egui::Modifiers::SHIFT,
+    ));
+    h.step();
+    assert!(try_card_of(&h, far).is_some());
+    assert!(try_card_of(&h, &owner).is_none());
+    assert_eq!(
+        h.state().1.drops.pending,
+        Some(choice(NORMAL, &owner, ROCK))
+    );
+    assert_eq!(documents(&h.state().0), before);
+}
+
+#[test]
 fn a_last_release_on_the_strip_asks_when_the_shift_primary_was_elsewhere() {
     assert_strip_release_asks(|at, outside| {
         vec![
@@ -1920,7 +1954,7 @@ fn a_last_release_on_the_strip_asks_when_the_shift_primary_was_elsewhere() {
 
 fn shift_share_at_strip(bridge: bool) {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drag_normal_to_odd(d.path());
+    let mut h = drag_normal_to_odd(three_cards(d.path()));
     let odd = "landscape/odd";
     let card = card_of(&h, odd);
     let (owner, strip, hit) = h.state().1.drops.strip.clone().expect("strip on odd");
