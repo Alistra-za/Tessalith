@@ -87,33 +87,36 @@ pub struct InitialWindow {
     pub maximized: bool,
 }
 
-/// The saved window, fitted to `monitors` (pixels). The window is saved in points with the scale it had, so the check
-/// runs in pixels (points x scale) and the answer goes back to points.
-pub fn initial_window(layout: &LayoutSettings, monitors: &[Rect]) -> InitialWindow {
+/// Fit the saved window in pixels at its saved scale, then cap the size in points for every possible launch monitor.
+pub fn initial_window(layout: &LayoutSettings, monitors: &[(Rect, f32)]) -> InitialWindow {
     let ppp = layout.window.map_or(1.0, |w| w.ppp);
     let (size, pos) = match layout.window {
         None => (DEFAULT_SIZE, None),
         Some(w) if monitors.is_empty() => ([w.w, w.h], None),
         Some(w) => {
             let px = Rect::from_min_size(pos2(w.x, w.y) * ppp, vec2(w.w, w.h) * ppp);
-            let r = fit_window(px, monitors);
+            let areas: Vec<_> = monitors.iter().map(|(area, _)| *area).collect();
+            let r = fit_window(px, &areas);
             (
                 [r.width() / ppp, r.height() / ppp],
                 Some([r.min.x / ppp, r.min.y / ppp]),
             )
         }
     };
+    let largest_ppp = monitors.iter().fold(ppp, |max, &(_, scale)| max.max(scale));
     InitialWindow {
-        size: cap_to_surface(size, ppp),
+        size: cap_to_surface(size, largest_ppp),
         pos,
+        // shortcut: on a monitor wider than 8192 px, maximized restore can oversize the first frame.
+        // Cap maximized startup natively if the first-frame MaxInnerSize/InnerSize correction is too late there.
         maximized: layout.window.is_some_and(|w| w.maximized),
     }
 }
 
-/// The monitors' work areas in pixels, the primary first. Empty when Windows cannot say (AG18: the Windows API
-/// through `windows-sys`, which eframe already pulls in; winit has no monitor list before the window exists).
+/// The monitors' work areas in pixels and native pixels per point, primary first. Empty when Windows cannot say.
+/// AG18 uses `windows-sys` because winit has no monitor list before the window exists.
 #[cfg(windows)]
-pub fn monitors() -> Vec<Rect> {
+pub fn monitors() -> Vec<(Rect, f32)> {
     use windows_sys::Win32::Foundation::{LPARAM, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
@@ -123,7 +126,7 @@ pub fn monitors() -> Vec<Rect> {
     };
     unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> i32 {
         // SAFETY: `out` is the `&mut Vec` passed below, alive for the whole enumeration.
-        let list = unsafe { &mut *(out as *mut Vec<(bool, Rect)>) };
+        let list = unsafe { &mut *(out as *mut Vec<(bool, Rect, f32)>) };
         // SAFETY: `MONITORINFO` is a `repr(C)` struct of `u32`s and `RECT`s (four `i32`s), so all-zero bytes are a
         // valid value.
         let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
@@ -138,11 +141,12 @@ pub fn monitors() -> Vec<Rect> {
                     pos2(r.left as f32, r.top as f32),
                     pos2(r.right as f32, r.bottom as f32),
                 ),
+                monitor_scale(m),
             ));
         }
         1
     }
-    let mut list: Vec<(bool, Rect)> = vec![];
+    let mut list: Vec<(bool, Rect, f32)> = vec![];
     // SAFETY: plain Win32 calls. The process is made per-monitor DPI aware first (winit does the same a moment later and
     // then finds it done), so the rectangles are real pixels and not scaled ones.
     unsafe {
@@ -154,12 +158,26 @@ pub fn monitors() -> Vec<Rect> {
             &mut list as *mut _ as LPARAM,
         );
     }
-    list.sort_by_key(|(primary, _)| !primary);
-    list.into_iter().map(|(_, r)| r).collect()
+    list.sort_by_key(|(primary, _, _)| !primary);
+    list.into_iter().map(|(_, r, scale)| (r, scale)).collect()
+}
+
+#[cfg(windows)]
+fn monitor_scale(monitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) -> f32 {
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    use windows_sys::Win32::UI::WindowsAndMessaging::USER_DEFAULT_SCREEN_DPI;
+
+    let (mut dpi_x, mut dpi_y) = (0, 0);
+    // SAFETY: both outputs are live locals. Windows returns an error for an invalid monitor handle.
+    if unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) } == 0 {
+        dpi_x as f32 / USER_DEFAULT_SCREEN_DPI as f32
+    } else {
+        5.0 // Windows supports up to 500% scaling. Keep the surface safe when the DPI query fails.
+    }
 }
 
 #[cfg(not(windows))]
-pub fn monitors() -> Vec<Rect> {
+pub fn monitors() -> Vec<(Rect, f32)> {
     vec![]
 }
 
@@ -491,7 +509,7 @@ mod tests {
         assert_eq!(cap_to_surface([1600.0, 900.0], 1.25), [1600.0, 900.0]);
     }
 
-    fn restored_size(monitors: &[Rect]) -> [f32; 2] {
+    fn restored_size(monitors: &[(Rect, f32)]) -> [f32; 2] {
         let layout = LayoutSettings {
             window: Some(WindowSettings {
                 x: 10.0,
@@ -509,11 +527,36 @@ mod tests {
     #[test]
     fn the_initial_window_caps_the_monitor_fitted_size() {
         let monitor = Rect::from_min_size(egui::Pos2::ZERO, vec2(10000.0, 1600.0));
-        assert_eq!(restored_size(&[monitor]), [4096.0, 800.0]);
+        assert_eq!(restored_size(&[(monitor, 1.0)]), [4096.0, 800.0]);
     }
 
     #[test]
     fn the_initial_window_caps_the_saved_size_without_monitors() {
         assert_eq!(restored_size(&[]), [4096.0, 900.0]);
+    }
+
+    #[test]
+    fn the_initial_window_caps_a_saved_window_at_the_largest_monitor_scale() {
+        let primary = Rect::from_min_size(egui::Pos2::ZERO, vec2(1920.0, 1080.0));
+        let launch = Rect::from_min_size(pos2(1920.0, 0.0), vec2(5120.0, 2880.0));
+        let layout = LayoutSettings {
+            window: Some(WindowSettings {
+                x: 1920.0,
+                y: 0.0,
+                w: 5000.0,
+                h: 900.0,
+                ppp: 1.0,
+                maximized: false,
+            }),
+            ..Default::default()
+        };
+        let window = initial_window(&layout, &[(primary, 1.0), (launch, 2.0)]);
+        assert_eq!(window.size, [4096.0, 900.0]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_unavailable_monitor_dpi_uses_the_windows_maximum_scale() {
+        assert_eq!(monitor_scale(std::ptr::null_mut()), 5.0);
     }
 }

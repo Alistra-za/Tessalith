@@ -77,7 +77,7 @@ fn a_missing_or_old_file_gives_todays_defaults() {
     assert_eq!(s.layout, LayoutSettings::default());
     assert!(s.set_view_3d, "the 2D | 3D switch is kept (AB4)");
     assert_eq!(s.layout.window, None);
-    let w = initial_window(&s.layout, &[rect(0.0, 0.0, 1920.0, 1080.0)]);
+    let w = initial_window(&s.layout, &[(rect(0.0, 0.0, 1920.0, 1080.0), 1.0)]);
     assert_eq!((w.size, w.pos, w.maximized), (DEFAULT_SIZE, None, false));
     assert_eq!(DEFAULT_SIZE, [1400.0, 900.0]);
     assert!(!GuiSettings::default().set_view_3d, "2D stays the default");
@@ -276,7 +276,7 @@ fn the_initial_window_is_in_points_and_uses_the_saved_scale() {
         ..LayoutSettings::default()
     };
     // The monitors are in pixels: at 2x the window is 2000 x 1400 px, bigger than the 1920 x 1080 monitor.
-    let w = initial_window(&l, &[mon()]);
+    let w = initial_window(&l, &[(mon(), 1.0)]);
     assert_eq!(w.size, [960.0, 540.0]);
     assert_eq!(w.pos, Some([0.0, 0.0]));
     assert!(!w.maximized);
@@ -284,7 +284,7 @@ fn the_initial_window_is_in_points_and_uses_the_saved_scale() {
     let w = initial_window(&l, &[]);
     assert_eq!((w.size, w.pos), ([1000.0, 700.0], None));
     // Fits: the saved points come back as they were.
-    let w = initial_window(&l, &[rect(0.0, 0.0, 4000.0, 3000.0)]);
+    let w = initial_window(&l, &[(rect(0.0, 0.0, 4000.0, 3000.0), 1.0)]);
     assert_eq!((w.size, w.pos), ([1000.0, 700.0], Some([100.0, 50.0])));
 }
 
@@ -496,8 +496,9 @@ fn a_restored_preview_settings_width_survives_a_session_without_the_panel() {
 
 #[test]
 fn the_monitor_list_has_positive_areas() {
-    for m in sdc_gui::layout::monitors() {
+    for (m, scale) in sdc_gui::layout::monitors() {
         assert!(m.width() > 0.0 && m.height() > 0.0, "{m:?}");
+        assert!(scale > 0.0 && scale <= 5.0, "{scale} pixels per point");
     }
 }
 
@@ -625,7 +626,7 @@ fn a_window_saved_at_egui_zoom_restores_at_the_same_size() {
         }),
         ..LayoutSettings::default()
     };
-    let w = initial_window(&l, &[rect(0.0, 0.0, 4000.0, 3000.0)]);
+    let w = initial_window(&l, &[(rect(0.0, 0.0, 4000.0, 3000.0), 1.0)]);
     assert_eq!((w.size, w.pos), ([1400.0, 900.0], Some([100.0, 80.0])));
 }
 
