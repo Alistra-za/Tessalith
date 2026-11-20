@@ -2179,16 +2179,38 @@ pub fn draw(
         || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(&ctx);
     let mut next_strip = None;
     // Test last frame's painted area and its bridge once, before any zone can take the release.
-    let strip_owner = st
-        .strip
-        .as_ref()
-        .filter(|(_, painted, hit)| {
-            image
-                && ctx
-                    .pointer_latest_pos()
-                    .is_some_and(|p| painted.contains(p) || hit.contains(p))
-        })
-        .map(|(id, ..)| id.as_str());
+    let release = ctx.input(|i| {
+        if !image || !i.pointer.any_released() {
+            return None;
+        }
+        let mut primary = i.events.iter().filter_map(|event| match event {
+            egui::Event::PointerButton {
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                pos,
+                modifiers,
+            } => Some((*pos, modifiers.shift)),
+            _ => None,
+        });
+        let first = primary.next()?;
+        primary.next().is_none().then_some(first)
+    });
+    let strip_at = |pos| {
+        st.strip
+            .as_ref()
+            .filter(|(_, painted, hit)| image && (painted.contains(pos) || hit.contains(pos)))
+            .map(|(id, ..)| id.as_str())
+    };
+    let hovered_strip = ctx.pointer_latest_pos().and_then(strip_at);
+    let strip_owner = match release {
+        Some((pos, _)) => strip_at(pos),
+        None => hovered_strip,
+    };
+    // egui's normal zones hit-test the last move too. On a move onto the strip after release,
+    // give the uncovered card or new-set area the actual release position.
+    let body_release = release
+        .filter(|_| hovered_strip.is_some() && strip_owner.is_none())
+        .map(|(pos, _)| pos);
     let out = area.show(ui, |ui| {
         let view_top = ui.clip_rect().top();
         // `top` runs on the remembered heights, not on the laid-out rects: egui rounds each allocation, and the sum of
@@ -2219,6 +2241,8 @@ pub fn draw(
                     let look = PillLook {
                         image: image && next_strip.is_none(),
                         strip_owner,
+                        release,
+                        body_release,
                         frame_x,
                         dragging: dragged.as_deref() == Some(v.id.as_str()),
                         selected,
@@ -2315,7 +2339,7 @@ pub fn draw(
             }
         }
         if model.root.is_some() {
-            new_set_area(ui, &editing, strip_owner.is_some(), &mut acts);
+            new_set_area(ui, &editing, strip_owner.is_some(), body_release, &mut acts);
         }
     });
     st.strip = next_strip.map(|(index, painted, hit)| {
@@ -2637,7 +2661,13 @@ fn move_to_hits(views: &[SetView], query: &str) -> MoveHits {
 }
 
 /// The dashed area at the bottom: a texture dropped here starts a new set.
-fn new_set_area(ui: &mut egui::Ui, editing: &Editing, covered: bool, acts: &mut Vec<Act>) {
+fn new_set_area(
+    ui: &mut egui::Ui,
+    editing: &Editing,
+    covered: bool,
+    body_release: Option<egui::Pos2>,
+    acts: &mut Vec<Act>,
+) {
     // Note HN F6: weak text, the selection accent while last frame's zone had a dragged texture over it.
     let hot_id = ui.scope_id().with("new_set_hint_hot");
     let hot = ui.data(|d| d.get_temp::<bool>(hot_id)).unwrap_or(false);
@@ -2650,6 +2680,7 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, covered: bool, acts: &mut 
     let (zone, payload) = item_zone(
         ui,
         editing.on && !borrow_in_flight && !covered,
+        body_release,
         egui::Frame::group(ui.style()).corner_radius(12.0),
         |ui| {
             ui.set_width(ui.available_width());
@@ -2679,10 +2710,22 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, covered: bool, acts: &mut 
 fn item_zone(
     ui: &mut egui::Ui,
     editing: bool,
+    body_release: Option<egui::Pos2>,
     frame: egui::Frame,
     add: impl FnOnce(&mut egui::Ui),
 ) -> (egui::Response, Option<Dropped>) {
     if editing && !egui::DragAndDrop::has_payload_of_type::<DragSet>(ui.ctx()) {
+        if let Some(pos) = body_release {
+            let zone = frame.show(ui, add).response;
+            let dropped = if zone.interact_rect.contains(pos)
+                && ui.ctx().layer_id_at(pos) == Some(zone.layer_id)
+            {
+                take_image(ui.ctx())
+            } else {
+                None
+            };
+            return (zone, dropped);
+        }
         if egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()) {
             let (zone, p) = ui.dnd_drop_zone::<DragBorrow, ()>(frame, add);
             return (zone.response, p.map(Dropped::Borrow));
@@ -2691,6 +2734,16 @@ fn item_zone(
         (zone.response, p.map(Dropped::Item))
     } else {
         (frame.show(ui, add).response, None)
+    }
+}
+
+fn take_image(ctx: &egui::Context) -> Option<Dropped> {
+    if egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ctx) {
+        egui::DragAndDrop::take_payload::<DragBorrow>(ctx).map(Dropped::Borrow)
+    } else if egui::DragAndDrop::has_payload_of_type::<DragItem>(ctx) {
+        egui::DragAndDrop::take_payload::<DragItem>(ctx).map(Dropped::Item)
+    } else {
+        None
     }
 }
 
@@ -2739,6 +2792,8 @@ struct PillOut {
 struct PillLook<'a> {
     image: bool,
     strip_owner: Option<&'a str>,
+    release: Option<(egui::Pos2, bool)>,
+    body_release: Option<egui::Pos2>,
     frame_x: f32,
     dragging: bool,
     selected: bool,
@@ -2801,15 +2856,16 @@ fn pill(
     let builder = egui::UiBuilder::new()
         .scope_id(look.id)
         .sense(egui::Sense::click());
+    let owns = look.strip_owner == Some(v.id.as_str());
     let scoped = ui.scope_builder(builder, |ui| {
         if look.dragging {
             ui.set_opacity(0.5);
         }
-        let owns = look.strip_owner == Some(v.id.as_str());
         let covered = look.strip_owner.is_some() && !owns;
         let (zone, mut dropped) = item_zone(
             ui,
             editing.on && !covered,
+            look.body_release,
             egui::Frame::NONE.corner_radius(12.0),
             |ui| {
                 card.show(ui, |ui| {
@@ -3122,14 +3178,8 @@ fn pill(
             hit.max.x = hit.max.x.min(zone.rect.right());
             (painted, hit.intersect(clip))
         });
-        if owns && !zone.contains_pointer() && editing.on && ui.input(|i| i.pointer.any_released())
-        {
-            if egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()) {
-                dropped =
-                    egui::DragAndDrop::take_payload::<DragBorrow>(ui.ctx()).map(Dropped::Borrow);
-            } else if egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx()) {
-                dropped = egui::DragAndDrop::take_payload::<DragItem>(ui.ctx()).map(Dropped::Item);
-            }
+        if owns && editing.on && look.release.is_some() && dropped.is_none() {
+            dropped = take_image(ui.ctx());
         }
         (dropped, strip)
     });
@@ -3150,18 +3200,8 @@ fn pill(
         Some(Dropped::Item(p)) => acts.push(Act::Drop(
             p.0.clone(),
             v.id.clone(),
-            ui.input(|i| {
-                let mut releases = i.events.iter().filter_map(|event| match event {
-                    egui::Event::PointerButton {
-                        button: egui::PointerButton::Primary,
-                        pressed: false,
-                        pos,
-                        modifiers,
-                    } => Some(modifiers.shift && resp.interact_rect.contains(*pos)),
-                    _ => None,
-                });
-                releases.next() == Some(true) && releases.next().is_none()
-            }),
+            look.release
+                .is_some_and(|(pos, shift)| shift && (owns || resp.interact_rect.contains(pos))),
         )),
         Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
             item: p.item.clone(),

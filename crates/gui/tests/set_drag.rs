@@ -302,13 +302,11 @@ fn empty_slots_hide_at_rest_and_float_under_a_dragged_image() {
     assert_eq!(h.state().1.drops.strip, None);
     // the D chip's letter offset, to compare the strip's letters with (HP9)
     let d_chip = on_card_of(&h, ROCK, "D")[0].rect();
-    let d_off = painted_text_in(&h, d_chip)
+    let d_text = painted_text_in(&h, d_chip)
         .iter()
         .find(|(t, ..)| t == "D")
         .expect("the D letter")
-        .1
-        .min
-        - d_chip.min;
+        .1;
     hover_with(&mut h, DragSet(ROCK.into()), card.center());
     assert_eq!(
         h.state().1.drops.strip,
@@ -344,14 +342,18 @@ fn empty_slots_hide_at_rest_and_float_under_a_dragged_image() {
             r.min + egui::vec2(4.0 + i as f32 * 48.0, 4.0),
             egui::vec2(32.0, 32.0),
         );
-        let off = at.min - cell.min;
-        // a longer tag may be fitted smaller (`max_w`), so its top can move; its left edge cannot
-        let same = if l.len() == 1 {
-            (off - d_off).length() <= 1.0
+        let (off, expected) = if l.len() == 1 {
+            (at.min - cell.min, d_text.min - d_chip.min)
         } else {
-            (off.x - d_off.x).abs() <= 1.0
+            (
+                at.left_bottom() - cell.left_bottom(),
+                d_text.left_bottom() - d_chip.left_bottom(),
+            )
         };
-        assert!(same, "{l}: offset {off:?} against the D chip's {d_off:?}");
+        assert!(
+            (off - expected).length() <= 1.0,
+            "{l}: offset {off:?} against the D chip's {expected:?}"
+        );
     }
     assert_eq!(card_of(&h, ROCK), card, "the card did not change size");
     egui::DragAndDrop::clear_payload(&h.ctx);
@@ -573,6 +575,86 @@ fn a_borrow_released_on_the_strip_keeps_its_lender() {
     );
 }
 
+fn borrow_across_strip_edge(released_inside: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    let leaf = "landscape/leaf";
+    let odd = "landscape/odd";
+    assert_eq!(
+        m.drop_choice(NORMAL, leaf, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    m.set_shader(odd, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    let before = documents(&m);
+    let mut h = harness(m);
+    h.run();
+    let from = on_card_of(&h, leaf, "N")[0].rect().center();
+    let card = card_of(&h, odd);
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    let (owner, strip, bridge) = h.state().1.drops.strip.clone().expect("strip on odd");
+    assert_eq!(owner, odd);
+    let inside = strip.left_center() + egui::vec2(1.0, 0.0);
+    let outside = strip.left_center() - egui::vec2(2.0, 0.0);
+    assert!(!bridge.contains(outside) && !card.contains(outside));
+    let (release, later) = if released_inside {
+        (inside, outside)
+    } else {
+        (outside, inside)
+    };
+    h.input_mut().events.extend([
+        pointer_button(release, false, egui::Modifiers::NONE),
+        egui::Event::PointerMoved(later),
+    ]);
+    h.step();
+    assert_eq!(h.state().1.drops.pending, None);
+    if released_inside {
+        idle(&mut h.state_mut().0);
+        assert!(
+            matches!(view(&h.state().0, odd).slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { from, item }) if from == ROCK && item == NORMAL),
+            "a release inside the strip shares into its owner"
+        );
+    } else {
+        assert_eq!(
+            documents(&h.state().0),
+            before,
+            "moving onto the strip after release cannot share"
+        );
+    }
+}
+
+#[test]
+fn a_borrow_crossing_the_strip_after_release_outside_leaves_membership_alone() {
+    borrow_across_strip_edge(false);
+}
+
+#[test]
+fn a_borrow_crossing_the_strip_after_release_inside_shares_into_its_owner() {
+    borrow_across_strip_edge(true);
+}
+
+#[test]
+fn a_release_on_an_uncovered_card_stays_there_after_a_move_onto_the_strip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(three_cards(d.path()));
+    h.run();
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let rock = card_of(&h, ROCK);
+    drag_over(&mut h, from, rock.center(), egui::Modifiers::NONE);
+    let (owner, strip, bridge) = h.state().1.drops.strip.clone().expect("strip on rock01");
+    assert_eq!(owner, ROCK);
+    let odd = "landscape/odd";
+    let release = card_of(&h, odd).center();
+    assert!(!strip.contains(release) && !bridge.contains(release));
+    h.input_mut().events.extend([
+        pointer_button(release, false, egui::Modifiers::NONE),
+        egui::Event::PointerMoved(strip.center()),
+    ]);
+    h.step();
+    assert_eq!(h.state().1.drops.pending, Some(choice(NORMAL, odd, ROCK)));
+}
+
 /// Note JW1: a strip covering the new-set area keeps both the hover and the release.
 #[test]
 fn the_new_set_area_stays_inactive_under_the_strip() {
@@ -665,6 +747,10 @@ fn a_read_only_card_shows_the_strip_without_taking_a_drop() {
             .expect("strip on read-only card");
         assert_eq!(id, ROCK);
         let painted = painted_text_in(&h, strip);
+        assert!(
+            painted.iter().any(|(text, ..)| text == "P"),
+            "Height is empty on the reloaded read-only card and must paint P"
+        );
         for letter in letters.split(", ") {
             assert!(
                 painted.iter().any(|(t, ..)| t == letter),
@@ -1766,6 +1852,62 @@ fn shift_changed_after_release_down_still_asks() {
 #[test]
 fn shift_changed_after_release_up_still_shares() {
     release_then_change_shift(egui::Modifiers::SHIFT, egui::Modifiers::NONE);
+}
+
+fn shift_share_at_strip(bridge: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    let odd = "landscape/odd";
+    m.set_shader(odd, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(m.choice_refused(NORMAL, odd, DropChoice::Share), None);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().1.drops.last_choice = Some(DropChoice::Share);
+    let from = outside_sets(&h, "rock01_normal.png").rect().center();
+    let card = card_of(&h, odd);
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    let (owner, strip, hit) = h.state().1.drops.strip.clone().expect("strip on odd");
+    assert_eq!(owner, odd);
+    let at = if bridge {
+        let y = if strip.top() >= card.bottom() {
+            (strip.top() + card.bottom()) / 2.0
+        } else {
+            (strip.bottom() + card.top()) / 2.0
+        };
+        let gap = egui::pos2(hit.center().x, y);
+        assert!(hit.contains(gap) && !strip.contains(gap));
+        gap
+    } else {
+        strip.center()
+    };
+    assert!(!card.contains(at));
+    h.input_mut().events.extend([
+        egui::Event::PointerMoved(at),
+        pointer_button(at, false, egui::Modifiers::SHIFT),
+        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+    ]);
+    h.step();
+    assert_eq!(
+        h.state().1.drops.pending,
+        None,
+        "Shift on the release uses Share"
+    );
+    idle(&mut h.state_mut().0);
+    assert!(
+        matches!(view(&h.state().0, odd).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == ROCK && item == NORMAL)
+    );
+}
+
+#[test]
+fn a_shift_drop_on_the_strip_writes_the_remembered_share() {
+    shift_share_at_strip(false);
+}
+
+#[test]
+fn a_shift_drop_on_the_strip_bridge_writes_the_remembered_share() {
+    shift_share_at_strip(true);
 }
 
 /// Note JW6 (A8-3): Shift held at the drop answers with the remembered Share: no dialog, the borrow is written.
