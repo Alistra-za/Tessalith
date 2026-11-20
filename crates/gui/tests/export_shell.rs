@@ -4007,7 +4007,7 @@ fn a_recovery_file_removed_by_a_listed_save_counts_under_the_document() {
 /// The complex-material fixture of `cm_json.rs`: `iron` (diffuse + `_m`) under `<dir>/src/m`, its JSON export on,
 /// exported once. Returns the model and the JSON's path.
 fn cm_exported_once(dir: &std::path::Path) -> (AppModel, std::path::PathBuf) {
-    let mut m = cm_project(dir);
+    let mut m = cm_project(dir, "iron");
     export_and_compare(&mut m, dir);
     let json = m.export_root().join("m").join("iron_m.json");
     assert!(json.is_file(), "{:?}", m.export.notes);
@@ -4651,19 +4651,19 @@ fn a_two_set_json_with_one_manifest_entry_gone_lists_the_json() {
 }
 
 /// `cm_exported_once` before its export: the project, its JSON export on.
-fn cm_project(dir: &std::path::Path) -> AppModel {
+fn cm_project(dir: &std::path::Path, stem: &str) -> AppModel {
     use image::{ImageBuffer, Rgb, Rgba};
     let r = dir.join("src/m");
     std::fs::create_dir_all(&r).unwrap();
     let rgb = |x: u32, y: u32| [(x * 4) as u8, (y * 4) as u8, 90u8];
     ImageBuffer::from_fn(64, 64, |x, y| Rgb(rgb(x, y)))
-        .save(r.join("iron.png"))
+        .save(r.join(format!("{stem}.png")))
         .unwrap();
     ImageBuffer::from_fn(64, 64, |x, y| {
         let [a, b, c] = rgb(x, y);
         Rgba([a, b, c, (40 + x * 2) as u8])
     })
-    .save(r.join("iron_m.png"))
+    .save(r.join(format!("{stem}_m.png")))
     .unwrap();
     let settings = sdc_gui::settings::GuiSettings {
         export_folder: Some(dir.join("export")),
@@ -4674,54 +4674,36 @@ fn cm_project(dir: &std::path::Path) -> AppModel {
     m.open_folder(dir.join("src"));
     idle(&mut m);
     support::choose_export(&mut m, dir.join("export"));
-    let iron = sdc_gui::model::sets::set_views(&m)
+    let set = sdc_gui::model::sets::set_views(&m)
         .into_iter()
-        .find(|v| v.key.ends_with("m/iron"))
-        .expect("the iron set")
+        .find(|v| v.key.ends_with(&format!("m/{stem}")))
+        .expect("the complex material set")
         .id;
-    m.set_cm_export(&iron, true);
-    m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(80)));
+    m.set_cm_export(&set, true);
+    m.set_cm_value(&set, "glossiness", Some(serde_json::json!(80)));
     idle(&mut m);
     m
 }
 
-/// Makes the empty folder `dir` case-sensitive, so two names that differ in case only can sit side by side (on
-/// Windows with `fsutil`; other systems are case-sensitive already).
-fn case_sensitive(dir: &std::path::Path) {
-    #[cfg(windows)]
-    {
-        let out = std::process::Command::new("fsutil.exe")
-            .args(["file", "setCaseSensitiveInfo"])
-            .arg(dir)
-            .arg("enable")
-            .output()
-            .expect("fsutil runs");
-        assert!(
-            out.status.success(),
-            "this test needs a case-sensitive folder: {}",
-            String::from_utf8_lossy(&out.stdout)
-        );
-    }
-    #[cfg(not(windows))]
-    let _ = dir;
-}
-
-/// B1: a case-sensitive folder holds both the recorded JSON under its old spelling `IRON_M.json` and a foreign
-/// `iron_m.json`. The writer removes its own old spelling first, then keeps the foreign file (ruling 3c-51 (a)): the
+/// B1: the folder holds both the recorded JSON under its old spelling and a foreign JSON under the current one.
+/// The writer removes its own old spelling first, then keeps the foreign file (ruling 3c-51 (a)): the
 /// JSON is listed and the removed spelling counts under it.
 #[test]
 fn a_case_twin_beside_a_foreign_json_lists_the_json_and_counts_the_twin_under_it() {
+    use std::io::Write;
     let d = tempfile::tempdir().unwrap();
-    let mut m = cm_project(d.path());
+    let mut m = cm_project(d.path(), "silk");
     let folder = m.export_root().join("m");
-    std::fs::create_dir_all(&folder).unwrap();
-    case_sensitive(&folder);
     export_and_compare(&mut m, d.path());
-    let json = folder.join("iron_m.json");
+    let json = folder.join("silk_m.json");
     assert!(json.is_file(), "{:?}", m.export.notes);
-    let twin = folder.join("IRON_M.json");
+    // The Kelvin sign lowercases to k in a JSON record key, but NTFS allows both names in an ordinary directory.
+    let twin = folder.join("SIL\u{212A}_M.json");
     std::fs::rename(&json, &twin).unwrap();
-    std::fs::write(&json, b"{ \"theirs\": true }\n").unwrap();
+    std::fs::File::create_new(&json)
+        .expect("the foreign spelling must name a separate file")
+        .write_all(b"{ \"theirs\": true }\n")
+        .unwrap();
     assert!(twin.is_file(), "guard: both spellings are on disk");
     let s = export_and_compare(&mut m, d.path());
     assert!(!twin.exists(), "the writer removed its own old spelling");
