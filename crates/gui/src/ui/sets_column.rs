@@ -1058,20 +1058,17 @@ fn folded_row(
     ui: &mut egui::Ui,
     model: &AppModel,
     v: &SetView,
-    helper: &str,
+    item: &TextureItem,
     name: &str,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
 ) {
-    let Some(item) = model.item(helper) else {
-        return;
-    };
     ui.horizontal(|ui| {
         let r = ui.add(egui::Button::new(name).sense(egui::Sense::click_and_drag()));
         member_acts(
             model,
             v,
-            helper,
+            &item.key,
             None,
             false,
             ChipDrag::Item,
@@ -1093,49 +1090,72 @@ fn folded_row(
             None => remove.on_hover_text("Remove from set"),
         };
         if remove.clicked() {
-            acts.push(Act::RemoveMember(v.id.clone(), helper.to_owned()));
+            acts.push(Act::RemoveMember(v.id.clone(), item.key.clone()));
             ui.close();
         }
     });
 }
 
-/// One chip's dock, planned: its rect, the index of that rect among the card's fixed rects, the helpers that fill it
-/// and the cells to draw (a badge whose item is gone has no cell).
+struct FoldedHelper<'a> {
+    item: &'a TextureItem,
+    fills: Vec<engine::helper::FillTarget>,
+}
+
+enum PlannedCell<'a> {
+    Badge(&'a Docked, &'a TextureItem),
+    More(SlotKind, Vec<FoldedHelper<'a>>),
+}
+
+/// One chip's rect, its index among the card's fixed rects and its drawable cells.
 struct DockPlan<'a> {
     chip: egui::Rect,
     own: usize,
-    entries: Vec<&'a Docked>,
-    cells: Vec<(usize, Cell)>,
+    cells: Vec<(usize, PlannedCell<'a>)>,
 }
 
 /// Note JW7: only helpers represented by a badge or an overflow row can be skipped on the trailing row.
 fn plan_dock<'a>(
-    model: &AppModel,
+    model: &'a AppModel,
     chip: egui::Rect,
     own: usize,
-    entries: Vec<&'a Docked>,
+    entries: &[&'a Docked],
     locks: (bool, bool),
     represented: &mut HashSet<&'a str>,
 ) -> DockPlan<'a> {
-    let mut cells = dock_cells(locks.0, locks.1, entries.len());
-    cells.retain(|(_, cell)| {
-        let slice = match *cell {
-            Cell::Badge(i) => &entries[i..=i],
-            Cell::More(k) => &entries[entries.len() - k..],
+    let mut cells = Vec::new();
+    for (pos, cell) in dock_cells(locks.0, locks.1, entries.len()) {
+        let cell = match cell {
+            Cell::Badge(i) => {
+                let d = entries[i];
+                let Some(item) = model.item(&d.helper) else {
+                    continue;
+                };
+                represented.insert(item.key.as_str());
+                PlannedCell::Badge(d, item)
+            }
+            Cell::More(k) => {
+                let hidden = &entries[entries.len() - k..];
+                let mut groups: Vec<FoldedHelper> = Vec::new();
+                for d in hidden {
+                    if let Some(group) = groups.iter_mut().find(|g| g.item.key == d.helper) {
+                        group.fills.push(d.target);
+                    } else if let Some(item) = model.item(&d.helper) {
+                        groups.push(FoldedHelper {
+                            item,
+                            fills: vec![d.target],
+                        });
+                    }
+                }
+                if groups.is_empty() {
+                    continue;
+                }
+                represented.extend(groups.iter().map(|g| g.item.key.as_str()));
+                PlannedCell::More(hidden[0].slot, groups)
+            }
         };
-        let mut extant = false;
-        for d in slice.iter().filter(|d| model.item(&d.helper).is_some()) {
-            represented.insert(d.helper.as_str());
-            extant = true;
-        }
-        extant
-    });
-    DockPlan {
-        chip,
-        own,
-        entries,
-        cells,
+        cells.push((pos, cell));
     }
+    DockPlan { chip, own, cells }
 }
 
 /// Note HP: clamps every dock hit rect of one card at once (they must not meet each other, a chip, a tile or the
@@ -1183,18 +1203,11 @@ fn draw_dock(
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
 ) {
-    let entries = &plan.entries;
     for ((pos, cell), &hit) in plan.cells.iter().zip(hits) {
         let (rect, _) = badge_rects(plan.chip, *pos);
         let pos = *pos;
         match cell {
-            Cell::Badge(i) => {
-                let d = entries[*i];
-                // `plan_dock` kept only cells whose item exists, so this is never None; it stays because the
-                // item is needed and the model is borrowed immutably for the whole frame.
-                let Some(item) = model.item(&d.helper) else {
-                    continue;
-                };
+            PlannedCell::Badge(d, item) => {
                 let id = ui
                     .scope_id()
                     .with(("dock", &v.id, &d.helper, d.slot, d.channel));
@@ -1222,26 +1235,24 @@ fn draw_dock(
                     None => item.name.clone(),
                 });
             }
-            Cell::More(k) => {
-                let k = *k;
-                let hidden = &entries[entries.len() - k..];
-                let slot = chip_letter(v, hidden[0].slot);
-                let id = ui
-                    .scope_id()
-                    .with(("dock-more", &v.id, hidden[0].slot, pos));
-                let mut groups: Vec<(&str, String)> = Vec::new();
-                for d in hidden {
-                    let Some(item) = model.item(&d.helper) else {
-                        continue;
-                    };
-                    let fill = fill_text(d.target);
-                    if let Some((_, name)) = groups.iter_mut().find(|(key, _)| *key == d.helper) {
-                        name.push_str(", ");
-                        name.push_str(&fill);
-                    } else {
-                        groups.push((&d.helper, format!("{}, fills {fill}", item.name)));
-                    }
-                }
+            PlannedCell::More(kind, groups) => {
+                let id = ui.scope_id().with(("dock-more", &v.id, kind, pos));
+                let names = std::cell::LazyCell::new(|| {
+                    #[cfg(feature = "test-hooks")]
+                    super::paint_counts::Work::FoldedNames.built();
+                    groups
+                        .iter()
+                        .map(|group| {
+                            let fills = group
+                                .fills
+                                .iter()
+                                .copied()
+                                .map(fill_text)
+                                .collect::<Vec<_>>();
+                            format!("{}, fills {}", group.item.name, fills.join(", "))
+                        })
+                        .collect::<Vec<_>>()
+                });
                 let k = groups.len();
                 let r = ui.interact(hit, id, egui::Sense::click());
                 if ui.is_rect_visible(rect) {
@@ -1261,20 +1272,35 @@ fn draw_dock(
                         egui::Color32::WHITE,
                     );
                 }
-                let name = format!("{k} more helpers fill {slot}");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                r.widget_info(|| {
+                    let slot = chip_letter(v, *kind);
+                    let fills = if k == 1 {
+                        "helper fills"
+                    } else {
+                        "helpers fill"
+                    };
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        format!("{k} more {fills} {slot} in {}", v.id),
+                    )
+                });
+                const LIST_HINT: &str = "Click to list them.";
+                ui.ctx().accesskit_node_builder(r.id, |node| {
+                    node.set_description(format!("{}\n{LIST_HINT}", names.join("\n")));
+                });
                 egui::Popup::menu(&r)
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .show(|ui| {
-                        for (key, name) in &groups {
-                            folded_row(ui, model, v, key, name, acts, member_menu);
+                        for (group, name) in groups.iter().zip(names.iter()) {
+                            folded_row(ui, model, v, group.item, name, acts, member_menu);
                         }
                     });
                 r.on_hover_ui(|ui| {
-                    for (_, name) in &groups {
+                    for name in names.iter() {
                         ui.label(name);
                     }
-                    ui.label("Click to list them.");
+                    ui.label(LIST_HINT);
                 });
             }
         }
@@ -3075,7 +3101,7 @@ fn chip_link_mark(ui: &egui::Ui, rect: egui::Rect) {
 #[allow(clippy::too_many_arguments)]
 fn chip_row<'a>(
     ui: &mut egui::Ui,
-    model: &AppModel,
+    model: &'a AppModel,
     thumbs: &mut ThumbCache,
     v: &SetView,
     dock: &'a [Docked],
@@ -3180,7 +3206,7 @@ fn chip_row<'a>(
             model,
             r.rect,
             own,
-            entries,
+            &entries,
             chip_locks(v, Some(k)),
             &mut represented,
         ));

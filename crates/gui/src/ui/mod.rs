@@ -72,7 +72,7 @@ fn paint_cached<T: Clone + Send + Sync + 'static>(
     value
 }
 
-/// Measurements of set-editor paint work on the current GUI thread.
+/// Measurements of paint work on the current GUI thread.
 #[cfg(feature = "test-hooks")]
 pub mod paint_counts {
     use std::cell::Cell;
@@ -86,9 +86,10 @@ pub mod paint_counts {
         OutputLine,
         Format,
         Picker,
+        FoldedNames,
     }
 
-    thread_local! { static BUILDS: Cell<[usize; 7]> = const { Cell::new([0; 7]) }; }
+    thread_local! { static BUILDS: Cell<[usize; 8]> = const { Cell::new([0; 8]) }; }
 
     impl Work {
         pub(super) fn built(self) {

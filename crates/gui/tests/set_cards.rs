@@ -15,12 +15,7 @@ const ROCK: &str = "landscape/rock01";
 
 /// `pbr_opened_plain` plus `rock01_metallic.png` and `rock01_specular.png`: four raw helpers on rock01's RMAOS.
 fn four_helpers(dir: &std::path::Path) -> AppModel {
-    let r = support::mod_folder(dir).join("landscape");
-    for n in ["rock01_metallic.png", "rock01_specular.png"] {
-        image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([x as u8 * 3]))
-            .save(r.join(n))
-            .unwrap();
-    }
+    four_helper_files(dir);
     let m = pbr_opened_plain(dir);
     let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
     let on_rmaos = sdc_gui::model::helpers::docked(&m, &v)
@@ -29,6 +24,16 @@ fn four_helpers(dir: &std::path::Path) -> AppModel {
         .count();
     assert_eq!(on_rmaos, 4, "premise: four helpers fill rock01's RMAOS");
     m
+}
+
+fn four_helper_files(dir: &std::path::Path) -> std::path::PathBuf {
+    let r = support::mod_folder(dir).join("landscape");
+    for n in ["rock01_metallic.png", "rock01_specular.png"] {
+        image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([x as u8 * 3]))
+            .save(r.join(n))
+            .unwrap();
+    }
+    r
 }
 
 /// Note JW7 (A9, "Never large"): one badge and "+3" on the RMAOS chip; the folded three are not drawn again as
@@ -64,7 +69,10 @@ fn folded_helpers_sit_behind_plus_k_and_never_as_tiles() {
         1,
         "only the one badge names a helper on the card (today: 1 + 3 tiles)"
     );
-    let more = h.get_by_role_and_label(Role::Button, "3 more helpers fill RMAOS");
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    );
     assert!(card.contains_rect(more.rect()));
     more.click();
     h.run();
@@ -115,8 +123,11 @@ fn a_folded_helper_is_removed_from_its_row() {
     h.run();
     h.run();
     let steps = h.state().history.undo.len();
-    h.get_by_role_and_label(Role::Button, "3 more helpers fill RMAOS")
-        .click();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
     h.run();
     let x = h
         .query_all_by_role(Role::Button)
@@ -156,8 +167,11 @@ fn a_folded_helper_drags_from_its_row() {
     let mut h = harness(four_helpers(d.path()));
     h.run();
     h.run();
-    h.get_by_role_and_label(Role::Button, "3 more helpers fill RMAOS")
-        .click();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
     h.run();
     let remove = h
         .query_all_by_role(Role::Button)
@@ -203,6 +217,122 @@ fn a_folded_helper_drags_from_its_row() {
     assert_eq!(got, Some(key), "the row drags its helper");
 }
 
+#[test]
+fn a_closed_unhovered_overflow_builds_no_display_names() {
+    use sdc_gui::ui::paint_counts::Work::FoldedNames;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(four_helpers(d.path()));
+    h.run();
+    let ctx = h.ctx.clone();
+    assert!(!egui::Popup::is_any_open(&ctx));
+    assert!(ctx.input(|i| i.pointer.hover_pos().is_none()));
+    // kittest requires an AccessKit tree for its own steps. Draw these two ordinary frames directly.
+    ctx.disable_accesskit();
+    let before = FoldedNames.count();
+    for _ in 0..2 {
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            sdc_gui::ui::draw(ui, h.state_mut())
+        });
+        out.textures_delta.clear();
+        assert!(out
+            .shapes
+            .iter()
+            .any(|s| matches!(&s.shape, egui::Shape::Text(t)
+            if t.galley.job.text == "+3")));
+    }
+    assert_eq!(
+        FoldedNames.count(),
+        before,
+        "two idle frames built folded names"
+    );
+    ctx.enable_accesskit();
+    h.run_steps(2);
+    h.get_by_role_and_label(
+        egui::Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
+    h.run();
+    h.get_by_role_and_label(egui::Role::Button, "Remove rock01_metallic.png from set");
+    assert!(
+        FoldedNames.count() > before,
+        "the open list builds its names"
+    );
+}
+
+#[test]
+fn overflow_name_identifies_each_visible_set_with_the_same_count_and_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let r = four_helper_files(d.path());
+    for tail in ["", "_normal", "_roughness", "_ao", "_metallic", "_specular"] {
+        std::fs::copy(
+            r.join(format!("rock01{tail}.png")),
+            r.join(format!("rock02{tail}.png")),
+        )
+        .unwrap();
+    }
+    let mut m = pbr_opened_plain(d.path());
+    let other = "landscape/rock02";
+    m.decide(
+        "landscape/rock02.png",
+        sdc_gui::model::Answer::Subtype(Subtype::PbrAlbedo),
+    );
+    m.set_shader(other, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let labels = [ROCK, other].map(|set| {
+        let card = card_of(&h, set);
+        let hits: Vec<_> = h
+            .query_all_by_role(egui::Role::Button)
+            .filter(|n| card.contains_rect(n.rect()))
+            .filter_map(|n| n.accesskit_node().label())
+            .filter(|name| name.starts_with("3 more helpers fill RMAOS"))
+            .collect();
+        assert_eq!(hits.len(), 1, "one three-helper overflow on {set}");
+        hits.into_iter().next().unwrap()
+    });
+    assert_eq!(
+        labels,
+        [ROCK, other].map(|set| format!("3 more helpers fill RMAOS in {set}"))
+    );
+}
+
+#[test]
+fn overflow_name_uses_the_singular_for_one_helper_filling_two_channels() {
+    use engine::helper::FillTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.set_helper_fills("landscape/rock01_ao.png", Some(vec![]));
+    m.set_helper_fills(
+        "landscape/rock01_roughness.png",
+        Some(vec![
+            FillTarget::Packed {
+                suffix: "rmaos",
+                channel: 0,
+            },
+            FillTarget::Packed {
+                suffix: "rmaos",
+                channel: 1,
+            },
+        ]),
+    );
+    m.edit_docs("Lock one RMAOS corner", None, false, |_, s| {
+        s.set_lock(ROCK, 6, true)
+    });
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let card = card_of(&h, ROCK);
+    let names: Vec<_> = h
+        .query_all_by_role(egui::Role::Button)
+        .filter(|n| card.contains_rect(n.rect()))
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|name| name.starts_with("1 more helper"))
+        .collect();
+    assert_eq!(names, ["1 more helper fills RMAOS in landscape/rock01"]);
+}
+
 /// Note JW7 (A9-2): the "+K" hover lists the folded helpers and ends with "Click to list them.".
 #[test]
 fn plus_k_says_it_lists_them() {
@@ -216,7 +346,10 @@ fn plus_k_says_it_lists_them() {
     h.run();
     h.run();
     let more = h
-        .get_by_role_and_label(Role::Button, "3 more helpers fill RMAOS")
+        .get_by_role_and_label(
+            Role::Button,
+            "3 more helpers fill RMAOS in landscape/rock01",
+        )
         .rect();
     h.hover_at(more.center());
     h.run();
@@ -252,8 +385,11 @@ fn a_folded_helpers_remove_is_off_when_the_project_is_read_only() {
     });
     h.run();
     h.run();
-    h.get_by_role_and_label(Role::Button, "3 more helpers fill RMAOS")
-        .click();
+    h.get_by_role_and_label(
+        Role::Button,
+        "3 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
     h.run();
     let x = h
         .query_all_by_role(Role::Button)
@@ -309,8 +445,17 @@ fn a_folded_helper_with_two_channels_has_one_remove() {
     let mut h = harness(m);
     h.run();
     h.run();
-    let more = h.get_by_role_and_label(Role::Button, "2 more helpers fill RMAOS");
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "2 more helpers fill RMAOS in landscape/rock01",
+    );
     assert!(card_of(&h, ROCK).contains_rect(more.rect()));
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert_eq!(
+        more.accesskit_node().description().as_deref(),
+        Some("rock01_ao.png, fills RMAOS B\nrock01_roughness.png, fills RMAOS R, RMAOS G\nClick to list them."),
+        "the closed overflow describes its files and their grouped fills"
+    );
     more.click();
     h.run();
     let rows: Vec<_> = h
@@ -329,7 +474,10 @@ fn a_folded_helper_with_two_channels_has_one_remove() {
     assert!(h
         .query_by_label("Remove rock01_roughness.png from set")
         .is_none());
-    let more = h.get_by_role_and_label(Role::Button, "2 more helpers fill RMAOS");
+    let more = h.get_by_role_and_label(
+        Role::Button,
+        "2 more helpers fill RMAOS in landscape/rock01",
+    );
     let at = more.rect();
     assert!(shapes(&h).iter().any(|s| matches!(s, egui::Shape::Text(t)
         if t.galley.job.text == "+2" && at.contains(t.visual_bounding_rect().center()))));
@@ -371,8 +519,11 @@ fn folded_helpers_follow_the_free_corners() {
             "trailing copy of {file}"
         );
     }
-    h.get_by_role_and_label(Role::Button, "4 more helpers fill RMAOS")
-        .click();
+    h.get_by_role_and_label(
+        Role::Button,
+        "4 more helpers fill RMAOS in landscape/rock01",
+    )
+    .click();
     h.run();
     for file in ["roughness", "metallic", "ao", "specular"] {
         h.get_by_role_and_label(Role::Button, &format!("Remove rock01_{file}.png from set"));
