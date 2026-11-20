@@ -135,6 +135,8 @@ struct Listed {
     hideable: bool,
     /// Review E2: the listed rows that are not notes (the empty and first-line texts).
     problem_rows: usize,
+    /// Visible NIF problems grouped just before the notes in the default list.
+    nif_problems: usize,
     /// Review E2: the set's notes, not hidden, while a set filter is on (the Notes pill and the first line).
     set_notes: Option<usize>,
 }
@@ -142,12 +144,12 @@ struct Listed {
 /// `filtered` at most once per change: keyed on the (cached) problems build, the filter and the hidden kinds. Also
 /// whether the `Checks` pill shows (the set's check rows while a Set filter is on, else the project's; K6, review M2),
 /// and the project's rows with a suggestion, which "Accept all suggestions" decides (Note FB9).
-fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
+fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
     let all = problems(model);
-    let f = model.bottom.filter.clone();
     let kind = model.bottom.name_kind;
     let hidden_kinds = model.hidden_kinds();
-    let id = egui::Id::unique("problems-rows");
+    // The tab hover reads the default list even while a filtered list is open.
+    let id = egui::Id::unique(("problems-rows", f.is_some()));
     if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
         if Arc::ptr_eq(&l.all, &all)
             && l.filter == f
@@ -180,7 +182,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         .iter()
         .filter(|p| !p.is_note() && is_hidden(p, &hidden_kinds))
         .count();
-    let rows: Rows = if hidden == 0 {
+    let mut rows: Rows = if hidden == 0 {
         out
     } else {
         Arc::new(
@@ -190,9 +192,18 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
                 .collect(),
         )
     };
+    let problem_rows = rows.iter().filter(|p| !p.is_note()).count();
+    let nif_problems = if f.is_none() && !model.nif_problems.is_empty() {
+        let problems = &mut Arc::make_mut(&mut rows)[..problem_rows];
+        problems.sort_by_key(Problem::is_nif_problem);
+        problems.len() - problems.partition_point(|p| !p.is_nif_problem())
+    } else {
+        0
+    };
     let l = Listed {
         set_notes,
-        problem_rows: rows.iter().filter(|p| !p.is_note()).count(),
+        problem_rows,
+        nif_problems,
         suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
         hideable: all.iter().any(can_hide),
         all,
@@ -206,6 +217,13 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     };
     ui.data_mut(|d| d.insert_temp(id, l.clone()));
     l
+}
+
+pub(super) fn nif_problem_count(ui: &egui::Ui, model: &AppModel) -> usize {
+    if model.nif_problems.is_empty() {
+        return 0;
+    }
+    rows(ui, model, None).nif_problems
 }
 
 /// The `Kinds ▾` menu (Note HC4): one tick per kind of row the project has, unticked when hidden. The menu stays open,
@@ -937,7 +955,7 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
     let width = stored.map_or(full, |b| {
         (lead_width(ui, p) + gaps + b + ROW_MARGIN).min(full)
     });
-    // The wrapper is `interact_size.y` high, as the focus rect above is: `row_h` is that plus the item spacing.
+    // Match the focus rect and the virtual row height. The scroll area adds the item spacing.
     let size = egui::vec2(width, ui.spacing().interact_size.y);
     let ((l, r), buttons) = ui
         .allocate_ui(size, |ui| {
@@ -1053,9 +1071,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         hidden_problems,
         hideable,
         problem_rows,
+        nif_problems,
         set_notes,
         ..
-    } = rows(ui, model);
+    } = rows(ui, model, model.bottom.filter.clone());
     // Review E2: the set's notes under a set filter, else the tab's own cached count; neither scans a row on a
     // settled frame. Read once a frame (review E18): the first lines read it too.
     let tab_counts = cached_tab_counts(model);
@@ -1158,7 +1177,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     if let Some(text) = lines.plain {
         ui.weak(text);
     }
-    let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    let row_h = ui.spacing().interact_size.y;
+    let heading = (nif_problems > 0).then_some(problem_rows - nif_problems);
     let m = &*model;
     // Review Focus 5: the focused row left the list (its question was answered) and egui dropped the focus, so the
     // row now at its index takes it, or the last row.
@@ -1181,7 +1201,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let fix_focus = taken.and_then(|id| list.iter().position(|p| row_id(p) == id).map(|i| (id, i)));
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     if let Some((_, i)) = fix_focus {
-        area = area.vertical_scroll_offset(i as f32 * row_h);
+        let display_row = i + usize::from(heading.is_some_and(|h| h <= i));
+        area =
+            area.vertical_scroll_offset(display_row as f32 * (row_h + ui.spacing().item_spacing.y));
     }
     let rows_in = RowsIn {
         m,
@@ -1196,11 +1218,27 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         focus_now: None,
         sizing: false,
     };
-    area.show_rows(ui, row_h, list.len(), |ui, range| {
-        for i in range {
-            row_ui(ui, &rows_in, i, &mut out);
-        }
-    });
+    area.show_rows(
+        ui,
+        row_h,
+        list.len() + usize::from(heading.is_some()),
+        |ui, range| {
+            for i in range {
+                if heading == Some(i) {
+                    let text = format!("From the NIF you are editing ({nif_problems})");
+                    ui.add_sized(
+                        [ui.available_width(), row_h],
+                        egui::Label::new(egui::RichText::new(text).strong())
+                            .halign(egui::Align::Min)
+                            .truncate(),
+                    );
+                } else {
+                    let row = i - usize::from(heading.is_some_and(|h| h < i));
+                    row_ui(ui, &rows_in, row, &mut out);
+                }
+            }
+        },
+    );
     let RowsOut {
         act,
         focus_now,

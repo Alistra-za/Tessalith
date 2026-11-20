@@ -7,8 +7,175 @@ use sdc_gui::model::{AppModel, Dialog};
 use std::time::Duration;
 
 use egui::accesskit::Role;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use sdc_gui::settings::GuiSettings;
+
+use sdc_gui::model::bottom::{cached_tab_counts, flagged, tab_label, BottomTab, ProblemsFilter};
+use sdc_gui::model::meshes::{NifLevel, NifProblem, NifTab};
+
+const NIF_HEADING: &str = "From the NIF you are editing";
+const NIF_HOVER: &str = "2 of these come from the NIF you are editing.";
+
+fn editing_nif(dir: &std::path::Path) -> (Harness<'static, AppModel>, usize) {
+    let mut m = support::opened(dir);
+    support::decide_all(&mut m);
+    m.skipped_user_presets = vec![("broken.toml".into(), "invalid preset".into())];
+    m.unmatched_keys = vec!["gone.png".into()]; // A project note with its own action.
+    m.invalidate_views();
+    let ready = flagged(&m).ready_rows;
+    m.set_nif_problems(
+        vec![
+            support::nif_problem_warning("Missing texture"),
+            NifProblem {
+                level: NifLevel::Blocks,
+                ..support::nif_problem_warning("Invalid shader")
+            },
+            NifProblem {
+                level: NifLevel::Info,
+                tab: NifTab::Alpha,
+                field: Some(nif::fields::Field::AlphaFlags),
+                ..support::nif_problem_warning("Alpha flags changed")
+            },
+        ]
+        .into(),
+    );
+    m.show_tab(BottomTab::Problems);
+    let mut h = harness(m);
+    settle(&mut h);
+    (h, ready)
+}
+
+#[test]
+fn nif_edit_problems_are_named_as_such() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, ready) = editing_nif(d.path());
+    assert_eq!(flagged(h.state()).ready_rows, ready + 2);
+    let block = h.get_by_label("Invalid shader").rect();
+    let warning = h.get_by_label("Missing texture").rect();
+    let other = h
+        .get_by_label("Preset file broken.toml was skipped: invalid preset")
+        .rect();
+    assert!(
+        h.query_by_label(&format!("{NIF_HEADING} (2)"))
+            .is_some_and(|header| {
+                other.bottom() <= header.rect().top()
+                    && header.rect().bottom() <= block.top()
+                    && block.bottom() <= warning.top()
+            }),
+        "the warning follows the block under the two-row NIF heading"
+    );
+    let row = "meshes/rock.nif: Missing texture";
+    h.get_by_label(row).focus();
+    h.run();
+    h.state_mut()
+        .set_nif_problems(vec![support::nif_problem_warning("Missing texture")].into());
+    settle(&mut h);
+    assert!(h.get_by_label(row).accesskit_node().is_focused());
+    assert!(h.get_by_label("Missing texture").rect().top() < warning.top());
+}
+
+#[test]
+fn nif_edit_problems_include_a_block_on_its_own() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = editing_nif(d.path());
+    h.get_by_label("Mark as intended: meshes/rock.nif: Missing texture")
+        .click();
+    settle(&mut h);
+    assert!(h.query_by_label("Missing texture").is_none());
+    let block = h.get_by_label("Invalid shader").rect();
+    assert!(
+        h.query_by_label(&format!("{NIF_HEADING} (1)"))
+            .is_some_and(|n| n.rect().bottom() <= block.top()),
+        "block under its counted heading"
+    );
+}
+
+#[test]
+fn nif_edit_problems_leave_info_among_the_actionable_notes() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = editing_nif(d.path());
+    let note = h.get_by_label("Alpha flags changed").rect();
+    let project = h
+        .get_by_label_contains("Project: 1 saved setting names no file")
+        .rect();
+    assert!(h.get_by_label("Missing texture").rect().bottom() <= project.top());
+    assert!(project.bottom() <= note.top());
+    h.get_by_label("Open the Alpha tab").click();
+    h.run();
+    assert_eq!(
+        h.state().nif_tab_request,
+        Some((
+            "meshes/rock.nif".into(),
+            NifTab::Alpha,
+            Some(nif::fields::Field::AlphaFlags)
+        ))
+    );
+    assert!(
+        h.query_by_label(&format!("{NIF_HEADING} (2)")).is_some(),
+        "the Info note is outside the two counted problems"
+    );
+}
+
+fn hover_problems(h: &mut Harness<'static, AppModel>) {
+    let label = tab_label(cached_tab_counts(h.state()));
+    h.get_by_label(&label).hover();
+    h.run();
+}
+
+#[test]
+fn nif_edit_problems_explain_the_tab_count_on_hover() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = editing_nif(d.path());
+    hover_problems(&mut h);
+    assert!(
+        h.query_by_label(NIF_HOVER).is_some(),
+        "two NIF problems on tab hover"
+    );
+    let key = sdc_gui::model::sets::set_views(h.state())[0].key.clone();
+    let scope = ProblemsFilter::Set(key);
+    h.state_mut().open_problems(Some(scope.clone()));
+    settle(&mut h);
+    assert!(h.query_by_label_contains(NIF_HEADING).is_none());
+    hover_problems(&mut h);
+    assert!(h.query_by_label(NIF_HOVER).is_some());
+    assert_eq!(h.state().bottom.filter.as_ref(), Some(&scope));
+}
+
+#[test]
+fn nif_edit_problems_hide_the_heading_and_hover_at_zero() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, ready) = editing_nif(d.path());
+    let before = h.query_all_by_label_contains(NIF_HEADING).count();
+    h.state_mut().set_nif_problems(
+        vec![NifProblem {
+            level: NifLevel::Info,
+            ..support::nif_problem_warning("Only a note")
+        }]
+        .into(),
+    );
+    settle(&mut h);
+    assert_eq!(flagged(h.state()).ready_rows, ready);
+    h.get_by_label("Only a note");
+    let after = h.query_all_by_label_contains(NIF_HEADING).count();
+    assert_eq!(
+        (before, after),
+        (1, 0),
+        "removing the last NIF problems removes their heading"
+    );
+    hover_problems(&mut h);
+    assert!(
+        h.query_by_label_contains("from the NIF you are editing.")
+            .is_none(),
+        "no zero-count hover"
+    );
+    h.state_mut()
+        .set_nif_problems(vec![support::nif_problem_warning("Missing texture")].into());
+    settle(&mut h);
+    assert!(
+        h.query_by_label(&format!("{NIF_HEADING} (1)")).is_some(),
+        "the heading returns for one warning"
+    );
+}
 
 #[test]
 fn the_header_number_is_the_progress_total_and_the_result_sum() {

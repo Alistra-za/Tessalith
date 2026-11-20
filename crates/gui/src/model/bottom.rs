@@ -469,6 +469,11 @@ impl Problem {
         matches!(self.level, Level::Info | Level::Queued) || self.intended
     }
 
+    /// Review E12: the NIF edit's contribution to the default Problems list, excluding its actionable notes.
+    pub(crate) fn is_nif_problem(&self) -> bool {
+        matches!(self.at, At::Nif(_)) && counts_as_ready_problem(self)
+    }
+
     /// Review E2 (controller ruling 5): a row of the default list. A note with a button stays; a row the user marked
     /// leaves it, fix or not.
     pub fn in_worklist(&self) -> bool {

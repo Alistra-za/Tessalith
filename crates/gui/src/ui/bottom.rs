@@ -23,6 +23,15 @@ fn tab_buttons(ui: &mut egui::Ui, model: &mut AppModel) {
     for (tab, text) in tabs(model) {
         let on = model.bottom.open && model.bottom.tab == tab;
         let mut r = ui.selectable_label(on, text);
+        if tab == BottomTab::Problems {
+            let n = problems::nif_problem_count(ui, model);
+            if n > 0 {
+                r = r.on_hover_ui(|ui| {
+                    let verb = if n == 1 { "comes" } else { "come" };
+                    ui.label(format!("{n} of these {verb} from the NIF you are editing."));
+                });
+            }
+        }
         if tab == BottomTab::Messages {
             r = r.on_hover_text(format!(
                 "Notes and results of this session ({})",

@@ -177,6 +177,17 @@ pub fn add_warn_set(dir: &Path, name: &str) {
     flat(&g.join(format!("{name}_n.png")));
 }
 
+pub fn nif_problem_warning(text: &str) -> sdc_gui::model::meshes::NifProblem {
+    use sdc_gui::model::meshes::{NifLevel, NifProblem, NifTab};
+    NifProblem {
+        level: NifLevel::Warning,
+        path: "meshes/rock.nif".into(),
+        text: text.into(),
+        tab: NifTab::Shader,
+        field: None,
+    }
+}
+
 /// A NIF review row for `path` that Review's Export would write: not blocked, the given foreign hash, no answer.
 pub fn nif_row(path: &str, foreign: Option<[u8; 32]>) -> sdc_gui::model::meshes::NifReviewRow {
     sdc_gui::model::meshes::NifReviewRow {
