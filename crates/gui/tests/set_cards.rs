@@ -101,6 +101,43 @@ fn idle(m: &mut AppModel) {
 }
 
 #[test]
+fn the_idle_sets_column_checks_bulk_membership_once_for_each_visible_summary_and_banner() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = many_sets(d.path(), 64);
+    let cards = views(&m);
+    m.click_set(&cards[0].key, false, false);
+    m.click_set(&cards[62].key, false, true);
+    m.click_set(&cards[63].key, true, false);
+    assert_eq!(m.selected_sets().last(), Some(&cards[63].key));
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(440.0, 900.0))
+        .build_ui_state(
+            |ui, (m, state): &mut (AppModel, sdc_gui::ui::State)| {
+                sdc_gui::ui::sets_column::draw(
+                    ui,
+                    m,
+                    &mut state.thumbs,
+                    &mut state.drops,
+                    &mut state.slot_cmds,
+                );
+            },
+            (m, sdc_gui::ui::State::default()),
+        );
+    h.run();
+    h.get_by_label("64 selected");
+    let before = h.state().0.bulk_membership_scans.get();
+    h.run_steps(5);
+    let scans = h.state().0.bulk_membership_scans.get() - before;
+    assert!(
+        scans <= 10,
+        "five idle frames scanned bulk membership {scans} times"
+    );
+}
+
+#[test]
 fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()));
@@ -809,7 +846,7 @@ fn a_go_to_set_in_the_same_frame_wins_over_a_tab_reveal() {
     .next()
     .expect("the stand-in")
     .focus();
-    h.state_mut().0.nav.reveal_set = Some(far);
+    h.state_mut().0.nav.reveal_set = Some(sdc_gui::model::SetTarget::Key(far));
     h.step();
     h.run();
     assert!(

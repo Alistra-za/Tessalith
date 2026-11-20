@@ -131,14 +131,14 @@ const MAIN: [Group; 7] = [
 ];
 const ADVANCED: [Group; 4] = [Group::Match, Group::Uv, Group::Vertex, Group::Locks];
 
-pub(crate) struct Ctx {
+pub(crate) struct Ctx<'a> {
     /// The set's own settings (there are no inherited ones: the `default` block is fixed).
     pub(crate) own: Settings,
     /// `own` with the keys the members switch on (DECISIONS AJ7); what the card shows and the writer writes.
     pub(crate) eff: Settings,
     /// The auto keys with why: a key here that `own` leaves unset shows "(auto)".
     auto: Vec<(&'static str, &'static str)>,
-    set: String,
+    set: &'a str,
     /// Why every control is disabled, when the sets document is read-only.
     pub(crate) read_only: Option<String>,
     coat_filled: bool,
@@ -170,13 +170,15 @@ pub fn context_builds() -> usize {
     CONTEXT_BUILDS.get()
 }
 
-pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
+pub(crate) fn context<'a>(model: &AppModel, set: &'a str) -> Ctx<'a> {
+    #[cfg(feature = "test-hooks")]
+    crate::model::count_identity_work();
     let all = views(model);
     context_of(model, set, all.iter().find(|v| same_id(&v.id, set)))
 }
 
 /// `context` for a caller that already holds the set's view (skips the linear id search).
-pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ctx {
+pub(crate) fn context_of<'a>(model: &AppModel, set: &'a str, v: Option<&SetView>) -> Ctx<'a> {
     #[cfg(feature = "test-hooks")]
     CONTEXT_BUILDS.set(CONTEXT_BUILDS.get() + 1);
     let filled =
@@ -209,7 +211,7 @@ pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ct
         auto,
         matches,
         addable,
-        set: set.to_string(),
+        set,
         read_only,
     }
 }
@@ -217,8 +219,26 @@ pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ct
 /// The TruePBR box of set `set` (F1 spec §4): the visual settings, Matching, and Advanced TruePBR settings. The set
 /// panel draws the two halves itself, with the CS PBR records between them (layout v2 A3, K12).
 pub fn panel(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
-    panel_main(ui, model, set);
-    panel_advanced(ui, model, set);
+    panel_main(ui, model, &context(model, set));
+    panel_advanced(ui, model, &context(model, set));
+}
+
+pub(super) fn panel_of(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
+    panel_main(ui, model, &context_of(model, &v.id, Some(v)));
+    advanced_of(ui, model, v);
+}
+
+pub(super) fn advanced_of(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
+    let active = model.resolved_selection();
+    panel_advanced(
+        ui,
+        model,
+        &if let Some(now) = active.view().filter(|now| now.id == v.id) {
+            context_of(model, &v.id, Some(now))
+        } else {
+            context(model, &v.id)
+        },
+    );
 }
 
 /// A group header's value (layout v2 A3).
@@ -228,8 +248,7 @@ fn value(s: impl Into<String>) -> Option<egui::RichText> {
 
 /// The visual settings to Matching, each a framed group; a header carries a value only where one shows nowhere else
 /// (layout v2 A3, C14).
-pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
-    let c = context(model, set);
+pub(super) fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, c: &Ctx<'_>) {
     let mut edits: Vec<Edit> = vec![];
     for g in MAIN {
         let mut keys: Vec<&KeySpec> = KEYS
@@ -244,8 +263,8 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
         let mut disp_kept = false;
         if g == Group::Material && !c.grass {
             if let Some(d) = spec("displacement_scale") {
-                if group_open(Group::Parallax, &c.eff) || kept_unused(d, &c) {
-                    disp_kept = kept_unused(d, &c);
+                if group_open(Group::Parallax, &c.eff) || kept_unused(d, c) {
+                    disp_kept = kept_unused(d, c);
                     keys.push(d);
                 }
             }
@@ -258,7 +277,7 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
         let on = group_open(g, &c.eff);
         // Note FM33: a feature's card shows while the feature is on (blocked included: its header says so) or while the
         // JSON still holds its values. Subsurface holds its own switch (the selector), so it stays.
-        let kept = keys.iter().any(|k| kept_unused(k, &c));
+        let kept = keys.iter().any(|k| kept_unused(k, c));
         if let Some(f) = group_feature(g) {
             if !on && !kept && !feature_on(&c.eff, f) {
                 continue;
@@ -286,13 +305,13 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
         // K16: the id carries the state, so a group opens when its feature turns on and closes when it turns off.
         super::group::group_closed_value(
             ui,
-            ("pgp", g as u8, on, kept, &c.set),
+            ("pgp", g as u8, on, kept, c.set),
             group_title(g),
             (head, closed_head),
             on || kept,
             |ui| {
                 if g == Group::Subsurface {
-                    subsurface_selector(ui, &c, &mut edits);
+                    subsurface_selector(ui, c, &mut edits);
                 }
                 // A kept group shows its stored values too, so they can be seen and reset without ticking the feature.
                 if kept && !on {
@@ -302,7 +321,7 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                     );
                 }
                 if on || kept {
-                    key_grid(ui, &c, "pgp", g, &keys, &mut edits);
+                    key_grid(ui, c, "pgp", g, &keys, &mut edits);
                 }
                 if disp_kept {
                     kept_line(
@@ -313,26 +332,32 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
             },
         );
     }
-    alpha_section(ui, &c, &mut edits);
-    matching(ui, &c, &mut edits);
-    model.set_json_values(set, edits);
+    alpha_section(ui, c, &mut edits);
+    matching(ui, c, &mut edits);
+    model.set_json_values(c.set, edits);
 }
 
 /// Advanced TruePBR settings: the keys most sets never need, collapsed.
-pub fn panel_advanced(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
-    let c = context(model, set);
+pub(super) fn panel_advanced(ui: &mut egui::Ui, model: &mut AppModel, c: &Ctx<'_>) {
     let mut edits: Vec<Edit> = vec![];
     // Note FC3 (P13): `Fix path` on a field in here opens the group (only while the one-shot request lives). Of the
     // path keys only `rename` is in here; `match1`-`match8` are in the main panel's Matching group (Note FC14).
     let asked = focus_request(ui.ctx()).is_some_and(|(s, k)| s == c.set && k == "rename");
     super::group::group_with(
         ui,
-        ("pgp-advanced", &c.set),
+        ("pgp-advanced", c.set),
         "Advanced TruePBR settings",
         None,
         false,
         asked,
         |ui| {
+            #[cfg(feature = "test-hooks")]
+            ui.data_mut(|d| {
+                d.insert_temp(
+                    egui::Id::unique("advanced-observed-parallax"),
+                    feature_on(&c.eff, Feature::Parallax),
+                )
+            });
             for g in ADVANCED {
                 if !group_open(g, &c.eff) {
                     continue;
@@ -342,11 +367,11 @@ pub fn panel_advanced(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                     .filter(|k| k.group == g && k.advanced)
                     .filter(|k| !(c.grass && grass_ignores(k.key)))
                     .collect();
-                group(ui, &c, "pgp-adv", g, &keys, &mut edits);
+                group(ui, c, "pgp-adv", g, &keys, &mut edits);
             }
         },
     );
-    model.set_json_values(set, edits);
+    model.set_json_values(c.set, edits);
 }
 
 /// Subsurface keys the selector owns instead of the generic rows.
@@ -382,7 +407,7 @@ fn subsurface_selector(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     // The group's title names the row (layout v2 A3), so the combo has no label of its own.
     ui.horizontal(|ui| {
         let r = ui.add_enabled_ui(reason.is_none(), |ui| {
-            let r = egui::ComboBox::from_id_salt(("pgp-subsurface", &c.set))
+            let r = egui::ComboBox::from_id_salt(("pgp-subsurface", c.set))
                 .selected_text(sub_text(mode))
                 .show_ui_036(ui, |ui| {
                     for (m, l) in [
@@ -458,7 +483,7 @@ fn key_grid(
     keys: &[&KeySpec],
     edits: &mut Vec<Edit>,
 ) {
-    egui::Grid::new((salt, g as u8, &c.set))
+    egui::Grid::new((salt, g as u8, c.set))
         .num_columns(3)
         .show(ui, |ui| {
             for k in keys {
@@ -478,12 +503,13 @@ fn matching(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     } else {
         value(format!("{n} match{}", if n == 1 { "" } else { "es" }))
     };
-    super::group::group(
+    super::group::group_with(
         ui,
-        ("pgp-matching-group", &c.set),
+        ("pgp-matching-group", c.set),
         "Matching",
         head,
         true,
+        focus_request(ui.ctx()).is_some_and(|(s, k)| s == c.set && k.starts_with("match")),
         |ui| matching_body(ui, c, edits),
     );
 }
@@ -493,7 +519,7 @@ const FOCUS_PASSES: u64 = 10;
 
 /// Note FC3 (P13): the live `Fix path` request (set id, field), one-shot: it is dropped once taken or after
 /// `FOCUS_PASSES`, so it never holds the Advanced group open.
-fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
+pub(super) fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
     let id = egui::Id::unique(super::problems::FOCUS_FIELD);
     let (s, k, at) = ctx.data(|d| d.get_temp::<(String, String, u64)>(id))?;
     if ctx.cumulative_pass_nr() > at + FOCUS_PASSES {
@@ -528,12 +554,12 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
         // An exact width: a TextEdit in a Grid takes the column's width from the last frame, so `desired_width`
         // alone stayed at the narrow first-frame column (final review 13). Room is left for the label and ×.
         let field_w = (ui.available_width() - 150.0).clamp(120.0, 360.0);
-        egui::Grid::new(("pgp-matching", &c.set))
+        egui::Grid::new(("pgp-matching", c.set))
             .num_columns(3)
             .show(ui, |ui| {
                 for m in &c.matches {
                     ui.label(&m.slot);
-                    let id = egui::Id::unique(("pgp-match", m.n, &c.set));
+                    let id = egui::Id::unique(("pgp-match", m.n, c.set));
                     let mut text = ui
                         .data(|d| d.get_temp::<String>(id))
                         .unwrap_or_else(|| m.path.clone());
@@ -542,7 +568,7 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                         egui::TextEdit::singleline(&mut text).margin(crate::look::TEXT_EDIT_MARGIN),
                     );
                     let r = super::name_input(r, &format!("{} match path", m.slot));
-                    take_focus(ui, &r, &c.set, &format!("match{}", m.n));
+                    take_focus(ui, &r, c.set, &format!("match{}", m.n));
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(id, text.clone()));
                     }
@@ -635,7 +661,9 @@ fn row(ui: &mut egui::Ui, k: &KeySpec, c: &Ctx, edits: &mut Vec<Edit>) {
             // An unset value shows what applies, greyed.
             ui.style_mut().visuals.override_text_color = Some(ui.visuals().weak_text_color());
         }
-        control(ui, k, own.cloned(), c, edits);
+        if let Some(field) = control(ui, k, own.cloned(), c, edits) {
+            take_focus(ui, &field, c.set, k.key);
+        }
     });
     if let Some(why) = reason {
         r.response.on_disabled_hover_text(why);
@@ -656,13 +684,14 @@ fn row(ui: &mut egui::Ui, k: &KeySpec, c: &Ctx, edits: &mut Vec<Edit>) {
     }
 }
 
+/// Returns the text field so the main set editor can handle Fix path on its own row.
 pub(crate) fn control(
     ui: &mut egui::Ui,
     k: &KeySpec,
     value: Option<Value>,
     c: &Ctx,
     edits: &mut Vec<(String, Option<Value>)>,
-) {
+) -> Option<egui::Response> {
     let key = edit_key(k.key).to_string();
     match k.kind {
         KeyKind::OnlyTrue | KeyKind::Object => {
@@ -767,12 +796,11 @@ pub(crate) fn control(
             }
         }
         KeyKind::Text => {
-            let id = egui::Id::unique(("pgp-text", k.key, &c.set));
-            let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
-                value
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default()
-            });
+            let id = ui.make_persistent_id(("pgp-text", k.key, c.set));
+            let stored = value.as_ref().and_then(Value::as_str).unwrap_or_default();
+            let mut text = ui
+                .data(|d| d.get_temp::<String>(id))
+                .unwrap_or_else(|| stored.to_owned());
             // A file name stays in the matched folder (V3); a path moves the outputs anywhere under Data (HJ5).
             let hint = if k.key == "rename" {
                 r"new file name or folder\name"
@@ -786,7 +814,6 @@ pub(crate) fn control(
                     .desired_width(160.0),
             );
             let r = super::name_input(r, k.label);
-            take_focus(ui, &r, &c.set, k.key);
             if r.changed() {
                 ui.data_mut(|d| d.insert_temp(id, text.clone()));
             }
@@ -795,10 +822,11 @@ pub(crate) fn control(
                 ui.data_mut(|d| d.remove::<String>(id));
                 let t = text.trim();
                 // Esc cancels (AG10/AG11, trace-debug #57).
-                if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if text != stored && !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     edits.push((key, (!t.is_empty()).then(|| json!(t))));
                 }
             }
+            return Some(r);
         }
         KeyKind::Rgb | KeyKind::Rgba => {
             // AG133: a float per channel, 0..=RGB_MAX; an old 0-255 colour reads as value/255.
@@ -812,7 +840,7 @@ pub(crate) fn control(
                 // Swatch + hex (AG2) show the colour clamped to 1.0; only a change made through them writes, as
                 // 0-1 values, so a stored 1.25 survives opening the picker.
                 let shown = rgb.map(|x| super::color::unit_to_u8(x as f32));
-                let id = egui::Id::unique(("pgp-rgb", k.key, &c.set));
+                let id = egui::Id::unique(("pgp-rgb", k.key, c.set));
                 if let Some(n) = super::color::color_field(ui, id, k.label, shown) {
                     rgb = n.map(|b| f64::from(b) / 255.0);
                     changed = true;
@@ -838,6 +866,7 @@ pub(crate) fn control(
         }
         KeyKind::Slot => {}
     }
+    None
 }
 
 /// egui's own number parsing (whitespace ignored, U+2212 read as a minus), so the box accepts what it always did.
@@ -907,7 +936,7 @@ fn alpha_section(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     let head = value(if set { "set" } else { "off" });
     super::group::group(
         ui,
-        ("pgp-alpha", &c.set),
+        ("pgp-alpha", c.set),
         "NiAlphaProperty",
         head,
         false,
@@ -1027,14 +1056,14 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
     ] {
         ui.horizontal(|ui| {
             ui.label(label);
-            alpha_combo(ui, (label, &c.set), v, &BLEND_MODES);
+            alpha_combo(ui, (label, c.set), v, &BLEND_MODES);
         });
     }
     ui.checkbox(&mut n.test, "Enable testing")
         .on_hover_text("Bit 9: drop pixels that fail the alpha test");
     ui.horizontal(|ui| {
         ui.label("Test function");
-        alpha_combo(ui, ("Test function", &c.set), &mut n.func, &TEST_FUNCS);
+        alpha_combo(ui, ("Test function", c.set), &mut n.func, &TEST_FUNCS);
     });
     if n != f {
         edits.push(("alphaprop_flags".into(), Some(json!(n.raw()))));
@@ -1042,7 +1071,7 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
     // The raw value, and a box to type one (0-65535; anything else is refused, outlined red).
     ui.horizontal(|ui| {
         ui.label(format!("= {}", f.raw()));
-        let id = egui::Id::unique(("pgp-alpha-raw", &c.set));
+        let id = egui::Id::unique(("pgp-alpha-raw", c.set));
         // The buffer carries the frame it was last drawn in: one left by a collapsed section is stale (as color.rs).
         let frame = ui.ctx().cumulative_frame_nr();
         let mut text = ui
@@ -1088,7 +1117,7 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
 }
 
 /// A combo over `list`, named by `id.0` (the label beside it).
-fn alpha_combo(ui: &mut egui::Ui, id: (&str, &String), v: &mut u8, list: &[&str]) {
+fn alpha_combo(ui: &mut egui::Ui, id: (&str, &str), v: &mut u8, list: &[&str]) {
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(list.get(usize::from(*v)).copied().unwrap_or("?"))
         .show_ui_036(ui, |ui| {

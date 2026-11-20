@@ -14,7 +14,7 @@ pub const REVEAL_FADE_SECS: f64 = 0.12;
 /// The reveal in progress: the set it is for, what it outlines, when it started, and whether its row was scrolled to.
 #[derive(Clone)]
 struct Reveal {
-    set_key: String,
+    set_id: String,
     target: SlotTarget,
     start: f64,
     scrolled: bool,
@@ -46,35 +46,43 @@ pub fn revealed(ctx: &egui::Context) -> Option<(SlotTarget, f32)> {
     (pass + 1 == ctx.cumulative_pass_nr()).then_some((target, alpha))
 }
 
-/// The set editor draws set `key` (`rows`: its slot rows are drawn this frame). Takes a waiting Go to set for this
-/// set and starts it; drops a reveal of another set, or any reveal when the rows are not drawn (the 3D view).
-pub(super) fn take(ctx: &egui::Context, nav: &mut Nav, key: &str, rows: bool) {
-    let new = nav.reveal_slot.take().filter(|r| rows && r.set_key == key);
+/// Start a waiting Go to set on the matching target. Its drawn document id follows the outline until expiry.
+pub(super) fn take(
+    ctx: &egui::Context,
+    nav: &mut Nav,
+    target: Option<&crate::model::SetTarget>,
+    drawn_id: Option<&str>,
+) {
+    let new = nav
+        .reveal_slot
+        .take()
+        .filter(|r| Some(&r.set) == target)
+        .zip(drawn_id);
     // Read before `data_mut`: the context is locked inside it.
     let start = ctx.input(|i| i.time);
     ctx.data_mut(|d| {
-        if let Some(r) = new {
+        if let Some((r, id)) = new {
             let reveal = Reveal {
-                set_key: r.set_key,
+                set_id: id.into(),
                 target: r.target,
                 start,
                 scrolled: false,
             };
             d.insert_temp(state_id(), reveal);
-        } else if !rows
+        } else if drawn_id.is_none()
             || d.get_temp::<Reveal>(state_id())
-                .is_some_and(|r| r.set_key != key)
+                .is_some_and(|r| Some(r.set_id.as_str()) != drawn_id)
         {
             d.remove::<Reveal>(state_id());
         }
     });
 }
 
-/// A slot row of set `key` at `rect`, showing `slot` and holding `item`: if it is the reveal's, scroll to it once and
+/// A slot row of set `id` at `rect`, showing `slot` and holding `item`: if it is the reveal's, scroll to it once and
 /// draw the outline outside the row's own (the unusable slot's amber one).
 pub(super) fn on_row(
     ui: &egui::Ui,
-    key: &str,
+    id: &str,
     slot: SlotKind,
     item: Option<&str>,
     rect: egui::Rect,
@@ -82,7 +90,7 @@ pub(super) fn on_row(
     let Some(mut r) = ui.data(|d| d.get_temp::<Reveal>(state_id())) else {
         return;
     };
-    let hit = r.set_key == key
+    let hit = r.set_id == id
         && match &r.target {
             // One card holds both kinds of slot 3 or 7, and shows one of them.
             SlotTarget::Slot(k) => k.shares_card(slot),

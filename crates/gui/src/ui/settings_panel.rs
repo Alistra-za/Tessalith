@@ -1656,12 +1656,21 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     let reencoding = model.reencode_on(key);
     let mut actions = vec![];
     if !compact {
-        let set_key = model.item(key).and_then(|i| i.set_key.clone());
-        // Note GY5: only a set with a card (a waiting file's set may have none).
-        if let Some(sk) = set_key.filter(|k| crate::model::sets::has_card(model, k)) {
-            let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
+        let active = model.resolved_selection();
+        let set_key = model.item(key).and_then(|i| i.set_key.as_deref());
+        let owner = if matches!(&active.selection, crate::model::Selection::Item(k) if k == key) {
+            active
+                .view()
+                .map(|v| v.key.as_str())
+                .filter(|k| Some(*k) == set_key)
+        } else {
+            set_key.filter(|k| crate::model::sets::has_card(model, k))
+        };
+        if let Some(sk) = owner {
+            let label = super::columns::set_label(&super::columns::export_prefix(model), sk);
             if ui.link(format!("← {label}")).clicked() {
-                model.select_set(&sk);
+                let key = sk.to_owned();
+                model.select_set(&key);
             }
         }
         ui.heading(&name);

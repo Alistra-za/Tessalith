@@ -531,6 +531,23 @@ fn problems_go_to_set_expands_its_sets_group() {
     assert!(card(&h, "g/h").is_some());
 }
 
+#[test]
+fn revealing_a_document_id_opens_only_its_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    group(&mut m, "First", &["landscape/empty"]);
+    group(&mut m, "Other", &["landscape/other"]);
+    m.set_group_collapsed("First", true);
+    m.set_group_collapsed("Other", true);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().nav.reveal_set = Some(sdc_gui::model::SetTarget::Id("Landscape/Other".into()));
+    h.run();
+    assert!(!h.state().group_collapsed("Other"));
+    assert!(h.state().group_collapsed("First"));
+    assert!(card(&h, "landscape/other").is_some());
+}
+
 /// Move to… and the palette ask the column to reveal a set through `nav.reveal_set`.
 #[test]
 fn a_reveal_expands_its_sets_group() {
@@ -542,7 +559,7 @@ fn a_reveal_expands_its_sets_group() {
     let mut h = harness(m);
     h.run();
     assert!(card(&h, "g/b").is_none());
-    h.state_mut().nav.reveal_set = Some(key);
+    h.state_mut().nav.reveal_set = Some(sdc_gui::model::SetTarget::Key(key));
     h.run();
     assert!(!h.state().group_collapsed("Armor"));
     assert!(card(&h, "g/b").is_some());
@@ -564,7 +581,7 @@ fn the_revealed_set_is_on_screen_with_headers_above_it() {
     let mut h = harness(m);
     h.run();
     assert!(card(&h, "g/s30").is_none());
-    h.state_mut().nav.reveal_set = Some(key);
+    h.state_mut().nav.reveal_set = Some(sdc_gui::model::SetTarget::Key(key));
     // One frame lands it at the top of the view, a little below it (Note FM32). The offset sums the heights above
     // the target, the three headers among them: without those it lands a header and a half too far down.
     h.step();

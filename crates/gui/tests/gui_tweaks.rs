@@ -319,6 +319,102 @@ fn a_delete_section_that_matches_a_sets_texture_is_a_hit_and_goes_in_the_export(
     assert!(m.sections().is_empty(), "each edit is a step");
 }
 
+#[test]
+fn the_json_editors_show_selects_the_set_it_was_pressed_on() {
+    use sdc_gui::model::pbr_export::written_json_entries;
+    use sdc_gui::model::Selection;
+    let d = tempfile::tempdir().unwrap();
+    let m = key_less_json_sets(d.path());
+    let candidates = json_entries(&m);
+    let written = written_json_entries(&m);
+    for id in ["landscape/empty", "landscape/other"] {
+        assert!(
+            candidates
+                .iter()
+                .any(|(v, _)| v.key.is_empty() && v.id == id),
+            "{id} must have a candidate entry"
+        );
+        assert!(
+            written.iter().any(|(v, _)| v.key.is_empty() && v.id == id),
+            "{id} must survive the statics rule"
+        );
+    }
+    let expected: Vec<_> = written
+        .into_iter()
+        .map(|(v, _)| {
+            let selection = if v.key.is_empty() {
+                Selection::SetId(v.id.clone())
+            } else {
+                Selection::Set(v.key)
+            };
+            (v.id, selection)
+        })
+        .collect();
+    let mut h = harness(m, false);
+    for (i, (id, want)) in expected.iter().enumerate() {
+        let texture = "landscape/rock01.png";
+        h.state_mut().0.expand(texture);
+        h.run();
+        let ctx = h.ctx.clone();
+        sdc_gui::ui::actions::run("json-editor", &mut h.state_mut().0, &ctx);
+        h.run();
+        assert_eq!(h.state().0.centre_tab, sdc_gui::model::CentreTab::Json);
+        assert_eq!(h.state().0.expanded.as_deref(), Some(texture));
+        assert_eq!(h.query_all_by_label("Show").count(), expected.len());
+        h.query_all_by_label("Show").nth(i).unwrap().scroll_to_me();
+        h.run();
+        h.query_all_by_label("Show").nth(i).unwrap().click();
+        h.run();
+        assert_eq!(&h.state().0.selection, want, "Show on {id}");
+        assert!(
+            h.state().0.expanded.is_none(),
+            "Show on {id} must close the preview"
+        );
+        if id == "landscape/other" {
+            assert_eq!(h.state().0.centre_tab, sdc_gui::model::CentreTab::Selection);
+            let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+            assert!(
+                h.query_all_by_label(id)
+                    .any(|n| centre.contains(n.rect().center())),
+                "the second borrower's editor head"
+            );
+        }
+    }
+}
+
+#[test]
+fn fix_path_from_the_3d_view_focuses_the_owning_field() {
+    use egui_kittest::kittest::NodeT;
+    use sdc_gui::model::SetTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    let bad = r"..\name";
+    m.set_json_value(id, "rename", Some(json!(bad)));
+    idle(&mut m);
+    let key = rock_key(&m);
+    m.select_set(&key);
+    m.settings.set_view_3d = true;
+    m.settings.set_settings_open = false;
+    m.open_problems(None);
+    let mut h = harness(m, true);
+    let (m, state) = h.state_mut();
+    state.set3d.poll(m);
+    h.run_steps(4);
+    h.get_by_label(FRAME_LABEL);
+    assert!(!h.state().0.settings.set_settings_open);
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("Fix path").click();
+    h.run_steps(4);
+    assert!(h
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .any(|n| n.accesskit_node().is_focused()
+            && n.accesskit_node().value().as_deref() == Some(bad)));
+    assert_eq!(h.state().0.selection, SetTarget::Id(id.into()).selection());
+    assert!(h.query_by_label(FRAME_LABEL).is_none());
+}
+
 type H = Harness<'static, (AppModel, State)>;
 
 fn harness(m: AppModel, preview: bool) -> H {

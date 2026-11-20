@@ -8,7 +8,7 @@ use super::sets::{
     projected_slot, set_views, slot_string, JsonFile, SetView, SlotFill, SlotKind,
 };
 use super::txst_map::{record_entries, slot_path_key};
-use super::AppModel;
+use super::{AppModel, SetTarget};
 use crate::pgp::prefix::{
     check_file_name, check_json_path, default_prefix, matches_nothing, output_rel, pitfalls,
     rename_hits_elsewhere, subsurface_pitfalls,
@@ -287,21 +287,31 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
         .filter(|v| exports_json(m, v))
         .map(|full| {
-            let bare;
-            let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
-            let v = if commands && !writes_entry(m, full) {
-                bare = SetView {
-                    settings: without_slot_commands(&full.settings),
-                    ..full.clone()
-                };
-                &bare
-            } else {
-                full
-            };
-            let (e, _) = entry_for(v, &views, &paths, m, &roots);
-            (full.clone(), e)
+            let entry = candidate_input(m, full, &views, &paths, &roots);
+            (full.clone(), entry)
         })
         .collect()
+}
+
+pub(super) fn candidate_input(
+    m: &AppModel,
+    full: &SetView,
+    views: &[SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+    roots: &[PathBuf; 2],
+) -> EntryInput {
+    let bare;
+    let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
+    let v = if commands && !writes_entry(m, full) {
+        bare = SetView {
+            settings: without_slot_commands(&full.settings),
+            ..full.clone()
+        };
+        &bare
+    } else {
+        full
+    };
+    entry_for(v, views, paths, m, roots).0
 }
 
 fn entry_for(
@@ -565,7 +575,7 @@ fn set_blocks(m: &AppModel, v: &SetView) -> Vec<ExportIssue> {
         let field = e.split_once(':').map_or(e, |(f, _)| f);
         // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
         crate::pgp::prefix::is_path_key(field)
-            .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
+            .then(|| Fix::FixPath(SetTarget::view(v), field.to_string()))
     };
     if let Some(e) = &v.prefix_error {
         out.push(ExportIssue {

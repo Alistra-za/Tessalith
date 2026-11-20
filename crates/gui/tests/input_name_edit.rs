@@ -1059,6 +1059,39 @@ fn tap_in_the_same_frame_keeps_the_typed_name() {
     );
 }
 
+#[test]
+fn a_secondary_tap_commits_the_old_cards_name_before_selecting_leaf() {
+    let (_d, mut h) = harness();
+    let steps = h.state().0.history.pushes;
+    focus(&mut h);
+    clear_and_type(&mut h, "rock02");
+    let pos = h.get_by_label("landscape/leaf").rect().center();
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Secondary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    h.run();
+    settle(&mut h);
+    assert_eq!(
+        h.state().0.resolved_selection().view().unwrap().id,
+        "landscape/leaf"
+    );
+    assert_eq!(
+        h.state().0.history.pushes,
+        steps + 1,
+        "the secondary click lost the edit"
+    );
+    assert_eq!(
+        h.state().0.input_name_of("landscape/rock02").as_deref(),
+        Some("textures/landscape/rock02")
+    );
+}
+
 /// Trace-debug wave 2 #5: the project's own rows name outputs, so they carry no source extension (`leaf.png` is
 /// offered as `textures/landscape/leaf`, never `textures/landscape/leaf.png`).
 #[test]

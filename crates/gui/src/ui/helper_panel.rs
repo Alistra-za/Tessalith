@@ -124,20 +124,28 @@ pub(super) fn combo(
 }
 
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport) {
+    let active = model.resolved_selection();
+    let selected = matches!(&active.selection, crate::model::Selection::Item(k) if k == key);
+    let fallback = (!selected).then(|| model.set_key_of_item(key)).flatten();
+    let owner = selected.then(|| active.view()).flatten();
     let Some(item) = model.item(key) else { return };
     let name = item.name.clone();
     // Note HF1: one check from a texture to its set; a no-set texture has none.
-    let set_key = model.set_key_of_item(key);
+    let set_key = owner.map(|v| v.key.as_str()).or(fallback.as_deref());
     let ro = model.toml_read_only_reason();
     let mut edits = vec![];
     if let Some(sk) = set_key.filter(|k| !k.is_empty()) {
-        let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
+        let label = super::columns::set_label(&super::columns::export_prefix(model), sk);
         if ui.link(format!("← {label}")).clicked() {
-            model.select_set(&sk);
+            model.select_set(sk);
         }
     }
     ui.heading(&name);
-    let tails = model.helper_tails(h);
+    let tails = match owner {
+        Some(v) if v.key == h.set_key => v.tails(),
+        None if selected && h.set_key.is_empty() => Tails::Plain,
+        _ => model.helper_tails(h),
+    };
     ui.label(fills_job(h, tails, ui.style()));
     // Note HH7: every set that shares the file, used or not, each a link to its set.
     if !h.shared_with.is_empty() {

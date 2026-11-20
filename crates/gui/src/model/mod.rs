@@ -159,6 +159,163 @@ pub enum Selection {
     None,
     Item(String),
     Set(String),
+    SetId(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetTarget {
+    Key(String),
+    Id(String),
+}
+
+impl From<&str> for SetTarget {
+    fn from(k: &str) -> Self {
+        Self::Key(k.to_owned())
+    }
+}
+impl From<&String> for SetTarget {
+    fn from(k: &String) -> Self {
+        Self::from(k.as_str())
+    }
+}
+
+impl SetTarget {
+    pub fn of(key: &str, id: &str) -> Self {
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        if key.is_empty() {
+            Self::Id(id.into())
+        } else {
+            Self::Key(key.into())
+        }
+    }
+
+    pub fn view(v: &sets::SetView) -> Self {
+        Self::of(&v.key, &v.id)
+    }
+
+    pub fn selection(self) -> Selection {
+        match self {
+            Self::Key(k) => Selection::Set(k),
+            Self::Id(id) => Selection::SetId(id),
+        }
+    }
+
+    pub fn matches(&self, v: &sets::SetView) -> bool {
+        match self {
+            Self::Key(k) => !k.is_empty() && v.key == *k,
+            Self::Id(id) => engine::sets::same_id(&v.id, id),
+        }
+    }
+}
+
+impl Selection {
+    // Owned snapshot for a resolution miss or an action that outlives the frame.
+    pub fn set_target(&self) -> Option<SetTarget> {
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        match self {
+            Self::Set(k) => Some(SetTarget::Key(k.clone())),
+            Self::SetId(id) => Some(SetTarget::Id(id.clone())),
+            Self::None | Self::Item(_) => None,
+        }
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static IDENTITY_WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_identity_work() {
+    IDENTITY_WORK.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(feature = "test-hooks")]
+pub fn identity_work() -> u64 {
+    IDENTITY_WORK.with(std::cell::Cell::get)
+}
+
+pub struct ResolvedSelection {
+    pub selection: Selection,
+    pub target: Option<SetTarget>,
+    pub views: Arc<Vec<sets::SetView>>,
+    pub index: Option<usize>,
+}
+
+impl ResolvedSelection {
+    pub fn view(&self) -> Option<&sets::SetView> {
+        self.index.map(|i| &self.views[i])
+    }
+}
+
+impl AppModel {
+    fn build_resolution(
+        &self,
+        views: Arc<Vec<sets::SetView>>,
+        index: Option<usize>,
+    ) -> Arc<ResolvedSelection> {
+        #[cfg(feature = "test-hooks")]
+        self.selection_builds.set(self.selection_builds.get() + 1);
+        let v = index.map(|i| &views[i]);
+        let target = match &self.selection {
+            Selection::Item(_) => v.map(SetTarget::view),
+            selected => selected.set_target(),
+        };
+        Arc::new(ResolvedSelection {
+            selection: self.selection.clone(),
+            target,
+            views,
+            index,
+        })
+    }
+
+    pub fn resolved_selection(&self) -> Arc<ResolvedSelection> {
+        let views = sets::views(self);
+        if let Some(hit) = self
+            .views
+            .borrow()
+            .active
+            .as_ref()
+            .filter(|hit| Arc::ptr_eq(&hit.views, &views) && hit.selection == self.selection)
+        {
+            return Arc::clone(hit);
+        }
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        let index = match &self.selection {
+            Selection::Set(k) => views.iter().position(|v| !k.is_empty() && v.key == *k),
+            Selection::SetId(id) => views.iter().position(|v| engine::sets::same_id(&v.id, id)),
+            Selection::Item(k) => views.iter().position(|v| v.members.iter().any(|m| m == k)),
+            Selection::None => None,
+        };
+        let hit = self.build_resolution(views, index);
+        self.views.borrow_mut().active = Some(hit.clone());
+        hit
+    }
+}
+
+impl AppModel {
+    pub(super) fn warm_views(&self) -> Option<Arc<Vec<sets::SetView>>> {
+        let cache = self.views.borrow();
+        let k = cache.key.as_ref()?;
+        let (project, sets_read_only, fallback) = cache.root_inputs.as_ref()?;
+        let current = *project == self.project.as_ref().map(|p| (p.rev(), p.read_only()))
+            && *sets_read_only == self.sets_doc.as_ref().map(|d| d.read_only())
+            && fallback.as_deref() == self.settings.export_folder.as_deref()
+            && k.items == self.items_rev
+            && k.inputs == self.inputs_rev
+            && k.doc == self.sets_doc.as_ref().map_or(0, |d| d.rev())
+            && k.root.as_deref() == self.root.as_deref()
+            && k.target == self.target
+            && k.scan_db.as_deref() == self.scan_db.as_deref()
+            && k.scan == self.scan_stamp
+            && k.known_rev == self.known_rev
+            && k.target_mod_rev == self.target_mod_rev
+            && k.scope == self.scope_rev;
+        current.then(|| cache.views.clone()).flatten()
+    }
 }
 
 pub use auto_record::FUZZ_SWITCH_HOVER;
@@ -300,11 +457,15 @@ pub(crate) type CachedReasons = (
     Arc<Vec<bottom::Reason>>,
 );
 
+type RootInputs = (Option<(u64, bool)>, Option<bool>, Option<PathBuf>);
+
 /// The cached set views, export blocks and delete-section hits, valid for `key` only.
 #[derive(Default)]
 pub(crate) struct ViewCache {
     pub key: Option<ViewKey>,
     pub views: Option<Arc<Vec<sets::SetView>>>,
+    active: Option<Arc<ResolvedSelection>>,
+    root_inputs: Option<RootInputs>,
     /// Note HF1: the set keys whose files are all in no set.
     pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
     /// Note HF9: the set keys of the excluded groups.
@@ -324,7 +485,7 @@ pub(crate) struct ViewCache {
     /// the hidden kinds.
     pub set_reasons: Option<CachedReasons>,
     /// Final wave Group 7: `bottom::cached_scope_label`, keyed on the views it read (held) and the filter's stored key.
-    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, String)>,
+    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, bottom::NameKind, String)>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -702,6 +863,12 @@ pub struct AppModel {
     /// Final fix wave R2: the reason scans `bottom::cached_set_reasons` ran (see `bottom::reason_scans`).
     #[cfg(feature = "test-hooks")]
     pub(crate) reason_scans: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub selection_builds: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub doc_block_reads: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub bulk_membership_scans: std::cell::Cell<u64>,
     /// Final wave Group 7: the set lookups `bottom::scope_label` ran (see `bottom::scope_label_lookups`).
     #[cfg(feature = "test-hooks")]
     pub(crate) scope_label_lookups: std::cell::Cell<u64>,
@@ -1082,6 +1249,12 @@ impl AppModel {
             tab_count_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             reason_scans: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            selection_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            doc_block_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            bulk_membership_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             scope_label_lookups: Default::default(),
             #[cfg(feature = "test-hooks")]
@@ -3396,16 +3569,28 @@ impl AppModel {
             *shown = true;
         }
         self.counts_status();
+        // If every selected key is pruned, the active set may still have a document card.
+        let active_set =
+            (self.multi.sets && !self.multi.keys.is_empty()).then(|| self.selection.clone());
         self.prune_selection();
+        if let (Selection::None, Some(active)) = (&self.selection, active_set) {
+            self.selection = active;
+        }
         // Keep the selection when its item or set still exists; else nothing.
-        let gone = match &self.selection {
-            Selection::Item(k) => self.item(k).is_none(),
-            // Note GY5: a set that lost its card is gone too.
-            Selection::Set(k) => !sets::has_card(self, k),
-            Selection::None => false,
-        };
-        if gone {
-            self.selection = Selection::None;
+        match &self.selection {
+            Selection::Item(k) if self.item(k).is_none() => self.selection = Selection::None,
+            Selection::Set(k) if sets::has_card(self, k) => {}
+            Selection::Set(_) | Selection::SetId(_) => {
+                let views = sets::views(self);
+                if let Some(i) = bottom::landed_index(&views, &self.sets_root(), &self.selection) {
+                    self.selection = SetTarget::view(&views[i]).selection();
+                    let active = self.build_resolution(views, Some(i));
+                    self.views.borrow_mut().active = Some(active);
+                } else {
+                    self.selection = Selection::None;
+                }
+            }
+            _ => {}
         }
         if let Some(k) = self.expanded.clone() {
             if self.item(&k).is_none() {
@@ -3698,6 +3883,9 @@ impl AppModel {
         if !same || carried.key.as_ref() != Some(old_key) {
             return;
         }
+        // Release the cache's other owners before moving the unchanged cards into the new plan.
+        drop(carried.active);
+        drop(carried.scope_label);
         let views = carried.views.map(|v| {
             let mut v = Arc::unwrap_or_clone(v);
             if !scope.is_empty() {
@@ -3891,28 +4079,30 @@ impl AppModel {
 
     /// Select one set; any multi-selection ends (F3a D1).
     pub fn select_set(&mut self, key: &str) {
-        self.selection = Selection::Set(key.to_string());
-        self.reset_multi();
-        self.bulk = Default::default();
-        // Note FB7: also a click on the set already selected brings it to the front of the centre.
-        self.centre_tab = CentreTab::Selection;
-        // Review E10: as in `select_item`; `go_to_set` sets its own after this.
-        self.nav.reveal_slot = None;
+        self.go_to_set(key, None);
     }
 
-    /// Review E10: a Problems row's Go to set. Selects the set, and leaves `target` for the set editor to scroll to and
-    /// outline when it next draws the set (`ui::set_editor`); with no target, the same as `select_set`. The switch to
-    /// the Textures view is the caller's: the model has no egui context. An expanded texture preview closes first: it
-    /// fills the centre, so the set editor would not draw (final fix wave A2).
-    pub fn go_to_set(&mut self, key: &str, target: Option<nav::SlotTarget>) {
+    pub fn go_to_set(&mut self, key: &str, slot: Option<nav::SlotTarget>) {
+        self.go_to_target(SetTarget::Key(key.into()), slot);
+    }
+
+    pub fn select_target(&mut self, target: SetTarget) {
+        self.go_to_target(target, None);
+    }
+
+    pub fn go_to_target(&mut self, target: SetTarget, slot: Option<nav::SlotTarget>) {
         if self.expanded.is_some() {
             self.collapse();
         }
-        self.select_set(key);
-        self.nav.reveal_slot = target.map(|target| nav::RevealSlot {
-            set_key: key.to_string(),
-            target,
+        self.nav.reveal_slot = slot.map(|slot| nav::RevealSlot {
+            set: target.clone(),
+            target: slot,
         });
+        self.selection = target.selection();
+        self.reset_multi();
+        self.bulk = Default::default();
+        self.centre_tab = CentreTab::Selection;
+        self.reveal_centre = true;
     }
 
     pub fn expand(&mut self, key: &str) {

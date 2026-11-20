@@ -3,10 +3,9 @@
 //! `ui::viewport3d::show`. No logic beyond mapping input to model calls.
 use crate::look::Combo036 as _;
 use crate::model::set_preview::{
-    badge_text, builtin_name, cap_text, count_text, followed_set, Candidates, EncState, MeshChoice,
-    Outcome, Pick, PreviewMode, SetPreview, BUILTINS, GRASS_APPROX, JSON_WINS, MATO_HOVER,
-    MATO_TOGGLE, MODE_LABEL_ENCODED, MODE_LABEL_SOURCE, NEEDS_CS, NO_MATCH, TILING,
-    WAITS_FOR_EXPORT,
+    badge_text, builtin_name, cap_text, count_text, Candidates, EncState, MeshChoice, Outcome,
+    Pick, PreviewMode, SetPreview, BUILTINS, GRASS_APPROX, JSON_WINS, MATO_HOVER, MATO_TOGGLE,
+    MODE_LABEL_ENCODED, MODE_LABEL_SOURCE, NEEDS_CS, NO_MATCH, TILING, WAITS_FOR_EXPORT,
 };
 use crate::model::sets::SetView;
 use crate::model::AppModel;
@@ -28,7 +27,7 @@ const LIST_MAX: f32 = 80.0;
 /// The switch is on 3D and a set is followed; the view draws in the centre in place of the set editor's body
 /// while the set itself is selected (AG78).
 pub fn wanted(m: &AppModel) -> bool {
-    m.settings.set_view_3d && followed_set(m).is_some()
+    m.settings.set_view_3d && m.resolved_selection().target.is_some()
 }
 
 /// The 2D | 3D switch of a set: the slot cards, or this 3D preview. The TruePBR settings show in both.
@@ -71,17 +70,20 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
         s.input = true;
     }
     // AG132: the set's name and path are the set editor's header row above this view; no heading of its own.
-    if followed_set(m).is_none() {
+    let active = m.resolved_selection();
+    if active.target.is_none() {
         ui.label("Select a set to preview it in 3D.");
         return;
     }
-    let Some(fp) = s.fp.clone() else {
+    let Some((simulated, landscape, grass)) =
+        s.fp.as_ref()
+            .filter(|fp| Some(&fp.set_key) == active.target.as_ref())
+            .map(|fp| (fp.entry.is_some(), fp.landscape, fp.grass))
+    else {
         ui.label(PREPARING);
         return;
     };
-    let simulated = fp.entry.is_some();
-    let views = crate::model::sets::views(m);
-    let view = followed_set(m).and_then(|k| views.iter().find(|v| v.key == k));
+    let view = active.view();
     crate::ui::viewport3d::prelude(ui.ctx(), &mut s.v3);
     // One toolbar line, then what needs attention; the frame takes the rest above the collapsed Details.
     super::panel_ids::top(ui, "set-3d-bar")
@@ -89,7 +91,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 mode_toggle(ui, s);
-                if fp.landscape {
+                if landscape {
                     // Note BM (review M4): short, so the toolbar stays one line at 1024 pt (BH13).
                     ui.label("Mesh: Plane").on_hover_text(
                         "A PBR texture set or PBR Landscape set previews on the plane",
@@ -120,7 +122,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
             if !simulated {
                 ui.colored_label(AMBER, NEEDS_CS);
             }
-            if fp.grass {
+            if grass {
                 ui.colored_label(AMBER, GRASS_APPROX);
             }
             if s.enc.paused {
@@ -500,30 +502,22 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
     if !three_d || !m.settings.set_settings_open {
         return;
     }
-    let item = match &m.selection {
-        crate::model::Selection::Item(k) => Some(k.clone()),
+    let active = m.resolved_selection();
+    let item = match &active.selection {
+        crate::model::Selection::Item(k) => Some(k),
         _ => None,
     };
-    let set = followed_set(m).and_then(|k| {
-        crate::model::sets::set_views(m)
-            .into_iter()
-            .find(|v| v.key == k)
-    });
-    let json = set
-        .as_ref()
-        .is_some_and(|v| crate::model::sets::shows_json_panel(v, m.target));
-    let skin = set.as_ref().is_some_and(|v| v.skin);
+    let set = active.view();
+    let json = set.is_some_and(|v| crate::model::sets::shows_json_panel(v, m.target));
+    let skin = set.is_some_and(|v| v.skin);
     // The CS PBR section (CS target) and the complex material card show here too, as they do in 2D.
     let cs = set.is_some() && m.target == engine::config::Target::Cs;
-    let cm = set
-        .as_ref()
-        .is_some_and(|v| crate::model::cm_json::shows_card(m, v));
-    if item.is_none() && !json && !skin && !cs && !cm {
+    if item.is_none() && !json && !skin && !cs && !set.is_some_and(|v| v.shows_cm_card) {
         m.settings.set_settings_open = false;
         m.save_settings();
         return;
     }
-    let title = match &item {
+    let title = match item {
         Some(k) => format!(
             "{} settings",
             m.item(k).map_or(k.as_str(), |i| i.name.as_str())
@@ -543,18 +537,22 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
         .constrain(true)
         .scroll([false, true])
         .show(ctx, |ui| {
-            if let Some(k) = &item {
+            if let Some(k) = item {
                 crate::ui::settings_panel::draw(ui, m, k, false);
             }
-            if let Some(v) = &set {
-                if item.is_some() && (json || skin || cs || cm) {
+            let current = m.resolved_selection();
+            if let Some(v) = current.view() {
+                let json = crate::model::sets::shows_json_panel(v, m.target);
+                if item.is_some()
+                    && (json || v.skin || m.target == engine::config::Target::Cs || v.shows_cm_card)
+                {
                     ui.separator();
                     ui.strong(format!("Set {}", v.id));
                 }
                 if json {
                     crate::ui::cs_pbr::pgp_panel(ui, m, v);
                 }
-                if skin {
+                if v.skin {
                     crate::ui::skin_card::card(ui, m, v);
                 }
                 crate::ui::cs_pbr::card(ui, m, v);

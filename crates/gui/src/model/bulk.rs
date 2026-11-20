@@ -11,10 +11,10 @@ use super::sets::{
     locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
     SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
 };
-use super::{AppModel, Dialog, Selection};
+use super::{AppModel, Dialog, Selection, SetTarget};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
-use engine::sets::same_id;
+use engine::sets::{fold_id, same_id};
 use serde_json::Value;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
@@ -85,9 +85,12 @@ impl AppModel {
 
     fn multi_in_effect(&self) -> bool {
         self.multi.keys.len() >= 2
-            && self
-                .active_of(self.multi.sets)
-                .is_some_and(|a| self.multi.keys.iter().any(|k| k == a))
+            && self.active_of(self.multi.sets).is_some_and(|a| {
+                #[cfg(feature = "test-hooks")]
+                self.bulk_membership_scans
+                    .set(self.bulk_membership_scans.get() + 1);
+                self.multi.keys.iter().any(|k| k == a)
+            })
     }
 
     fn selected(&self, sets: bool) -> Vec<String> {
@@ -145,13 +148,22 @@ impl AppModel {
         keys
     }
 
-    /// The keys of the sets the column shows, in display order (R17: the Sets filter applied).
-    pub(super) fn set_order(&self) -> Vec<String> {
+    /// Keyed sets in filtered display order. Ctrl+A and Shift ranges also skip folded groups (JV6).
+    pub(super) fn set_order(&self, skip_folded: bool) -> Vec<String> {
+        let mut folded = std::collections::HashSet::new();
+        if skip_folded && !self.settings.group_collapsed.is_empty() {
+            for group in self.sets_doc.iter().flat_map(|d| d.groups()) {
+                if self.group_collapsed(&group.name) {
+                    folded.extend(group.sets.iter().map(|id| fold_id(id)));
+                }
+            }
+        }
         let views = super::sets::views(self);
         self.visible_sets()
             .iter()
             .map(|&i| &views[i])
             .filter(|v| !v.key.is_empty())
+            .filter(|v| folded.is_empty() || !folded.contains(&fold_id(&v.id)))
             .map(|v| v.key.clone())
             .collect()
     }
@@ -165,9 +177,19 @@ impl AppModel {
     }
 
     /// F3a D1: the same over the Sets column, in its display order (search and filters applied, R17).
-    pub fn click_set(&mut self, key: &str, ctrl: bool, shift: bool) {
-        let order = self.set_order();
-        self.click(key, ctrl, shift, true, &order);
+    pub fn click_set(&mut self, target: impl Into<SetTarget>, ctrl: bool, shift: bool) {
+        match target.into() {
+            id @ SetTarget::Id(_) => self.go_to_target(id, None),
+            SetTarget::Key(key) if super::sets::has_card(self, &key) => {
+                if matches!(self.selection, Selection::SetId(_)) {
+                    self.go_to_target(SetTarget::Key(key), None);
+                } else {
+                    let order = self.set_order(shift);
+                    self.click(&key, ctrl, shift, true, &order);
+                }
+            }
+            SetTarget::Key(_) => {}
+        }
     }
 
     pub(super) fn click(
@@ -236,6 +258,11 @@ impl AppModel {
 
     /// `put_selection` for a new selection: the bulk panel starts over (All, no report).
     pub(super) fn set_selection(&mut self, keys: Vec<String>, active: Option<String>, sets: bool) {
+        if sets && keys.len() == 1 && active.as_deref() == keys.first().map(String::as_str) {
+            if let Some(key) = active {
+                return self.go_to_target(SetTarget::Key(key), None);
+            }
+        }
         self.put_selection(keys, active, sets);
         self.bulk = BulkState::default();
     }
@@ -244,9 +271,9 @@ impl AppModel {
     /// applied; K18). The active entry stays when it is among them; else the first becomes active. With nothing
     /// visible the selection is kept.
     pub fn select_all_visible(&mut self) {
-        let sets = matches!(self.selection, Selection::Set(_));
+        let sets = matches!(self.selection, Selection::Set(_) | Selection::SetId(_));
         let keys = if sets {
-            self.set_order()
+            self.set_order(true)
         } else {
             self.visible_keys()
         };
@@ -270,12 +297,12 @@ impl AppModel {
     /// F3a D1: "12 selected", or "12 selected (4 hidden by filter)", for the column of that kind while two or
     /// more are selected there.
     pub fn selection_summary(&self, sets: bool) -> Option<String> {
-        let keys = self.selected(sets);
-        if keys.len() < 2 {
+        if self.multi.sets != sets || !self.in_bulk() {
             return None;
         }
+        let keys = &self.multi.keys;
         let shown: std::collections::HashSet<String> = if sets {
-            self.set_order()
+            self.set_order(false)
         } else {
             self.shown_keys()
         }
@@ -1252,9 +1279,14 @@ impl AppModel {
         }
     }
 
-    pub fn right_click_set(&mut self, key: &str) {
-        if !self.is_selected(key, true) {
-            self.select_set(key);
+    pub fn right_click_set(&mut self, target: impl Into<SetTarget>) {
+        let target = target.into();
+        let selected = match &target {
+            SetTarget::Key(key) => self.is_selected(key, true),
+            SetTarget::Id(id) => matches!(&self.selection, Selection::SetId(s) if same_id(s, id)),
+        };
+        if !selected || !self.in_bulk() {
+            self.go_to_target(target, None);
         }
     }
 

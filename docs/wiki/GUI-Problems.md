@@ -91,7 +91,7 @@ Each click is one undo step. <!-- D:JO4 -->
 
 ### Go to set
 
-**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md), closing an expanded texture preview first. When the row is about one slot or file (a missing map or a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
+**Go to set** closes an expanded texture preview and opens the set in the [Set editor](GUI-Set-Editor.md). In **2D**, a missing or unused map scrolls to its slot or file and outlines it for two seconds if the editor draws that row. Whole-set rows and **3D** open the set without an outline. <!-- D:JO8,JO14 -->
 
 ### Unmatched [files] entries
 
@@ -132,7 +132,9 @@ A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.
 
 ## Narrowing the list
 
-Click a row's subject to select it in the Textures view. Arriving from a count (**N undecided**, a set's **⚠** badge) opens the list narrowed, with a chip to clear it. The **Checks** pill narrows to check rows.
+Counts such as **N undecided** filter the list. Click the chip to clear it. **Checks** shows check rows.
+
+The ordinary filter follows a set when its first file arrives. It prefers matching engine keys over ids and shows no rows for empty ids. A reason that opens Problems shows its card's row in either case. Focus goes to its first action (fix, second fix, **Mark as intended**). With a disabled or missing action, the row takes focus unless Enter or Space would answer it. Then nothing takes focus. <!-- D:JV1,JV2,JV5 -->
 
 ## Hiding kinds of row
 
@@ -140,5 +142,5 @@ Click a row's subject to select it in the Textures view. Arriving from a count (
 
 - **The tab** counts hidden problem rows apart: `Problems (12 · 60 hidden)`. A hidden note counts nowhere. <!-- D:JO6 -->
 - **The list's first line** says what is hidden, with the project's numbers: "2 kinds hidden in this project (60 rows). Hidden rows still count for Ready." <!-- D:JO6 -->
-- **Kinds ▾ (n hidden)** counts the rows this list hides, notes included. <!-- D:JO6 -->
-- **Showing them again:** tick the kind again in **Kinds ▾**, or click "+k more in Problems" on a set's status line, which shows the hidden kinds of that set's rows again ([Set editor](GUI-Set-Editor.md#is-the-set-ready)).
+- **Kinds ▾ (n hidden)** counts hidden rows in this list, including notes. <!-- D:JO6 -->
+- Restore kinds in **Kinds ▾** or with [**+k more in Problems**](GUI-Set-Editor.md#is-the-set-ready).

@@ -4,8 +4,9 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts, KEEP_ALPHA_HOVER,
+    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered_by, flagged, is_hidden,
+    kinds, problems, At, Fix, Level, NameKind, Problem, ProblemsFilter, TabCounts,
+    KEEP_ALPHA_HOVER,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -13,7 +14,7 @@ use crate::model::meshes::NifTab;
 use crate::model::nav::SlotTarget;
 use crate::model::sets::{shader_options, Missing};
 use crate::model::shell::ShellRequest;
-use crate::model::{Answer, AppModel};
+use crate::model::{Answer, AppModel, SetTarget};
 use crate::pgp::settings::feature_key;
 use crate::sets_doc::IntendedKey;
 use eframe::egui;
@@ -80,6 +81,7 @@ fn lead_width(ui: &egui::Ui, p: &Problem) -> f32 {
 fn link_text(p: &Problem) -> &str {
     match &p.at {
         At::Texture(k) | At::File(k) | At::Nif(k) => k.as_str(),
+        At::Set { id, .. } if id.is_empty() => "Unnamed set",
         At::Set { id, .. } => id.as_str(),
         At::Project => "Project",
     }
@@ -120,6 +122,7 @@ type Rows = Arc<Vec<Problem>>;
 struct Listed {
     all: Rows,
     filter: Option<ProblemsFilter>,
+    name_kind: NameKind,
     hidden_kinds: Vec<Code>,
     rows: Rows,
     checks: usize,
@@ -142,18 +145,23 @@ struct Listed {
 fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let all = problems(model);
     let f = model.bottom.filter.clone();
+    let kind = model.bottom.name_kind;
     let hidden_kinds = model.hidden_kinds();
     let id = egui::Id::unique("problems-rows");
     if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
-        if Arc::ptr_eq(&l.all, &all) && l.filter == f && l.hidden_kinds == hidden_kinds {
+        if Arc::ptr_eq(&l.all, &all)
+            && l.filter == f
+            && l.name_kind == kind
+            && l.hidden_kinds == hidden_kinds
+        {
             return l;
         }
     }
-    let out: Rows = filtered(model, f.as_ref());
+    let out: Rows = filtered_by(model, f.as_ref(), kind);
     // The Checks pill under a set's list or its notes leads to the set's checks, so it counts those.
     let checks = match &f {
         Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
-            count_in_set(model, k, counts_as_check)
+            count_in_set(model, k, kind, counts_as_check)
         }
         _ => flagged(model).check_rows,
     };
@@ -162,7 +170,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let set_notes = match &f {
         Some(
             ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
-        ) => Some(count_in_set(model, k, |p| {
+        ) => Some(count_in_set(model, k, kind, |p| {
             p.is_note() && !is_hidden(p, &hidden_kinds)
         })),
         _ => None,
@@ -189,6 +197,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         hideable: all.iter().any(can_hide),
         all,
         filter: f,
+        name_kind: kind,
         hidden_kinds: hidden_kinds.clone(),
         rows,
         checks,
@@ -345,8 +354,8 @@ pub fn forget_focus(ctx: &egui::Context) {
 
 enum Act {
     Texture(String),
-    /// The set (by key) and, from Go to set, the slot or file to outline (review E10).
-    Set(String, Option<SlotTarget>),
+    /// The source set and, from Go to set, the slot or file to outline (review E10).
+    Set(SetTarget, Option<SlotTarget>),
     File(String),
     Pick(RowPick),
     Apply(Fix, At),
@@ -944,7 +953,7 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
                     } else if ui.link(link).clicked() {
                         a = match &p.at {
                             At::Texture(k) => Some(Act::Texture(k.clone())),
-                            At::Set { key, .. } => Some(Act::Set(key.clone(), None)),
+                            At::Set { key, id } => Some(Act::Set(SetTarget::of(key, id), None)),
                             At::File(k) => Some(Act::File(k.clone())),
                             // A NIF's link opens it, as its fix does.
                             At::Nif(_) => p.fix.clone().map(|f| Act::Apply(f, p.at.clone())),
@@ -979,9 +988,9 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
                     // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to set. The
                     // layout is right to left, so Go to set is drawn first.
                     let mut a = None;
-                    if let At::Set { key, .. } = &p.at {
+                    if let At::Set { key, id } = &p.at {
                         if ui.button("Go to set").clicked() {
-                            a = Some(Act::Set(key.clone(), p.target.clone()));
+                            a = Some(Act::Set(SetTarget::of(key, id), p.target.clone()));
                         }
                     }
                     // Review E4: the widgets from here to the fix are Mark, the second fix and the fix; the last one
@@ -1055,7 +1064,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
     let mut act = None;
-    let label = |k: &String| crate::model::bottom::cached_scope_label(model, k);
+    let label =
+        |k: &String| crate::model::bottom::cached_scope_label(model, k, model.bottom.name_kind);
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
     let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
     if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {
@@ -1235,10 +1245,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             model.select_item(&k);
             to_textures(ui);
         }
-        Some(Act::Set(k, target)) => {
-            model.go_to_set(&k, target);
-            to_textures(ui);
-        }
+        Some(Act::Set(target, slot)) => model.go_to_target(target, slot),
         // Re-check A5: a Vanilla or CM row of the last Also export names no texture; its file is shown in Explorer.
         Some(Act::File(k)) => match model.also_file(&k) {
             Some(f) => {
@@ -1281,14 +1288,16 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::TurnFeatureOff(id, f) => model.turn_feature_off(&id, f),
         // Its buttons ask for `TurnFeatureOff` (`fix_button`).
         Fix::FeatureClash(..) => {}
-        Fix::FixPath(key, field) => {
-            let id = crate::model::sets::views(model)
-                .iter()
-                .find(|v| v.key == key)
-                .map(|v| v.id.clone());
-            model.select_set(&key);
-            to_textures(ui);
+        Fix::FixPath(target, field) => {
+            model.go_to_target(target, None);
+            let active = model.resolved_selection();
+            let id = active.view().map(|v| v.id.clone());
             if let Some(id) = id {
+                if model.settings.set_view_3d {
+                    model.settings.set_view_3d = false;
+                    model.save_settings();
+                }
+                super::set_editor::show_main_tab(ui.ctx());
                 let at = ui.ctx().cumulative_pass_nr();
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));

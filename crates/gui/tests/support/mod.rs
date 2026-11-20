@@ -363,6 +363,26 @@ pub fn pbr_opened(dir: &Path) -> AppModel {
     m
 }
 
+pub fn key_less_json_sets(dir: &Path) -> AppModel {
+    use sdc_gui::model::sets::{views, SlotFill, SlotKind};
+    let mut m = pbr_opened(dir);
+    for id in ["landscape/empty", "landscape/other"] {
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.set_borrow(id, 1, Some("landscape/rock01"));
+        });
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let all = views(&m);
+    for id in ["landscape/empty", "landscape/other"] {
+        let v = all.iter().find(|v| v.id == id).unwrap();
+        assert!(v.key.is_empty() && v.members.is_empty(), "{v:?}");
+        assert!(matches!(v.slots.get(&SlotKind::Diffuse),
+            Some(SlotFill::Borrowed { from, .. }) if from == "landscape/rock01"));
+    }
+    m
+}
+
 /// `pbr_opened` with rock01 picked as plain `pbr`: the fixture lives under `textures/landscape/`, so it is auto PBR
 /// Landscape (Note BM); tests of plain-PBR cards, slots and the sphere/mesh preview use this.
 pub fn pbr_opened_plain(dir: &Path) -> AppModel {

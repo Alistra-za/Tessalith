@@ -87,6 +87,9 @@ impl AppModel {
         if let super::Selection::Set(k) = &mut self.selection {
             rekey(k);
         }
+        if self.multi.sets {
+            self.multi.keys.iter_mut().for_each(rekey);
+        }
         if !names_an_id {
             if let Some(Set(k) | SetNotes(k) | SetChecks(k)) = &mut self.bottom.filter {
                 rekey(k);

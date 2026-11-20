@@ -20,8 +20,8 @@ Readiness stays above the slot rows as you scroll. See [what counts against Read
 Click a reason to go to its fix:
 
 - **A missing map** reads "no {slot} (Assign…)". The editor switches to 2D if it shows 3D, then scrolls to that slot row and outlines it, as [Go to set](GUI-Problems.md#go-to-set) does, and puts the keyboard on its **Assign…**. A slot named with its own brackets reads "no Emissive / Skin, slot 3 (Assign…)". <!-- D:JO7 -->
-- **Any other reason** opens Problems on the set's rows, scrolled to that row, with the keyboard on its fix or **Mark as intended**. A hidden kind shows again. <!-- D:JO7 -->
-- **"+k more in Problems"** opens Problems on the set's rows and shows the hidden kinds among them again. <!-- D:JO7 -->
+- **Any other reason** unhides its kind and opens its row. Focus can land on an action, the row, or neither. [Keyboard focus in Problems](GUI-Problems.md#narrowing-the-list). <!-- D:JO7 -->
+- **+k more in Problems** shows the hidden kinds among this set's reasons again, then opens the [ordinary set filter](GUI-Problems.md#narrowing-the-list). <!-- D:JO7 -->
 
 ## Output files
 

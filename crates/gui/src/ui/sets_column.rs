@@ -22,7 +22,7 @@ use crate::model::sets::{
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
-use crate::model::{AppModel, Selection};
+use crate::model::{AppModel, Selection, SetTarget};
 use crate::sets_doc::TxstMap;
 use eframe::egui;
 use engine::codes::Warning;
@@ -130,7 +130,7 @@ pub struct DropState {
     /// Review I1: frames a reveal has re-aimed at a card not yet laid out (capped by `REVEAL_TRIES`).
     pub reveal_tries: u8,
     /// Note HF6: the set a filter change or a re-flow scrolls to. It scrolls only: it never opens the set's group.
-    pub quiet_reveal: Option<String>,
+    pub quiet_reveal: Option<crate::model::SetTarget>,
     /// The Sets scroll offset and view height last frame, for a reveal's jump (review I1).
     pub view: Option<(f32, f32)>,
     /// Note FM32: the column width `card_h` is for. A change re-flows every remembered height (`reflow_heights`).
@@ -141,7 +141,7 @@ pub struct DropState {
     /// Note FM32: the key of the reveal's target when it was laid out last frame, so this frame scrolls to its measured
     /// rect instead of jumping to the offset the heights give (the mean moves as cards are measured, and would re-aim
     /// each frame). Another target, or a frame with no reveal, takes the jump path again.
-    pub reveal_seen: Option<String>,
+    pub reveal_seen: Option<crate::model::SetTarget>,
     /// Note FM32: the widget with the keyboard focus when the last frame's list ended. A stand-in that holds the focus
     /// and was not the holder then took it this frame (Tab), as opposed to a focused card the wheel scrolled away.
     pub focus: Option<egui::Id>,
@@ -200,7 +200,6 @@ fn reflow_heights(st: &mut DropState, views: &[SetView], width: f32, frame_x: f3
 const TIP_LINES: usize = 10;
 
 enum Act {
-    Select(String),
     /// The warning badge: open Problems filtered to this set key.
     Problems(String),
     SelectItem(String),
@@ -1219,9 +1218,11 @@ fn filter_strips(
     ui: &mut egui::Ui,
     model: &mut AppModel,
     views: &[crate::model::sets::SetView],
+    visible: &[usize],
 ) -> bool {
     let mut button = false;
-    if let Some(id) = model.selected_set_hidden_by_filter() {
+    if let Some(i) = model.hidden_set_index(visible) {
+        let id = &views[i].id;
         button = true;
         let text = format!("{id} is hidden by the Sets filter");
         // Note HN F2: the sentence wraps in full, the button sits on the next row.
@@ -1432,28 +1433,19 @@ fn open_groups_of(
     views: &[SetView],
     visible: &[usize],
     seen: &mut Option<Selection>,
-    reveal: Option<&str>,
+    reveal: Option<usize>,
 ) {
     let moved = seen.as_ref().is_some_and(|s| *s != model.selection);
     if seen.as_ref() != Some(&model.selection) {
         *seen = Some(model.selection.clone());
     }
-    let mut keys: Vec<String> = reveal.map(str::to_string).into_iter().collect();
-    if moved {
-        keys.extend(match &model.selection {
-            Selection::Item(k) => model.set_key_of_item(k),
-            Selection::Set(k) => Some(k.clone()),
-            Selection::None => None,
-        });
-    }
-    for k in keys {
-        let Some(v) = visible
-            .iter()
-            .map(|&i| &views[i])
-            .find(|v| !v.key.is_empty() && v.key == k)
-        else {
-            continue;
-        };
+    let moved = moved.then(|| model.resolved_selection().index).flatten();
+    for i in [reveal, moved]
+        .into_iter()
+        .flatten()
+        .filter(|i| visible.binary_search(i).is_ok())
+    {
+        let v = &views[i];
         if let Some(g) = model.group_of(&v.id) {
             if model.group_collapsed(&g.name) {
                 model.set_group_collapsed(&g.name, false);
@@ -1666,7 +1658,7 @@ pub fn draw(
     };
     let views = crate::model::sets::views(model);
     let visible = model.visible_sets();
-    let has_clear = filter_strips(ui, model, &views);
+    let has_clear = filter_strips(ui, model, &views, &visible);
     if views.is_empty() && model.root.is_some() && !model.busy() {
         ui.weak("No sets.");
     } else if visible.is_empty() && filtering && !views.is_empty() {
@@ -1714,12 +1706,7 @@ pub fn draw(
     let card_w = ui.available_width() - ui.spacing().scroll.allocated_width();
     let reflowed = reflow_heights(st, &views, card_w, frame_x);
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
-    if reflowed && model.nav.reveal_set.is_none() {
-        if let [k] = model.selected_sets().as_slice() {
-            st.quiet_reveal = Some(k.clone());
-            model.nav.reveal_set = Some(k.clone());
-        }
-    }
+    let active = model.resolved_selection();
     let est = if st.card_h.is_empty() {
         CARD_EST
     } else {
@@ -1739,9 +1726,23 @@ pub fn draw(
         }
     };
     let mut to_top = false;
+    let single = (reflowed || changed)
+        && matches!(active.selection, Selection::Set(_) | Selection::SetId(_))
+        && !model.in_bulk();
+    if reflowed && model.nav.reveal_set.is_none() && single {
+        if let Some(k) = &active.target {
+            st.quiet_reveal = Some(k.clone());
+            model.nav.reveal_set = Some(k.clone());
+        }
+    }
     if changed {
-        match model.selected_sets().as_slice() {
-            [k] if visible.iter().any(|&i| views[i].key == *k) => {
+        match &active.target {
+            Some(k)
+                if single
+                    && active
+                        .index
+                        .is_some_and(|i| visible.binary_search(&i).is_ok()) =>
+            {
                 st.quiet_reveal = Some(k.clone());
                 model.nav.reveal_set = Some(k.clone());
             }
@@ -1750,25 +1751,29 @@ pub fn draw(
         st.reveal_tries = 0;
     }
     let reveal = model.nav.reveal_set.take();
+    let reveal_index = reveal.as_ref().and_then(|target| {
+        if active.target.as_ref() == Some(target) {
+            active.index
+        } else {
+            views.iter().position(|v| target.matches(v))
+        }
+    });
     // Note HF6: what a reveal or a moved selection leads to is shown: its group opens before the rows are built.
     open_groups_of(
         model,
         &views,
         &visible,
         &mut st.selection,
-        reveal
-            .as_deref()
-            .filter(|k| st.quiet_reveal.as_deref() != Some(*k)),
+        reveal_index.filter(|_| st.quiet_reveal != reveal),
     );
     let (rows, heads, grouped) = build_rows(model, &views, &visible, &status_of);
     let head_h = ui
         .text_style_height(&egui::TextStyle::Body)
         .max(ui.spacing().interact_size.y)
         + 6.0;
-    let reveal_at = reveal.as_deref().and_then(|k| {
-        rows.iter().position(
-            |r| matches!(r, Row::Card(i) if !views[*i].key.is_empty() && views[*i].key == k),
-        )
+    let reveal_at = reveal_index.and_then(|index| {
+        rows.iter()
+            .position(|r| matches!(r, Row::Card(i) if *i == index))
     });
     let row_h = |r: &Row| match r {
         Row::Header(_) => head_h,
@@ -1834,7 +1839,7 @@ pub fn draw(
             let v = &views[index];
             let h = st.card_h.get(&v.id).copied().unwrap_or(est);
             let id = ui.scope_id().with(("set-card", &v.key, &v.id));
-            let selected = !v.key.is_empty() && sel_sets.contains(&v.key);
+            let selected = sel_sets.contains(&v.id);
             let mut card = |ui: &mut egui::Ui| {
                 let probe =
                     egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
@@ -1954,7 +1959,7 @@ pub fn draw(
     // A Go to set in the same frame wins: the card keeps its focus, and the Tab does not pull the view off the target.
     if let Some(k) = focused.filter(|_| !go_to) {
         st.reveal_tries = 0;
-        model.nav.reveal_set = Some(k);
+        model.nav.reveal_set = Some(crate::model::SetTarget::Key(k));
         ctx.request_repaint();
     }
     // A measured height moved the cards below it: one more frame lays them out where they now are (settles).
@@ -1971,12 +1976,11 @@ pub fn draw(
     for a in acts {
         match a {
             // Note FC8 (BN3): a new selection waits a frame for a focused field to commit.
-            Act::Select(k) => super::after_commit(&ctx, model, move |m| m.select_set(&k)),
             Act::SelectItem(k) => super::after_commit(&ctx, model, move |m| m.select_item(&k)),
-            Act::Click(k, ctrl, shift) => {
-                super::after_commit(&ctx, model, move |m| m.click_set(&k, ctrl, shift))
-            }
-            Act::RightClick(k) => model.right_click_set(&k),
+            Act::Click(id, ctrl, shift) => after_card_commit(&ctx, model, id, move |m, target| {
+                m.click_set(target, ctrl, shift)
+            }),
+            Act::RightClick(id) => after_card_commit(&ctx, model, id, AppModel::right_click_set),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
                 st.pending = Some(Pending::NewGroup {
@@ -2146,8 +2150,27 @@ fn apply_reorder(model: &mut AppModel, id: &str, to: usize) {
         .find(|v| engine::sets::same_id(&v.id, id))
         .map(|v| v.key.clone());
     if model.reorder_set(id, to) {
-        model.nav.reveal_set = key.filter(|k| !k.is_empty());
+        model.nav.reveal_set = key
+            .filter(|k| !k.is_empty())
+            .map(crate::model::SetTarget::Key);
     }
+}
+
+/// The plan can land while the old editor commits. Find the clicked card by its document id in that plan.
+fn after_card_commit(
+    ctx: &egui::Context,
+    model: &mut AppModel,
+    id: String,
+    click: impl FnOnce(&mut AppModel, SetTarget) + 'static,
+) {
+    super::after_commit(ctx, model, move |m| {
+        let views = crate::model::sets::views(m);
+        if let Some(v) = views.iter().find(|v| engine::sets::same_id(&v.id, &id)) {
+            click(m, SetTarget::view(v));
+        } else {
+            m.clear_selection();
+        }
+    });
 }
 
 /// CF4: the card's place in the full order, a body-size number in a slot as wide as `total`'s, so names line up.
@@ -2670,9 +2693,9 @@ fn pill(
     if !editing.on {
         resp.clone().on_hover_text(editing.why);
     }
-    if resp.clicked() && !v.key.is_empty() && acts.is_empty() {
+    if resp.clicked() && acts.is_empty() {
         let m = ui.input(|i| i.modifiers);
-        acts.push(Act::Click(v.key.clone(), m.command, m.shift));
+        acts.push(Act::Click(v.id.clone(), m.command, m.shift));
     }
     if let Some(p) = dropped {
         if editing.on {
@@ -2687,8 +2710,8 @@ fn pill(
         .map(|p| p.0.clone());
     // F3a D4: a right-click on an unselected pill selects it alone first; among two or more selected sets the pill
     // shows the bulk menu, otherwise its own.
-    if resp.secondary_clicked() && !v.key.is_empty() && !member_menu {
-        acts.push(Act::RightClick(v.key.clone()));
+    if resp.secondary_clicked() && !member_menu {
+        acts.push(Act::RightClick(v.id.clone()));
     }
     let bulk = look.selected && look.bulk;
     if !member_menu {
@@ -3151,8 +3174,8 @@ fn menu(
         }
     });
     tip(rename.response);
-    if tip(ui.button("Edit match…")).clicked() && !v.key.is_empty() {
-        acts.push(Act::Select(v.key.clone()));
+    if tip(ui.button("Edit match…")).clicked() {
+        acts.push(Act::Click(v.id.clone(), false, false));
         ui.close();
     }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {

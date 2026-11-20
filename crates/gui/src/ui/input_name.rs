@@ -213,7 +213,7 @@ fn plan_error(
             return e;
         }
     }
-    let e = model.input_name_plan(&v.id, text).err();
+    let e = model.input_name_plan_of(v, text).err();
     ui.data_mut(|d| d.insert_temp::<Cached>(key, (text.to_string(), rev, e.clone())));
     e
 }
@@ -221,7 +221,7 @@ fn plan_error(
 /// The set's input name box, which also names the set (Note BH1); a set without an own diffuse shows its path.
 /// `matching`: draw the Note DO match selector (a JSON set's 2D view; the 3D view's header row has no room).
 pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bool) {
-    let Some(current) = model.input_name_of(&v.id) else {
+    let Some((current, tail)) = model.input_name_parts_of(v) else {
         ui.heading(&v.id);
         return;
     };
@@ -280,7 +280,6 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
     };
     // Note HC3: the known paths are whole file names, so the diffuse's suffix counts too (`body` is known as
     // `body_albedo`).
-    let tail = model.input_name_tail(&v.id);
     let unknown = |t: &str| {
         !paths.is_empty()
             && !t.trim().is_empty()

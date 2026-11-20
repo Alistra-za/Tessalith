@@ -310,8 +310,8 @@ fn a_set_that_writes_nothing_says_so() {
         .expect("premise: the created set has a view")
         .clone();
     assert!(set_outputs(&v).is_empty(), "premise: no member writes");
-    // A set with no file is not in the plan's list (`m.sets`): select it by its view's key.
-    m.select_set(&v.key);
+    assert!(v.key.is_empty());
+    m.select_target(sdc_gui::model::SetTarget::Id(v.id.clone()));
     let mut h = harness(m);
     let header = h.get_by_label_contains("Output files").rect();
     assert!(
@@ -340,35 +340,29 @@ fn the_output_files_group_is_not_drawn_in_the_3d_view() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair(d.path());
     select_set(&mut m, LEAF);
-    let key = m
-        .sets
-        .iter()
-        .find(|s| s.key.ends_with(LEAF))
-        .unwrap()
-        .key
-        .clone();
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
-            move |ui, s: &mut (AppModel, String)| {
+            move |ui, m: &mut AppModel| {
+                let active = m.resolved_selection();
                 let view = View {
                     three_d: true,
                     ..Default::default()
                 };
                 draw(
                     ui,
-                    &mut s.0,
-                    &s.1,
+                    m,
+                    &active,
                     &mut Default::default(),
                     &mut Default::default(),
                     &mut Default::default(),
                     view,
                 );
             },
-            (m, key),
+            m,
         );
     // The viewport's share of the centre is pinned (`set_preview_layout`), so the header stays out of the 3D view.
     assert!(h.query_by_label_contains("Output files").is_none());
@@ -3482,8 +3476,8 @@ fn the_click_checks_the_plan_again_without_the_rows_cache() {
 }
 
 /// Rulings 3b-F21 and 3b-F24: with an Also tick on CS (where the output folder is made of the export configuration and
-/// the export folder), a warm menu call with members reads each 4 times: the two views lookups a menu with none listed
-/// makes, the rows' cache key (its views key) and `output_roots`; nothing per listed member or per item. The uncached
+/// the export folder), a warm menu with members reads each twice, for the rows' cache key and `output_roots`.
+/// Warm views add no root read, whatever the number of listed members or items. The uncached
 /// settled check reads the same on a bigger project, and the link index reads them once beside its views. While a plan
 /// is out the list adds no read beyond the views lookups and builds no export inputs.
 #[test]
@@ -3514,10 +3508,11 @@ fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
         (none_listed.0 + 2, none_listed.1 + 2),
         "a warm menu with members: its cache key and `output_roots` beside the views lookups"
     );
-    assert_eq!(menu, (4, 4), "the measured warm count");
+    assert_eq!(menu, (2, 2), "only the menu key and output roots");
     let views_alone = reads_of(|| {
         let _ = views(&m);
     });
+    assert_eq!(views_alone, (0, 0), "warm views reuse their root inputs");
     let index = reads_of(|| {
         let _ = sdc_gui::model::txst_map::written_output_index(&m);
     });

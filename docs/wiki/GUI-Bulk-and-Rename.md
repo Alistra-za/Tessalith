@@ -4,7 +4,9 @@ For anyone fixing many textures or sets at once, reading files under corrected n
 
 ## Selecting several
 
-Ctrl+click adds or removes one entry, Shift+click selects the range in the order shown, and Ctrl+A selects everything shown. Helper rows take Ctrl+click and Shift+click too. Textures and sets are never selected together, and entries a filter hides stay selected and are edited.
+Ctrl+click adds or removes one entry. Shift+click selects a range in the column's order. Both work on helper rows. In Textures, Ctrl+A selects the visible texture tiles and skips helper rows. Textures and sets are selected separately. Changing a filter keeps hidden selections in the bulk edit.
+
+With a set active, Ctrl+A selects visible sets with files of their own that pass the Sets filter. Ctrl+A and Shift+click ranges skip folded groups. If no set qualifies for Ctrl+A, your selection stays as it was. Folding a group keeps its already selected cards in the bulk edit. <!-- D:JV6 --> If either the active set or the card you click has no files of its own, Ctrl+click and Shift+click select only the card you click. <!-- D:JV3 -->
 
 ## Editing them together
 

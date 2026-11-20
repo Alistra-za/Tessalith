@@ -549,7 +549,7 @@ fn a_drag_released_after_the_source_scrolled_away_still_reorders() {
     h.run();
     start_drag(&mut h, 1, 60);
     // K7: shift the content as a reveal does (egui 0.37's wheel scrolls during a drag too; that has its own test).
-    h.state_mut().nav.reveal_set = Some(target_key);
+    h.state_mut().nav.reveal_set = Some(sdc_gui::model::SetTarget::Key(target_key));
     for _ in 0..12 {
         h.step();
         if pos_rect(&h, 1, 60).is_none() {

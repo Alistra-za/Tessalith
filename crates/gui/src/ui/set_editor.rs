@@ -119,7 +119,7 @@ fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
 
 /// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
 fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
-    let reasons = cached_set_reasons(model, scope_key(v));
+    let reasons = cached_set_reasons(model, v);
     // A set the export blocks on has the card's red dot (`sets_column`), whatever its words say.
     let blocked = export_blocks(model).iter().any(|i| i.set_id == v.id);
     let mut act = None;
@@ -223,6 +223,7 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
                 model.settings.set_view_3d = false;
                 model.save_settings();
             }
+            // Slot reasons come from warnings on a keyed plan set.
             model.go_to_set(&v.key, Some(SlotTarget::Slot(kind)));
             let id = slot_row_id(&v.id, kind).with("assign");
             ui.data_mut(|d| d.insert_temp(egui::Id::unique(ASSIGN_FOCUS), id));
@@ -232,13 +233,12 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
             if let Some(code) = p.code.filter(|_| is_hidden(&p, &model.hidden_kinds())) {
                 model.set_kind_hidden(code, false);
             }
-            model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));
+            model.open_set_problems(crate::model::SetTarget::view(v));
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
         Act::Problems => {
-            // The list shows at least the rows the link counts, a slot reason's row too: their hidden kinds show
-            // again, as a reason's does.
-            for code in hidden_reason_kinds(model, scope_key(v)) {
+            // Show the editor's counted kinds before opening the ordinary JP5 filter.
+            for code in hidden_reason_kinds(model, v) {
                 model.set_kind_hidden(code, false);
             }
             model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));
@@ -255,8 +255,6 @@ pub struct View {
     pub switch: bool,
     /// The 3D panel shows this set: the slot rows are left out, the TruePBR settings stay.
     pub three_d: bool,
-    /// The editor was not what the centre showed last frame: open at the top (Note FI6).
-    pub to_top: bool,
     /// The 3D preview's picked MATO record's `noiseUVScale`, where the XPMF card's Override starts (M8).
     pub noise_uv: Option<f32>,
 }
@@ -265,17 +263,20 @@ pub struct View {
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
-    key: &str,
+    active: &crate::model::ResolvedSelection,
     thumbs: &mut ThumbCache,
     cmds: &mut SlotCmdState,
     drops: &mut DropState,
     view: View,
 ) {
-    let all = views(model);
-    // Review E10: Go to set's outline, on the slot rows only (the 3D view and a set gone from the plan drop it).
-    let rows_drawn = !view.three_d && all.iter().any(|v| v.key == key);
-    super::row_reveal::take(ui.ctx(), &mut model.nav, key, rows_drawn);
-    let Some(v) = all.iter().find(|v| v.key == key) else {
+    let selected = active.view();
+    super::row_reveal::take(
+        ui.ctx(),
+        &mut model.nav,
+        active.target.as_ref(),
+        selected.filter(|_| !view.three_d).map(|v| v.id.as_str()),
+    );
+    let Some(v) = selected else {
         ui.weak("This set is no longer in the plan.");
         return;
     };
@@ -316,10 +317,10 @@ pub fn draw(
         .auto_shrink([false, false]);
     // Go to set's scroll to its row (`row_reveal`) still wins: egui applies this offset as the area begins and a
     // scroll request as it ends.
-    if view.to_top {
+    if super::take_scroll_reset(ui.ctx()) {
         area = area.vertical_scroll_offset(0.0);
     }
-    area.show(ui, |ui| {
+    let out = area.show(ui, |ui| {
         head(ui, model, v, view);
         outputs(ui, model, v);
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
@@ -337,10 +338,19 @@ pub fn draw(
             .response
             .on_disabled_hover_text(&why);
         });
-        under_grid(ui, model, v);
+        under_grid(ui, v);
         ui.add_space(6.0);
         tabs(ui, model, v, view.noise_uv);
     });
+    #[cfg(feature = "test-hooks")]
+    ui.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::unique("set-editor-observed-offset"),
+            out.state.clamped_offset().y,
+        )
+    });
+    #[cfg(not(feature = "test-hooks"))]
+    let _ = out;
     super::row_reveal::end(ui.ctx());
     // The slot rows took a waiting Assign… focus, or it has no Assign… to go to (a filled slot): either way it is gone.
     ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
@@ -360,6 +370,7 @@ pub fn draw(
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::OpenSet(id) => {
+                // The link source owns a planned member output; a key-less view has no members.
                 if let Some(key) = views(model)
                     .iter()
                     .find(|s| s.id == id)
@@ -424,7 +435,7 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     });
     // F3b: the set's output name, or why it is ignored.
     let mut clear_name = false;
-    if let Some(n) = model.output_name_of(&v.id) {
+    if let Some(n) = &v.output_name {
         ui.horizontal_wrapped(|ui| {
             if model.renames_outputs(v) {
                 ui.colored_label(
@@ -610,6 +621,13 @@ const TAB_ID: &str = "set-editor-tab";
 /// Set with the tab by Review's link: the tab row scrolls to the top once, so the recipe is in view.
 const SCROLL_ID: &str = "set-editor-tab-scroll";
 
+pub(super) fn show_main_tab(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique(TAB_ID), SetTab::Main);
+        d.remove::<bool>(egui::Id::unique(SCROLL_ID));
+    });
+}
+
 /// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
 pub fn show_also_tab(ctx: &egui::Context) {
     ctx.data_mut(|d| {
@@ -668,9 +686,13 @@ fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f
     // settings; `pgp_panel` (a PBR Landscape set's) draws both halves itself.
     let split = json && !(model.target == Target::Cs && crate::model::sets::is_pbr_landscape(v));
     if split {
-        super::pgp_fields::panel_main(ui, model, &v.id);
+        super::pgp_fields::panel_main(
+            ui,
+            model,
+            &super::pgp_fields::context_of(model, &v.id, Some(v)),
+        );
         super::cs_pbr::section(ui, model, v);
-        super::pgp_fields::panel_advanced(ui, model, &v.id);
+        super::pgp_fields::advanced_of(ui, model, v);
     } else if json {
         super::cs_pbr::pgp_panel(ui, model, v);
     }
@@ -723,11 +745,11 @@ fn slot_note(ui: &mut egui::Ui, drops: &DropState, set: &str) {
 }
 
 /// The recipe lines and what matches nothing (the set's problems are on the status line, review E4).
-fn under_grid(ui: &mut egui::Ui, model: &AppModel, v: &SetView) {
-    let Some(set) = model.sets.iter().find(|s| s.key == v.key) else {
+fn under_grid(ui: &mut egui::Ui, v: &SetView) {
+    if v.key.is_empty() {
         return;
-    };
-    for r in &set.recipes {
+    }
+    for r in &v.recipes {
         ui.add_space(4.0);
         recipe(ui, r);
     }
@@ -1388,7 +1410,7 @@ fn row(
             egui::StrokeKind::Outside,
         );
     }
-    super::row_reveal::on_row(ui, &v.key, slot, item_key.as_deref(), rect);
+    super::row_reveal::on_row(ui, &v.id, slot, item_key.as_deref(), rect);
     RowWidths {
         widths: [slot_w, THUMB, format_w, flags_w, status_w],
         base_widths: [slot_w, THUMB, format_base_w, flags_w, status_w],

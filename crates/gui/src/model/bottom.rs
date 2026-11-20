@@ -29,6 +29,8 @@ pub struct BottomPanel {
     pub open: bool,
     pub tab: BottomTab,
     pub filter: Option<ProblemsFilter>,
+    /// How the open set filter names its card, retained when switching between its checks and notes.
+    pub(crate) name_kind: NameKind,
 }
 
 /// Note HC4: a row its kind can hide. A block or a question never hides, and hiding never touches the Review gate,
@@ -97,6 +99,7 @@ impl AppModel {
             open: true,
             tab,
             filter: None,
+            name_kind: NameKind::Filter,
         };
         self.sync_messages_open();
     }
@@ -110,6 +113,7 @@ impl AppModel {
                 open: true,
                 tab,
                 filter: None,
+                name_kind: NameKind::Filter,
             };
         }
         self.sync_messages_open();
@@ -368,8 +372,8 @@ pub enum Fix {
     /// P26, owner 2026-11-04: two exclusive features of a set (by id) are both on. The row offers one
     /// `TurnFeatureOff` button per feature, neither a default; the modder picks which one goes.
     FeatureClash(String, Feature, Feature),
-    /// P13: go to the set (by key) and focus the path field (a settings key) the blocker names.
-    FixPath(String, String),
+    /// P13: open the blocker's set by engine key or document id and focus its path field (a settings key).
+    FixPath(super::SetTarget, String),
     /// R-fills-2, Z11: undo the step that caused the row; only built while that step is the top of the history.
     UndoLast,
     /// Note GD1: open the NIF on this tab and field.
@@ -568,6 +572,15 @@ impl AppModel {
         self.bottom.filter = f;
     }
 
+    pub(crate) fn open_set_problems(&mut self, target: super::SetTarget) {
+        let (name, kind) = match target {
+            super::SetTarget::Key(k) => (k, NameKind::Key),
+            super::SetTarget::Id(id) => (id, NameKind::Id),
+        };
+        self.open_problems(Some(ProblemsFilter::Set(name)));
+        self.bottom.name_kind = kind;
+    }
+
     /// Note FC3: the NIF edit's problems, handed over by `app.rs` each frame. Only a new snapshot rebuilds Problems.
     pub fn set_nif_problems(&mut self, p: Arc<Vec<super::meshes::NifProblem>>) {
         if !Arc::ptr_eq(&self.nif_problems, &p) {
@@ -666,9 +679,7 @@ pub fn set_ready_in(f: &Flagged, v: &sets::SetView) -> bool {
         && !v.members.iter().any(|t| f.textures.contains(t))
 }
 
-/// Note JP5 (B3-16, B3-19): the name a set's Problems filter, its reasons, the card's hover and its badges' clicks use:
-/// its engine key, or for a set with no key (a created set with no file yet, or one whose every entry is missing) its
-/// id.
+/// Note JP5: an ordinary Problems filter names a set by its engine key or, for a key-less set, its document id.
 pub fn scope_key(v: &sets::SetView) -> &str {
     if v.key.is_empty() {
         &v.id
@@ -1596,6 +1607,14 @@ fn unreadable_folder(message: &str) -> Option<PathBuf> {
 /// The list narrowed by `f`: a set keeps its own rows and its members' rows; `Undecided` keeps the Decide rows.
 /// `None` and `Set` list the worklist (`Problem::in_worklist`); `Notes` and `SetNotes` list every note.
 pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
+    filtered_by(m, f, NameKind::Filter)
+}
+
+pub(crate) fn filtered_by(
+    m: &AppModel,
+    f: Option<&ProblemsFilter>,
+    kind: NameKind,
+) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
@@ -1603,7 +1622,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         None => worklist(&all, &|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
         Some(ProblemsFilter::SetNotes(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| p.is_note() && in_set(p, &s))
                 .cloned()
@@ -1618,11 +1637,11 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             all.iter().filter(|p| counts_as_check(p)).cloned().collect()
         }
         Some(ProblemsFilter::Set(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             worklist(&all, &|p| in_set(p, &s))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| counts_as_check(p) && in_set(p, &s))
                 .cloned()
@@ -1643,8 +1662,13 @@ fn worklist(all: &[Problem], keep: &dyn Fn(&Problem) -> bool) -> Vec<Problem> {
 
 /// How many of the set's own rows and members' rows pass `keep`, without cloning them. `key` is a set's scope key
 /// (`scope_key`: its key, or a key-less set's id).
-pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) -> usize {
-    let s = scope(m, key);
+pub(crate) fn count_in_set(
+    m: &AppModel,
+    key: &str,
+    kind: NameKind,
+    keep: impl Fn(&Problem) -> bool,
+) -> usize {
+    let s = scope(m, key, kind);
     problems(m)
         .iter()
         .filter(|p| in_set(p, &s) && keep(p))
@@ -1655,7 +1679,7 @@ pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) ->
 /// set's member items.
 struct Scope {
     key: String,
-    id: String,
+    id: Option<String>,
     members: HashSet<String>,
 }
 
@@ -1663,7 +1687,7 @@ impl Scope {
     fn of(v: &sets::SetView) -> Self {
         Scope {
             key: v.key.clone(),
-            id: v.id.clone(),
+            id: Some(v.id.clone()),
             members: v.members.iter().cloned().collect(),
         }
     }
@@ -1674,42 +1698,68 @@ impl Scope {
 /// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
 /// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
 /// and has no key. The key wins. `None` for the empty string.
-fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
-    view_lookup(views, root, s).map(|(v, _)| v)
-}
-
-/// `view_of`, and whether `s` named the set by its id (the second and third lookups) rather than by a key (the first
-/// and fourth). The lookup order lives here only.
-fn view_lookup<'a>(
+fn view_of<'a>(
     views: &'a [sets::SetView],
     root: &Path,
     s: &str,
-) -> Option<(&'a sets::SetView, bool)> {
-    if s.is_empty() {
+    kind: NameKind,
+) -> Option<&'a sets::SetView> {
+    view_lookup(views, root, s, kind).map(|(i, _)| &views[i])
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NameKind {
+    #[default]
+    Filter,
+    Key,
+    Id,
+}
+
+/// Returns the view index and whether the name matched a document id.
+fn view_lookup(
+    views: &[sets::SetView],
+    root: &Path,
+    s: &str,
+    kind: NameKind,
+) -> Option<(usize, bool)> {
+    if kind != NameKind::Id && s.is_empty() {
+        return None;
+    }
+    if kind != NameKind::Id {
+        if let Some(i) = views.iter().position(|v| v.key == s) {
+            return Some((i, false));
+        }
+    }
+    if kind != NameKind::Key {
+        let by_id = views
+            .iter()
+            .position(|v| v.key.is_empty() && v.id == s)
+            .or_else(|| views.iter().position(|v| engine::sets::same_id(&v.id, s)));
+        if let Some(i) = by_id {
+            return Some((i, true));
+        }
+    }
+    if kind == NameKind::Id {
         return None;
     }
     views
         .iter()
-        .find(|v| v.key == s)
-        .map(|v| (v, false))
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| v.key.is_empty() && v.id == s)
-                .map(|v| (v, true))
-        })
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| engine::sets::same_id(&v.id, s))
-                .map(|v| (v, true))
-        })
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
-                .map(|v| (v, false))
-        })
+        .position(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+        .map(|i| (i, false))
+}
+
+pub(super) fn landed_index(
+    views: &[sets::SetView],
+    root: &Path,
+    selected: &super::Selection,
+) -> Option<usize> {
+    use super::Selection;
+    let (s, kind) = match selected {
+        Selection::Set(k) => (k, NameKind::Key),
+        Selection::SetId(id) => (id, NameKind::Id),
+        _ => return None,
+    };
+    view_lookup(views, root, s, kind).map(|(i, _)| i)
 }
 
 impl AppModel {
@@ -1723,23 +1773,29 @@ impl AppModel {
         else {
             return false;
         };
-        let views = sets::views(self);
-        view_lookup(&views, &self.sets_root(), k).is_some_and(|(_, by_id)| by_id)
+        match self.bottom.name_kind {
+            NameKind::Id => true,
+            NameKind::Key => false,
+            NameKind::Filter => {
+                view_lookup(&sets::views(self), &self.sets_root(), k, NameKind::Filter)
+                    .is_some_and(|(_, by_id)| by_id)
+            }
+        }
     }
 }
 
 /// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip
 /// (read through `cached_scope_label`); `s` itself when no set matches.
-fn scope_label(m: &AppModel, s: &str) -> String {
+fn scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
     #[cfg(feature = "test-hooks")]
     m.scope_label_lookups.set(m.scope_label_lookups.get() + 1);
     let views = sets::views(m);
-    view_of(&views, &m.sets_root(), s).map_or_else(|| s.to_string(), |v| v.id.clone())
+    view_of(&views, &m.sets_root(), s, kind).map_or_else(|| s.to_string(), |v| v.id.clone())
 }
 
 /// `scope_label` for the Problems chip, which is drawn every frame (final wave Group 7, ledger 253): looked up once
 /// per set views build and stored key `s`. The views live in the same cache cell, which is emptied when they change.
-pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
+pub(crate) fn cached_scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
     // Before the borrow: `views` writes the same cell.
     let views = sets::views(m);
     if let Some((.., l)) = m
@@ -1747,23 +1803,27 @@ pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
         .borrow()
         .scope_label
         .as_ref()
-        .filter(|(v, k, _)| Arc::ptr_eq(v, &views) && k == s)
+        .filter(|(v, k, n, _)| Arc::ptr_eq(v, &views) && k == s && *n == kind)
     {
         return l.clone();
     }
-    let l = scope_label(m, s);
-    m.views.borrow_mut().scope_label = Some((views, s.to_string(), l.clone()));
+    let l = scope_label(m, s, kind);
+    m.views.borrow_mut().scope_label = Some((views, s.to_string(), kind, l.clone()));
     l
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
-fn scope(m: &AppModel, s: &str) -> Scope {
+fn scope(m: &AppModel, s: &str, kind: NameKind) -> Scope {
     let views = sets::views(m);
-    match view_of(&views, &m.sets_root(), s) {
+    match view_of(&views, &m.sets_root(), s, kind) {
         Some(v) => Scope::of(v),
         None => Scope {
-            key: s.to_string(),
-            id: String::new(),
+            key: if kind == NameKind::Id {
+                String::new()
+            } else {
+                s.to_string()
+            },
+            id: None,
             members: HashSet::new(),
         },
     }
@@ -1774,7 +1834,7 @@ fn scope(m: &AppModel, s: &str) -> Scope {
 fn in_set(p: &Problem, s: &Scope) -> bool {
     match &p.at {
         At::Set { key, id } if s.key.is_empty() => {
-            !s.id.is_empty() && key.is_empty() && *id == s.id
+            key.is_empty() && s.id.as_deref() == Some(id.as_str())
         }
         At::Set { key, .. } => *key == s.key,
         At::Texture(t) => s.members.contains(t),
@@ -1803,17 +1863,16 @@ pub enum ReasonGo {
 /// whose slot the set editor draws a row for goes to that slot's **Assign…**; every other row goes to itself in
 /// Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
-    with_counted_rows(m, key, |v, rows| {
-        let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
-        rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
-    })
-    .unwrap_or_default()
+    with_counted_rows(m, key, reasons_for_view).unwrap_or_default()
 }
 
-/// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
-/// per `problems()` build, scope key `key` (see `scope_key`) and hidden kinds, as `cached_tab_counts`. The set views
-/// it reads live in the same cache cell, which is emptied when they change.
-pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
+fn reasons_for_view(v: &sets::SetView, rows: Vec<&Problem>) -> Vec<Reason> {
+    let drawn: Vec<_> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
+    rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
+}
+
+/// The status line's reasons, cached by problems, resolved view id and hidden kinds. Rebuilding the views clears it.
+pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
     let hidden = m.hidden_kinds();
@@ -1822,22 +1881,21 @@ pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
         .borrow()
         .set_reasons
         .as_ref()
-        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == key && *h == hidden)
+        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == &v.id && *h == hidden)
     {
         return r.clone();
     }
     #[cfg(feature = "test-hooks")]
     m.reason_scans.set(m.reason_scans.get() + 1);
-    let r = Arc::new(set_reasons(m, key));
-    m.views.borrow_mut().set_reasons = Some((all, key.to_string(), hidden, r.clone()));
+    let r = Arc::new(with_view_rows(m, v, reasons_for_view).unwrap_or_default());
+    m.views.borrow_mut().set_reasons = Some((all, v.id.clone(), hidden, r.clone()));
     r
 }
 
-/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key, `scope_key`:
-/// its key, or a key-less set's id), slot reasons' rows included: what "+k more in Problems" shows again.
-pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
+/// The hidden kinds among the resolved editor view's counted rows, including slot reasons.
+pub fn hidden_reason_kinds(m: &AppModel, v: &sets::SetView) -> Vec<Code> {
     let hidden = m.hidden_kinds();
-    with_counted_rows(m, key, |_, rows| {
+    with_view_rows(m, v, |_, rows| {
         rows.into_iter()
             .filter(|p| is_hidden(p, &hidden))
             .filter_map(|p| p.code)
@@ -1855,7 +1913,15 @@ fn with_counted_rows<T>(
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
     let views = sets::views(m);
-    let v = view_of(&views, &m.sets_root(), key)?;
+    let v = view_of(&views, &m.sets_root(), key, NameKind::Filter)?;
+    with_view_rows(m, v, f)
+}
+
+fn with_view_rows<T>(
+    m: &AppModel,
+    v: &sets::SetView,
+    f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
+) -> Option<T> {
     if set_ready_in(&flagged(m), v) {
         return None;
     }
