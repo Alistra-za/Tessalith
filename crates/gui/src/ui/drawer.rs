@@ -146,9 +146,8 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             ui.ctx(),
             PickerPurpose::SaveReport,
             PickerSpec {
-                title: None,
                 kind,
-                start: None,
+                ..PickerSpec::folder()
             },
         );
     }

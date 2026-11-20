@@ -418,6 +418,25 @@ fn the_export_picker_starts_in_the_last_export_folder_then_the_project() {
 }
 
 #[test]
+fn the_export_picker_sends_missing_start_candidates_to_the_worker_in_order() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_unchosen(d.path());
+    let root = m.root.clone().unwrap();
+    let chosen = d.path().join("missing-chosen");
+    let last = d.path().join("missing-last");
+    choose_export(&mut m, chosen.clone());
+    m.settings.last_export_folder = Some(last.clone());
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend);
+
+    assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+    wait_picker(&mut m);
+    let spec = specs.lock().unwrap().pop().unwrap();
+    assert_eq!(spec.start_candidates, [chosen, last, root.clone()]);
+    assert_eq!(spec.start, Some(root));
+}
+
+#[test]
 fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fresh(d.path());

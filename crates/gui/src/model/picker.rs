@@ -50,6 +50,8 @@ pub struct PickerSpec {
     pub kind: PickerKind,
     /// The folder the dialog starts in (None: the OS's choice). A `Save` picker has its own `dir`.
     pub start: Option<PathBuf>,
+    /// Ordered directories for the picker worker to check before opening the dialog.
+    pub start_candidates: Vec<PathBuf>,
 }
 
 impl PickerSpec {
@@ -58,6 +60,7 @@ impl PickerSpec {
             title: None,
             kind: PickerKind::Folder,
             start: None,
+            start_candidates: Vec::new(),
         }
     }
 
@@ -195,10 +198,15 @@ impl Picker {
         let (me, ctx, owner) = (self.clone(), ctx.clone(), self.1);
         let work = move || {
             // A panicking dialog must not leave the buttons disabled for good.
-            let path =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.pick(&spec)))
-                    .ok()
-                    .flatten();
+            let path = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut spec = spec;
+                if !spec.start_candidates.is_empty() {
+                    spec.start = spec.start_candidates.iter().find(|p| p.is_dir()).cloned();
+                }
+                backend.pick(&spec)
+            }))
+            .ok()
+            .flatten();
             {
                 let mut s = me.lock();
                 s.open = None;
@@ -264,20 +272,21 @@ impl AppModel {
     pub fn pick(&self, ctx: &egui::Context, purpose: PickerPurpose, mut spec: PickerSpec) -> bool {
         match purpose {
             PickerPurpose::ExportFolder => {
-                spec.start = self
+                let chosen = self
                     .sets_doc
                     .as_ref()
                     .filter(|d| !d.read_only())
                     .and_then(|d| d.export_folder_ref())
-                    .filter(|p| p.is_dir())
-                    .or_else(|| {
-                        self.settings
-                            .last_export_folder
-                            .as_deref()
-                            .filter(|p| p.is_dir())
-                    })
-                    .map(std::path::Path::to_owned)
-                    .or_else(|| self.project_start());
+                    .map(std::path::Path::to_owned);
+                spec.start = None;
+                spec.start_candidates = [
+                    chosen,
+                    self.settings.last_export_folder.clone(),
+                    self.project_start(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
             }
             PickerPurpose::AlsoLocation | PickerPurpose::TargetMod => {
                 spec.start = self.project_start();
@@ -366,6 +375,10 @@ impl AppModel {
                     .notify(super::messages::Severity::Warning, note);
             }
             PickerPurpose::ExportFolder => {
+                // A fresh pick is an edit even when it repeats the loaded value (three-way settings merge).
+                if let Some((base, _)) = &mut self.settings_base {
+                    base.last_export_folder = None;
+                }
                 self.settings.last_export_folder = Some(path.clone());
                 // Without a writable project, set_export_folder saves both settings together.
                 if self.sets_doc.as_ref().is_some_and(|d| !d.read_only()) {
