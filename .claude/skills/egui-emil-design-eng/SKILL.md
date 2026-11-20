@@ -25,7 +25,7 @@ The first call of `open_t` or any `animate_bool_*` for a new id returns the targ
 
 ## Review format (required)
 
-When reviewing egui UI code, you MUST use a markdown table with Before/After/Why columns. Do NOT use a list with "Before:" and "After:" on separate lines.
+When reviewing egui UI code, give the findings as one markdown table with Before, After and Why columns, one row per issue. "Why" gives the reason in a few words. For example:
 
 | Before | After | Why |
 | --- | --- | --- |
@@ -34,18 +34,6 @@ When reviewing egui UI code, you MUST use a markdown table with Before/After/Why
 | `emath::easing::quadratic_in` on a dropdown | `ease_out_quint` | Ease-in delays the first movement, the moment the user watches most closely |
 | Custom button with no press feedback | Draw it scaled 0.97 while `is_pointer_button_down_on()` | Buttons must feel like they heard the press |
 | Popover scaled around its own centre | `pop_in_layer(ui, layer, trigger.center_bottom(), t)` | Popovers grow from their trigger (modals are exempt: they stay centred) |
-
-Wrong format (never do this):
-
-````
-Before: ctx.animate_bool(id, open)
-After: open_t(ctx, id, open, 0.2)
-────────────────────────────
-Before: scale 0.0
-After: scale 0.96
-````
-
-Correct format: one markdown table, `| Before | After | Why |`, one row per issue. "Why" explains the reasoning in a few words.
 
 ## The animation decision framework
 

@@ -112,7 +112,7 @@ Curves are `fn(f32) -> f32`. Define them once as named `fn`s next to the `dur` t
 
 ## Physicality
 
-- **Never scale from 0.** Start from 0.9-0.97 plus `multiply_opacity(t)`. Nothing in the real world appears from nothing. `pop_in_layer` uses 0.96.
+- **Never scale from 0.** Start from 0.95-0.97 plus `multiply_opacity(t)`. Nothing in the real world appears from nothing. `pop_in_layer` uses 0.96.
 - **Origin-aware popups.** Scale from the trigger, not the screen corner: `T(origin) * S(scale) * T(-origin)`, as `pop_in_layer` does with `btn.rect.center_bottom()` as origin. A bare `TSTransform::from_scaling(s)` scales toward (0, 0) and makes the popup slide from the top-left.
   **Modals are exempt**: they appear centered, so the origin is the modal's own centre.
 - **Press feedback.** Draw the pressable at 0.97 scale while `response.is_pointer_button_down_on()`, over `dur::PRESS`. Keep it subtle (0.95-0.98). Applies to any pressable element. The allocation stays fixed; only the drawing shrinks:
