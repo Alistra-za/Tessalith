@@ -2068,4 +2068,4 @@ The owner: "if a normal is only ever in a pbr set, its alpha should always be dr
 
 ## Note LA — Authored normal length through the mip chain (owner, 2026-11-20)
 
-- **LA1** A resolved `normal`, `landscape_normal` or `pbr_normal` with `mips.normal_base = keep` requires XYZ storage because BC5, RG8, BC4 and R8 discard Z. Resolve raises CFG-INVALID even with FMT-BC5-NORMAL acknowledged, and a raw chain for these formats starts from unit directions. Under `if-changed`, the failed normal keeps its output and record, and a member losing its sole bake source reports SET-MISSING-COMPANION and rebuilds without the bake (JS2, JA1).
+- **LA1** A resolved `normal`, `landscape_normal` or `pbr_normal` with `mips.normal_base = keep` requires XYZ storage because BC5, RG8, BC4 and R8 discard Z. Resolve raises CFG-INVALID even with FMT-BC5-NORMAL acknowledged, and a raw chain for these formats starts from unit directions. Under `if-changed`, the failed normal keeps its output and record. An eligible CS roughness member losing its sole normal reports SET-MISSING-COMPANION and rebuilds without the bake (JS2, JA1).

@@ -221,6 +221,18 @@ mod tests {
         l.px.iter().map(|q| q.map(code8)).collect()
     }
 
+    #[test]
+    fn raw_xy_grass_keeps_the_short_bottom_normal_at_mip_zero() {
+        let mut p = profile();
+        p.format = Format::Bc5;
+        p.mips.normal_base = NormalBase::Keep;
+        let mut src = source(2);
+        src.px[4..].fill([0.5, 0.5, 0.75, 1.0]);
+        let (_, chain) = build(src, &p, SourceTransfer::Stored).unwrap();
+        assert_eq!(codes(&chain[0])[4], [128, 128, 191, 255]);
+        assert_eq!(codes(&chain[1])[1], [128, 128, 255, 255]);
+    }
+
     /// R6: one level per half level, ending at 1 x 2.
     #[test]
     fn the_chain_stops_at_one_by_two() {
