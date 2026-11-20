@@ -304,14 +304,15 @@ fn rows_stay_keyed_after_a_packed_source_drop() {
     assert_eq!(x.rows.len(), 2, "no duplicate row from a stale index");
 }
 
-/// Audit 08c-4: the export notes (JSON not written, kept files, copies) are in the Markdown report.
+/// Audit 08c-4, ruling 3c-10: the export notes (JSON not written, kept files, copies) are in the Markdown report,
+/// under the Files tab's heading.
 #[test]
 fn the_markdown_report_lists_the_export_notes() {
     let mut x = ExportModel::default();
     x.notes = vec!["PGPatcher JSON not written: the export failed".into()];
     let md = x.to_markdown();
     assert!(
-        md.contains("## Notes\n\n- PGPatcher JSON not written: the export failed\n"),
+        md.contains("## Export details\n\n- PGPatcher JSON not written: the export failed\n"),
         "{md}"
     );
 }

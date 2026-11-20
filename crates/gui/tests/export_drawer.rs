@@ -411,6 +411,30 @@ fn a_files_row_lists_its_warnings_on_hover() {
     );
 }
 
+/// Plan 3c Task 17b (F4): the Files tab heads what the export did besides converting "Export details (n)", so it never
+/// shares the name of the Problems tab's Notes pill.
+#[test]
+fn the_files_tab_heads_its_export_notes_export_details() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.export.notes = vec![
+        "1 kept at a higher quality target".into(),
+        "PGPatcher JSON written: out/pgp.json".into(),
+        "not in JSON: rock01 (no normal)".into(),
+    ];
+    m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
+    let mut h = drawer_harness(m);
+    h.run();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("Notes (3)").count(),
+        0,
+        "no Notes heading in the Files tab"
+    );
+    h.get_by_label("Export details (3)");
+    h.get_by_label("1 kept at a higher quality target");
+}
+
 #[test]
 fn a_files_row_reveals_the_output_once_written_else_the_source() {
     let d = tempfile::tempdir().unwrap();

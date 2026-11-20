@@ -542,7 +542,7 @@ impl ExportModel {
         }
         // Audit 08c-4: what the export did besides converting (a JSON not written or kept, the copies).
         if !self.notes.is_empty() {
-            s += "## Notes\n\n";
+            s += "## Export details\n\n";
             for n in &self.notes {
                 s += &format!("- {n}\n");
             }

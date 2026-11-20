@@ -75,9 +75,9 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             ui.colored_label(ui.visuals().error_fg_color, e);
         }
     });
-    // Audit 08c-4: notes can run to hundreds of lines ("not in JSON: …"), so they scroll inside a capped area.
+    // Audit 08c-4: the Export details list can run to hundreds of lines ("not in JSON: …"), so it scrolls inside a capped area.
     if !model.export.notes.is_empty() {
-        egui::CollapsingHeader::new(format!("Notes ({})", model.export.notes.len()))
+        egui::CollapsingHeader::new(format!("Export details ({})", model.export.notes.len()))
             .id_salt("export_notes")
             .default_open(true)
             .show(ui, |ui| {
