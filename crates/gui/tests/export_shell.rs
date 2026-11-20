@@ -279,14 +279,56 @@ fn check_review_replans_once(start_scan: bool) {
     assert!(writes.outputs.iter().map(|w| &w.path).eq(paths.iter()));
 
     m.hold_plan_results = false;
+    let generation = m.generation();
     m.set_reencode_all(true);
+    assert!(m.written_text().contains("checking which changed"));
     idle(&mut m);
-    assert_eq!(m.export_files(), 8);
+    assert_eq!(
+        m.generation(),
+        generation,
+        "Re-encode granted another replan"
+    );
+    assert_eq!(m.export_files(), 6);
     m.close_review();
     support::add_ready_set(d.path(), "e");
     m.open_review();
     idle(&mut m);
     assert_eq!(m.export_files(), 10);
+}
+
+#[test]
+fn reload_from_disk_preserves_the_open_reviews_spent_reconcile() {
+    use sdc_gui::model::DocKind;
+    use sdc_gui::worker::WorkerMsg;
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    support::add_ready_set(d.path(), "b");
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.export_files(), 6);
+    m.save().unwrap();
+
+    m.set_field("g/a_n.png", "subtype", serde_json::json!("msn"));
+    idle(&mut m);
+    support::touch_sdc_toml_by_hand(m.root.as_deref().unwrap(), "\n# external edit\n");
+    assert!(m.save().is_err());
+    assert_eq!(m.dialog, Some(Dialog::ExternalChange(DocKind::SdcToml)));
+    m.hold_plan_results = true;
+    m.resolve_external_change(DocKind::SdcToml, false);
+    let plan = held_plan(&mut m);
+    support::add_ready_set(d.path(), "c");
+    for msg in plan {
+        m.handle_held(msg);
+    }
+    let reply = held_currency(&mut m);
+    assert!(matches!(&reply, WorkerMsg::Currency { result: Ok(keys), .. } if keys.len() == 8));
+    assert_eq!(m.export_files(), 6);
+    let generation = m.generation();
+    m.handle_held(reply);
+    assert_eq!(m.generation(), generation, "post-Reload mismatch replanned");
+    assert!(m.review.is_some() && m.review_gate().is_ok());
+    assert!(!m.full_plan_pending());
 }
 
 #[test]

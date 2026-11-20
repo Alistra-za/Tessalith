@@ -1482,6 +1482,24 @@ fn a_scoped_export_treats_a_linked_lender_as_a_borrowed_one() {
     assert_eq!(linked, borrowed);
 }
 
+#[test]
+fn linking_a_lender_in_open_scoped_review_refreshes_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    m.export_sets(keys(&m, &["arch/leaf"]), "Export set arch/leaf".into());
+    idle(&mut m);
+    let lender = |m: &AppModel| {
+        m.review_writes()
+            .outputs
+            .iter()
+            .any(|o| o.path.ends_with("arch/stone_p.dds"))
+    };
+    assert!(!lender(&m));
+    leaf_takes_stone(&mut m, true);
+    assert!(lender(&m), "the open Review omitted the linked lender");
+    assert!(m.review_gate().is_ok());
+}
+
 /// R2: a lender left out of the run on purpose (an excluded group) and never exported: the entry is held with the same
 /// note whether it borrows or links the lender's file.
 #[test]

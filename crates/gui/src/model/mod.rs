@@ -2238,16 +2238,12 @@ impl AppModel {
                     && self.review.is_some()
                     && self.currency.pending.take().is_some()
                 {
-                    let request_id = self.currency.review_request_id;
-                    if let (true, Ok(verdicts)) = (
-                        self.currency.reconciled_request != Some(request_id),
-                        &result,
-                    ) {
+                    if let (false, Ok(verdicts)) = (self.currency.reconciled, &result) {
                         let reviewed: BTreeSet<_> =
                             self.primary_items().map(|i| &i.job_key).collect();
                         if !reviewed.into_iter().eq(verdicts.keys()) {
                             self.replan();
-                            self.currency.reconciled_request = Some(request_id);
+                            self.currency.reconciled = true;
                             return;
                         }
                     }
@@ -2580,7 +2576,7 @@ impl AppModel {
             return;
         }
         // Note HF9: a plain Export is the whole project, whatever Review was opened for.
-        self.choose_scope(None);
+        self.set_scope(None);
         self.export_go();
     }
 
@@ -2595,7 +2591,7 @@ impl AppModel {
         if self.press_refused(press) {
             return;
         }
-        self.choose_scope(None);
+        self.set_scope(None);
         self.export_decided();
     }
 
@@ -3103,9 +3099,6 @@ impl AppModel {
         else {
             return false;
         };
-        if self.automatic_step.is_none() {
-            self.new_review_request();
-        }
         self.replan_after_edit(files_edit);
         true
     }
@@ -4279,6 +4272,8 @@ impl AppModel {
             .as_ref()
             .filter(|_| follows)
             .and_then(|t| shared_alpha::before(self, t));
+        // A document edit without a plan can still change the preview's group filter or linked lenders.
+        let write_only = (!replan && self.review.is_some()).then(|| self.write_only());
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
@@ -4306,10 +4301,13 @@ impl AppModel {
         if let Some(files_edit) = self.record_step(label, merge, before, dirty, previous_type_alpha)
         {
             if replan {
-                if user {
-                    self.new_review_request();
-                }
                 self.replan_after_edit(files_edit);
+            } else if let Some(before) = write_only {
+                if self.export_scope.is_some() {
+                    self.expand_scope_hosts();
+                } else if self.write_only() != before {
+                    self.invalidate_currency();
+                }
             }
         }
     }
@@ -4491,7 +4489,6 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
-        self.new_review_request();
         self.replan_changed(files_edit);
     }
 
@@ -5253,11 +5250,8 @@ impl AppModel {
         let fail = |e: &dyn std::fmt::Display| format!("{}: {e}", file.display());
         let text = std::fs::read_to_string(file).map_err(|e| fail(&e))?;
         let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| fail(&e))?;
-        let changed = doc.remove("suffix_aliases").is_some();
+        doc.remove("suffix_aliases");
         engine::dds::write_atomic(file, doc.to_string().as_bytes()).map_err(|e| fail(&e))?;
-        if changed {
-            self.new_review_request();
-        }
         self.replan();
         Ok(())
     }

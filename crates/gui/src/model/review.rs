@@ -441,19 +441,12 @@ pub(super) struct Currency {
     pub(super) revision: u64,
     pub(super) pending: Option<CancelToken>,
     pub(super) verdicts: Option<crate::worker::CurrencyVerdicts>,
-    /// One logical Review request can span several plan generations and preview revisions.
-    pub(super) review_request_id: u64,
-    pub(super) reconciled_request: Option<u64>,
+    /// The current Review opening already replanned for a preview membership change.
+    pub(super) reconciled: bool,
     due: bool,
 }
 
 impl AppModel {
-    pub(super) fn new_review_request(&mut self) {
-        if self.review.is_some() {
-            self.currency.review_request_id += 1;
-        }
-    }
-
     pub(super) fn invalidate_currency(&mut self) {
         if let Some(token) = self.currency.pending.take() {
             token.cancel();
@@ -490,7 +483,6 @@ impl AppModel {
     pub fn set_reencode_all(&mut self, on: bool) {
         if self.reencode_all != on {
             self.reencode_all = on;
-            self.new_review_request();
             self.invalidate_currency();
             self.request_currency();
         }
@@ -499,12 +491,14 @@ impl AppModel {
     /// Open Review (its answers are kept when it is already open) and show its tab.
     pub fn open_review(&mut self) {
         let unwritable = self.also_toml_unwritable();
+        if self.review.is_none() {
+            self.currency.reconciled = false;
+        }
         let review = self.review.get_or_insert_with(Review::default);
         review.toml_unwritable = unwritable;
         review.options_open = false;
         review.also_blocked = false;
         self.show_tab(BottomTab::Review);
-        self.new_review_request();
         self.invalidate_currency();
         self.request_currency();
         // E7: the list Review opens with reads the disk as it is now, not a second-old answer.

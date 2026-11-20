@@ -339,7 +339,6 @@ impl AppModel {
             }
         }
         self.history.retype_untouched = keep;
-        self.new_review_request();
         self.replan();
     }
 

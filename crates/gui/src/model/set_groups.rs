@@ -237,7 +237,9 @@ impl AppModel {
             .iter()
             .map(|i| self.view_of(i).map_or_else(|| i.clone(), |v| v.id))
             .collect();
-        self.edit_group_membership(&label, move |d| d.move_to_group(&ids, &group));
+        self.edit_docs(&label, None, false, move |_, d| {
+            d.move_to_group(&ids, &group)
+        });
         self.prune_collapsed();
         Ok(())
     }
@@ -280,7 +282,9 @@ impl AppModel {
     pub fn ungroup(&mut self, name: &str) -> Result<(), String> {
         self.group_edit()?;
         let name = self.stored_group(name)?.name;
-        self.edit_group_membership(&format!("Ungroup {name}"), move |d| d.ungroup(&name));
+        self.edit_docs(&format!("Ungroup {name}"), None, false, move |_, d| {
+            d.ungroup(&name)
+        });
         self.prune_collapsed();
         Ok(())
     }
@@ -294,24 +298,10 @@ impl AppModel {
         } else {
             format!("Include group {name} in export")
         };
-        self.edit_group_membership(&label, move |d| d.set_group_excluded(&name, on));
+        self.edit_docs(&label, None, false, move |_, d| {
+            d.set_group_excluded(&name, on)
+        });
         Ok(())
-    }
-
-    fn edit_group_membership(
-        &mut self,
-        label: &str,
-        edit: impl FnOnce(&mut crate::sets_doc::SetsDoc),
-    ) {
-        let before = self.review.is_some().then(|| self.write_only());
-        self.edit_docs(label, None, false, |_, d| edit(d));
-        if let Some(before) = before {
-            self.expand_scope_hosts();
-            if self.write_only() != before {
-                self.new_review_request();
-                self.invalidate_currency();
-            }
-        }
     }
 
     /// Forget the collapsed state of this project's groups that no longer exist (renamed, ungrouped, or gone with
