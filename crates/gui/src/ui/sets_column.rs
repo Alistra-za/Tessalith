@@ -16,9 +16,9 @@ use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
-    badge_text, fill_proposals, is_shareable_helper, kind_text, member_tail, shader_options,
-    slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome, FillProposal,
-    Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
+    badge_text, chip_letter, fill_proposals, is_shareable_helper, kind_text, member_tail,
+    shader_options, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
+    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -155,6 +155,8 @@ pub struct SlotNote {
 
 #[derive(Debug, Default)]
 pub struct DropState {
+    /// Note JW1: document id, clipped strip and its hit rectangle across the gap to the card.
+    pub strip: Option<(String, egui::Rect, egui::Rect)>,
     /// Note JW6: the last answer for this run, kept when opening another folder.
     pub last_choice: Option<DropChoice>,
     pub pending: Option<Pending>,
@@ -248,7 +250,9 @@ const CARD_EST: f32 = 110.0;
 // shortcut: a docked or folded helper still counts as an extra member here, and a helper tile counts as a full chip,
 // so an unmeasured card may be estimated a row too tall (drawing corrects it, FM32); count them apart if a scroll jump shows.
 fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
-    let chips = view_row(v).len() + v.missing.len() + v.members.len().saturating_sub(v.slots.len());
+    let chips = view_row(v).len() - v.empty.len()
+        + v.missing.len()
+        + v.members.len().saturating_sub(v.slots.len());
     chips.div_ceil(chips_per_row(width, frame_x))
 }
 
@@ -344,12 +348,72 @@ const STATUS_DOT: f32 = 8.0;
 /// The size of a member thumbnail (`columns::member`), which an empty chip matches.
 const CHIP: f32 = 32.0;
 
-/// A chip's letter (A3): the slot's suffix in capitals, "D" for the diffuse.
-fn chip_letter(v: &SetView, k: SlotKind) -> String {
-    match k.suffix() {
-        "" => "D".to_string(),
-        _ if k == SlotKind::Rmaos => v.slot_text(k).to_string(),
-        s => s.to_uppercase(),
+/// Note JW1: the empty strip's inner margin and gap from the card.
+const STRIP_PAD: f32 = 4.0;
+const STRIP_GAP: f32 = 2.0;
+
+fn strip_size(n: usize, per_row: usize) -> egui::Vec2 {
+    let cols = n.min(per_row);
+    let rows = n.div_ceil(per_row);
+    egui::vec2(
+        cols as f32 * CHIP + cols.saturating_sub(1) as f32 * DOCK_GAP_X,
+        rows as f32 * CHIP + rows.saturating_sub(1) as f32 * DOCK_GAP_Y,
+    ) + egui::Vec2::splat(2.0 * STRIP_PAD)
+}
+
+fn strip_rect(card: egui::Rect, size: egui::Vec2, clip: egui::Rect) -> egui::Rect {
+    let below = card.bottom() + STRIP_GAP;
+    let above = card.top() - STRIP_GAP - size.y;
+    let y = if below + size.y <= clip.bottom() {
+        below
+    } else if above >= clip.top() {
+        above
+    } else {
+        clip.bottom() - size.y
+    };
+    let x = card.left().min(clip.right() - size.x).max(clip.left());
+    egui::Rect::from_min_size(egui::pos2(x, y), size)
+}
+
+/// Note JW1: paint only. The clip can cut through a box, without moving its letter.
+fn paint_strip(
+    p: &egui::Painter,
+    style: &egui::Style,
+    v: &SetView,
+    rect: egui::Rect,
+    per_row: usize,
+) {
+    let vis = &style.visuals;
+    p.rect(
+        rect,
+        2.0,
+        vis.window_fill(),
+        vis.window_stroke(),
+        egui::StrokeKind::Inside,
+    );
+    // The view has already formatted these letters in row order.
+    for (i, letter) in v
+        .empty_line
+        .trim_start_matches("Empty: ")
+        .split(", ")
+        .enumerate()
+    {
+        let offset = egui::vec2(
+            (i % per_row) as f32 * (CHIP + DOCK_GAP_X),
+            (i / per_row) as f32 * (CHIP + DOCK_GAP_Y),
+        );
+        let cell = egui::Rect::from_min_size(
+            rect.min + egui::Vec2::splat(STRIP_PAD) + offset,
+            egui::Vec2::splat(CHIP),
+        );
+        p.rect(
+            cell,
+            2.0,
+            vis.extreme_bg_color,
+            vis.widgets.noninteractive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        paint_letter_on(p, style, cell, letter, true, f32::INFINITY);
     }
 }
 
@@ -453,13 +517,24 @@ pub fn dim_letter_colour(vis: &egui::Visuals) -> egui::Color32 {
 /// no backing; otherwise white on a dark backing so it reads over any thumbnail. Text wider than the chip is cut with `…`.
 /// `max_w` cuts the text with `…` (trailing-row tags); chip letters pass `f32::INFINITY` and are never cut.
 fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool, max_w: f32) {
-    let font = egui::TextStyle::Small.resolve(ui.style());
+    paint_letter_on(ui.painter(), ui.style(), rect, text, dim, max_w);
+}
+
+fn paint_letter_on(
+    p: &egui::Painter,
+    style: &egui::Style,
+    rect: egui::Rect,
+    text: &str,
+    dim: bool,
+    max_w: f32,
+) {
+    let font = egui::TextStyle::Small.resolve(style);
     let colour = if dim {
-        dim_letter_colour(ui.visuals())
+        dim_letter_colour(&style.visuals)
     } else {
         egui::Color32::WHITE
     };
-    let lay = |s: String| ui.painter().layout_no_wrap(s, font.clone(), colour);
+    let lay = |s: String| p.layout_no_wrap(s, font.clone(), colour);
     let mut g = lay(text.to_string());
     let mut shown = text.to_string();
     while g.size().x > max_w && shown.pop().is_some() {
@@ -467,13 +542,13 @@ fn paint_letter(ui: &egui::Ui, rect: egui::Rect, text: &str, dim: bool, max_w: f
     }
     let at = rect.left_bottom() + egui::vec2(1.0, -1.0 - g.size().y);
     if !dim {
-        ui.painter().rect_filled(
+        p.rect_filled(
             egui::Rect::from_min_size(at, g.size()).expand(1.0),
             2.0,
             egui::Color32::from_black_alpha(170),
         );
     }
-    ui.painter().galley(at, g, colour);
+    p.galley(at, g, colour);
 }
 
 /// Note JW7: a non-helper trailing tile paints its slot letter, or its member tail.
@@ -529,6 +604,9 @@ pub fn pill_hover(model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) -
             l.push_str(&format!(" ({reason})"));
         }
         lines.push(l);
+    }
+    if !v.empty_line.is_empty() {
+        lines.push(v.empty_line.clone());
     }
     lines.join("\n")
 }
@@ -744,7 +822,10 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetVi
             }
         })
         .response
-        .on_hover_text(pill_hover(model, flagged, v, s));
+        .on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(pill_hover(model, flagged, v, s));
+        });
 }
 
 /// A member's thumbnail on the card with today's behaviours: click selects, double-click expands, a slot member has
@@ -1521,6 +1602,9 @@ fn card_node(
 ) {
     n.set_role(egui::accesskit::Role::Button);
     n.set_label(format!("Set {}, position {} of {total}", v.id, index + 1));
+    if !v.empty_line.is_empty() {
+        n.set_description(v.empty_line.clone());
+    }
     n.set_selected(selected);
     n.add_action(egui::accesskit::Action::Focus);
     n.add_action(egui::accesskit::Action::ScrollIntoView);
@@ -2091,6 +2175,20 @@ pub fn draw(
     if let Some(y) = target {
         area = area.vertical_scroll_offset(y);
     }
+    let image = egui::DragAndDrop::has_payload_of_type::<DragItem>(&ctx)
+        || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(&ctx);
+    let mut next_strip = None;
+    // Test last frame's painted area and its bridge once, before any zone can take the release.
+    let strip_owner = st
+        .strip
+        .as_ref()
+        .filter(|(_, painted, hit)| {
+            image
+                && ctx
+                    .pointer_latest_pos()
+                    .is_some_and(|p| painted.contains(p) || hit.contains(p))
+        })
+        .map(|(id, ..)| id.as_str());
     let out = area.show(ui, |ui| {
         let view_top = ui.clip_rect().top();
         // `top` runs on the remembered heights, not on the laid-out rects: egui rounds each allocation, and the sum of
@@ -2119,6 +2217,9 @@ pub fn draw(
                     egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), h));
                 if ui.is_rect_visible(probe) {
                     let look = PillLook {
+                        image: image && next_strip.is_none(),
+                        strip_owner,
+                        frame_x,
                         dragging: dragged.as_deref() == Some(v.id.as_str()),
                         selected,
                         bulk: sel_sets.len() >= 2,
@@ -2138,6 +2239,9 @@ pub fn draw(
                         sel_items,
                         &mut acts,
                     );
+                    if let Some((painted, hit)) = out.strip {
+                        next_strip = Some((index, painted, hit));
+                    }
                     resized |= (out.rect.height() - h).abs() > 0.5;
                     st.card_h.insert(v.id.clone(), out.rect.height());
                     if let Some(d) = out.dropped_set {
@@ -2211,9 +2315,17 @@ pub fn draw(
             }
         }
         if model.root.is_some() {
-            new_set_area(ui, &editing, &mut acts);
+            new_set_area(ui, &editing, strip_owner.is_some(), &mut acts);
         }
     });
+    st.strip = next_strip.map(|(index, painted, hit)| {
+        let id = match st.strip.take() {
+            Some((id, ..)) if id == views[index].id => id,
+            _ => views[index].id.clone(),
+        };
+        (id, painted, hit)
+    });
+
     st.view = Some((out.state.clamped_offset().y, out.inner_rect.height()));
     st.anchor = anchor;
     st.reveal_seen = reveal.clone().filter(|_| reveal_drawn);
@@ -2525,11 +2637,11 @@ fn move_to_hits(views: &[SetView], query: &str) -> MoveHits {
 }
 
 /// The dashed area at the bottom: a texture dropped here starts a new set.
-fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
+fn new_set_area(ui: &mut egui::Ui, editing: &Editing, covered: bool, acts: &mut Vec<Act>) {
     // Note HN F6: weak text, the selection accent while last frame's zone had a dragged texture over it.
     let hot_id = ui.scope_id().with("new_set_hint_hot");
     let hot = ui.data(|d| d.get_temp::<bool>(hot_id)).unwrap_or(false);
-    let colour = if hot {
+    let colour = if hot && !covered {
         ui.visuals().selection.stroke.color
     } else {
         ui.visuals().weak_text_color()
@@ -2537,7 +2649,7 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
     let borrow_in_flight = egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx());
     let (zone, payload) = item_zone(
         ui,
-        editing.on && !borrow_in_flight,
+        editing.on && !borrow_in_flight && !covered,
         egui::Frame::group(ui.style()).corner_radius(12.0),
         |ui| {
             ui.set_width(ui.available_width());
@@ -2549,6 +2661,7 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
         },
     );
     let over = editing.on
+        && !covered
         && zone.contains_pointer()
         && egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx());
     ui.data_mut(|d| d.insert_temp(hot_id, over));
@@ -2615,6 +2728,7 @@ fn reorder_target(
 /// What a pill reports back: the set dropped on it this frame (R1: detected on the target, since the source card
 /// may not be laid out when the drag ends), and whether a dragged set is over it.
 struct PillOut {
+    strip: Option<(egui::Rect, egui::Rect)>,
     dropped_set: Option<String>,
     hovered_by_set: bool,
     rect: egui::Rect,
@@ -2622,7 +2736,10 @@ struct PillOut {
 
 /// How a pill is drawn this frame.
 #[derive(Clone, Copy)]
-struct PillLook {
+struct PillLook<'a> {
+    image: bool,
+    strip_owner: Option<&'a str>,
+    frame_x: f32,
     dragging: bool,
     selected: bool,
     /// Two or more sets are selected: the pills of selected ones show the bulk menu.
@@ -2652,7 +2769,7 @@ fn pill(
     folded: &mut FoldedBySlice,
     editing: &Editing,
     status: Status,
-    look: PillLook,
+    look: PillLook<'_>,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
 ) -> PillOut {
@@ -2688,9 +2805,11 @@ fn pill(
         if look.dragging {
             ui.set_opacity(0.5);
         }
-        let (zone, dropped) = item_zone(
+        let owns = look.strip_owner == Some(v.id.as_str());
+        let covered = look.strip_owner.is_some() && !owns;
+        let (zone, mut dropped) = item_zone(
             ui,
-            editing.on,
+            editing.on && !covered,
             egui::Frame::NONE.corner_radius(12.0),
             |ui| {
                 card.show(ui, |ui| {
@@ -2972,11 +3091,8 @@ fn pill(
             },
         );
         // Final review I1: the zone's hover stroke is under the card frame, so outline the drop target on top.
-        if editing.on
-            && zone.contains_pointer()
-            && (egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx())
-                || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()))
-        {
+        let over = look.image && !covered && (zone.contains_pointer() || owns);
+        if editing.on && over {
             ui.painter().rect_stroke(
                 zone.rect,
                 12.0,
@@ -2984,9 +3100,40 @@ fn pill(
                 egui::StrokeKind::Inside,
             );
         }
-        dropped
+        let strip = (over && !v.empty.is_empty()).then(|| {
+            let per_row = chips_per_row(zone.rect.width(), look.frame_x);
+            let clip = ui.clip_rect();
+            let rect = strip_rect(zone.rect, strip_size(v.empty.len(), per_row), clip);
+            let layer = egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::unique("sets-empty-strip"),
+            );
+            let p = ui.ctx().layer_painter(layer).with_clip_rect(clip);
+            paint_strip(&p, ui.style(), v, rect, per_row);
+            let painted = rect.intersect(clip);
+            let mut hit = painted;
+            if rect.top() >= zone.rect.bottom() {
+                hit.min.y = zone.rect.bottom();
+            } else if rect.bottom() <= zone.rect.top() {
+                hit.max.y = zone.rect.top();
+            }
+            // The bridge reaches only the part of the strip that faces the card.
+            hit.min.x = hit.min.x.max(zone.rect.left());
+            hit.max.x = hit.max.x.min(zone.rect.right());
+            (painted, hit.intersect(clip))
+        });
+        if owns && !zone.contains_pointer() && editing.on && ui.input(|i| i.pointer.any_released())
+        {
+            if egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()) {
+                dropped =
+                    egui::DragAndDrop::take_payload::<DragBorrow>(ui.ctx()).map(Dropped::Borrow);
+            } else if egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx()) {
+                dropped = egui::DragAndDrop::take_payload::<DragItem>(ui.ctx()).map(Dropped::Item);
+            }
+        }
+        (dropped, strip)
     });
-    let dropped = scoped.inner;
+    let (dropped, strip) = scoped.inner;
     let resp = scoped.response;
     // Note FM32: named as its stand-in is, so a card keeps its name when it scrolls in (a Tab stop for the card itself).
     ui.ctx().accesskit_node_builder(resp.id, |n| {
@@ -3048,6 +3195,7 @@ fn pill(
     }
     PillOut {
         dropped_set,
+        strip,
         hovered_by_set,
         rect: resp.rect,
     }
@@ -3128,7 +3276,7 @@ fn chip_link_mark(ui: &egui::Ui, rect: egui::Rect) {
     link_mark(ui.painter(), at, ui.visuals().strong_text_color());
 }
 
-/// Note HP: the chip row of a card: one chip per slot (an empty one is a letter box), the missing entries, then the
+/// Note JW1: the chip row of a card: one chip per displayed fill or clear, the missing entries, then the
 /// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
 /// (`fixed` comes in holding the combo's).
 #[allow(clippy::too_many_arguments)]
@@ -3150,7 +3298,7 @@ fn chip_row<'a>(
     let mut plans: Vec<DockPlan> = vec![];
     for cell in &row {
         let k = cell.kind;
-        let letter = chip_letter(v, k);
+        let letter = || chip_letter(v, k);
         let (mk, from) = match slot_shown(v, k) {
             SlotShown::Linked(l) => {
                 let rect = linked_chip(
@@ -3158,7 +3306,7 @@ fn chip_row<'a>(
                     model,
                     thumbs,
                     v,
-                    (k, &letter, l),
+                    (k, &letter(), l),
                     sel_items,
                     acts,
                     member_menu,
@@ -3169,6 +3317,7 @@ fn chip_row<'a>(
             }
             // the JSON leaves the slot empty: dim like an empty chip, named for what it is
             SlotShown::Cleared { item } => {
+                let letter = letter();
                 // a click-sensed box with the slot menu, so the clear can be undone from the card
                 let r = letter_box_painted(ui, &letter, None, false).interact(egui::Sense::click());
                 r.widget_info(|| {
@@ -3193,13 +3342,25 @@ fn chip_row<'a>(
             }
             SlotShown::Own { item } => (item, None),
             SlotShown::Borrowed { from, item } => (item, Some(from)),
-            SlotShown::Empty | SlotShown::Record { .. } | SlotShown::Replaced { .. } => {
-                let r = letter_box(ui, &letter, None, None)
+            SlotShown::Empty => continue,
+            SlotShown::Record { path } => {
+                let letter = letter();
+                let name = || format!("{letter}, record {path}");
+                fixed.push(
+                    letter_box(ui, &letter, None, Some(&name))
+                        .on_hover_text(path)
+                        .rect,
+                );
+                continue;
+            }
+            SlotShown::Replaced { .. } => {
+                let r = letter_box(ui, &letter(), None, None)
                     .on_hover_text(format!("{} (empty)", v.slot_text(k)));
                 fixed.push(r.rect);
                 continue;
             }
         };
+        let letter = letter();
         represented.insert(mk);
         let note = from.map(|f| move || format!("borrowed from {f}"));
         // Note JW4: a displayed borrow shares its source, including at the end of a chain.
@@ -4544,6 +4705,36 @@ mod tests {
     use egui_kittest::kittest::{NodeT, Queryable};
     use engine::codes::Code;
 
+    #[test]
+    fn the_empty_strip_is_sized_by_its_slots() {
+        assert_eq!(strip_size(1, 5), egui::vec2(40.0, 40.0));
+        assert_eq!(strip_size(4, 5), egui::vec2(184.0, 40.0));
+        assert_eq!(strip_size(6, 5), egui::vec2(232.0, 80.0));
+    }
+
+    #[test]
+    fn the_empty_strip_sits_below_flips_above_and_clamps() {
+        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(266.0, 600.0));
+        let size = egui::vec2(40.0, 40.0);
+        let at = |x0, y0, x1, y1| egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1));
+        assert_eq!(
+            strip_rect(at(10.0, 100.0, 250.0, 200.0), size, clip),
+            egui::Rect::from_min_size(egui::pos2(10.0, 202.0), size)
+        );
+        assert_eq!(
+            strip_rect(at(10.0, 500.0, 250.0, 590.0), size, clip),
+            egui::Rect::from_min_size(egui::pos2(10.0, 458.0), size)
+        );
+        assert_eq!(
+            strip_rect(at(10.0, 20.0, 250.0, 590.0), size, clip),
+            egui::Rect::from_min_size(egui::pos2(10.0, 560.0), size)
+        );
+        assert_eq!(
+            strip_rect(at(240.0, 100.0, 260.0, 200.0), size, clip).max.x,
+            266.0
+        );
+    }
+
     /// Note JJ2: a fresh layout's Sets column still holds five chips a row beside the thin bar's gutter (260 held
     /// exactly five with no gutter; with it, four).
     #[test]
@@ -4639,6 +4830,19 @@ mod tests {
             });
         h.run();
         (drawn.get(), chip_rows(v, 0.0, 0.0))
+    }
+
+    #[test]
+    fn empty_slots_take_no_rows_in_the_height_estimate() {
+        let mut v = SetView::new("k/a".into(), "a".into(), vec![]);
+        v.shader = Some(engine::shader::ShaderPick {
+            shader: Shader::Pbr,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        });
+        v.empty = view_row(&v).iter().map(|c| c.kind).collect();
+        assert!(!v.empty.is_empty());
+        assert_eq!(drawn_and_counted(&v), (0, 0));
     }
 
     /// Review E1: `chip_rows` counts the chips `chip_row` draws for a linked slot, a cleared one, and a link over an

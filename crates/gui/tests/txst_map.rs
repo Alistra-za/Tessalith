@@ -1034,6 +1034,53 @@ const LENDER: &str = "textures/v/b";
 const LENT_NORMAL: &str = "textures/v/b_normal.png";
 const RECORD_NORMAL: &str = "textures/black.dds";
 
+/// Note JW1: an external record fill keeps its chip and path, and supplies no draggable item.
+#[test]
+fn an_external_record_chip_stays_named_at_rest() {
+    use sdc_gui::ui::sets_column::{DragBorrow, DragItem};
+    let d = tempfile::tempdir().unwrap();
+    let m = record_only_normal(d.path());
+    assert!(!view(&m, RECORD_DEST).empty.contains(&SlotKind::Normal));
+    let mut h = harness(m, 1100.0);
+    h.ctx
+        .global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    let card = h
+        .get_by_label_contains("Set textures/v/a, position ")
+        .rect();
+    let chips: Vec<_> = h
+        .query_all_by_label("N, record textures/black.dds")
+        .filter(|n| card.contains_rect(n.rect()))
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(
+        chips.len(),
+        1,
+        "one named external Normal on the destination"
+    );
+    assert!(!h
+        .query_all_by_label("N, empty")
+        .any(|n| card.contains_rect(n.rect())));
+    let at = chips[0].center();
+    h.hover_at(at);
+    h.run();
+    h.run();
+    h.get_by_label(RECORD_NORMAL);
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(at + egui::vec2(20.0, 0.0)));
+    h.run_steps(2);
+    assert!(!egui::DragAndDrop::has_payload_of_type::<DragItem>(&h.ctx));
+    assert!(!egui::DragAndDrop::has_payload_of_type::<DragBorrow>(
+        &h.ctx
+    ));
+}
+
 fn record_only_normal(dir: &Path) -> AppModel {
     use engine::config::{GreenConvention, Subtype};
     use sdc_gui::model::Answer;

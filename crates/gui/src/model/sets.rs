@@ -342,6 +342,10 @@ pub enum MatchFrom {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetView {
+    /// Note JW1: empty cells of the final linked row, in display order.
+    pub empty: Vec<SlotKind>,
+    /// Note JW1: the card description and last hover line, or an empty string for a full card.
+    pub empty_line: String,
     /// The engine key (`""` for a created set with no members yet).
     pub key: String,
     pub id: String,
@@ -733,6 +737,8 @@ impl SetView {
             filled: BTreeMap::new(),
             fill_off: BTreeMap::new(),
             record_supplied: BTreeMap::new(),
+            empty: vec![],
+            empty_line: String::new(),
             rfaos: false,
             created: false,
             missing: vec![],
@@ -1007,6 +1013,29 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
             )
         })
         .collect()
+}
+
+/// A chip's letter (A3): the slot's suffix in capitals, "D" for the diffuse.
+pub fn chip_letter(v: &SetView, k: SlotKind) -> String {
+    match k.suffix() {
+        "" => "D".to_string(),
+        _ if k == SlotKind::Rmaos => v.slot_text(k).to_string(),
+        s => s.to_uppercase(),
+    }
+}
+
+/// Note JW1: resolve the empty slots once, after links and record fills, for each rebuilt card.
+fn finish_empty(views: &mut [SetView]) {
+    for v in views {
+        for cell in view_row(v) {
+            if matches!(slot_shown(v, cell.kind), SlotShown::Empty) {
+                v.empty_line
+                    .push_str(if v.empty.is_empty() { "Empty: " } else { ", " });
+                v.empty_line.push_str(&chip_letter(v, cell.kind));
+                v.empty.push(cell.kind);
+            }
+        }
+    }
 }
 
 /// `v`'s slot cards as the exported JSON reads them (review E1): `shared_cells(slot_row(…))`, where a card that holds
@@ -1456,6 +1485,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     }
     // Review E1: after `finish_view` (`exports_json` reads `json`) and the short names (a link names its source's).
     link_slots(m, &mut views);
+    finish_empty(&mut views);
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
@@ -1998,6 +2028,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
     // with one rebuilt every view above), so the link index is not built.
     link_slots(m, &mut rebuilt);
+    finish_empty(&mut rebuilt);
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {

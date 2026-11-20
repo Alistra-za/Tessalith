@@ -185,6 +185,520 @@ fn filled_normal(dir: &Path) -> (AppModel, String, String, String, String) {
     (m, leaf, normal, other, copy)
 }
 
+/// Every painted text whose rect lies inside `r` (grown by 1): its text, its rect and its colour (the galley's first
+/// section, which `paint_letter` paints in one colour).
+fn painted_text_in(h: &H, r: egui::Rect) -> Vec<(String, egui::Rect, egui::Color32)> {
+    shapes(h)
+        .into_iter()
+        .filter_map(|s| match s {
+            egui::Shape::Text(t) => {
+                let rect = t.visual_bounding_rect();
+                let colour = t
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map_or(t.fallback_color, |s| s.format.color);
+                let colour = if colour == egui::Color32::PLACEHOLDER {
+                    t.fallback_color
+                } else {
+                    colour
+                };
+                r.expand(1.0)
+                    .contains_rect(rect)
+                    .then(|| (t.galley.text().to_string(), rect, colour))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The AccessKit description of set `id`'s card node ("Set {id}, position …").
+fn card_description(h: &H, id: &str) -> Option<String> {
+    let prefix = format!("Set {id}, position ");
+    h.query_all(egui_kittest::kittest::by())
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(&prefix))
+        })
+        .unwrap_or_else(|| panic!("{id}'s card node"))
+        .accesskit_node()
+        .description() // accesskit_consumer 0.39: `Option<String>` already
+}
+
+/// The sets whose cards are drawn now, with their rects (stand-ins of off-screen cards are skipped).
+fn drawn_cards(h: &H) -> Vec<(String, egui::Rect)> {
+    set_views(&h.state().0)
+        .into_iter()
+        .filter_map(|v| try_card_of(h, &v.id).map(|r| (v.id, r)))
+        .collect()
+}
+
+/// `pbr_opened_plain` with leaf (Diffuse, alpha Cutout) and odd (Diffuse, small image acknowledged) decided, as
+/// `support::decide_all` decides them: three cards, rock01 first.
+fn three_cards(dir: &Path) -> AppModel {
+    use engine::config::{AlphaPolicy, Subtype};
+    use sdc_gui::model::Answer;
+    let mut m = pbr_opened_plain(dir);
+    m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide(
+        "landscape/odd.png",
+        Answer::Acknowledge(engine::codes::Code::DimSmall),
+    );
+    m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
+    idle(&mut m);
+    m
+}
+
+/// Puts `payload` in flight and hovers `at` over three frames (the payload pass, then the painted one each).
+fn hover_with<P: Clone + Send + Sync + 'static>(h: &mut H, payload: P, at: egui::Pos2) {
+    h.hover_at(at);
+    h.run();
+    for step in 1..=3 {
+        egui::DragAndDrop::set_payload(&h.ctx, payload.clone());
+        h.event(egui::Event::PointerMoved(at + egui::vec2(step as f32, 0.0)));
+        h.run_steps(2);
+    }
+}
+
+const LEAF: &str = "landscape/leaf.png";
+
+/// Note JW1 (A4-1, A4-2, A4-3): rock01's empty slots (G, P, CNR, S under plain PBR) are not drawn at rest, are listed
+/// in the card's description, and float in a strip under a dragged texture or a dragged share, never under a dragged
+/// set. The strip's letters are dim and sit in their boxes where the D chip's letter sits (HP9).
+#[test]
+fn empty_slots_hide_at_rest_and_float_under_a_dragged_image() {
+    use sdc_gui::ui::sets_column::{DragBorrow, DragItem, DragSet};
+    const LINE: &str = "Empty: G, P, CNR, S";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.invalidate_views();
+    let v = view(&m, ROCK);
+    // `shader.rs` l.86: plain PBR's optional slots are _g, _s, _cnr, _f, _p; slot 7 shows Coat (CNR).
+    assert_eq!(
+        v.empty,
+        [
+            SlotKind::Emissive,
+            SlotKind::Height,
+            SlotKind::Coat,
+            SlotKind::Subsurface
+        ],
+        "premise: rock01's empty slots under plain PBR, in row order"
+    );
+    assert_eq!(v.empty_line, LINE);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let card = card_of(&h, ROCK);
+    for l in ["G", "P", "CNR", "S"] {
+        assert!(
+            on_card_of(&h, ROCK, &format!("{l}, empty")).is_empty(),
+            "no empty {l} chip at rest"
+        );
+    }
+    assert_eq!(card_description(&h, ROCK).as_deref(), Some(LINE));
+    assert_eq!(h.state().1.drops.strip, None);
+    // the D chip's letter offset, to compare the strip's letters with (HP9)
+    let d_chip = on_card_of(&h, ROCK, "D")[0].rect();
+    let d_off = painted_text_in(&h, d_chip)
+        .iter()
+        .find(|(t, ..)| t == "D")
+        .expect("the D letter")
+        .1
+        .min
+        - d_chip.min;
+    hover_with(&mut h, DragSet(ROCK.into()), card.center());
+    assert_eq!(
+        h.state().1.drops.strip,
+        None,
+        "a dragged set is not an image"
+    );
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.run();
+    hover_with(&mut h, DragItem(LEAF.into()), card.center());
+    let (set, r, _) = h
+        .state()
+        .1
+        .drops
+        .strip
+        .clone()
+        .expect("a strip under a dragged texture");
+    assert_eq!(set, ROCK);
+    // four boxes at five per row (JJ2): 4·32 + 3·16 + 2·4 wide, 32 + 2·4 high
+    assert_eq!(r.size(), egui::vec2(184.0, 40.0));
+    assert!(
+        (r.min.x - card.min.x).abs() <= 1.0 && (r.min.y - (card.max.y + 2.0)).abs() <= 1.0,
+        "{r:?} under {card:?}"
+    );
+    let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
+    let texts = painted_text_in(&h, r);
+    for (i, l) in ["G", "P", "CNR", "S"].into_iter().enumerate() {
+        let (_, at, c) = texts
+            .iter()
+            .find(|(t, ..)| t == l)
+            .unwrap_or_else(|| panic!("{l} in the strip: {texts:?}"));
+        assert_eq!(*c, dim, "{l} is dim");
+        let cell = egui::Rect::from_min_size(
+            r.min + egui::vec2(4.0 + i as f32 * 48.0, 4.0),
+            egui::vec2(32.0, 32.0),
+        );
+        let off = at.min - cell.min;
+        // a longer tag may be fitted smaller (`max_w`), so its top can move; its left edge cannot
+        let same = if l.len() == 1 {
+            (off - d_off).length() <= 1.0
+        } else {
+            (off.x - d_off.x).abs() <= 1.0
+        };
+        assert!(same, "{l}: offset {off:?} against the D chip's {d_off:?}");
+    }
+    assert_eq!(card_of(&h, ROCK), card, "the card did not change size");
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.run();
+    assert_eq!(
+        h.state().1.drops.strip,
+        None,
+        "the strip goes with the drag"
+    );
+    hover_with(
+        &mut h,
+        DragBorrow {
+            item: NORMAL.into(),
+            from: ROCK.into(),
+        },
+        card.center(),
+    );
+    assert!(
+        h.state().1.drops.strip.is_some(),
+        "a dragged share is an image too"
+    );
+    egui::DragAndDrop::clear_payload(&h.ctx);
+}
+
+/// Review Focus 5 (owner: "Floating strip"; FM32): no card's measured height or rect moves during a drag.
+#[test]
+fn no_card_changes_height_while_an_image_is_dragged() {
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(three_cards(d.path()));
+    h.run();
+    h.run();
+    let before = drawn_cards(&h);
+    assert!(
+        before.len() >= 2,
+        "premise: several cards are drawn: {before:?}"
+    );
+    let heights = h.state().1.drops.card_h.clone();
+    let at = card_of(&h, ROCK).center();
+    hover_with(&mut h, DragItem(LEAF.into()), at);
+    assert!(
+        h.state().1.drops.strip.is_some(),
+        "premise: the strip is up"
+    );
+    assert_eq!(h.state().1.drops.card_h, heights);
+    assert_eq!(drawn_cards(&h), before, "every drawn card keeps its rect");
+    egui::DragAndDrop::clear_payload(&h.ctx);
+}
+
+/// Review Focus 1, ruling A4-4: "a release on the strip goes to the STRIP'S OWN card (the hovered card whose empty
+/// slots it shows); a card the strip happens to cover takes nothing". The covered card shows no outline either.
+#[test]
+fn a_drop_on_the_strip_goes_to_its_card_not_the_one_under_it() {
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(three_cards(d.path()));
+    h.run();
+    h.run();
+    let cards = drawn_cards(&h);
+    // the first drawn card with an empty slot whose strip covers another drawn card
+    let mut found = None;
+    for (id, card) in &cards {
+        hover_with(&mut h, DragItem(LEAF.into()), card.center());
+        let strip = h.state().1.drops.strip.clone().map(|s| s.1);
+        egui::DragAndDrop::clear_payload(&h.ctx);
+        h.run();
+        let Some(strip) = strip else { continue };
+        if let Some((under, _)) = cards
+            .iter()
+            .find(|(o, r)| o != id && r.contains(strip.center()))
+        {
+            found = Some((id.clone(), *card, strip, under.clone()));
+            break;
+        }
+    }
+    let (owner, card, strip, under) = found.expect("premise: a strip covers another card");
+    // The payload is a member of the covered card. Dropped on the covered card it would change nothing (it is
+    // already there), so only a drop on the strip's card can make `landed` the owner.
+    // The drag starts on the member's own Textures-column widget, so the payload is the real one: a press on a chip of
+    // the owner's card would start a drag of that chip's own member instead.
+    let member = view(&h.state().0, &under).members[0].clone();
+    let source = h.state().0.item(&member).unwrap();
+    let from = if source.helper.is_some() {
+        helper_source(&h, &source.name)
+    } else {
+        outside_sets(&h, &source.name).rect().center()
+    };
+    let active = h.ctx.global_style().visuals.widgets.active.bg_stroke;
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    assert!(
+        egui::DragAndDrop::payload::<DragItem>(&h.ctx).is_some_and(|p| p.0 == member),
+        "premise: {member} is in flight"
+    );
+    let edge = if strip.center().y > card.center().y {
+        (card.bottom() + strip.top()) / 2.0
+    } else {
+        (card.top() + strip.bottom()) / 2.0
+    };
+    let gap = egui::pos2(strip.center().x, edge);
+    assert!(
+        !strip.contains(gap) && !card.contains(gap),
+        "one frame strictly in the gap"
+    );
+    for p in [gap, strip.center(), strip.center()] {
+        h.event(egui::Event::PointerMoved(p));
+        h.run_steps(2);
+        assert_eq!(
+            h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+            Some(owner.as_str())
+        );
+    }
+    let under_rect = card_of(&h, &under);
+    assert!(
+        !shapes(&h).iter().any(|s| matches!(s, egui::Shape::Rect(r)
+            if (r.rect.min - under_rect.min).length() < 1.0 && r.stroke == active)),
+        "the covered card shows no drop outline"
+    );
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.clone()),
+        Some(owner.clone()),
+        "the strip stays its card's"
+    );
+    h.event(pointer_button(strip.center(), false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    let landed = match &h.state().1.drops.pending {
+        Some(Pending::Replace { set, .. }) | Some(Pending::Choice { set, .. }) => Some(set.clone()),
+        Some(other) => panic!("{other:?}"),
+        None => set_views(&h.state().0)
+            .into_iter()
+            .find(|v| v.members.contains(&member))
+            .map(|v| v.id),
+    };
+    assert_eq!(
+        landed.as_deref(),
+        Some(owner.as_str()),
+        "dropped on the strip's card, not {under}"
+    );
+}
+
+/// Note JW1: when the strip flips up, the covered card draws first and must leave the release for its owner.
+#[test]
+fn a_flipped_strip_takes_the_drop_before_the_card_under_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    assert!(m.reorder_set(ROCK, 1));
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let (under, first) = drawn_cards(&h).into_iter().next().unwrap();
+    assert_ne!(under, ROCK);
+    let bottom = first.top() + h.state().1.drops.view.unwrap().1;
+    let height = 1000.0 - (bottom - card_of(&h, ROCK).bottom()) + 8.0;
+    h.set_size(egui::vec2(1600.0, height));
+    h.run();
+    let card = card_of(&h, ROCK);
+    let member = view(&h.state().0, &under).members[0].clone();
+    let from = outside_sets(&h, &h.state().0.item(&member).unwrap().name)
+        .rect()
+        .center();
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    let (_, strip, _) = h.state().1.drops.strip.clone().expect("strip on rock01");
+    assert!(
+        strip.bottom() <= card.top() && card_of(&h, &under).contains(strip.center()),
+        "{strip:?} above {card:?}"
+    );
+    h.hover_at(egui::pos2(
+        strip.center().x,
+        (strip.bottom() + card.top()) / 2.0,
+    ));
+    h.run_steps(2);
+    h.hover_at(strip.center());
+    h.run_steps(2);
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK)
+    );
+    h.event(pointer_button(strip.center(), false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Choice { set, .. } | Pending::Replace { set, .. }) if set == ROCK),
+        "the earlier card left the drop for rock01: {:?}",
+        h.state().1.drops.pending
+    );
+}
+
+/// Note JW1: a borrowed payload released on the strip still uses the sharing path.
+#[test]
+fn a_borrow_released_on_the_strip_keeps_its_lender() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    let leaf = "landscape/leaf";
+    assert_eq!(
+        m.drop_choice(NORMAL, leaf, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(!view(&m, ROCK).empty.is_empty());
+    let mut h = harness(m);
+    h.run();
+    let from = on_card_of(&h, leaf, "N")[0].rect().center();
+    let card = card_of(&h, ROCK);
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    let (owner, strip, _) = h
+        .state()
+        .1
+        .drops
+        .strip
+        .clone()
+        .expect("the borrowed chip opens the strip");
+    assert_eq!(owner, ROCK);
+    h.hover_at(strip.center());
+    h.run_steps(2);
+    h.event(pointer_button(strip.center(), false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert!(h.state().1.drops.pending.is_none());
+    assert_eq!(
+        h.state().0.status_line,
+        "Nothing to share: rock01_normal.png is already in landscape/rock01."
+    );
+}
+
+/// Note JW1: a strip covering the new-set area keeps both the hover and the release.
+#[test]
+fn the_new_set_area_stays_inactive_under_the_strip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_cards(d.path());
+    m.sets_filter.search = ROCK.into();
+    let mut h = harness(m);
+    h.run();
+    let card = card_of(&h, ROCK);
+    let from = outside_sets(&h, "leaf.png").rect().center();
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    let (_, strip, _) = h
+        .state()
+        .1
+        .drops
+        .strip
+        .clone()
+        .expect("strip below the filtered card");
+    let label = h.get_by_label("Drop here to start a new set").rect();
+    let overlap = strip.intersect(label);
+    assert!(
+        overlap.is_positive(),
+        "strip {strip:?} over new-set hint {label:?}"
+    );
+    h.hover_at(overlap.center());
+    h.run_steps(3);
+    let active = h.ctx.global_style().visuals.widgets.active.bg_stroke;
+    assert!(!shapes(&h).iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect.contains_rect(label) && r.stroke == active)), "covered new-set drop zone is inactive");
+    let hints = painted_text_in(&h, label);
+    assert!(
+        hints
+            .iter()
+            .any(|(t, _, c)| t == "Drop here to start a new set"
+                && *c == h.ctx.global_style().visuals.weak_text_color()),
+        "covered new-set hint stays dim: {hints:?}"
+    );
+    h.event(pointer_button(
+        overlap.center(),
+        false,
+        egui::Modifiers::NONE,
+    ));
+    h.run_steps(3);
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Choice { set, .. } | Pending::Replace { set, .. }) if set == ROCK),
+        "strip release targets {ROCK}: {:?}",
+        h.state().1.drops.pending
+    );
+}
+
+/// Note JW1: a read-only card still identifies its empty slots during a drag.
+#[test]
+fn a_read_only_card_shows_the_strip_without_taking_a_drop() {
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.save().unwrap();
+    std::fs::write(
+        m.root.as_ref().unwrap().join("sdc-project.toml"),
+        "[[sets]\nbroken",
+    )
+    .unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    assert!(m.sets_read_only_reason().is_some());
+    let empties = view(&m, ROCK).empty_line;
+    let letters = empties
+        .strip_prefix("Empty: ")
+        .expect("read-only set has empty slots");
+    let before = documents(&m);
+    let released = std::rc::Rc::new(std::cell::Cell::new(None));
+    let probe = released.clone();
+    let mut h = harness_observing(m, move |ctx| {
+        if ctx.input(|i| i.pointer.any_released()) {
+            probe.set(Some(egui::DragAndDrop::has_payload_of_type::<DragItem>(
+                ctx,
+            )));
+        }
+    });
+    h.run();
+    let card = card_of(&h, ROCK);
+    let source = outside_sets(&h, "rock01_normal.png").rect().center();
+    for on_strip in [true, false] {
+        drag_over(&mut h, source, card.center(), egui::Modifiers::NONE);
+        let (id, strip, _) = h
+            .state()
+            .1
+            .drops
+            .strip
+            .clone()
+            .expect("strip on read-only card");
+        assert_eq!(id, ROCK);
+        let painted = painted_text_in(&h, strip);
+        for letter in letters.split(", ") {
+            assert!(
+                painted.iter().any(|(t, ..)| t == letter),
+                "{letter} on the read-only strip"
+            );
+        }
+        let at = if on_strip {
+            strip.center()
+        } else {
+            card.center()
+        };
+        h.hover_at(at);
+        h.run_steps(2);
+        assert_eq!(
+            h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+            Some(ROCK)
+        );
+        let active = h.ctx.global_style().visuals.widgets.active.bg_stroke;
+        assert!(!shapes(&h)
+            .iter()
+            .any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == card && r.stroke == active)));
+        released.set(None);
+        h.event(pointer_button(at, false, egui::Modifiers::NONE));
+        h.run_steps(3);
+        assert_eq!(
+            released.get(),
+            Some(true),
+            "the read-only target leaves the payload in flight on release"
+        );
+        assert!(h.state().1.drops.pending.is_none());
+        assert_eq!(documents(&h.state().0), before);
+    }
+}
+
 fn documents(m: &AppModel) -> (String, String, usize) {
     (
         m.project.as_ref().unwrap().text(),
@@ -591,6 +1105,10 @@ fn no_set_ao(dir: &Path) -> AppModel {
 type H = Harness<'static, (AppModel, State)>;
 
 fn harness(m: AppModel) -> H {
+    harness_observing(m, |_| {})
+}
+
+fn harness_observing(m: AppModel, after_draw: impl Fn(&egui::Context) + 'static) -> H {
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -598,7 +1116,10 @@ fn harness(m: AppModel) -> H {
         .with_size(egui::vec2(1600.0, 1000.0))
         .with_step_dt(0.02)
         .build_ui_state(
-            |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
+            move |ui, (m, s): &mut (AppModel, State)| {
+                sdc_gui::ui::draw_with(ui, m, s);
+                after_draw(ui.ctx());
+            },
             (m, State::default()),
         );
     h.ctx.global_style_mut(|s| {

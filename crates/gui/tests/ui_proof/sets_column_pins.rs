@@ -1089,7 +1089,6 @@ fn a_search_keeps_its_match_in_cut_titles() {
             {
                 n.scroll_to_me();
             }
-            h.run();
             crate::app_harness::quiet(&mut h);
             let title = h
                 .query_all_by_label(id)
@@ -1744,16 +1743,6 @@ fn tile_named(h: &crate::app_harness::H, prefix: &str) -> egui::Rect {
     r[0]
 }
 
-/// The one text painted in `tile`.
-fn any_text(h: &crate::app_harness::H, tile: egui::Rect) -> String {
-    let found: Vec<_> = coloured_texts(h)
-        .into_iter()
-        .filter(|(_, r, _)| tile.expand(1.0).contains(r.center()))
-        .collect();
-    assert_eq!(found.len(), 1, "one painted text in {tile:?}: {found:?}");
-    found[0].0.clone()
-}
-
 fn same_offset(a: egui::Vec2, b: egui::Vec2, at: &str) {
     assert!(
         (a.x - b.x).abs() <= 1.0 && (a.y - b.y).abs() <= 1.0,
@@ -1768,10 +1757,8 @@ fn labels_sit_bottom_left_on_every_tile() {
         let search = |s: &str| {
             format!(r#"{{"op":"type","text":"{s}","at":{{"placeholder":"Search sets"}}}}"#)
         };
-        // an empty chip's letter sits where the D chip's does, dimmed
         let (_d, h) = crate::replay("demo", &[resize.as_str(), search("cobble").as_str()]);
         let at = format!("cobble at {w}x{h_px}");
-        let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
         // the letter reads on the chip's own fill in both themes
         for v in [egui::Visuals::dark(), egui::Visuals::light()] {
             let dim = sdc_gui::ui::sets_column::dim_letter_colour(&v);
@@ -1784,7 +1771,6 @@ fn labels_sit_bottom_left_on_every_tile() {
         }
         let card = one_node(&h, "Set architecture/stone/cobble, ");
         let mut d_off = None;
-        let mut empties = vec![];
         for n in h.query_all(egui_kittest::kittest::by()) {
             if n.accesskit_node().raw_bounds().is_none() {
                 continue;
@@ -1793,22 +1779,20 @@ fn labels_sit_bottom_left_on_every_tile() {
             if !card.contains_rect(r) || !near(r, 32.0, 32.0) {
                 continue;
             }
-            let label = n.accesskit_node().label().unwrap_or_default();
-            match n.accesskit_node().role() {
-                Role::Button if label == "D" => d_off = Some((r, "D")),
-                Role::Label => empties.push(r),
+            let a = n.accesskit_node();
+            let name = a.label().or_else(|| a.value()).unwrap_or_default();
+            match a.role() {
+                Role::Button if name == "D" => d_off = Some(r),
+                // Note JW1: an empty slot has no chip at rest; its letter is painted in the drag strip (set_drag.rs).
+                // Missing, cleared and linked chips keep their own names and interactive roles.
+                _ if name.ends_with(", empty") => {
+                    panic!("{at}: an empty chip {name:?} in the card at rest: {r:?}")
+                }
                 _ => {}
             }
         }
-        let (d_chip, d_text) = d_off.expect("the D chip");
-        let (d_off, ..) = tile_label(&h, d_chip, d_text);
-        assert!(!empties.is_empty(), "{at}: the card has an empty chip");
-        for chip in empties {
-            let letter = any_text(&h, chip);
-            let (off, colour, _) = tile_label(&h, chip, &letter);
-            same_offset(off, d_off, &format!("{at}, empty {letter}"));
-            assert_eq!(colour, dim, "{at}, empty {letter}: the dim letter colour");
-        }
+        let d_chip = d_off.expect("the D chip");
+        let (d_off, ..) = tile_label(&h, d_chip, "D");
         // a trailing-row tile's tag, in the same corner
         for (q, file, tag) in [
             ("gold", "gold_m.png, ", "_m"),
@@ -1934,9 +1918,10 @@ fn a_helper_whose_second_chip_is_linked_returns_to_the_trailing_row() {
     }
 }
 
-/// Note HP: an empty chip is named "<letter>, empty", and no Label inside a set card has an empty name.
+/// Note HP: no Label inside a set card has an empty name. Note JW1: an empty slot has no chip at rest, and the card
+/// node's description lists the empty slots.
 #[test]
-fn empty_chips_are_named_and_no_card_label_is_nameless() {
+fn no_card_label_is_nameless_and_the_card_lists_its_empty_slots() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
         let (_d, h) = crate::replay(
@@ -1962,8 +1947,26 @@ fn empty_chips_are_named_and_no_card_label_is_nameless() {
             "{at}: nameless Label in the card: {labels:?}"
         );
         assert!(
-            labels.iter().any(|l| l == "G, empty"),
-            "{at}: an empty G chip, got {labels:?}"
+            !labels.iter().any(|l| l == "G, empty"),
+            "{at}: no empty G chip at rest, got {labels:?}"
+        );
+        let description = h
+            .query_all(egui_kittest::kittest::by())
+            .find(|n| {
+                n.accesskit_node().raw_bounds().is_some()
+                    && n.accesskit_node()
+                        .label()
+                        .is_some_and(|l| l.starts_with("Set architecture/stone/cobble, "))
+            })
+            .and_then(|n| n.accesskit_node().description())
+            .unwrap_or_default();
+        let letters: Vec<&str> = description
+            .strip_prefix("Empty: ")
+            .map(|s| s.split(", ").collect())
+            .unwrap_or_default();
+        assert!(
+            letters.contains(&"G"),
+            "{at}: the card lists G as empty, got {description:?}"
         );
     }
 }

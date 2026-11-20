@@ -6,7 +6,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::Subtype;
 use sdc_gui::model::bulk::MenuAction;
-use sdc_gui::model::sets::{set_views, slot_row, view_row, views, SlotCommand, SlotFill, SlotKind};
+use sdc_gui::model::sets::{set_views, view_row, views, SlotCommand, SlotFill, SlotKind};
 use sdc_gui::model::AppModel;
 use std::time::Duration;
 use support::*;
@@ -650,18 +650,18 @@ fn card_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
     card_of(h, ROCK)
 }
 
-/// A card: the smallest painted rect holding the set's name and the chip row below it.
+/// A drawn card has its position label inside the full-id card node.
 fn card_of(h: &Harness<'static, AppModel>, id: &str) -> egui::Rect {
-    let name = name_of(h, id);
-    shapes(h)
-        .iter()
-        .filter_map(|s| match s {
-            egui::Shape::Rect(r) => Some(r.rect),
-            _ => None,
-        })
-        .filter(|r| r.contains_rect(name) && r.height() > name.height() + 40.0)
-        .min_by(|a, b| a.area().total_cmp(&b.area()))
-        .expect("the card's frame")
+    let prefix = format!("Set {id}, position ");
+    let card = h.get_by_label_contains(&prefix);
+    let label = card.accesskit_node().label().unwrap();
+    let position = format!("Position {}", label.strip_prefix(&prefix).unwrap());
+    assert!(
+        h.query_all_by_label(&position)
+            .any(|n| card.rect().contains_rect(n.rect())),
+        "{id} is drawn"
+    );
+    card.rect()
 }
 
 /// The nodes labelled `label` inside rock01's card (K11: every card has a "D").
@@ -782,23 +782,29 @@ fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     );
 }
 
+/// Note JW1 (A4-1, A4-3): the filled slots have one chip each; the empty ones have none at rest, and the card's
+/// description and the pill's hover list them.
 #[test]
-fn slot_chips_are_labelled_and_empty_ones_are_dim() {
+fn slot_chips_are_labelled_and_empty_ones_hide_at_rest() {
+    const LINE: &str = "Empty: G, P, CNR, S";
     let d = tempfile::tempdir().unwrap();
     let m = pbr_opened_plain(d.path());
-    // A4: the plain PBR shader uses Height and the fixture has no `_p`.
     let v = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
-    let row = slot_row(v.shader.as_ref(), &v.slots);
+    let row = sdc_gui::model::sets::view_row(&v);
     assert!(
-        row.iter()
-            .any(|c| c.kind == SlotKind::Height && c.fill == SlotFill::Empty),
+        row.iter().any(|c| c.kind == SlotKind::Height
+            && matches!(
+                sdc_gui::model::sets::slot_shown(&v, c.kind),
+                sdc_gui::model::sets::SlotShown::Empty
+            )),
         "{row:?}"
     );
+    assert_eq!(v.empty_line, LINE);
+    let pill = sdc_gui::model::sets::kind_text(&m, &v);
     let mut h = harness(m);
     h.run();
-    // A chip with docked helpers is named "<letter>, <file>, filled by <helpers>" (Note HN).
     let card = card_of(&h, ROCK);
-    for l in ["D", "N", "RMAOS", "P"] {
+    for l in ["D", "N", "RMAOS"] {
         let prefix = format!("{l}, ");
         let named = h
             .query_all_by_label_contains(&prefix)
@@ -810,16 +816,93 @@ fn slot_chips_are_labelled_and_empty_ones_are_dim() {
                     .starts_with(&prefix)
             })
             .count();
-        // an empty chip is named "<letter>, empty" (Note HP)
-        let empty = format!("{l}, empty");
-        let n = on_card(&h, l).len() + on_card(&h, &empty).len() + named;
-        assert_eq!(n, 1, "one {l:?} chip on rock01's card");
+        assert_eq!(
+            on_card(&h, l).len() + named,
+            1,
+            "one {l:?} chip on rock01's card"
+        );
     }
-    assert!(h.query_by_label_contains("Height _p (empty)").is_none());
-    on_card(&h, "P, empty")[0].hover();
+    for l in ["G", "P", "CNR", "S"] {
+        assert!(
+            on_card(&h, &format!("{l}, empty")).is_empty(),
+            "no {l} chip at rest"
+        );
+        assert!(on_card(&h, l).is_empty(), "no {l} chip at rest");
+    }
+    assert_eq!(empty_letters(&h, ROCK), ["G", "P", "CNR", "S"]);
+    let status = h
+        .query_all_by_role_and_label(egui::accesskit::Role::Label, pill)
+        .find(|n| card.contains_rect(n.rect()))
+        .expect("the status pill");
+    status.hover();
     h.run();
     h.run();
-    h.get_by_label("Height _p (empty)");
+    let tooltip = h
+        .get_by_label_contains(LINE)
+        .accesskit_node()
+        .value()
+        .expect("the pill's hover text");
+    assert_eq!(tooltip.lines().last(), Some(LINE));
+}
+
+/// Note JW1 (A4-3, spec detail 4): an off-screen card's stand-in node carries the same "Empty: …" description.
+#[test]
+fn a_stand_in_carries_the_empty_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    let seed = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    assert_eq!(seed.empty_line, "Empty: G, P, CNR, S");
+    let rock = m.sets.iter().find(|s| s.key == seed.key).unwrap().clone();
+    m.sets = (0..60)
+        .map(|i| {
+            let mut s = rock.clone();
+            if i > 0 {
+                s.key = format!("{}{i:04}", rock.key);
+            }
+            s
+        })
+        .collect();
+    m.invalidate_views();
+    let all = set_views(&m);
+    let total = all.len();
+    let (index, last) = all
+        .iter()
+        .enumerate()
+        .find(|(_, v)| v.key == format!("{}0059", rock.key))
+        .unwrap();
+    assert!(index >= 50 && last.empty_line == seed.empty_line);
+    let mut h = many(m);
+    h.run();
+    assert!(
+        pos_rect(&h, index + 1, total).is_none(),
+        "premise: the last card is a stand-in, not drawn"
+    );
+    let prefix = format!("Set {}, position ", last.id);
+    let node = h
+        .query_all(egui_kittest::kittest::by())
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with(&prefix))
+        })
+        .expect("the stand-in's node");
+    assert_eq!(
+        node.accesskit_node().description().as_deref(),
+        Some(last.empty_line.as_str())
+    );
+}
+
+/// The letters of a card's "Empty: …" description (Note JW1).
+fn empty_letters(h: &Harness<'static, AppModel>, id: &str) -> Vec<String> {
+    let prefix = format!("Set {id}, position ");
+    let card = h.get_by_label_contains(&prefix);
+    card.accesskit_node()
+        .description()
+        .and_then(|d| {
+            d.strip_prefix("Empty: ")
+                .map(|s| s.split(", ").map(str::to_string).collect())
+        })
+        .unwrap_or_default()
 }
 
 #[test]
@@ -1655,7 +1738,8 @@ fn a_linked_chip_is_filled_and_named_for_its_set() {
     assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
     h.state_mut().undo();
     h.run();
-    assert_eq!(on_card_of(&h, "arch/leaf", "D, empty").len(), 1);
+    assert!(empty_letters(&h, "arch/leaf").contains(&"D".to_string()));
+    assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
 }
 
 #[test]
