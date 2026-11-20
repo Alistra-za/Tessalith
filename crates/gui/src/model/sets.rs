@@ -3702,7 +3702,7 @@ impl AppModel {
         if !self.sets_editable() {
             return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
         }
-        if self.full_plan_pending() || membership_edits(self) != self.landed_membership {
+        if self.pick_waits().is_some() || membership_edits(self) != self.landed_membership {
             return Err(SHARED_SOURCE_CHANGED.into());
         }
         let target = match self.drop_target(set) {
@@ -3891,8 +3891,13 @@ impl AppModel {
         kind: SlotKind,
         approved: &SlotFill,
     ) -> Result<(), String> {
-        if self.full_plan_pending() {
-            self.status_line = SHARED_SOURCE_CHANGED.into();
+        if let Some(wait) = self.pick_waits() {
+            self.status_line = if wait == PICK_PLANNING {
+                "Tessalith is still planning. Try again in a moment."
+            } else {
+                "The plan must run again first."
+            }
+            .into();
             return Err(self.status_line.clone());
         }
         if !approved.is_filled() {

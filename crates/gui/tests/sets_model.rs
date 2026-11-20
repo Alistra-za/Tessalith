@@ -799,8 +799,8 @@ fn a_read_only_project_file_refuses_set_edits_but_sdc_toml_still_edits() {
     assert!(m.drop_new_set(&odd).is_err());
     assert!(m.rename_set("landscape/rock01", "x/y").is_err());
     assert!(m.remove_member("landscape/rock01", &rough).is_err());
-    assert!(m
-        .drop_replace(
+    assert_eq!(
+        m.drop_replace(
             &leaf,
             "landscape/rock01",
             DropChoice::Move,
@@ -808,8 +808,9 @@ fn a_read_only_project_file_refuses_set_edits_but_sdc_toml_still_edits() {
             &SlotFill::Own {
                 item: "landscape/rock01.png".into()
             }
-        )
-        .is_err());
+        ),
+        Err("sdc-project.toml is read-only".into())
+    );
     assert!(!m.delete_set("landscape/rock01"));
     assert!(m
         .set_slot_command("landscape/rock01", 6, SlotCommand::Clear)
@@ -880,8 +881,8 @@ fn sharing_away_the_only_texture_of_an_automatic_set_is_refused() {
                 .into()
         )
     );
-    assert!(m
-        .drop_replace(
+    assert_eq!(
+        m.drop_replace(
             &rock,
             "landscape/leaf",
             DropChoice::Share,
@@ -889,8 +890,12 @@ fn sharing_away_the_only_texture_of_an_automatic_set_is_refused() {
             &SlotFill::Own {
                 item: "landscape/leaf.png".into()
             }
+        ),
+        Err(
+            "landscape/leaf would have no texture of its own left; move another texture in first"
+                .into()
         )
-        .is_err());
+    );
     m.edit_docs("Share the albedo", None, true, |_, s| {
         s.create_set("landscape/shared");
         s.set_borrow("landscape/shared", 1, Some(ROCK));

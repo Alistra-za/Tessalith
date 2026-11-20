@@ -44,15 +44,17 @@ fn a_locked_slot_refuses_drops_onto_it() {
     let refused = |o: DropOutcome| matches!(o, DropOutcome::Refused(why) if why.contains("slot 1 of landscape/rock01 is locked"));
     assert!(refused(m.drop_on_set(LEAF, SET)));
     assert!(refused(m.drop_choice(LEAF, SET, DropChoice::Move)));
-    assert!(m
-        .drop_replace(
+    idle(&mut m);
+    assert_eq!(
+        m.drop_replace(
             LEAF,
             SET,
             DropChoice::Move,
             SlotKind::Diffuse,
             &SlotFill::Own { item: ROCK.into() }
-        )
-        .is_err());
+        ),
+        Err("slot 1 of landscape/rock01 is locked; unlock it first".into())
+    );
     // The locked fill cannot leave either.
     assert!(m.remove_member(SET, ROCK).is_err());
     // The new-set area says why (the UI shows it as the refusal note).

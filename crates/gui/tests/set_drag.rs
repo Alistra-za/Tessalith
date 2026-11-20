@@ -1104,11 +1104,66 @@ fn pending_subtype_edit_refuses_replace_and_chip_release() {
     assert_eq!(documents(&m), before);
     assert_eq!(
         m.drop_replace(&normal, &dest, DropChoice::Move, kind, &existing),
-        Err(why.into())
+        Err("Tessalith is still planning. Try again in a moment.".into())
+    );
+    assert_eq!(
+        m.status_line,
+        "Tessalith is still planning. Try again in a moment."
     );
     assert_eq!(documents(&m), before);
     idle(&mut m);
     assert_eq!(normal_fill(&m, &dest), Some(SlotFill::Own { item: copy }));
+}
+
+#[test]
+fn a_failed_subtype_replan_refuses_replace_and_chip_release() {
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, normal, dest, _) = filled_normal(d.path());
+    let DropOutcome::AskReplace { kind, existing } =
+        m.drop_choice(&normal, &dest, DropChoice::Move)
+    else {
+        panic!("the destination has its own normal");
+    };
+    let Ok(sdc_gui::model::sets::BorrowOutcome::AskReplace {
+        kind: borrowed_kind,
+        existing: borrowed,
+    }) = m.drop_borrow(&normal, ROCK, &dest)
+    else {
+        panic!("the chip asks to replace the same normal");
+    };
+    let fail_plan = |m: &mut AppModel| {
+        assert!(m.full_plan_pending());
+        m.handle_held(WorkerMsg::Planned {
+            generation: m.generation(),
+            result: Err(PlanFailure {
+                message: "the plan failed".into(),
+                config: false,
+            }),
+        });
+        m.dialog = None;
+        assert!(!m.full_plan_pending());
+    };
+    m.hold_plan_results = true;
+    m.replan();
+    fail_plan(&mut m);
+    m.set_field(&normal, "subtype", serde_json::json!("height"));
+    fail_plan(&mut m);
+    let before = documents(&m);
+    assert_eq!(
+        m.drop_replace(&normal, &dest, DropChoice::Move, kind, &existing),
+        Err("The plan must run again first.".into())
+    );
+    assert_eq!(m.status_line, "The plan must run again first.");
+    assert_eq!(documents(&m), before);
+    let why = "The shared source changed. Drag the chip again.";
+    assert_eq!(m.drop_borrow(&normal, ROCK, &dest), Err(why.into()));
+    assert_eq!(documents(&m), before);
+    assert_eq!(
+        m.replace_borrow(&normal, ROCK, &dest, borrowed_kind, &borrowed),
+        Err(why.into())
+    );
+    assert_eq!(documents(&m), before);
 }
 
 #[test]

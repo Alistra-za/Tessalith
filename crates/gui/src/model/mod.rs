@@ -4968,16 +4968,29 @@ impl AppModel {
 
 /// Write and hash the image created by Duplicate.
 fn write_copy(mut input: impl std::io::Read, path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{ErrorKind, Write};
+
     let mut out = std::fs::File::create_new(path)?;
-    let copied = std::io::copy(&mut input, &mut out);
+    let mut hash = Sha256::new();
+    let mut buf = [0; 8192];
+    let copied = loop {
+        let n = match input.read(&mut buf) {
+            Ok(0) => break Ok(hex::encode(hash.finalize())),
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => break Err(e),
+        };
+        if let Err(e) = out.write_all(&buf[..n]) {
+            break Err(e);
+        }
+        hash.update(&buf[..n]);
+    };
     drop(out);
-    copied
-        .and_then(|_| {
-            history::sha256_of(path).ok_or_else(|| std::io::Error::other("could not read the copy"))
-        })
-        .inspect_err(|_| {
-            let _ = std::fs::remove_file(path);
-        })
+    copied.inspect_err(|_| {
+        // shortcut: the path may have been replaced, use handle-owned cleanup once persist_noclobber lands (SC-45).
+        let _ = std::fs::remove_file(path);
+    })
 }
 
 /// Redo Duplicate only while the original destination is free.
@@ -5036,6 +5049,34 @@ mod tests {
             result.unwrap_err().kind(),
             std::io::ErrorKind::AlreadyExists
         );
+    }
+
+    #[test]
+    fn undo_keeps_a_replacement_swapped_in_at_the_end_of_duplicate() {
+        use std::io::{self, Read};
+        struct SwapAtEof<'a>(&'a Path);
+        impl Read for SwapAtEof<'_> {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                std::fs::rename(self.0, self.0.with_extension("moved"))?;
+                std::fs::write(self.0, b"foreign")?;
+                Ok(0)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.png");
+        let input = b"image".as_slice().chain(SwapAtEof(&path));
+        let sha256 = write_copy(input, &path).unwrap();
+        assert_eq!(
+            Some(&sha256),
+            history::sha256_of(&path.with_extension("moved")).as_ref()
+        );
+        let copy = history::CreatedFile {
+            source: dir.path().join("source.png"),
+            path: path.clone(),
+            sha256,
+        };
+        assert!(remove_created(&copy).unwrap_err().contains("undo keeps it"));
+        assert_eq!(std::fs::read(path).unwrap(), b"foreign");
     }
 
     #[test]
