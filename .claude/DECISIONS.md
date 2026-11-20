@@ -9,15 +9,15 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS, JE, JQ, JR, JS, JW
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW, JS
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU, HX
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS
-- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS, JZ
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS, JH, JI, JN, JR, JS
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX
@@ -2065,3 +2065,8 @@ The owner: "if a normal is only ever in a pbr set, its alpha should always be dr
 - **JX2** On a focused thumbnail, Enter or Space opens the set. Holding Shift with either key opens the texture. Both routes wait for a focused edit to commit (FC8). The thumbnail's hover and accessible description give the Shift+click hint.
 - **JX3** Dragging a thumbnail still uses its usual payload (JW4). Double-click expands the texture with or without Shift. Right-click opens the slot or member menu. A plain click in the Textures column selects the texture. Go to set in Problems opens the indicated set.
 - **JX4** Clicking a helper in the open `+` list opens that texture without Shift (JW7).
+
+## Note JZ — BC1 NVIDIA three-colour midpoint (main team, 2026-11-20)
+
+- **JZ1** The trial scored three-colour fits and solid blocks in packed endpoint order. No candidate met the quality rule. The shipped encoder keeps its legacy midpoint lookup (scored before the endpoint swap), rgbcx's NVIDIA table and the byte-exact default Dual path at (1, 1) (HY18). See the [midpoint measurements](../docs/research/encoder-benchmark.md#bc1-nvidia-three-colour-midpoint-2026-11-20-note-jz).
+- **JZ2** Adoption needs a separate owner instruction and a port to current main. Require fresh quality and speed results for each affected mode. Keep cutouts, perceptual, fast and BC3 on their legacy paths until each qualifies separately from plain BC1. For changed bytes, bump the affected `encode_version`, re-record the goldens and document the identity change in DECISIONS.

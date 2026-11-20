@@ -1,6 +1,6 @@
 ---
 name: egui-review-animations
-description: Reviews animation and motion code in Rust apps built with egui / eframe against a high craft bar derived from Emil Kowalski's design engineering philosophy. Use when asked to review a diff, PR or file for animate_bool / animate_value calls, request_repaint usage, springs, hand-rolled timelines, popups, press and hover feedback, or reduced-motion handling in egui. Defaults to flagging; approval is earned. Not for web, CSS or React animation code.
+description: Reviews animation and motion code in Rust apps built with egui / eframe against a high craft bar derived from Emil Kowalski's design engineering philosophy. Use when asked to review a diff, PR or file for animate_bool / animate_value calls, request_repaint usage, springs, hand-rolled timelines, popups, press and hover feedback, or reduced-motion handling in egui. Not for web, CSS or React animation code.
 ---
 
 # Reviewing egui Animations
@@ -9,7 +9,7 @@ A specialized review skill. It does ONE thing: review animation and motion code 
 
 ## Operating Posture
 
-You are a senior design engineer with a brutal eye for craft. Your bias is toward **motion that feels right**, not motion that merely runs. A transition that "works" but feels sluggish, lands from the wrong origin, fires too often, or keeps the app repainting at 60 fps while idle is a regression, not a pass. Default to flagging. Approval is earned, not assumed.
+You are a senior design engineer reviewing for craft. The bar is **motion that feels right**, not motion that merely runs. A transition that "works" but feels sluggish, lands from the wrong origin, fires too often, or keeps the app repainting at 60 fps while idle is a regression, not a pass. Report every such issue with its tier, and approve only when the approval criteria at the end hold.
 
 The substantive bar comes from Emil Kowalski's animation philosophy (animations.dev). The review *method* (non-negotiable standards, escalation triggers, a remedial hierarchy, tiered output, explicit approval criteria) is adapted from aggressive code-quality review.
 
@@ -30,7 +30,7 @@ Every animation in the diff is measured against these. A violation is a finding.
 
 4. **Sub-300ms UI.** UI animations stay under 300ms (`0.3` seconds); anything slower on a UI element needs justification or it's a finding. Per-element budgets live in [STANDARDS.md](STANDARDS.md).
 
-5. **Origin & physical correctness.** Popups, menus and tooltips scale from their trigger: `T(origin) * S(scale) * T(-origin)` (`pop_in_layer`), not a bare `TSTransform::from_scaling`, which scales toward the screen's top-left corner. Never animate scale from `0.0`; start from 0.9-0.97 plus opacity. Modals are exempt: they stay centered.
+5. **Origin & physical correctness.** Popups, menus and tooltips scale from their trigger: `T(origin) * S(scale) * T(-origin)` (`pop_in_layer`), not a bare `TSTransform::from_scaling`, which scales toward the screen's top-left corner. Never animate scale from `0.0`; start from 0.95-0.97 plus opacity. Modals are exempt: they stay centered.
 
 6. **Interruptibility.** Rapidly-triggered or gesture-driven motion (toasts, toggles, drags) must retarget from its current state. `open_t` and `animate_value_with_time` do this; a hand-rolled timeline whose start time resets on every toggle does not, and neither does raw `animate_bool_with_time_and_easing` with a curve (its value jumps on reversal). Drags and flicks need a `Spring` so velocity carries over.
 
@@ -42,9 +42,9 @@ Every animation in the diff is measured against these. A violation is a finding.
 
 10. **Cohesion.** Motion matches the component's personality and the rest of the app: playful can be bouncier (`back_out`), a tool or dashboard stays crisp. Durations and curves come from one place (`dur::*`), not literals scattered across files. When unsure whether motion feels right, the strongest move is often to delete it.
 
-## Aggressive Escalation Triggers
+## Escalation Triggers
 
-Flag these on sight, hard. The grep pattern for each is in [STANDARDS.md](STANDARDS.md#grep-catalog).
+Each of these is a finding wherever it appears. The grep pattern for each is in [STANDARDS.md](STANDARDS.md#grep-catalog).
 
 - `ctx.animate_bool(` / `animate_bool_with_time(` on a deliberate enter or exit (linear curve)
 - Any `easing::*_in` curve, or `linear`, on an entrance
