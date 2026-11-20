@@ -479,7 +479,10 @@ impl BorrowOccupant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BorrowOutcome {
     Joined,
-    AskReplace { existing: BorrowOccupant },
+    AskReplace {
+        kind: SlotKind,
+        existing: BorrowOccupant,
+    },
     Refused(String),
 }
 
@@ -1707,6 +1710,14 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
         .retain(|w| !missing_map_slot(w).is_some_and(|n| bits & (1 << (n - 1)) != 0));
 }
 
+/// The own file a numbered borrow reads, including the first kind when two kinds share a number.
+fn own_in_slot(slots: BTreeMap<SlotKind, SlotFill>, n: u8) -> Option<(SlotKind, String)> {
+    slots.into_iter().find_map(|(k, f)| match f {
+        SlotFill::Own { item } if k.slot_number() == Some(n) => Some((k, item)),
+        _ => None,
+    })
+}
+
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
 /// for no such set); `lender_borrow` gives set `id`'s own `borrow.slot<n>` line (Note JN1: a chain is followed).
 fn entry_view(
@@ -1757,11 +1768,7 @@ fn entry_view(
             let Some(src) = own(&cur) else {
                 break Err(hops > 0);
             };
-            let found = src.into_iter().find_map(|(k, f)| match f {
-                SlotFill::Own { item } if k.slot_number() == Some(*slot) => Some((k, item)),
-                _ => None,
-            });
-            if let Some(found) = found {
+            if let Some(found) = own_in_slot(src, *slot) {
                 break Ok(found);
             }
             match lender_borrow(&cur, *slot) {
@@ -2075,14 +2082,8 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     plan_outputs(m, &views(m), None)
 }
 
-/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
-pub(super) fn plan_outputs(
-    m: &AppModel,
-    views: &[SetView],
-    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
-) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
-    #[cfg(feature = "test-hooks")]
-    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
+/// Membership edits in the order the engine applies them.
+fn membership_edits(m: &AppModel) -> Vec<SetEdit> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut edits = vec![];
     for e in entries.iter().filter(|e| e.created) {
@@ -2122,6 +2123,18 @@ pub(super) fn plan_outputs(
             });
         }
     }
+    edits
+}
+
+/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
+pub(super) fn plan_outputs(
+    m: &AppModel,
+    views: &[SetView],
+    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
+) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    #[cfg(feature = "test-hooks")]
+    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
+    let edits = membership_edits(m);
     let mut paths = BTreeMap::new();
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
     let mut named = output_name_paths(m, views);
@@ -3003,6 +3016,20 @@ pub(crate) fn written_game_path(job: &engine::policy::ResolvedJob) -> String {
     }
 }
 
+/// Sharing adds no member to keep an automatic set alive after Replace.
+fn share_keeps_member(target: &SetView, existing: Option<&SlotFill>) -> Result<(), String> {
+    if matches!(existing, Some(SlotFill::Own { .. }))
+        && target.members.len() == 1
+        && !target.created
+    {
+        return Err(format!(
+            "{} would have no texture of its own left; move another texture in first",
+            target.id
+        ));
+    }
+    Ok(())
+}
+
 /// Empty `slot` of set `id` in the document: its own occupant leaves the set, a borrow is dropped. Part of a replace.
 fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Option<SlotFill>) {
     match existing {
@@ -3248,10 +3275,7 @@ impl AppModel {
             .iter()
             .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
             .and_then(|(k, _)| k.slot_number())?;
-        let first = own.into_iter().find_map(|(k, f)| match f {
-            SlotFill::Own { item } if k.slot_number() == Some(n) => Some(item),
-            _ => None,
-        })?;
+        let (_, first) = own_in_slot(own, n)?;
         (first == item).then_some((v.id, n))
     }
 
@@ -3610,9 +3634,10 @@ impl AppModel {
         item: &str,
         from: &str,
         set: &str,
+        kind: SlotKind,
         existing: &BorrowOccupant,
     ) -> Result<(), String> {
-        self.share_borrow(item, from, set, Some(existing))
+        self.share_borrow(item, from, set, Some((kind, existing)))
             .and_then(|out| match out {
                 BorrowOutcome::Joined => Ok(()),
                 BorrowOutcome::Refused(why) => Err(why),
@@ -3626,10 +3651,13 @@ impl AppModel {
         item: &str,
         from: &str,
         set: &str,
-        confirmed: Option<&BorrowOccupant>,
+        confirmed: Option<(SlotKind, &BorrowOccupant)>,
     ) -> Result<BorrowOutcome, String> {
         if !self.sets_editable() {
             return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
+        }
+        if membership_edits(self) != self.landed_membership {
+            return Err("The shared source changed. Drag the chip again.".into());
         }
         let target = match self.drop_target(set) {
             Ok(target) => target,
@@ -3637,31 +3665,30 @@ impl AppModel {
         };
         let source = self
             .item(item)
-            .and_then(|it| Some((it, slot_of(it)?, self.set_of_item(item)?)));
-        let Some((it, kind, owner)) = source.filter(|(_, kind, owner)| {
-            same_id(&owner.id, from)
-                && matches!(owner.slots.get(kind), Some(SlotFill::Own { item: key }) if key == item)
-        }) else {
+            .and_then(|it| Some((it, slot_of(it)?, self.lent_slot(item)?.0)));
+        let Some((it, kind, owner)) = source.filter(|(_, _, owner)| same_id(owner, from)) else {
             return Ok(BorrowOutcome::Refused(
                 "The shared source changed. Drag the chip again.".into(),
             ));
         };
-        if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner.id) {
+        if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner) {
             return Err(why);
         }
         let shown = slot_shown(&target, kind);
-        if confirmed.is_some_and(|existing| !existing.matches(&shown)) {
+        if confirmed
+            .is_some_and(|(approved, existing)| approved != kind || !existing.matches(&shown))
+        {
             return Err("The destination slot changed. Drag the chip again.".into());
         }
         let set = &target.id;
         let name = &it.name;
-        if same_id(set, &owner.id) {
+        if same_id(set, &owner) {
             self.status_line = format!("Nothing to share: {name} is already in {set}.");
             return Ok(BorrowOutcome::Joined);
         }
-        if matches!(shown, SlotShown::Borrowed {item: current, from} if current == item && same_id(from, &owner.id))
+        if matches!(shown, SlotShown::Borrowed {item: current, from} if current == item && same_id(from, &owner))
         {
-            self.status_line = format!("{set} already shares {name} from {}.", owner.id);
+            self.status_line = format!("{set} already shares {name} from {owner}.");
             return Ok(BorrowOutcome::Joined);
         }
         if let Some(why) = slot_conflict(&target.slots.keys().copied().collect::<Vec<_>>(), kind) {
@@ -3673,11 +3700,13 @@ impl AppModel {
         };
         if confirmed.is_none() {
             if let Some(existing) = BorrowOccupant::from_shown(shown) {
-                if let Err(why) = self.choice_allowed(item, &target, Some(kind), DropChoice::Share)
+                if let Err(why) = self
+                    .choice_allowed(item, &target, Some(kind), DropChoice::Share)
+                    .and_then(|()| share_keeps_member(&target, raw.as_ref()))
                 {
                     return Ok(BorrowOutcome::Refused(why));
                 }
-                return Ok(BorrowOutcome::AskReplace { existing });
+                return Ok(BorrowOutcome::AskReplace { kind, existing });
             }
         }
         Ok(
@@ -3915,15 +3944,7 @@ impl AppModel {
                 Ok(())
             }
             DropChoice::Share => {
-                // Sharing adds no member: a set whose only texture leaves would vanish from the engine's sets.
-                if matches!(&existing, Some(SlotFill::Own { .. }))
-                    && target.members.len() == 1
-                    && !target.created
-                {
-                    return Err(format!(
-                        "{id} would have no texture of its own left; move another texture in first"
-                    ));
-                }
+                share_keeps_member(target, existing.as_ref())?;
                 let fid = self.set_of_item(item).map(|f| f.id).unwrap_or_default();
                 let n = slot.and_then(SlotKind::slot_number).unwrap_or_default();
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {

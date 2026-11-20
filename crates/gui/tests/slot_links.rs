@@ -197,7 +197,7 @@ fn a_borrow_replace_refuses_when_the_same_file_becomes_owned() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, _) = shared_through_moss(d.path());
     let pending = m.drop_borrow(INCOMING, LEAF, MOSS);
-    let Ok(BorrowOutcome::AskReplace { existing }) = pending else {
+    let Ok(BorrowOutcome::AskReplace { kind, existing }) = pending else {
         panic!("expected Replace: {pending:?}")
     };
     assert_eq!(
@@ -228,7 +228,7 @@ fn a_borrow_replace_refuses_when_the_same_file_becomes_owned() {
     let before = state(&m);
     let why = "The destination slot changed. Drag the chip again.";
     assert_eq!(
-        m.replace_borrow(INCOMING, LEAF, MOSS, &existing),
+        m.replace_borrow(INCOMING, LEAF, MOSS, kind, &existing),
         Err(why.into())
     );
     assert_eq!(m.status_line, why);

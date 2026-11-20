@@ -214,6 +214,7 @@ fn a_shared_chip_dropped_on_a_filled_slot_opens_replace_as_a_share() {
             item: normal.clone(),
             from: ROCK.into(),
             set: other.clone(),
+            kind: SlotKind::Normal,
             existing: BorrowOccupant::Own { item: copy.clone() }
         })
     );
@@ -266,6 +267,96 @@ fn a_borrow_dropped_on_a_locked_card_opens_the_refusal() {
 }
 
 #[test]
+fn replacing_before_the_source_move_lands_keeps_both_documents_and_undo() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, leaf, normal, other, copy) = filled_normal(d.path());
+    let mut h = harness(m);
+    h.run();
+    drag_normal(&mut h, &leaf, &other, egui::Modifiers::NONE);
+    assert!(matches!(
+        h.state().1.drops.pending,
+        Some(Pending::BorrowReplace { .. })
+    ));
+    h.state_mut()
+        .0
+        .edit_docs("Move the source", None, true, |_, s| {
+            s.create_set("landscape/new_lender");
+            s.add_member("landscape/new_lender", &normal);
+        });
+    let before = documents(&h.state().0);
+    let name = h.state().0.item(&copy).unwrap().name.clone();
+    h.get_by_role_and_label(Role::Button, &format!("Replace {name}"))
+        .click();
+    h.run();
+    assert_eq!(h.state().1.drops.pending, None);
+    let m = &mut h.state_mut().0;
+    assert!(m.full_plan_pending(), "the harness has not polled the move");
+    assert_eq!(
+        (m.status_line.as_str(), documents(m)),
+        (
+            "The shared source changed. Drag the chip again.",
+            before.clone()
+        )
+    );
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &other),
+        Err("The shared source changed. Drag the chip again.".into())
+    );
+    assert_eq!(documents(m), before);
+}
+
+#[test]
+fn retyping_the_shared_normal_to_height_while_replace_is_open_keeps_both_slots() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, leaf, normal) = leaf_borrows_normal(d.path());
+    let dest = "landscape/record";
+    let path = "textures/black.dds";
+    let map = sdc_gui::sets_doc::TxstMap {
+        plugin: "a.esp".into(),
+        formid: "1".into(),
+        edid: "E".into(),
+        slots: [(2, path.into()), (4, path.into())].into(),
+        base: None,
+    };
+    m.edit_docs("Set up record slots", None, true, |_, s| {
+        s.create_set(dest);
+        s.set_txst(dest, Some(&map));
+    });
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    drag_normal(&mut h, &leaf, dest, egui::Modifiers::NONE);
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::BorrowReplace {
+        existing: BorrowOccupant::Record { path: old }, ..
+    }) if old == path)
+    );
+    h.state_mut()
+        .0
+        .set_field(&normal, "subtype", serde_json::json!("height"));
+    idle(&mut h.state_mut().0);
+    let cards = set_views(&h.state().0);
+    let owner = cards.iter().find(|v| v.id == ROCK).unwrap();
+    assert_eq!(
+        slot_shown(owner, SlotKind::Height),
+        SlotShown::Own { item: &normal }
+    );
+    let card = cards.iter().find(|v| v.id == dest).unwrap();
+    for kind in [SlotKind::Normal, SlotKind::Height] {
+        assert_eq!(slot_shown(card, kind), SlotShown::Record { path });
+    }
+    let before = documents(&h.state().0);
+    h.get_by_role_and_label(Role::Button, &format!("Replace {path}"))
+        .click();
+    h.run();
+    assert_eq!(h.state().1.drops.pending, None);
+    assert_eq!(
+        (h.state().0.status_line.as_str(), documents(&h.state().0)),
+        ("The destination slot changed. Drag the chip again.", before)
+    );
+}
+
+#[test]
 fn a_borrow_replace_click_refuses_a_now_owned_file() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, leaf, normal, other, copy) = filled_normal(d.path());
@@ -284,6 +375,7 @@ fn a_borrow_replace_click_refuses_a_now_owned_file() {
             item: normal,
             from: ROCK.into(),
             set: recipient.into(),
+            kind: SlotKind::Normal,
             existing: BorrowOccupant::Borrowed {
                 item: copy.clone(),
                 from: other

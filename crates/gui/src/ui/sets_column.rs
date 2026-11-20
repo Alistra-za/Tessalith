@@ -83,6 +83,7 @@ pub enum Pending {
         item: String,
         from: String,
         set: String,
+        kind: SlotKind,
         existing: BorrowOccupant,
     },
     Refused(String),
@@ -2068,11 +2069,12 @@ pub fn draw(
                 DropOutcome::Refused(why) => st.pending = Some(Pending::Refused(why)),
             },
             Act::ShareBorrow { item, from, set } => match model.drop_borrow(&item, &from, &set) {
-                Ok(BorrowOutcome::AskReplace { existing }) => {
+                Ok(BorrowOutcome::AskReplace { kind, existing }) => {
                     st.pending = Some(Pending::BorrowReplace {
                         item,
                         from,
                         set,
+                        kind,
                         existing,
                     })
                 }
@@ -3517,10 +3519,11 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
                 item,
                 from,
                 set,
+                kind,
                 existing,
             },
         ) => {
-            let _ = model.replace_borrow(&item, &from, &set, &existing);
+            let _ = model.replace_borrow(&item, &from, &set, kind, &existing);
             None
         }
         _ => None,

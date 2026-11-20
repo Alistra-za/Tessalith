@@ -192,6 +192,7 @@ fn a_borrow_dropped_on_a_filled_slot_asks_to_replace() {
     assert_eq!(
         m.drop_borrow(&normal, ROCK, &other),
         Ok(BorrowOutcome::AskReplace {
+            kind: SlotKind::Normal,
             existing: BorrowOccupant::Own { item: copy }
         })
     );
@@ -869,6 +870,37 @@ fn sharing_away_the_only_texture_of_an_automatic_set_is_refused() {
     assert!(m
         .drop_replace(&rock, "landscape/leaf", DropChoice::Share)
         .is_err());
+    m.edit_docs("Share the albedo", None, true, |_, s| {
+        s.create_set("landscape/shared");
+        s.set_borrow("landscape/shared", 1, Some(ROCK));
+    });
+    idle(&mut m);
+    let cards = set_views(&m);
+    let SlotShown::Borrowed { item, from } =
+        slot_shown(view(&cards, "landscape/shared"), SlotKind::Diffuse)
+    else {
+        panic!("the chip shares the rock albedo")
+    };
+    let leaf = view(&cards, "landscape/leaf");
+    assert!(!leaf.created && leaf.members.len() == 1);
+    assert_eq!(
+        slot_shown(leaf, SlotKind::Diffuse),
+        SlotShown::Own {
+            item: &leaf.members[0]
+        }
+    );
+    let before = (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len());
+    assert_eq!(
+        m.drop_borrow(item, from, &leaf.id),
+        Ok(BorrowOutcome::Refused(
+            "landscape/leaf would have no texture of its own left; move another texture in first"
+                .into()
+        ))
+    );
+    assert_eq!(
+        (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len()),
+        before
+    );
 }
 
 #[test]
@@ -1763,6 +1795,21 @@ fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
         view(&views, "landscape/leaf").slots.get(&SlotKind::Normal),
         Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
     ));
+    let SlotShown::Borrowed { from, item } =
+        slot_shown(view(&views, "landscape/leaf"), SlotKind::Normal)
+    else {
+        panic!("leaf shows the lender's own normal")
+    };
+    assert_eq!(
+        m.drop_borrow(item, from, "landscape/odd"),
+        Ok(BorrowOutcome::Joined)
+    );
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, "landscape/odd", 2).as_deref(), Some(from));
+    assert_eq!(
+        slot_shown(view(&set_views(&m), "landscape/odd"), SlotKind::Normal),
+        SlotShown::Borrowed { from, item }
+    );
 }
 
 /// Final wave Group 2 (review Important 3, Q5 b): rock01 owns a normal and borrows rock02's into its Normal slot, and

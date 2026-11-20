@@ -941,6 +941,8 @@ pub struct AppModel {
     close_ready: bool,
     /// The engine inputs the latest plan was requested with (DECISIONS P1: two-pass planning).
     last_inputs: Option<EngineInputs>,
+    /// Membership edits applied to the sets on screen. A newer request can still be in flight.
+    landed_membership: Vec<engine::sets::SetEdit>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
     /// A cleanup waiting for the plan that shows its new defaults (the note is written then).
@@ -1213,6 +1215,7 @@ impl AppModel {
             fuzz_note: None,
             missing_preset_id: None,
             last_inputs: None,
+            landed_membership: Vec::new(),
             auto_replans: 0,
             type_pending: None,
             type_base: None,
@@ -1272,6 +1275,7 @@ impl AppModel {
         self.export_after_plan = false;
         self.continue_after_plan = None;
         self.last_inputs = None;
+        self.landed_membership.clear();
         self.slot_paths.clear();
         self.pending_slot_paths.clear();
         self.inputs_rev += 1;
@@ -2024,6 +2028,9 @@ impl AppModel {
                         // Note FC14: the edit planned fine; a later failure is not its fault.
                         self.replan_pushes.1 = None;
                         self.landed_sig = Some(self.plan_sig.1);
+                        if let Some(inputs) = &self.last_inputs {
+                            self.landed_membership.clone_from(&inputs.set_edits);
+                        }
                         self.apply_plan(view)
                     }
                     Err(f) => self.plan_failed(f),

@@ -1065,6 +1065,71 @@ fn record_only_normal(dir: &Path) -> AppModel {
 }
 
 #[test]
+fn a_record_fuzz_chip_cannot_lend_coat_from_the_same_numbered_slot() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    const FUZZ: &str = "textures/v/b_f.png";
+    const COAT: &str = "textures/v/b_cnr.png";
+    const DEST: &str = "textures/v/drop";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), &[FUZZ, COAT, "textures/v/a.png"], "");
+    m.decide(FUZZ, Answer::Subtype(Subtype::PbrFuzz));
+    m.decide(COAT, Answer::Subtype(Subtype::CoatNormal));
+    idle(&mut m);
+    let path = m.item(FUZZ).unwrap().job_key.clone();
+    m.edit_docs("Read the fuzz by path", None, true, |_, s| {
+        s.set_txst(RECORD_DEST, Some(&record(&[(7, &path)])));
+        s.create_set(DEST);
+    });
+    idle(&mut m);
+    let owner = view(&m, LENDER);
+    assert_eq!(
+        slot_shown(&owner, SlotKind::Coat),
+        SlotShown::Own { item: COAT }
+    );
+    assert_eq!(
+        slot_shown(&owner, SlotKind::Fuzz),
+        SlotShown::Own { item: FUZZ }
+    );
+    let card = view(&m, RECORD_DEST);
+    let chip = slot_shown(&card, SlotKind::Fuzz);
+    assert_eq!(
+        chip,
+        SlotShown::Borrowed {
+            item: FUZZ,
+            from: LENDER
+        }
+    );
+    let SlotShown::Borrowed { item, from } = chip else {
+        unreachable!()
+    };
+    let before = (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len());
+    assert_eq!(
+        m.drop_borrow(item, from, DEST),
+        Ok(BorrowOutcome::Refused(
+            "The shared source changed. Drag the chip again.".into()
+        ))
+    );
+    assert_eq!(
+        (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len()),
+        before
+    );
+    assert_eq!(m.drop_borrow(COAT, LENDER, DEST), Ok(BorrowOutcome::Joined));
+    idle(&mut m);
+    assert_eq!(
+        entry(&m, DEST).borrow.get(&7).map(String::as_str),
+        Some(LENDER)
+    );
+    assert_eq!(
+        slot_shown(&view(&m, DEST), SlotKind::Coat),
+        SlotShown::Borrowed {
+            item: COAT,
+            from: LENDER
+        }
+    );
+}
+
+#[test]
 fn a_borrow_asks_before_replacing_a_record_only_normal() {
     let d = tempfile::tempdir().unwrap();
     let mut m = record_only_normal(d.path());
@@ -1082,6 +1147,7 @@ fn a_borrow_asks_before_replacing_a_record_only_normal() {
         assert_eq!(
             m.drop_borrow(LENT_NORMAL, LENDER, RECORD_DEST),
             Ok(BorrowOutcome::AskReplace {
+                kind: SlotKind::Normal,
                 existing: existing.clone()
             })
         )
@@ -1096,8 +1162,14 @@ fn a_borrow_asks_before_replacing_a_record_only_normal() {
             path: RECORD_NORMAL
         }
     );
-    m.replace_borrow(LENT_NORMAL, LENDER, RECORD_DEST, &existing)
-        .unwrap();
+    m.replace_borrow(
+        LENT_NORMAL,
+        LENDER,
+        RECORD_DEST,
+        SlotKind::Normal,
+        &existing,
+    )
+    .unwrap();
     idle(&mut m);
     assert_eq!(
         slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
@@ -1145,7 +1217,13 @@ fn a_borrow_asks_before_replacing_a_record_only_normal() {
     let after = docs(&m);
     let why = format!("{RECORD_DEST}'s Normal _n is linked to {path}: Unlink it first.");
     assert_eq!(
-        m.replace_borrow(LENT_NORMAL, LENDER, RECORD_DEST, &existing),
+        m.replace_borrow(
+            LENT_NORMAL,
+            LENDER,
+            RECORD_DEST,
+            SlotKind::Normal,
+            &existing
+        ),
         Err(why.clone())
     );
     assert_eq!(m.status_line, why);
