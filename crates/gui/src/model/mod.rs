@@ -891,8 +891,11 @@ pub struct AppModel {
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
     /// Item 22: per-item DDS sizes by plan revision.
     pub sizes: out_size::SizeCache,
-    /// A note kept in front of the status line until the next Export click (an Export cancelled by an edit, AF4).
+    /// A note in front of the counts: the step after open, or an Export cancelled by an edit (AF4).
     pub status_note: Option<String>,
+    next_step_pending: bool,
+    /// The next replan retires only the sentence this open published.
+    shown_next_step: Option<String>,
     /// "Undid: <label>" / "Redid: <label>" in front of the status line until the next edit (item 2).
     undo_note: Option<String>,
     /// When the note was set, and whether a plan has shown it: it goes with the next plan after that, or after 5 s.
@@ -1276,6 +1279,8 @@ impl AppModel {
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
             status_note: None,
+            next_step_pending: false,
+            shown_next_step: None,
             undo_note: None,
             undo_note_at: None,
             dropped_fills: Default::default(),
@@ -1388,6 +1393,7 @@ impl AppModel {
     }
 
     pub fn open_folder(&mut self, root: PathBuf) {
+        self.next_step_pending = true;
         self.open_cancelled = false;
         // Whatever was pending for the previous folder no longer applies (spec §8).
         self.after_export = None;
@@ -1858,6 +1864,9 @@ impl AppModel {
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
     /// partial plan first (`send_partial`).
     fn replan_with(&mut self, files_edit: bool) {
+        if let Some(shown) = self.shown_next_step.take() {
+            self.status_note.take_if(|note| *note == shown);
+        }
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
@@ -2070,6 +2079,7 @@ impl AppModel {
                 self.open_cancelled = true;
             }
         }
+        self.next_step_pending = false;
         // E3: the previous project's plan state is back; its answer is the settled one.
         if !self.full_plan_pending() {
             self.hold_settled();
@@ -2329,6 +2339,7 @@ impl AppModel {
     /// out-of-range value), ignore `sdc.toml` as for a parse error (spec §7.4): read-only, banner, and plan the
     /// folder again without it. Any other failure (or a config error with `sdc.toml` already ignored) is a dialog.
     fn plan_failed(&mut self, f: PlanFailure) {
+        self.next_step_pending = false;
         self.export_after_plan = false;
         self.disarm_write();
         self.continue_after_plan = None;
@@ -3678,6 +3689,29 @@ impl AppModel {
         self.refresh_mesh_votes(true);
     }
 
+    /// What to do first when this folder's opening plans have settled.
+    pub fn next_step_text(&self) -> Option<String> {
+        self.root.as_ref()?;
+        let undecided = self.undecided();
+        if undecided > 0 {
+            let who = code_text::counted(undecided, "texture needs", "textures need");
+            return Some(format!("{who} a type: start with Undecided."));
+        }
+        if self.has_problem_rows() {
+            let rows = code_text::counted(bottom::flagged(self).ready_rows, "problem", "problems");
+            return Some(format!("{rows} to look at: open Problems."));
+        }
+        if self.export_folder_ref().is_none() {
+            return Some("Next: choose where to export (Export to ▾).".into());
+        }
+        let tail = if self.header_writes_now() {
+            "writes them."
+        } else {
+            "shows what will be written."
+        };
+        Some(format!("Ready: {} {tail}", self.header_export_text()))
+    }
+
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.
     fn counts_status(&mut self) {
         self.status_line = self.status_line_counts();
@@ -3822,6 +3856,11 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
+        if std::mem::take(&mut self.next_step_pending) {
+            self.status_note = self.next_step_text();
+            self.shown_next_step.clone_from(&self.status_note);
+            self.counts_status();
+        }
         // E3: this is the plan that really settles (every re-plan above returned early).
         self.deliver_queued(false);
     }

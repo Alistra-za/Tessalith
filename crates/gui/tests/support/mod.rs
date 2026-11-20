@@ -256,6 +256,12 @@ pub fn write_auto_decidable(dir: &Path) {
     colour(&dir.join("textures/other_unknown.png"), 90);
 }
 
+pub fn write_undecided_pngs(dir: &Path, n: usize) {
+    for i in 0..n {
+        colour(&dir.join(format!("textures/mystery_{i}.png")), i as u8);
+    }
+}
+
 pub fn auto_project(dir: &Path) -> AppModel {
     write_auto_decidable(dir);
     let mut m = AppModel::new(GuiSettings::default(), None, session());

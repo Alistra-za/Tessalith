@@ -309,6 +309,8 @@ mod slot_lock;
 mod slot_menu;
 #[path = "../slot_menu_ui.rs"]
 mod slot_menu_ui;
+#[path = "../start_shell.rs"]
+mod start_shell;
 #[path = "../subsurface_mode.rs"]
 mod subsurface_mode;
 #[path = "../subtype_hints.rs"]

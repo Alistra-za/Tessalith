@@ -1026,7 +1026,6 @@ fn no_line_when_there_is_nothing_to_write() {
 }
 
 #[test]
-#[ignore = "Task 11"]
 fn the_new_project_line_and_the_next_step_both_read_at_1100_px() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness_sized(support::auto_project(d.path()), egui::vec2(1100.0, 800.0));
@@ -1035,8 +1034,8 @@ fn the_new_project_line_and_the_next_step_both_read_at_1100_px() {
         .get_by_label_contains("New project: nothing saved yet.")
         .rect();
     let next = h
-        .get_by_label_contains("a type: start with Undecided.")
-        .rect(); // Task 11: "1 texture needs a type: …"
+        .get_by_label_contains("1 texture needs a type: start with Undecided.")
+        .rect();
     assert!(!line.intersects(next), "{line:?} {next:?}");
     for r in [line, next] {
         assert!(r.max.x <= 1100.0 && r.min.x >= 0.0, "{r:?} is cut");
