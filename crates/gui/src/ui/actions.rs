@@ -632,9 +632,25 @@ pub(crate) fn focused_at_start(ctx: &egui::Context) -> bool {
 
 /// Run action `id` (the palette's pick).
 pub fn run(id: &str, model: &mut AppModel, ctx: &egui::Context) {
-    if let Some(f) = action(id).and_then(|a| a.run) {
-        f(model, ctx);
+    if let Some(a) = action(id) {
+        dispatch(a, model, ctx);
     }
+}
+
+fn messages_block(ctx: &egui::Context, model: &AppModel) -> Option<&'static str> {
+    (!super::edit_controls_visible(ctx, model))
+        .then_some("Open a texture folder or edit a NIF in Meshes to see Messages.")
+}
+
+fn dispatch(a: &Action, model: &mut AppModel, ctx: &egui::Context) -> Option<&'static str> {
+    if a.id == "messages" {
+        if let Some(why) = messages_block(ctx, model) {
+            model.status_line = why.into();
+            return None;
+        }
+    }
+    (a.run?)(model, ctx);
+    Some(a.id)
 }
 
 /// The keys of this frame. Called first thing in the frame, before any widget has seen the input: Ctrl+K must not
@@ -702,8 +718,7 @@ pub fn keys(ctx: &egui::Context, model: &mut AppModel, set_modal: bool) -> Optio
     if !on {
         return None;
     }
-    (a.run?)(model, ctx);
-    Some(a.id)
+    dispatch(a, model, ctx)
 }
 
 /// Keeps every enabled pair, and a disabled pair only when an enabled one shares its key (it eats the key, trace #7)
@@ -782,6 +797,7 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
     };
     let meshes = super::header::meshes_view_active(ctx);
     let offered = palette_actions(model, meshes, ctx);
+    let messages_block = messages_block(ctx, model);
     let mut chosen = None;
     let k = super::dialogs::modal_keys(ctx, "palette", true, false, |ui| {
         ui.set_min_width(420.0);
@@ -847,7 +863,13 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
                 for i in range {
                     let h = &hits[i];
                     let text = format!("{}   {}", h.label, h.detail);
-                    let r = ui.selectable_label(active && i == p.sel, text);
+                    let selected = active && i == p.sel;
+                    let r = match (h.pick == Pick::Action("messages"), messages_block) {
+                        (true, Some(why)) => ui
+                            .add_enabled(false, egui::Button::selectable(selected, text))
+                            .on_disabled_hover_text(why),
+                        _ => ui.selectable_label(selected, text),
+                    };
                     if active && i == p.sel && (up || down) {
                         r.scroll_to_me(None);
                     }
@@ -859,7 +881,8 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
         if enter && active {
             chosen = chosen
                 .take()
-                .or_else(|| hits.get(p.sel).map(|h| h.pick.clone()));
+                .or_else(|| hits.get(p.sel).map(|h| h.pick.clone()))
+                .filter(|pick| *pick != Pick::Action("messages") || messages_block.is_none());
         }
     });
     if k.cancel {

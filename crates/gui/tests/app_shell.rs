@@ -4,10 +4,13 @@ mod app_harness;
 mod manifest;
 mod support;
 
-use egui_kittest::kittest::Queryable;
+use eframe::egui::{Key, Modifiers};
+use egui_kittest::kittest::{NodeT, Queryable};
 use sdc_gui::{model::AppModel, ui::header};
 use std::sync::OnceLock;
 use tempfile::TempDir;
+
+const BANNER_OPEN: &str = "Open a texture folder from the Meshes banner";
 
 fn model() -> AppModel {
     static DATA: OnceLock<TempDir> = OnceLock::new();
@@ -84,14 +87,23 @@ fn the_meshes_view_with_no_project_keeps_its_list_and_a_banner() {
     h.get_by_label(
         "No project open. This list is your MO2 instance; open a folder to edit its textures.",
     );
-    h.get_by_label("Open folder…");
     no_edit_controls(&h);
+    h.get_by_label("Open").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.query_all_by_label("Open folder…").count(),
+        1,
+        "only the open menu item should have the plain name"
+    );
+    h.get_by_label(BANNER_OPEN);
+    h.key_press(Key::Escape);
+    h.run_steps(2);
     let dir = tempfile::tempdir().unwrap();
     h.state()
         .model
         .picker
         .set_backend(std::sync::Arc::new(Folder(dir.path().to_owned())));
-    h.get_by_label("Open folder…").click();
+    h.get_by_label(BANNER_OPEN).click();
     h.run_steps(2);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while h.state().model.picker.busy() {
@@ -104,6 +116,7 @@ fn the_meshes_view_with_no_project_keeps_its_list_and_a_banner() {
     assert!(app_harness::settle(&mut h, 3));
     assert_eq!(h.state().model.root.as_deref(), Some(dir.path()));
     assert!(h.query_by_label("Open folder…").is_none());
+    assert!(h.query_by_label(BANNER_OPEN).is_none());
 }
 
 #[test]
@@ -127,4 +140,72 @@ fn a_no_project_files_tab_stays_hidden_even_when_saved_open() {
         "the Files tab is visible"
     );
     assert!(h.query_by_label("Open export folder").is_none());
+}
+
+const MESSAGES_REASON: &str = "Open a texture folder or edit a NIF in Meshes to see Messages.";
+
+#[test]
+fn a_hidden_messages_tab_stops_reading_new_entries() {
+    let mut m = model();
+    m.show_tab(sdc_gui::model::bottom::BottomTab::Messages);
+    assert!(m.messages.is_open());
+    let mut h = app_harness::plain_harness(m);
+    assert!(h.query_by_label("Messages").is_none());
+    let m = &mut h.state_mut().model;
+    let unread = m.messages.unread();
+    m.messages
+        .log(sdc_gui::model::messages::Severity::Warning, "New entry");
+    assert_eq!(m.messages.unread(), unread + 1);
+}
+
+fn start_card_with_unread_message() -> app_harness::H {
+    let mut h = app_harness::restored_harness(model());
+    h.state_mut().model.messages.clear();
+    h.state_mut().model.messages.log(
+        sdc_gui::model::messages::Severity::Warning,
+        "Folder could not be opened",
+    );
+    h
+}
+
+#[test]
+fn hidden_messages_shortcut_keeps_the_entry_unread() {
+    let mut h = start_card_with_unread_message();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    h.run_steps(2);
+    let m = &h.state().model;
+    assert_eq!(m.messages.unread(), 1, "Ctrl+M read an unseen entry");
+    assert!(!m.messages.is_open() && !m.bottom.open);
+    h.get_by_label(MESSAGES_REASON);
+}
+
+#[test]
+fn hidden_messages_palette_click_keeps_the_entry_unread() {
+    let mut h = start_card_with_unread_message();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.run_steps(2);
+    h.state_mut().model.nav.palette.as_mut().unwrap().query = "Messages".into();
+    h.run_steps(2);
+    let row = "Messages   Ctrl+M";
+    h.get_by_label(row).click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().model.messages.unread(),
+        1,
+        "the palette read an unseen entry"
+    );
+    assert!(h.get_by_label(row).accesskit_node().is_disabled());
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.get_by_label(row).hover();
+    h.run_steps(4);
+    h.get_by_label(MESSAGES_REASON);
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+    let m = &h.state().model;
+    assert_eq!(m.messages.unread(), 1);
+    assert!(!m.messages.is_open() && !m.bottom.open);
+    assert!(m.nav.palette.is_some());
 }

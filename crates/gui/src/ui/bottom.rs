@@ -59,6 +59,9 @@ pub fn draw(
     nif_preview: bool,
 ) {
     if !super::edit_controls_visible(ui.ctx(), model) {
+        if model.messages.is_open() {
+            model.collapse_bottom();
+        }
         problems::forget_focus(ui.ctx());
         ui.skip_ahead_auto_ids(1);
         return;

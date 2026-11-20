@@ -409,7 +409,11 @@ pub fn no_project_banner(ui: &mut egui::Ui, model: &mut AppModel) {
     panel_ids::top(ui, "no-project-banner").show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label("No project open. This list is your MO2 instance; open a folder to edit its textures.");
-            if crate::model::picker::button(ui, &model.picker, egui::Button::new("Open folder…")) {
+            let open = ui.add_enabled(!model.picker.busy(), egui::Button::new("Open folder…"));
+            if name_input(open, "Open a texture folder from the Meshes banner")
+                .on_disabled_hover_text(crate::model::picker::BUSY_HOVER)
+                .clicked()
+            {
                 model.pick(ui.ctx(), PickerPurpose::OpenFolder, model.open_folder_spec());
             }
         });

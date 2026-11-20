@@ -45,8 +45,20 @@ fn open_startup_folder(
     args: impl IntoIterator<Item = std::ffi::OsString>,
     reopen: Option<Option<std::path::PathBuf>>,
 ) {
-    if let Some(folder) = sdc_gui::crash_log::folder_arg(args).or_else(|| reopen.flatten()) {
-        model.open_folder(folder);
+    use sdc_gui::crash_log::{checked_folder, folder_arg};
+    let folder = match folder_arg(args) {
+        Ok(None) => reopen.flatten().map(checked_folder).transpose(),
+        explicit => explicit,
+    };
+    match folder {
+        Ok(Some(path)) => model.open_folder(path),
+        Ok(None) => {}
+        Err(message) => {
+            model
+                .messages
+                .log(sdc_gui::model::messages::Severity::Error, &message);
+            model.status_line = message;
+        }
     }
 }
 
@@ -109,6 +121,74 @@ mod tests {
     use super::*;
     use sdc_gui::crash_log::after_device_loss_folder;
 
+    fn bad_folder(path: &std::path::Path) {
+        let reason = std::fs::read_dir(path).unwrap_err().to_string();
+        let mut model = AppModel::placeholder(settings::GuiSettings::default());
+        open_startup_folder(&mut model, [path.as_os_str().to_owned()], None);
+        assert!(model.root.is_none(), "the start card needs an empty root");
+        assert!(model.settings.recent.is_empty());
+        assert!(
+            model.status_line.contains(&path.display().to_string())
+                && model.status_line.contains(&reason),
+            "missing path or OS reason in status: {:?}",
+            model.status_line
+        );
+        assert!(model
+            .messages
+            .entries()
+            .any(|e| e.text == model.status_line));
+    }
+
+    #[test]
+    fn folder_arg_reports_a_missing_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        bad_folder(&dir.path().join("missing"));
+    }
+
+    #[test]
+    fn folder_arg_reports_a_regular_file() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        bad_folder(file.path());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn folder_arg_reports_an_unlistable_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let acl = |args: &[&str]| {
+            assert!(std::process::Command::new("icacls")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        acl(&["/deny", "*S-1-1-0:(RD)"]);
+        let check = std::panic::catch_unwind(|| {
+            assert!(dir.path().is_dir());
+            bad_folder(dir.path());
+        });
+        acl(&["/remove:d", "*S-1-1-0"]);
+        if let Err(panic) = check {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn folder_arg_stores_dot_as_an_absolute_recent_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let saved = dir.path().join("gui.toml");
+        let mut model = AppModel::placeholder(settings::GuiSettings::default());
+        model.settings_path = Some(saved.clone());
+        open_startup_folder(&mut model, [".".into()], None);
+        assert_eq!(
+            settings::GuiSettings::load(&saved).0.recent,
+            [std::env::current_dir().unwrap()]
+        );
+        assert_eq!(model.settings.recent, [std::env::current_dir().unwrap()]);
+    }
+
     #[test]
     fn folder_arg_wins_in_both_orders_and_a_bare_restart_stays_a_restart() {
         let a = tempfile::tempdir().unwrap();
@@ -138,6 +218,7 @@ mod tests {
             check(&args, true, Some(a.path()));
         }
         check(&[explicit], false, Some(a.path()));
+        check(&[], false, None);
         check(&sdc_gui::crash_log::relaunch_args(None), true, None);
         check(
             &sdc_gui::crash_log::relaunch_args(Some(b.path())),

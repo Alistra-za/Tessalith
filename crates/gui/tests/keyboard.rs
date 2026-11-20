@@ -78,7 +78,10 @@ fn the_action_table_has_unique_ids_and_shortcuts() {
 
 #[test]
 fn every_shortcut_runs_its_action() {
-    let mut h = keys_only(AppModel::placeholder(GuiSettings::default()));
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.open_folder(dir.path().to_owned());
+    let mut h = keys_only(m);
     let mut checked = 0;
     for a in actions() {
         if a.run.is_none() {

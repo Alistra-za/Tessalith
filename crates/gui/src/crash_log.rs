@@ -121,20 +121,37 @@ pub fn after_device_loss_folder(
     None
 }
 
-/// The first positional folder, excluding the device-loss restart's own argument.
-pub fn folder_arg(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
+/// Check the same access the planner needs before the folder goes into Recent.
+pub fn checked_folder(path: PathBuf) -> Result<PathBuf, String> {
+    std::path::absolute(&path)
+        .and_then(|absolute| {
+            std::fs::read_dir(&absolute)?.next().transpose()?;
+            // Windows grants listing entries and reading folder attributes separately.
+            std::fs::metadata(&absolute)?;
+            Ok(absolute)
+        })
+        .map_err(|e| format!("Could not open {}. {e}", path.display()))
+}
+
+/// The first usable positional folder, or why the first candidate failed.
+pub fn folder_arg(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Option<PathBuf>, String> {
     let mut args = args.into_iter();
+    let mut first_error = None;
     while let Some(arg) = args.next() {
         if arg == "--after-device-loss" {
             args.next();
         } else if !arg.as_encoded_bytes().starts_with(b"-") {
-            let path = PathBuf::from(arg);
-            if path.is_dir() {
-                return Some(path);
+            match checked_folder(arg.into()) {
+                Ok(folder) => return Ok(Some(folder)),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
             }
         }
     }
-    None
+    first_error.map_or(Ok(None), Err)
 }
 
 /// Note FC4 (DN3): the arguments the restarted process gets, so it reopens the folder and FB5's restore runs.
@@ -417,8 +434,9 @@ mod tests {
             a.path().as_os_str().to_owned(),
             b.path().as_os_str().to_owned(),
         ];
-        assert_eq!(folder_arg(args), Some(a.path().to_path_buf()));
-        assert_eq!(folder_arg(["C:\\no\\such\\folder".into()]), None);
+        assert_eq!(folder_arg(args).unwrap(), Some(a.path().to_path_buf()));
+        let missing = a.path().join("missing");
+        assert!(folder_arg([missing.into_os_string()]).is_err());
     }
 
     #[test]
@@ -429,7 +447,7 @@ mod tests {
             d.path().as_os_str().to_owned(),
         ];
         assert_eq!(
-            folder_arg(args),
+            folder_arg(args).unwrap(),
             None,
             "that folder is reopened by the device-loss path"
         );

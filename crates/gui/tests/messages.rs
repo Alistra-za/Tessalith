@@ -148,11 +148,8 @@ fn ctrl_m_is_an_action_in_global_and_toggles_the_panel() {
     let a = actions::action("messages").expect("listed");
     assert_eq!(actions::keys_text("messages"), "Ctrl+M");
     assert_eq!(a.area, actions::Area::Global);
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
     actions::run("messages", &mut m, &egui::Context::default());
     assert!(m.bottom.open && m.messages.is_open());
     actions::run("messages", &mut m, &egui::Context::default());
