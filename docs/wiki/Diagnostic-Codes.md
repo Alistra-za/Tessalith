@@ -70,7 +70,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback, or change the sub-type or target. |
-| `CFG-INVALID` | error | A value outside its range, or a combination that can't be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope). In a config, preset or rule the file is refused outright; reached after layering, that one file fails. | Fix the value. |
+| `CFG-INVALID` | error | A value is outside its range or settings conflict (legacy header on BC7 or `_SRGB`, bad swizzle or filter scope). A config, preset or rule with an invalid value is refused. After layering, only the affected file fails. On `normal`, `landscape_normal` or `pbr_normal`, `mips.normal_base = "keep"` conflicts with BC5, RG8, BC4 or R8 even if you acknowledge `FMT-BC5-NORMAL`. <!-- D:LA1 --> | Fix the invalid value. For Keep, choose XYZ storage such as BC7, or set `mips.normal_base = "renormalize"`. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config.md#mipmaps) this texture can't use; it uses box. | Scope the filter to colour maps, or ignore. |
 | `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file. When another preset already declares its suffix aliases, the Problems row has **Remove aliases from {id}**. |

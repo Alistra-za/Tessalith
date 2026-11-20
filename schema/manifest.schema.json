@@ -617,7 +617,7 @@
         "normal_base": {
           "$ref": "#/$defs/NormalBase",
           "default": "renormalize",
-          "description": "Mip 0 of a normal map (spec §5.4, DECISIONS R1): `renormalize` (default) stores every base vector at unit\nlength; `keep` stores the source as authored. Read only for the Normal category."
+          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors. `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length. On other normal\nmaps, `keep` applies only to mip 0."
         }
       },
       "required": [

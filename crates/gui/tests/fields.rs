@@ -237,6 +237,14 @@ fn size_is_a_group_and_header_stays_in_compression() {
 }
 
 #[test]
+fn keep_help_covers_coat_and_lower_mips() {
+    let help = field_help("mips.normal_base").unwrap();
+    for detail in ["lower mips", "XYZ", "coat normals", "full-size level only"] {
+        assert!(help.contains(detail), "missing {detail:?} in {help}");
+    }
+}
+
+#[test]
 fn normal_base_level_is_a_normal_map_field() {
     let reg = PresetRegistry::builtin().unwrap();
     let n = reg.base_profile(Target::Cs, Subtype::PbrNormal);

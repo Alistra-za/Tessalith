@@ -556,8 +556,9 @@ pub struct MipSpec {
     #[serde(default, skip_serializing_if = "MipEdge::is_wrap")]
     pub edge: MipEdge,
     pub normal: NormalMips,
-    /// Mip 0 of a normal map (spec §5.4, DECISIONS R1): `renormalize` (default) stores every base vector at unit
-    /// length; `keep` stores the source as authored. Read only for the Normal category.
+    /// Normal length after resizing. `renormalize` (default) stores unit vectors. `keep` preserves mip 0 as authored.
+    /// On XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length. On other normal
+    /// maps, `keep` applies only to mip 0.
     #[serde(default = "default_normal_base")]
     pub normal_base: NormalBase,
     /// Clamp `t` of the variance bake (spec §6.2, DECISIONS Note E): the added variance is at most `t²`. 0.25;

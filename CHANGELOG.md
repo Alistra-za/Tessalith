@@ -102,6 +102,13 @@
 - Replace waits for a successful plan after a texture type changes. Undo keeps a file that replaced a duplicate with different contents while the copy was finishing.
 - Helpers no longer take a full tile on a set card. A slot shows at most two helper thumbnails. Click the **+**, with or without a number, to list the rest.
 - Clicking a thumbnail on a set card opens the set. Shift+click the thumbnail to open the texture's settings.
+- On the next encode with `mips.normal_base = "keep"`, standalone XYZ base normals and coat normals keep their average authored length in smaller mips. Baked `_rmaos` and `_rfaos` roughness, opt-in complex `_m` gloss and self-baked coat roughness respond only to variation in direction. A flat patch of short normals no longer gets rougher at mip 1. Mip 0 stays as authored.
+  - Even with BC5 acknowledged, a base normal set to Keep fails at Resolve with `CFG-INVALID` under `if-changed`. Its existing DDS and record stay in place. If it was the only eligible normal for a roughness member, the member reports `SET-MISSING-COMPANION` (Info) and loses the bake. A previously baked member rebuilds unbaked. Choose XYZ storage such as BC7, or set `mips.normal_base = "renormalize"`.
+  - Projects without `mips.normal_base = "keep"` gain nothing from re-encoding for this change. By default, `if-changed` keeps otherwise matching older outputs. To update an affected project, run the command below. The properties select whole texture types, including their default profiles.
+
+    ```text
+    sdc convert src --recursive --on-existing if-changed --ev --property normal --property landscape_normal --property pbr_normal --property coat_normal --property rmaos --property skin_rfaos --property complex_material
+    ```
 
 ## 3.0.0
 

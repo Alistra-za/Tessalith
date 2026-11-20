@@ -25,7 +25,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 
 ## Why this format and tag?
 
-- **Normals are BC7, not BC5.** Community Shaders reads the `_n` blue channel and never rebuilds Z, so a BC5 `_n` decodes with Z = -1 and loses the specular alpha. Benchmarks that favour BC5 rebuild Z, which Skyrim doesn't. BC4/BC5 on a normal map is a blocking warning.
+- **BC7 keeps the blue channel.** Skyrim reads Z from blue on a base `_n`. BC5 drops both Z and specular alpha. Benchmarks that rebuild Z from BC5 measure a different shader path. See [Formats and mips](Texture-Types.md#formats-and-mips).
 - **`_SRGB` only for TruePBR colour under `cs`.** Vanilla diffuse stores gamma-encoded colour in UNORM files, and an `_SRGB` tag darkens it in vanilla shaders, CS non-PBR paths and LOD. TruePBR expects albedo tagged `_SRGB`. `_SRGB` under a `lod` path is flagged ([the rule](Texture-Types.md#srgb-or-unorm)).
 - **BC1 alpha is opt-in.** On cutouts it lost anti-aliased edges and visible RGB quality against BC7, so the compact presets use BC1 only for colour without alpha.
 - **Small BC7 textures keep their format.** Full chains from 16 to 128 px ran in game without a crash (spike S2), so there's no fallback.
@@ -44,7 +44,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 
 ## Why renormalise normal mips?
 
-- Averaging unit normals shortens them, and the lost length is the variance the mip throws away. Unity HDRP and other engines turn it into extra GGX roughness. In a TruePBR set Tessalith does the same with a vMF fit, clamped at t = 0.25, and renormalises every level.
+- A box of unit normals has a shorter average vector when the directions differ. Unity HDRP and other engines use this loss to widen GGX roughness. Tessalith uses a vMF fit with a default clamp of 0.25. If all directions agree, even a map authored at length 0.9 adds zero roughness. The length written to the normal map follows [the profile setting](Project-Config.md#normal-length-by-output).
 - Quantisation noise alone on a flat normal map lifts roughness at lower mips, so a noise floor at L = 0.999 adds no variance (about a 2° tilt).
 
 ## Why the BC4/BC5 search?

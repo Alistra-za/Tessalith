@@ -303,16 +303,25 @@ fn a_lone_n_or_a_lone_rmaos_in_a_pbr_set_is_set_missing_companion_info() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
     rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 64);
-    let (p, _) = plan(req(d.path(), &[]));
-    for (tail, needle) in [
-        ("iron_n.png", "renormalised only"),
-        ("steel_rmaos.png", "without the variance bake"),
+    for (setting, base) in [
+        (
+            "file:**/iron_n.png.mips.normal_base=renormalize",
+            NormalBase::Renormalize,
+        ),
+        ("file:**/iron_n.png.mips.normal_base=keep", NormalBase::Keep),
     ] {
-        let j = job(&p, tail);
-        assert_eq!(set_codes(j), vec![Code::SetMissingCompanion], "{tail}");
-        let w = &j.warnings[j.warnings.len() - 1];
-        assert_eq!(w.severity, Severity::Info);
-        assert!(w.message.contains(needle), "{tail}: {}", w.message);
+        let (p, _) = plan(req(d.path(), &[setting]));
+        assert_eq!(job(&p, "iron_n.png").profile.mips.normal_base, base);
+        for (tail, needle) in [
+            ("iron_n.png", "no roughness bake"),
+            ("steel_rmaos.png", "without the variance bake"),
+        ] {
+            let j = job(&p, tail);
+            assert_eq!(set_codes(j), vec![Code::SetMissingCompanion], "{tail}");
+            let w = &j.warnings[j.warnings.len() - 1];
+            assert_eq!(w.severity, Severity::Info);
+            assert!(w.message.contains(needle), "{tail}: {}", w.message);
+        }
     }
 }
 
@@ -350,6 +359,9 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
             .find(|w| w.code == Code::SetCompanionDds)
             .unwrap();
         assert_eq!(w.severity, Severity::Warning);
+        if tail == "iron_n.png" {
+            assert!(w.message.contains("no roughness bake"), "{}", w.message);
+        }
         assert!(
             w.data["companion"].as_str().unwrap().ends_with(".dds"),
             "{tail}: {}",
@@ -357,6 +369,23 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
         );
     }
     assert!(job(&p, "steel_rmaos.png").bake.is_none());
+}
+
+#[test]
+fn a_dds_roughness_outside_the_batch_explains_the_missing_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    fake_dds(d.path(), "textures/pbr/iron_rmaos.dds");
+    let mut r = req(d.path(), &["file:**/iron_n.png.mips.normal_base=keep"]);
+    r.inputs = vec![d.path().join("in/textures/pbr/iron_n.png")];
+    let (p, _) = plan(r);
+    let w = job(&p, "iron_n.png")
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::SetCompanionDds)
+        .unwrap();
+    assert!(w.message.contains("not in this batch"), "{}", w.message);
+    assert!(w.message.contains("no roughness bake"), "{}", w.message);
 }
 
 /// Review Focus 2: converting one file of a set leaves the other on disk.
@@ -412,7 +441,7 @@ fn an_explicit_renormalize_on_the_n_opts_out() {
     assert!(!bake_flag(&ev, "textures/pbr/iron"));
 }
 
-/// M3b spec §3.3 (v1 instruction): a shared roughness renormalises only, and its borrower reports nothing missing.
+/// A shared roughness skips the bake, and its borrower reports nothing missing (DECISIONS R7).
 #[test]
 fn a_shared_roughness_is_never_baked_and_reports_nothing() {
     let d = tempfile::tempdir().unwrap();
@@ -522,7 +551,7 @@ fn a_shared_roughness_never_bakes_even_with_a_borrowed_n() {
     assert!(s.bake.is_none());
     assert!(set_codes(s).is_empty(), "{:?}", s.warnings);
     assert!(!bake_flag(&ev, "textures/pbr/steel"));
-    // The lent `_n` renormalises only, silently: its borrower's roughness is shared (R7).
+    // The lent `_n` supplies no bake and raises no warning because its borrower's roughness is shared (R7).
     let n = job(&p, "iron_n.png");
     assert_eq!(n.profile.mips.normal, NormalMips::Renormalize);
     assert!(set_codes(n).is_empty(), "{:?}", n.warnings);
