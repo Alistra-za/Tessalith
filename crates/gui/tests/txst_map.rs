@@ -1025,7 +1025,132 @@ fn render_shared_set_shots() {
 // ---- Task 5: record slots fill from the project (Note HG) ----
 
 use sdc_gui::model::bulk::MenuAction;
-use sdc_gui::model::sets::SlotFill;
+use sdc_gui::model::sets::{
+    slot_shown, BorrowOccupant, BorrowOutcome, SlotCommand, SlotFill, SlotShown,
+};
+
+const RECORD_DEST: &str = "textures/v/a";
+const LENDER: &str = "textures/v/b";
+const LENT_NORMAL: &str = "textures/v/b_normal.png";
+const RECORD_NORMAL: &str = "textures/black.dds";
+
+fn record_only_normal(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::Answer;
+    let toml = format!(
+        "[[sets]]\nid = \"{RECORD_DEST}\"\nshader = \"pbr_landscape\"\n{}",
+        txst(&[(2, RECORD_NORMAL)])
+    );
+    let mut m = project_toml(
+        dir,
+        &["textures/v/a.png", "textures/v/b.png", LENT_NORMAL],
+        &toml,
+    );
+    m.decide(LENT_NORMAL, Answer::Subtype(Subtype::PbrNormal));
+    m.decide(LENT_NORMAL, Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    assert_eq!(
+        slot_shown(&view(&m, LENDER), SlotKind::Normal),
+        SlotShown::Own { item: LENT_NORMAL }
+    );
+    let dest = view(&m, RECORD_DEST);
+    assert!(!dest.slots.contains_key(&SlotKind::Normal));
+    assert_eq!(
+        slot_shown(&dest, SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    m
+}
+
+#[test]
+fn a_borrow_asks_before_replacing_a_record_only_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = record_only_normal(d.path());
+    let docs = |m: &AppModel| {
+        (
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len(),
+        )
+    };
+    let existing = BorrowOccupant::Record {
+        path: RECORD_NORMAL.into(),
+    };
+    let ask = |m: &mut AppModel| {
+        assert_eq!(
+            m.drop_borrow(LENT_NORMAL, LENDER, RECORD_DEST),
+            Ok(BorrowOutcome::AskReplace {
+                existing: existing.clone()
+            })
+        )
+    };
+    let before = docs(&m);
+    let mapping = entry(&m, RECORD_DEST).txst;
+    ask(&mut m);
+    assert_eq!(docs(&m), before);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    m.replace_borrow(LENT_NORMAL, LENDER, RECORD_DEST, &existing)
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Borrowed {
+            item: LENT_NORMAL,
+            from: LENDER
+        }
+    );
+    let dest = entry(&m, RECORD_DEST);
+    assert_eq!(dest.txst, mapping);
+    assert_eq!(dest.borrow.get(&2).map(String::as_str), Some(LENDER));
+    assert_eq!(m.history.undo.len(), before.2 + 1);
+    m.undo();
+    idle(&mut m);
+    assert_eq!(docs(&m), before);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+
+    m.set_target(engine::config::Target::Cs);
+    m.set_shader(RECORD_DEST, Some(engine::shader::Shader::Pbr));
+    m.set_field("textures/v/a.png", "subtype", serde_json::json!("diffuse"));
+    m.set_cs_statics(RECORD_DEST, sdc_gui::model::cs_pbr::Statics::Always);
+    idle(&mut m);
+    assert!(sdc_gui::model::pbr_export::written_json_entries(&m)
+        .iter()
+        .any(|(v, _)| v.id == RECORD_DEST));
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    ask(&mut m);
+    let path = r"textures\other\record_n.dds";
+    m.set_slot_command(RECORD_DEST, 2, SlotCommand::Path(path.into()))
+        .unwrap();
+    idle(&mut m);
+    assert!(
+        matches!(slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal), SlotShown::Linked(l) if l.path == path)
+    );
+    let after = docs(&m);
+    let why = format!("{RECORD_DEST}'s Normal _n is linked to {path}: Unlink it first.");
+    assert_eq!(
+        m.replace_borrow(LENT_NORMAL, LENDER, RECORD_DEST, &existing),
+        Err(why.clone())
+    );
+    assert_eq!(m.status_line, why);
+    assert_eq!(docs(&m), after);
+}
 
 const R_FILES: &[&str] = &[
     "textures/s/x_normal.png",

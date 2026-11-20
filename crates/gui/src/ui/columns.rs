@@ -1024,12 +1024,12 @@ pub(super) fn interact_stroke(
 /// T7 K10: the dragged texture's ghost, a 40 x 40 thumbnail beside the pointer. Painted once per frame from the
 /// payload, not from the source widget, so it survives a source that scrolled out of a virtualised list.
 pub(super) fn drag_ghost(ctx: &egui::Context, model: &AppModel, thumbs: &mut ThumbCache) {
-    let Some(p) = egui::DragAndDrop::payload::<crate::ui::sets_column::DragItem>(ctx) else {
+    let Some(key) = crate::ui::sets_column::dragged_item_key(ctx) else {
         return;
     };
     // No repaint request: the ghost moves only with pointer events, and egui repaints after the release frame's
     // events, which takes the ghost away (final review D1).
-    let (Some(pos), Some(item)) = (ctx.pointer_interact_pos(), model.item(&p.0)) else {
+    let (Some(pos), Some(item)) = (ctx.pointer_interact_pos(), model.item(&key)) else {
         return;
     };
     let rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 12.0), egui::Vec2::splat(40.0));

@@ -439,6 +439,50 @@ pub struct SlotLink {
     pub row: Option<SlotKind>,
 }
 
+/// The displayed occupant the user agreed to replace. Keep the full key or path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOccupant {
+    Own { item: String },
+    Borrowed { item: String, from: String },
+    Record { path: String },
+}
+
+impl BorrowOccupant {
+    fn from_shown(shown: SlotShown<'_>) -> Option<Self> {
+        match shown {
+            SlotShown::Own { item } => Some(Self::Own { item: item.into() }),
+            SlotShown::Borrowed { item, from } => Some(Self::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            }),
+            SlotShown::Record { path } => Some(Self::Record { path: path.into() }),
+            _ => None,
+        }
+    }
+
+    fn matches(&self, shown: &SlotShown<'_>) -> bool {
+        match (self, shown) {
+            (Self::Own { item }, SlotShown::Own { item: current }) => item == current,
+            (
+                Self::Borrowed { item, from },
+                SlotShown::Borrowed {
+                    item: current,
+                    from: owner,
+                },
+            ) => item == current && same_id(from, owner),
+            (Self::Record { path }, SlotShown::Record { path: current }) => path == current,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOutcome {
+    Joined,
+    AskReplace { existing: BorrowOccupant },
+    Refused(String),
+}
+
 /// What the exported JSON carries for a kind's row, in the order `slots_of` writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlotShown<'a> {
@@ -3547,6 +3591,149 @@ impl AppModel {
             DropOutcome::Refused(e) => Err(e),
             _ => Err("the slot is filled; clear it first".into()),
         }
+    }
+
+    /// Note JW4: share the source of a displayed borrow. An effective slot command explains its refusal on the card's status line.
+    pub fn drop_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+    ) -> Result<BorrowOutcome, String> {
+        self.share_borrow(item, from, set, None)
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    /// Recheck the source, commands and displayed occupant before accepting Replace.
+    pub fn replace_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        existing: &BorrowOccupant,
+    ) -> Result<(), String> {
+        self.share_borrow(item, from, set, Some(existing))
+            .and_then(|out| match out {
+                BorrowOutcome::Joined => Ok(()),
+                BorrowOutcome::Refused(why) => Err(why),
+                BorrowOutcome::AskReplace { .. } => unreachable!("the occupant was confirmed"),
+            })
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    fn share_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        confirmed: Option<&BorrowOccupant>,
+    ) -> Result<BorrowOutcome, String> {
+        if !self.sets_editable() {
+            return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
+        }
+        let target = match self.drop_target(set) {
+            Ok(target) => target,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        let source = self
+            .item(item)
+            .and_then(|it| Some((it, slot_of(it)?, self.set_of_item(item)?)));
+        let Some((it, kind, owner)) = source.filter(|(_, kind, owner)| {
+            same_id(&owner.id, from)
+                && matches!(owner.slots.get(kind), Some(SlotFill::Own { item: key }) if key == item)
+        }) else {
+            return Ok(BorrowOutcome::Refused(
+                "The shared source changed. Drag the chip again.".into(),
+            ));
+        };
+        if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner.id) {
+            return Err(why);
+        }
+        let shown = slot_shown(&target, kind);
+        if confirmed.is_some_and(|existing| !existing.matches(&shown)) {
+            return Err("The destination slot changed. Drag the chip again.".into());
+        }
+        let set = &target.id;
+        let name = &it.name;
+        if same_id(set, &owner.id) {
+            self.status_line = format!("Nothing to share: {name} is already in {set}.");
+            return Ok(BorrowOutcome::Joined);
+        }
+        if matches!(shown, SlotShown::Borrowed {item: current, from} if current == item && same_id(from, &owner.id))
+        {
+            self.status_line = format!("{set} already shares {name} from {}.", owner.id);
+            return Ok(BorrowOutcome::Joined);
+        }
+        if let Some(why) = slot_conflict(&target.slots.keys().copied().collect::<Vec<_>>(), kind) {
+            return Ok(BorrowOutcome::Refused(why));
+        }
+        let raw = match self.occupant(&target, Some(kind), None) {
+            Ok(raw) => raw,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        if confirmed.is_none() {
+            if let Some(existing) = BorrowOccupant::from_shown(shown) {
+                if let Err(why) = self.choice_allowed(item, &target, Some(kind), DropChoice::Share)
+                {
+                    return Ok(BorrowOutcome::Refused(why));
+                }
+                return Ok(BorrowOutcome::AskReplace { existing });
+            }
+        }
+        Ok(
+            match self.apply_choice(item, &target, Some(kind), DropChoice::Share, raw) {
+                Ok(()) => BorrowOutcome::Joined,
+                Err(why) => BorrowOutcome::Refused(why),
+            },
+        )
+    }
+
+    /// Note JW4: the membership edit can turn on an otherwise dormant slot command, e.g. by lending an albedo.
+    fn borrow_command_refusal(
+        &self,
+        target: &SetView,
+        kind: SlotKind,
+        item: &str,
+        from: &str,
+    ) -> Option<String> {
+        let n = kind.game_slot()?;
+        let path = slot_string(&target.settings, n)?;
+        let reason = |v: &SetView| {
+            let row = v.linked.get(&n).and_then(|l| l.row).unwrap_or(kind);
+            let slot = v.slot_text(row);
+            let set = &target.id;
+            if path.is_empty() {
+                format!("{set}'s {slot} is cleared: use Use this file or Unlink first.")
+            } else {
+                format!("{set}'s {slot} is linked to {path}: Unlink it first.")
+            }
+        };
+        if super::pbr_export::writes_entry(self, target) {
+            return Some(reason(target));
+        }
+        let mut result = target.clone();
+        if let Some(SlotFill::Own { item }) = result.slots.insert(
+            kind,
+            SlotFill::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            },
+        ) {
+            result.members.retain(|key| key != &item);
+        }
+        finish_view(self, &mut result);
+        if !super::pbr_export::writes_entry(self, &result) {
+            return None;
+        }
+        if path.is_empty() {
+            return Some(reason(&result));
+        }
+        // Resolve the projected link against every lender's outputs, in normal display order.
+        let mut all = set_views(self);
+        let i = all.iter().position(|v| same_id(&v.id, &target.id))?;
+        all[i] = result;
+        link_slots(self, &mut all);
+        Some(reason(&all[i]))
     }
 
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set

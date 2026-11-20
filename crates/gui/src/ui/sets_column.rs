@@ -17,8 +17,8 @@ use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, fill_proposals, is_shareable_helper, kind_text, member_tail, shader_options,
-    slot_of, slot_shown, view_row, DropChoice, DropOutcome, FillProposal, Missing, SetView,
-    SlotFill, SlotKind, SlotLink, SlotShown,
+    slot_of, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
+    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -34,6 +34,33 @@ use std::sync::Arc;
 /// Drag payload: a texture, by item key.
 #[derive(Debug, Clone)]
 pub struct DragItem(pub String);
+
+/// Note JW4: a shared chip carries the item and the set that owns it at the end of the chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DragBorrow {
+    pub item: String,
+    pub from: String,
+}
+
+/// The texture to paint under the pointer during an image drag.
+pub fn dragged_item_key(ctx: &egui::Context) -> Option<String> {
+    egui::DragAndDrop::payload::<DragItem>(ctx)
+        .map(|p| p.0.clone())
+        .or_else(|| egui::DragAndDrop::payload::<DragBorrow>(ctx).map(|p| p.item.clone()))
+}
+
+#[derive(Clone, Copy)]
+enum ChipDrag<'a> {
+    None,
+    Item,
+    Borrow(&'a str),
+}
+
+enum Dropped {
+    Item(Arc<DragItem>),
+    Borrow(Arc<DragBorrow>),
+}
+
 /// Drag payload: a set, by id (reordering).
 #[derive(Debug, Clone)]
 pub struct DragSet(pub String);
@@ -51,6 +78,12 @@ pub enum Pending {
         set: String,
         existing: String,
         choice: DropChoice,
+    },
+    BorrowReplace {
+        item: String,
+        from: String,
+        set: String,
+        existing: BorrowOccupant,
     },
     Refused(String),
     /// The rename dialog: the set, the name being typed, and why the last try was refused.
@@ -205,6 +238,11 @@ enum Act {
     SelectItem(String),
     Expand(String),
     Drop(String, String),
+    ShareBorrow {
+        item: String,
+        from: String,
+        set: String,
+    },
     NewSet(String),
     Reorder(String, usize),
     OpenMoveTo(String),
@@ -676,7 +714,8 @@ fn member_chip(
     v: &SetView,
     mk: &str,
     kind: Option<SlotKind>,
-    drag: bool,
+    remove: bool,
+    drag: ChipDrag<'_>,
     note: Option<&dyn Fn() -> String>,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
@@ -685,7 +724,7 @@ fn member_chip(
     let item = model.item(mk)?;
     let (locked, pgp) = chip_locks(v, kind);
     let r = member(ui, item, sel_items.contains(mk), locked, pgp, thumbs, note);
-    member_acts(model, v, mk, kind, drag, &r, acts, member_menu);
+    member_acts(model, v, mk, kind, remove, drag, &r, acts, member_menu);
     Some(r)
 }
 
@@ -848,26 +887,27 @@ fn slot_box_menu(
 }
 
 /// A member chip's menu, drag payload and clicks: click selects, double-click expands, a slot member has the slot
-/// menu, and `drag` offers it for dragging and a "Remove from set" entry.
+/// menu, and an own member can be removed.
 #[allow(clippy::too_many_arguments)]
 fn member_acts(
     model: &AppModel,
     v: &SetView,
     mk: &str,
     kind: Option<SlotKind>,
-    drag: bool,
+    remove: bool,
+    drag: ChipDrag<'_>,
     r: &egui::Response,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
 ) {
-    // Note DU5: an own member (`drag`) can leave the set from its chip; a borrowed one has the slot's Clear.
-    if kind.is_some() || drag {
+    // Note JW4: only own members can leave the set through this menu.
+    if kind.is_some() || remove {
         *member_menu |= r.secondary_clicked();
         let open = r.context_menu(|ui| {
             if let Some(k) = kind {
                 slot_menu_ui(ui, model, v, k, acts);
             }
-            if drag {
+            if remove {
                 let off = model.sets_read_only_reason();
                 let b = ui.add_enabled(off.is_none(), egui::Button::new("Remove from set"));
                 let b = match &off {
@@ -882,8 +922,15 @@ fn member_acts(
         });
         *member_menu |= open.is_some();
     }
-    if drag {
-        r.dnd_set_drag_payload(DragItem(mk.to_string()));
+    if r.drag_started() {
+        match drag {
+            ChipDrag::Item => r.dnd_set_drag_payload(DragItem(mk.to_string())),
+            ChipDrag::Borrow(from) => r.dnd_set_drag_payload(DragBorrow {
+                item: mk.into(),
+                from: from.into(),
+            }),
+            ChipDrag::None => {}
+        }
     }
     if r.double_clicked() {
         acts.push(Act::Expand(mk.to_string()));
@@ -1013,7 +1060,17 @@ fn draw_dock(
                 }
                 let name = format!("{}, fills {}", item.name, fill_text(d.target));
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-                member_acts(model, v, &d.helper, None, true, &r, acts, member_menu);
+                member_acts(
+                    model,
+                    v,
+                    &d.helper,
+                    None,
+                    true,
+                    ChipDrag::Item,
+                    &r,
+                    acts,
+                    member_menu,
+                );
                 let target = item
                     .helper
                     .as_ref()
@@ -2010,6 +2067,18 @@ pub fn draw(
                 }
                 DropOutcome::Refused(why) => st.pending = Some(Pending::Refused(why)),
             },
+            Act::ShareBorrow { item, from, set } => match model.drop_borrow(&item, &from, &set) {
+                Ok(BorrowOutcome::AskReplace { existing }) => {
+                    st.pending = Some(Pending::BorrowReplace {
+                        item,
+                        from,
+                        set,
+                        existing,
+                    })
+                }
+                Ok(BorrowOutcome::Refused(why)) => st.pending = Some(Pending::Refused(why)),
+                Ok(BorrowOutcome::Joined) | Err(_) => {}
+            },
             Act::NewSet(item) => {
                 // Nothing was done (a packed map, a locked slot): say why.
                 if let Err(why) = model.drop_new_set(&item) {
@@ -2238,9 +2307,10 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
     } else {
         ui.visuals().weak_text_color()
     };
+    let borrow_in_flight = egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx());
     let (zone, payload) = item_zone(
         ui,
-        editing.on,
+        editing.on && !borrow_in_flight,
         egui::Frame::group(ui.style()).corner_radius(12.0),
         |ui| {
             ui.set_width(ui.available_width());
@@ -2258,10 +2328,8 @@ fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
     if !editing.on {
         zone.on_hover_text(editing.why);
     }
-    if let Some(p) = payload {
-        if editing.on {
-            acts.push(Act::NewSet(p.0.clone()));
-        }
+    if let Some(Dropped::Item(p)) = payload {
+        acts.push(Act::NewSet(p.0.clone()));
     }
 }
 
@@ -2273,10 +2341,14 @@ fn item_zone(
     editing: bool,
     frame: egui::Frame,
     add: impl FnOnce(&mut egui::Ui),
-) -> (egui::Response, Option<std::sync::Arc<DragItem>>) {
+) -> (egui::Response, Option<Dropped>) {
     if editing && !egui::DragAndDrop::has_payload_of_type::<DragSet>(ui.ctx()) {
+        if egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()) {
+            let (zone, p) = ui.dnd_drop_zone::<DragBorrow, ()>(frame, add);
+            return (zone.response, p.map(Dropped::Borrow));
+        }
         let (zone, p) = ui.dnd_drop_zone::<DragItem, ()>(frame, add);
-        (zone.response, p)
+        (zone.response, p.map(Dropped::Item))
     } else {
         (frame.show(ui, add).response, None)
     }
@@ -2672,8 +2744,9 @@ fn pill(
         );
         // Final review I1: the zone's hover stroke is under the card frame, so outline the drop target on top.
         if editing.on
-            && egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx())
             && zone.contains_pointer()
+            && (egui::DragAndDrop::has_payload_of_type::<DragItem>(ui.ctx())
+                || egui::DragAndDrop::has_payload_of_type::<DragBorrow>(ui.ctx()))
         {
             ui.painter().rect_stroke(
                 zone.rect,
@@ -2693,14 +2766,18 @@ fn pill(
     if !editing.on {
         resp.clone().on_hover_text(editing.why);
     }
-    if resp.clicked() && acts.is_empty() {
+    if dropped.is_none() && resp.clicked() && acts.is_empty() {
         let m = ui.input(|i| i.modifiers);
         acts.push(Act::Click(v.id.clone(), m.command, m.shift));
     }
-    if let Some(p) = dropped {
-        if editing.on {
-            acts.push(Act::Drop(p.0.clone(), v.id.clone()));
-        }
+    match dropped {
+        Some(Dropped::Item(p)) => acts.push(Act::Drop(p.0.clone(), v.id.clone())),
+        Some(Dropped::Borrow(p)) => acts.push(Act::ShareBorrow {
+            item: p.item.clone(),
+            from: p.from.clone(),
+            set: v.id.clone(),
+        }),
+        None => {}
     }
     let hovered_by_set = editing.reorder && resp.dnd_hover_payload::<DragSet>().is_some();
     // K9: only while a set hovers, since `take_payload` would take a dragged texture too.
@@ -2753,7 +2830,7 @@ fn linked_chip<'a>(
     let hover = || format!("{} linked to {}", v.slot_text(k), l.path);
     let thumb = l.item.as_deref().and_then(|mk| {
         chipped.insert(mk);
-        // K13: the item belongs to another set: no drag payload from here.
+        // Note JW4: an explicit link has no drag payload.
         member_chip(
             ui,
             model,
@@ -2762,6 +2839,7 @@ fn linked_chip<'a>(
             mk,
             Some(k),
             false,
+            ChipDrag::None,
             Some(&hover),
             sel_items,
             acts,
@@ -2829,7 +2907,7 @@ fn chip_row<'a>(
     for cell in &row {
         let k = cell.kind;
         let letter = chip_letter(v, k);
-        match slot_shown(v, k) {
+        let (mk, from) = match slot_shown(v, k) {
             SlotShown::Linked(l) => {
                 let rect = linked_chip(
                     ui,
@@ -2869,12 +2947,9 @@ fn chip_row<'a>(
                 fixed.push(r.rect);
                 continue;
             }
-            _ => {}
-        }
-        let (mk, from) = match &cell.fill {
-            SlotFill::Own { item } => (item, None),
-            SlotFill::Borrowed { from, item } => (item, Some(from)),
-            SlotFill::Empty => {
+            SlotShown::Own { item } => (item, None),
+            SlotShown::Borrowed { from, item } => (item, Some(from)),
+            SlotShown::Empty | SlotShown::Record { .. } | SlotShown::Replaced { .. } => {
                 let r = letter_box(ui, &letter, None, None)
                     .on_hover_text(format!("{} (empty)", v.slot_text(k)));
                 fixed.push(r.rect);
@@ -2883,7 +2958,7 @@ fn chip_row<'a>(
         };
         chipped.insert(mk);
         let note = from.map(|f| move || format!("borrowed from {f}"));
-        // K13: a borrowed item belongs to another set: no drag payload from here.
+        // Note JW4: a displayed borrow shares its source, including at the end of a chain.
         let Some(r) = member_chip(
             ui,
             model,
@@ -2892,6 +2967,7 @@ fn chip_row<'a>(
             mk,
             Some(k),
             from.is_none(),
+            from.map_or(ChipDrag::Item, ChipDrag::Borrow),
             note.as_ref().map(|n| n as &dyn Fn() -> String),
             sel_items,
             acts,
@@ -2995,6 +3071,7 @@ fn chip_row<'a>(
             mk,
             kind,
             true,
+            ChipDrag::Item,
             Some(&|| role.clone()),
             sel_items,
             acts,
@@ -3313,6 +3390,22 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
     use super::dialogs::Role;
     let mut dragged = None;
     // Per case: the title, the body line, and the footer as (label, role, what it answers).
+    let replace_prompt = |set: &str, name: &str| {
+        // K1: Enter does nothing here, so Cancel is plain and nothing is filled.
+        let footer = vec![
+            (
+                format!("Replace {}", super::dialogs::short_name(name)),
+                Role::Destructive,
+                ModalAnswer::Replace,
+            ),
+            ("Cancel".to_string(), Role::Plain, ModalAnswer::Close),
+        ];
+        (
+            "Replace?".to_string(),
+            Some(format!("{set} already has {name} in that slot.")),
+            footer,
+        )
+    };
     let (title, line, footer) = match &p {
         Pending::Choice { item, from, .. } => {
             dragged = model.item(item);
@@ -3321,22 +3414,21 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             let footer = vec![("Cancel".to_string(), Role::Plain, ModalAnswer::Close)];
             (format!("{name} is in {from}"), None, footer)
         }
-        Pending::Replace { set, existing, .. } => {
-            let name = model
-                .item(existing)
-                .map_or(existing.clone(), |i| i.name.clone());
-            // K1: Enter does nothing here, so Cancel is Plain and nothing is filled.
-            let footer = vec![
-                (
-                    format!("Replace {}", super::dialogs::short_name(&name)),
-                    Role::Destructive,
-                    ModalAnswer::Replace,
-                ),
-                ("Cancel".to_string(), Role::Plain, ModalAnswer::Close),
-            ];
-            let line = format!("{set} already has {name} in that slot.");
-            ("Replace?".to_string(), Some(line), footer)
-        }
+        Pending::Replace { set, existing, .. }
+        | Pending::BorrowReplace {
+            set,
+            existing:
+                BorrowOccupant::Own { item: existing } | BorrowOccupant::Borrowed { item: existing, .. },
+            ..
+        } => replace_prompt(
+            set,
+            model.item(existing).map_or(existing.as_str(), |i| &i.name),
+        ),
+        Pending::BorrowReplace {
+            set,
+            existing: BorrowOccupant::Record { path },
+            ..
+        } => replace_prompt(set, path),
         Pending::Refused(why) => {
             let footer = vec![("OK".to_string(), Role::Default, ModalAnswer::Close)];
             ("Can't do that".to_string(), Some(why.clone()), footer)
@@ -3419,6 +3511,18 @@ pub fn pending_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropSta
             .drop_replace(&item, &set, choice)
             .err()
             .map(Pending::Refused),
+        (
+            ModalAnswer::Replace,
+            Pending::BorrowReplace {
+                item,
+                from,
+                set,
+                existing,
+            },
+        ) => {
+            let _ = model.replace_borrow(&item, &from, &set, &existing);
+            None
+        }
         _ => None,
     };
 }

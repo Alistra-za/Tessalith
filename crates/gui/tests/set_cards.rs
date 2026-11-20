@@ -362,35 +362,19 @@ fn drags_a_texture(h: &mut Harness<'static, AppModel>, at: egui::Pos2) -> bool {
     dragging
 }
 
-/// Note JW3, K13: a borrowed chip has a neutral outline and link mark, says where it is from in its one hover, and is never offered for
-/// dragging (dragging it would move another set's member). An own chip still drags.
-#[test]
-fn a_borrowed_chip_is_outlined_neutral_and_offers_no_drag() {
-    use sdc_gui::model::sets::DropChoice;
-    use sdc_gui::model::sets::DropOutcome;
-    let d = tempfile::tempdir().unwrap();
-    // pbr_export.rs::vanilla_borrow: a new set from leaf borrows rock01's normal.
-    let mut m = pbr_ready(d.path());
-    let leaf = m
-        .items
-        .iter()
-        .find(|i| i.name == "leaf.png")
-        .unwrap()
-        .key
-        .clone();
+fn leaf_borrowing(dir: &std::path::Path) -> (AppModel, String, String) {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let mut m = pbr_ready(dir);
+    let key =
+        |m: &AppModel, name: &str| m.items.iter().find(|i| i.name == name).unwrap().key.clone();
+    let leaf = key(&m, "leaf.png");
     m.set_field(&leaf, "subtype", serde_json::json!("pbr_albedo"));
     idle(&mut m);
     let id = m.drop_new_set(&leaf).unwrap();
     idle(&mut m);
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
-    let normal = m
-        .items
-        .iter()
-        .find(|i| i.name == "rock01_normal.png")
-        .unwrap()
-        .key
-        .clone();
+    let normal = key(&m, "rock01_normal.png");
     assert!(matches!(
         m.drop_choice(&normal, &id, DropChoice::Share),
         DropOutcome::Joined
@@ -405,6 +389,67 @@ fn a_borrowed_chip_is_outlined_neutral_and_offers_no_drag() {
         "{:?}",
         v.slots
     );
+    (m, id, normal)
+}
+
+/// Press on `at` and move past the drag threshold: the borrow now in flight, as (item, from). The payload is cleared
+/// before the release, so nothing is dropped.
+fn drags_a_borrow(h: &mut Harness<'static, AppModel>, at: egui::Pos2) -> Option<(String, String)> {
+    use sdc_gui::ui::sets_column::DragBorrow;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.hover_at(at);
+    h.run();
+    h.event(press(true));
+    h.run();
+    for step in 1..=4 {
+        h.event(egui::Event::PointerMoved(
+            at + egui::vec2(6.0 * step as f32, 0.0),
+        ));
+        h.run_steps(2); // the payload pass, then the painted one
+    }
+    let got =
+        egui::DragAndDrop::payload::<DragBorrow>(&h.ctx).map(|p| (p.item.clone(), p.from.clone()));
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.event(press(false));
+    h.run();
+    got
+}
+
+/// Note JW4: a dragged shared chip has the same ghost as a dragged texture.
+#[test]
+fn a_dragged_shared_chip_shows_the_ghost() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id, _normal) = leaf_borrowing(d.path());
+    let mut h = harness(m);
+    h.run();
+    let at = on_card_of(&h, &id, "N")[0].rect().center();
+    let p = start_drag(&mut h, at);
+    assert!(egui::DragAndDrop::has_payload_of_type::<
+        sdc_gui::ui::sets_column::DragBorrow,
+    >(&h.ctx));
+    let want = p + egui::vec2(12.0, 12.0);
+    let bounds = |s: &egui::Shape| match s {
+        egui::Shape::Rect(r) => Some(r.rect),
+        egui::Shape::Mesh(m) => Some(m.calc_bounds()),
+        _ => None,
+    };
+    assert!(shapes(&h)
+        .iter()
+        .filter_map(bounds)
+        .any(|r| (r.min - want).length() < 1.0 && (r.width() - 40.0).abs() < 0.5));
+    egui::DragAndDrop::clear_payload(&h.ctx);
+}
+
+/// Note JW4: a borrowed chip keeps its neutral outline and offers its source for sharing.
+#[test]
+fn a_borrowed_chip_is_outlined_neutral_and_drags_as_a_share() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id, normal) = leaf_borrowing(d.path());
     let mut h = harness(m);
     h.run();
     let chip = on_card_of(&h, &id, "N");
@@ -455,11 +500,22 @@ fn a_borrowed_chip_is_outlined_neutral_and_offers_no_drag() {
     h.get_by_label_contains("rock01_normal.png\nborrowed from landscape/rock01");
     assert!(
         !drags_a_texture(&mut h, at.center()),
-        "a borrowed chip offers no drag"
+        "a borrowed chip carries no texture payload"
+    );
+    assert_eq!(
+        drags_a_borrow(&mut h, at.center()),
+        Some((normal.clone(), "landscape/rock01".to_string())),
+        "it drags as a share of rock01's normal"
     );
     assert!(
         drags_a_texture(&mut h, own.center()),
         "an own chip still drags"
+    );
+    on_card_of(&h, &id, "N")[0].click_secondary();
+    h.run();
+    assert!(
+        h.query_by_label("Remove from set").is_none(),
+        "a borrowed chip cannot be removed from here"
     );
 }
 
@@ -521,6 +577,37 @@ fn a_texture_dragged_over_a_card_outlines_it() {
     h.event(press(false));
     h.run();
     assert!(!top_is_outline(&h), "the outline goes with the drag");
+}
+
+/// Note JW4: the accepting card draws its outline above the card frame for a share too.
+#[test]
+fn a_borrow_dragged_over_a_card_outlines_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, leaf, _) = leaf_borrowing(d.path());
+    let mut h = harness(m);
+    h.run();
+    let at = on_card_of(&h, &leaf, "N")[0].rect().center();
+    start_drag(&mut h, at);
+    let card = card_rect(&h);
+    h.event(egui::Event::PointerMoved(card.center()));
+    h.run_steps(3);
+    let stroke = shapes(&h)
+        .into_iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if (r.rect.min - card.min).length() < 1.0
+                    && (r.rect.max - card.max).length() < 1.0
+                    && r.stroke.width > 0.0 =>
+            {
+                Some(r.stroke)
+            }
+            _ => None,
+        })
+        .next_back();
+    assert_eq!(
+        stroke,
+        Some(h.ctx.global_style().visuals.widgets.active.bg_stroke)
+    );
 }
 
 /// Press `at` and move it 30 pt in 3 steps (the button stays down); returns where the pointer ends.

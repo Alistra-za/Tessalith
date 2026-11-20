@@ -15,6 +15,301 @@ use serde_json::{json, Value};
 use support::*;
 
 const LEAF: &str = "arch/leaf";
+
+fn assert_command_refuses_borrow(
+    m: &mut AppModel,
+    item: &str,
+    from: &str,
+    set: &str,
+    kind: SlotKind,
+    why: String,
+) {
+    let state = |m: &AppModel| {
+        let dest = set_views(m).into_iter().find(|v| v.id == set).unwrap();
+        (
+            dest,
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len(),
+        )
+    };
+    let before = state(m);
+    assert_eq!(m.drop_borrow(item, from, set), Err(why.clone()));
+    assert_eq!(m.status_line, why);
+    let after = state(m);
+    assert_eq!(slot_shown(&after.0, kind), slot_shown(&before.0, kind));
+    assert_eq!(
+        after, before,
+        "no change to the card, membership, either document or Undo"
+    );
+}
+
+fn link_destination(dir: &std::path::Path) -> AppModel {
+    let (mut m, _) = shared_through_moss(dir);
+    m.edit_docs("Remove the fixture borrow", None, true, |_, s| {
+        s.set_borrow(MOSS, 2, None)
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let dest = set_views(&m).into_iter().find(|v| v.id == MOSS).unwrap();
+    assert!(!dest.slots.contains_key(&SlotKind::Normal));
+    m
+}
+
+#[test]
+fn a_borrow_refuses_a_set_link() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = link_destination(d.path());
+    let path = member_game_path(&m, "arch/wall_n.png").unwrap();
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: MOSS.into(),
+            n: 2,
+            item: "arch/wall_n.png".into()
+        }),
+        None
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = set_views(&m).into_iter().find(|v| v.id == MOSS).unwrap();
+    assert!(
+        matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Linked(l)
+        if l.path == path && l.from.as_deref() == Some("arch/wall"))
+    );
+    assert_command_refuses_borrow(
+        &mut m,
+        "arch/wall_n.png",
+        "arch/wall",
+        MOSS,
+        SlotKind::Normal,
+        format!("{MOSS}'s Normal _n is linked to {path}: Unlink it first."),
+    );
+}
+
+#[test]
+fn a_borrow_refuses_a_path_link_without_a_member() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = link_destination(d.path());
+    let path = r"textures\other\x_n.dds";
+    m.set_slot_command(MOSS, 2, SlotCommand::Path(path.into()))
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = set_views(&m).into_iter().find(|v| v.id == MOSS).unwrap();
+    assert!(!v.slots.contains_key(&SlotKind::Normal));
+    assert!(
+        matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Linked(l) if l.path == path && l.from.is_none())
+    );
+    assert_command_refuses_borrow(
+        &mut m,
+        "arch/wall_n.png",
+        "arch/wall",
+        MOSS,
+        SlotKind::Normal,
+        format!("{MOSS}'s Normal _n is linked to {path}: Unlink it first."),
+    );
+}
+
+#[test]
+fn a_borrow_refuses_a_clear_over_the_same_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _) = shared_through_moss(d.path());
+    // The menu's Clear would also remove the fixture borrow.
+    m.edit_docs("Clear over borrow", None, false, |_, s| {
+        s.set_value(MOSS, "slot2", Some(Value::from("")))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = set_views(&m).into_iter().find(|v| v.id == MOSS).unwrap();
+    assert!(
+        matches!(v.slots.get(&SlotKind::Normal), Some(SlotFill::Borrowed { item, from })
+        if item == "arch/wall_n.png" && from == "arch/wall")
+    );
+    assert!(matches!(
+        slot_shown(&v, SlotKind::Normal),
+        SlotShown::Cleared {
+            item: "arch/wall_n.png"
+        }
+    ));
+    assert_command_refuses_borrow(
+        &mut m,
+        "arch/wall_n.png",
+        "arch/wall",
+        MOSS,
+        SlotKind::Normal,
+        format!("{MOSS}'s Normal _n is cleared: use Use this file or Unlink first."),
+    );
+}
+
+// Start with the actual post-Share membership, then remove only the fixture borrow.
+// The writer/non-writer assertions exercise the production entry rule in both states.
+fn created_slot1_refusal(cmd: SlotCommand, stored: &str, why: &str) {
+    use sdc_gui::model::pbr_export::written_json_entries;
+    const DEST: &str = "landscape/empty";
+    const OWNER: &str = "landscape/rock01";
+    const ALBEDO: &str = "landscape/rock01.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    assert_eq!(m.target, engine::config::Target::Cs);
+    let writes = |m: &AppModel| written_json_entries(m).iter().any(|(v, _)| v.id == DEST);
+    assert!(writes(&m));
+    let dest = |m: &AppModel| set_views(m).into_iter().find(|v| v.id == DEST).unwrap();
+    assert!(dest(&m).created && dest(&m).pbr);
+    assert_eq!(
+        slot_shown(&dest(&m), SlotKind::Diffuse),
+        SlotShown::Borrowed {
+            item: ALBEDO,
+            from: OWNER
+        }
+    );
+    m.edit_docs("Remove fixture albedo borrow", None, true, |_, s| {
+        s.set_borrow(DEST, 1, None)
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_slot_command(DEST, 1, cmd).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let before = dest(&m);
+    assert!(before.created && !writes(&m));
+    assert_eq!(before.settings.get("slot1"), Some(&Value::from(stored)));
+    assert_eq!(slot_shown(&before, SlotKind::Diffuse), SlotShown::Empty);
+    assert_command_refuses_borrow(&mut m, ALBEDO, OWNER, DEST, SlotKind::Diffuse, why.into());
+}
+
+#[test]
+fn a_borrow_refuses_a_slot1_path_activated_by_share() {
+    let path = r"textures\other\x.dds";
+    created_slot1_refusal(
+        SlotCommand::Path(path.into()),
+        path,
+        r"landscape/empty's Diffuse is linked to textures\other\x.dds: Unlink it first.",
+    );
+}
+
+#[test]
+fn a_borrow_refuses_a_slot1_clear_activated_by_share() {
+    created_slot1_refusal(
+        SlotCommand::Clear,
+        "",
+        "landscape/empty's Diffuse is cleared: use Use this file or Unlink first.",
+    );
+}
+
+#[test]
+fn a_borrow_replace_refuses_when_the_same_file_becomes_owned() {
+    const INCOMING: &str = "arch/leaf_n.png";
+    const OLD: &str = "arch/wall_n.png";
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _) = shared_through_moss(d.path());
+    let pending = m.drop_borrow(INCOMING, LEAF, MOSS);
+    let Ok(BorrowOutcome::AskReplace { existing }) = pending else {
+        panic!("expected Replace: {pending:?}")
+    };
+    assert_eq!(
+        existing,
+        BorrowOccupant::Borrowed {
+            item: OLD.into(),
+            from: "arch/wall".into()
+        }
+    );
+    m.edit_docs("Give moss the same normal", None, true, |_, s| {
+        s.set_borrow(MOSS, 2, None);
+        s.add_member(MOSS, OLD);
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let state = |m: &AppModel| {
+        let moss = set_views(m).into_iter().find(|v| v.id == MOSS).unwrap();
+        assert_eq!(
+            slot_shown(&moss, SlotKind::Normal),
+            SlotShown::Own { item: OLD }
+        );
+        (
+            moss,
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len(),
+        )
+    };
+    let before = state(&m);
+    let why = "The destination slot changed. Drag the chip again.";
+    assert_eq!(
+        m.replace_borrow(INCOMING, LEAF, MOSS, &existing),
+        Err(why.into())
+    );
+    assert_eq!(m.status_line, why);
+    assert_eq!(
+        state(&m),
+        before,
+        "keep the new owner, both post-change document texts and Undo"
+    );
+}
+
+#[test]
+fn a_borrow_refuses_a_link_on_the_other_slot_seven_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("moss_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let coat = "arch/lacq_cnr.png";
+    let path = member_game_path(&m, coat).unwrap();
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: LEAF.into(),
+            n: 7,
+            item: coat.into()
+        }),
+        None
+    );
+    let v = set_views(&m).into_iter().find(|v| v.id == LEAF).unwrap();
+    assert!(matches!(slot_shown(&v, SlotKind::Coat), SlotShown::Linked(l) if l.path == path));
+    assert_command_refuses_borrow(
+        &mut m,
+        "arch/moss_f.png",
+        MOSS,
+        LEAF,
+        SlotKind::Coat,
+        format!("{LEAF}'s Coat _cnr is linked to {path}: Unlink it first."),
+    );
+}
+#[test]
+fn a_borrow_refuses_a_coat_link_activated_by_sharing_fuzz() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("empty_m.png", [90, 90, 90], Subtype::Envmask),
+            ("moss_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let dest = "arch/empty";
+    let path = member_game_path(&m, "arch/lacq_cnr.png").unwrap();
+    m.set_cs_statics(dest, sdc_gui::model::cs_pbr::Statics::Always);
+    m.edit_docs("Share fuzz", None, true, |_, s| {
+        s.set_borrow(dest, 7, Some(MOSS))
+    });
+    m.set_slot_command(dest, 7, SlotCommand::Path(path.clone()))
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let dest_view = |m: &AppModel| set_views(m).into_iter().find(|v| v.id == dest).unwrap();
+    assert!(
+        matches!(slot_shown(&dest_view(&m), SlotKind::Coat), SlotShown::Linked(l) if l.path == path)
+    );
+    m.edit_docs("Remove fuzz", None, true, |_, s| {
+        s.set_borrow(dest, 7, None)
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = dest_view(&m);
+    assert!(!v.json && v.linked.is_empty());
+    assert_command_refuses_borrow(
+        &mut m,
+        "arch/moss_f.png",
+        MOSS,
+        dest,
+        SlotKind::Fuzz,
+        format!("{dest}'s Coat _cnr is linked to {path}: Unlink it first."),
+    );
+}
+
 const WALL_ALBEDO: &str = "arch/wall.png";
 /// How far a row's cells sit from its slot label: the label is centred on the 56 px thumbnail, the Assign… button and
 /// the file name at the top. Rows are 60 px apart.

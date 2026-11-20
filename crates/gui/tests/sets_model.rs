@@ -4,6 +4,199 @@ use serde_json::json;
 use std::time::Duration;
 use support::*;
 
+const ROCK: &str = "landscape/rock01";
+
+/// `pbr_ready` with a new set from leaf (pbr_albedo, Vanilla target) that borrows rock01's normal; returns the model,
+/// that set's id, and the normal's key.
+fn leaf_borrows_normal(dir: &std::path::Path) -> (sdc_gui::model::AppModel, String, String) {
+    let mut m = pbr_ready(dir);
+    let leaf = key_of(&m, "leaf.png");
+    m.set_field(&leaf, "subtype", serde_json::json!("pbr_albedo"));
+    idle(&mut m);
+    let id = m.drop_new_set(&leaf).unwrap();
+    idle(&mut m);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    assert_eq!(
+        m.drop_choice(&normal, &id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    (m, id, normal)
+}
+
+#[test]
+fn a_borrow_refuses_a_stale_source_and_ignores_an_inactive_command() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, leaf, normal) = leaf_borrows_normal(d.path());
+    let odd = key_of(&m, "odd.png");
+    let other = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    m.set_slot_command(&other, 2, SlotCommand::Clear).unwrap();
+    idle(&mut m);
+    let docs = |m: &sdc_gui::model::AppModel| {
+        (
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len(),
+        )
+    };
+    let before = docs(&m);
+    assert_eq!(
+        m.drop_borrow(&normal, &leaf, &other),
+        Ok(BorrowOutcome::Refused(
+            "The shared source changed. Drag the chip again.".into()
+        ))
+    );
+    assert_eq!(docs(&m), before);
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &other),
+        Ok(BorrowOutcome::Joined)
+    );
+    idle(&mut m);
+    let dest = set_views(&m).into_iter().find(|v| v.id == other).unwrap();
+    assert_eq!(
+        slot_shown(&dest, SlotKind::Normal),
+        SlotShown::Borrowed {
+            item: &normal,
+            from: ROCK
+        }
+    );
+    assert_eq!(dest.settings.get("slot2"), Some(&json!("")));
+}
+
+fn borrowed_from(m: &sdc_gui::model::AppModel, id: &str) -> Option<String> {
+    let v = set_views(m).into_iter().find(|v| v.id == id).unwrap();
+    match v.slots.get(&SlotKind::Normal) {
+        Some(SlotFill::Borrowed { from, .. }) => Some(from.clone()),
+        _ => None,
+    }
+}
+
+/// Note JW4 (A6-1): a shared chip dropped on another set shares the source there, as one step, with no question.
+#[test]
+fn a_borrow_dropped_on_another_set_shares_the_source_at_once() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _leaf, normal) = leaf_borrows_normal(d.path());
+    let odd = key_of(&m, "odd.png");
+    let other = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    let steps = m.history.undo.len();
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &other),
+        Ok(BorrowOutcome::Joined)
+    );
+    idle(&mut m);
+    assert_eq!(borrowed_from(&m, &other).as_deref(), Some(ROCK));
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+    let rock = set_views(&m).into_iter().find(|v| v.id == ROCK).unwrap();
+    assert!(rock.members.contains(&normal), "the source keeps its file");
+}
+
+/// Note JW4: on the source's own set, or a set that already borrows it, nothing is written and the status line says so.
+#[test]
+fn a_borrow_dropped_on_its_source_or_on_a_set_that_already_borrows_it_does_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, leaf, normal) = leaf_borrows_normal(d.path());
+    let (steps, text) = (m.history.undo.len(), m.sets_doc.as_ref().unwrap().text());
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, ROCK),
+        Ok(BorrowOutcome::Joined)
+    );
+    assert_eq!(
+        m.status_line,
+        "Nothing to share: rock01_normal.png is already in landscape/rock01."
+    );
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &leaf),
+        Ok(BorrowOutcome::Joined)
+    );
+    assert_eq!(
+        m.status_line,
+        format!("{leaf} already shares rock01_normal.png from landscape/rock01.")
+    );
+    assert_eq!(m.history.undo.len(), steps, "no step");
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), text, "nothing written");
+    let odd = key_of(&m, "odd.png");
+    let other = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    m.edit_docs("Share through leaf", None, true, |_, s| {
+        s.set_borrow(&other, 2, Some(&leaf))
+    });
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, &other, 2).as_deref(), Some(leaf.as_str()));
+    let check_display = |m: &sdc_gui::model::AppModel| {
+        let v = set_views(m).into_iter().find(|v| v.id == other).unwrap();
+        assert!(
+            matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Borrowed { item, from }
+            if item == normal && from == ROCK)
+        );
+    };
+    check_display(&m);
+    let before = (
+        m.project.as_ref().unwrap().text(),
+        m.sets_doc.as_ref().unwrap().text(),
+        m.history.undo.len(),
+    );
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &other),
+        Ok(BorrowOutcome::Joined)
+    );
+    assert_eq!(
+        m.status_line,
+        format!("{other} already shares rock01_normal.png from {ROCK}.")
+    );
+    assert_eq!(
+        (
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len()
+        ),
+        before
+    );
+    check_display(&m);
+}
+
+/// Note JW4: a filled slot still asks Replace; the answer is a Share.
+#[test]
+fn a_borrow_dropped_on_a_filled_slot_asks_to_replace() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _leaf, normal) = leaf_borrows_normal(d.path());
+    let odd = key_of(&m, "odd.png");
+    let other = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice(&normal, &other, DropChoice::Duplicate),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    let base = other.rsplit('/').next().unwrap();
+    let copy_key = key_of(&m, &format!("{base}_normal.png"));
+    m.decide(
+        &copy_key,
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::PbrNormal),
+    );
+    m.decide(
+        &copy_key,
+        sdc_gui::model::Answer::Green(engine::config::GreenConvention::Directx),
+    );
+    idle(&mut m);
+    let v = set_views(&m).into_iter().find(|v| v.id == other).unwrap();
+    let Some(SlotFill::Own { item: copy }) = v.slots.get(&SlotKind::Normal).cloned() else {
+        panic!(
+            "premise: the duplicate fills the normal slot: {:?}",
+            v.slots
+        )
+    };
+    assert_eq!(
+        m.drop_borrow(&normal, ROCK, &other),
+        Ok(BorrowOutcome::AskReplace {
+            existing: BorrowOccupant::Own { item: copy }
+        })
+    );
+}
+
 fn idle(m: &mut sdc_gui::model::AppModel) {
     assert!(m.wait_idle(Duration::from_secs(60)));
 }
