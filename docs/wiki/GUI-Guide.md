@@ -88,12 +88,12 @@ For Ctrl+A in Textures and Sets, see [Selecting several](GUI-Bulk-and-Rename.md#
 | JSON editor | F8 | Next error in the PGPatcher JSON editor |
 | JSON editor | Shift+F8 | Previous error in the PGPatcher JSON editor |
 | Problems list | Enter or Space | Accept the focused Problems row's suggestion and go to the next row |
-| [Dialogs](GUI-Guide.md#dialogs) | Enter | Press the dialog's safe default. In the set-drop dialog, Enter uses an available remembered answer. Replace still needs a click. |
+| [Dialogs](GUI-Guide.md#dialogs) | Enter | Press the dialog's safe default. In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), Enter uses an available remembered answer. Replace still needs a click. |
 | Dialogs | Esc | Cancel the dialog |
 
 ## Dialogs
 
 - **Esc**, or a click outside, cancels. The rename dialogs, **Copy settings** and **Fill from names** ignore a click outside, so a stray click can't lose what you typed.
-- In most dialogs, **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 --> In the set-drop dialog, Enter uses an available remembered answer. Replace still needs a click. An accepted answer edits the open project documents. Duplicate also creates its copy on disk immediately. <!-- D:JW6 -->
+- In most dialogs, **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 --> In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), Enter uses an available remembered answer. Replace still needs a click. An accepted answer edits the open project documents. Duplicate also creates its copy on disk immediately. <!-- D:JW6 -->
 
 Where to go next: [Troubleshooting](Troubleshooting.md) covers crash recovery.
