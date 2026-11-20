@@ -553,14 +553,16 @@ pub fn write_snapshot(
     w: &sdc_gui::model::review::ReviewWrites,
 ) -> std::collections::BTreeMap<PathBuf, String> {
     let mut files = tree_hashes(&[dir]);
-    for o in w.outputs.iter().filter(|o| {
-        o.path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
-    }) {
-        if let Some(hash) = sdc_gui::model::history::sha256_of(&o.path) {
-            let stamp = std::fs::metadata(&o.path).unwrap().modified().unwrap();
-            files.insert(o.path.clone(), format!("{hash} {stamp:?}"));
+    let paths = w
+        .outputs
+        .iter()
+        .map(|o| &o.path)
+        .chain(&w.current)
+        .chain(&w.kept);
+    for path in paths.filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dds"))) {
+        if let Some(hash) = sdc_gui::model::history::sha256_of(path) {
+            let stamp = std::fs::metadata(path).unwrap().modified().unwrap();
+            files.insert(path.clone(), format!("{hash} {stamp:?}"));
         }
     }
     files

@@ -537,6 +537,14 @@ fn a_kept_note_is_not_carried_into_the_next_export() {
     let s = export_and_wait(&mut m);
     assert_eq!(s.kept_older_encode, 1, "{s:?}");
     assert_eq!(m.export.result.as_ref().unwrap().primary.kept, 1);
+    assert_eq!(
+        m.export
+            .rows
+            .iter()
+            .filter(|r| r.state.label() == "kept")
+            .count(),
+        1
+    );
     assert!(m
         .export
         .notes

@@ -788,14 +788,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 .into_iter().filter(|&n| n > 0).map(|n| n + 1).sum::<usize>();
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
+            let rows = list.len() + paths;
+            let height = footer_cap.max(3.0 * stride).min(rows as f32 * stride);
             ui.scope(|ui| {
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::vertical()
                     .id_salt("review-footer-lists")
-                    .max_height(footer_cap.max(3.0 * stride).min(list.len() as f32 * stride))
+                    .min_scrolled_height(height)
+                    .max_height(height)
                     .auto_shrink([false, true])
                     // Rule 9.2: only the rows on screen are laid out, each exactly `row_h` tall.
-                    .show_rows(ui, row_h, list.len() + paths, |ui, range| {
+                    .show_rows(ui, row_h, rows, |ui, range| {
                         for index in range {
                             let size = egui::vec2(ui.available_width(), row_h);
                             let layout = egui::Layout::left_to_right(egui::Align::Center);

@@ -400,12 +400,12 @@ impl AppModel {
                 "Also export: the {} phase failed (exit {code}): {msg}",
                 phase_name(*phase)
             );
+            self.export.notes.push(t.clone());
             // Review M2: a PBR-phase error is the export's `Err`, logged and shown once by `export_ended`.
             if *phase != Phase::Pbr {
                 self.messages.notify(messages::Severity::Error, t.clone());
+                self.also_error = Some(t);
             }
-            self.export.notes.push(t.clone());
-            self.also_error = Some(t);
         }
         let phases = s
             .phases

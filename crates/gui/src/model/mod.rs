@@ -1090,6 +1090,8 @@ pub struct AppModel {
     /// them in the order it wants.
     #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    #[cfg(feature = "test-hooks")]
+    pub before_export_worker: Option<fn(&AppModel)>,
     /// Tests: runs once, right after the write gate's source walk and before its eligibility read (`set_after_walk`).
     #[cfg(feature = "test-hooks")]
     after_walk: Option<Box<dyn FnOnce()>>,
@@ -1369,6 +1371,8 @@ impl AppModel {
             landed_sig: None,
             #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
+            #[cfg(feature = "test-hooks")]
+            before_export_worker: None,
             #[cfg(feature = "test-hooks")]
             after_walk: None,
             #[cfg(feature = "test-hooks")]
@@ -2234,6 +2238,14 @@ impl AppModel {
                     && self.review.is_some()
                     && self.currency.pending.take().is_some()
                 {
+                    if let Ok(verdicts) = &result {
+                        let reviewed: BTreeSet<_> =
+                            self.primary_items().map(|i| &i.job_key).collect();
+                        if !reviewed.into_iter().eq(verdicts.keys()) {
+                            self.replan();
+                            return;
+                        }
+                    }
                     self.currency.verdicts = result.ok();
                     self.currency.revision += 1;
                 } else {
@@ -2445,6 +2457,10 @@ impl AppModel {
                 self.export.summary = Some(summary);
             }
             Err(e) => {
+                if let Some(result) = &self.export.result {
+                    self.messages
+                        .log(messages::Severity::Error, export::result_line(result));
+                }
                 self.messages
                     .log(messages::Severity::Error, format!("Export failed: {e}"));
                 self.export.error = Some(e.clone());
@@ -3284,6 +3300,10 @@ impl AppModel {
         self.drawer_epoch += 1;
         let cancel = CancelToken::default();
         self.export.running = Some(cancel.clone());
+        #[cfg(feature = "test-hooks")]
+        if let Some(before) = self.before_export_worker.take() {
+            before(self);
+        }
         if also {
             // One Files tab for the three phases, with progress measured against the PBR folder.
             let spec = self.also_spec();

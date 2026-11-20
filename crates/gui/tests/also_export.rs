@@ -446,6 +446,24 @@ fn with_an_also_tick_the_equality_holds_for_the_pbr_folder() {
 }
 
 #[test]
+fn vanilla_counts_the_unused_packing_source_in_its_own_events() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    let path = m
+        .root
+        .as_ref()
+        .unwrap()
+        .join("textures/clutter/orphan_opacity.png");
+    png(&path, [90, 90, 90, 255]);
+    m.replan();
+    idle(&mut m);
+    tick(&mut m, AlsoTarget::Vanilla);
+    export(&mut m);
+    let r = m.export.result.as_ref().unwrap();
+    assert_eq!(r.phases[0].1.skipped_sources, 1, "{r:?}");
+}
+
+#[test]
 fn a_cm_failure_keeps_the_completed_vanilla_counts() {
     let d = tempfile::tempdir().unwrap();
     let mut m = project(d.path());
@@ -791,6 +809,9 @@ fn press(h: &mut H, node: impl Fn(&H) -> egui_kittest::Node<'_>) {
 fn reviewing(d: &Path, w: f32) -> H {
     let mut m = project(d);
     tick(&mut m, AlsoTarget::Vanilla);
+    for job in m.items.iter().filter_map(|i| i.job.as_ref()) {
+        std::fs::create_dir_all(job.output.parent().unwrap()).unwrap();
+    }
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_some());

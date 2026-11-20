@@ -916,7 +916,10 @@ pub(super) fn dep_ok(
     slot_file: Option<&Path>,
 ) -> Result<(), String> {
     if let Some(r) = rows.iter().find(|r| r.job_key.eq_ignore_ascii_case(key)) {
-        if !matches!(r.state, RowState::Done { .. } | RowState::UpToDate) {
+        if !matches!(
+            r.state,
+            RowState::Done { .. } | RowState::UpToDate | RowState::Kept
+        ) {
             return Err(r.state.label());
         }
         if slot_file.is_none() {

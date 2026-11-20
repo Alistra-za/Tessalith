@@ -13,6 +13,7 @@ pub enum RowState {
     Running,
     Done { passed: bool },
     UpToDate,
+    Kept,
     Skipped(SkipKind, String),
     Failed(String),
     Cancelled,
@@ -27,6 +28,7 @@ impl RowState {
             RowState::Done { passed: true } => "converted".into(),
             RowState::Done { passed: false } => "validation failed".into(),
             RowState::UpToDate => "up to date".into(),
+            RowState::Kept | RowState::Skipped(SkipKind::OnExistingSkip, _) => "kept".into(),
             RowState::Skipped(SkipKind::Unresolved | SkipKind::Blocked, _) => {
                 "skipped: undecided".into()
             }
@@ -36,10 +38,15 @@ impl RowState {
         }
     }
 
-    /// A skip is provisional: a later run of the same job key (a `PACK-CONFLICT` skip of a pre-packed file shares
-    /// the key of the recipe's output) replaces it, but nothing replaces a skip that arrives after a run started.
+    /// A source skip can share its key with a recipe. Keep the recipe's terminal state if its skip arrives later.
     fn accepts_skip(&self) -> bool {
-        matches!(self, RowState::Queued | RowState::Skipped(..))
+        match self {
+            Self::Queued => true,
+            Self::Skipped(kind, _) => {
+                !matches!(kind, SkipKind::UnknownExisting | SkipKind::OnExistingSkip)
+            }
+            _ => false,
+        }
     }
 
     /// The "Failed only" filter: a failed file or a validation failure.
@@ -62,6 +69,43 @@ pub struct ExportSummary {
     pub textures: usize,
     pub generated: usize,
     pub sets: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Terminal {
+    Written,
+    Current,
+    Kept,
+    Protected,
+    Failed,
+}
+
+impl Terminal {
+    fn from_event(kind: &EventKind) -> Option<Self> {
+        match kind {
+            EventKind::FileDone { validation, .. } if validation.passed => Some(Self::Written),
+            EventKind::FileDone { .. } | EventKind::FileFailed { .. } => Some(Self::Failed),
+            EventKind::FileSkipped { kind, reason, .. } => match kind {
+                SkipKind::UpToDate if reason.starts_with("kept:") => Some(Self::Kept),
+                SkipKind::UpToDate => Some(Self::Current),
+                SkipKind::OnExistingSkip => Some(Self::Kept),
+                SkipKind::UnknownExisting => Some(Self::Protected),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+fn skipped_source(event: &EngineEvent) -> Option<&str> {
+    match event.kind {
+        EventKind::FileSkipped { kind, .. }
+            if kind != SkipKind::PackedSource && Terminal::from_event(&event.kind).is_none() =>
+        {
+            event.path.as_deref()
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -142,8 +186,9 @@ pub struct ExportModel {
     pub events: Vec<EngineEvent>,
     pub summary: Option<BatchSummary>,
     pub result: Option<ExportResult>,
-    /// The pass's ready keys, with the index of their actual terminal event in the primary batch.
-    pub(super) primary_keys: HashMap<String, Option<usize>>,
+    /// Reviewed keys plus terminal keys reported by the primary writer.
+    pub(super) primary_keys: HashMap<String, Option<Terminal>>,
+    pub(super) primary_finished: usize,
     pub error: Option<String>,
     /// What the export did besides converting: the JSON, the vanilla copies, and what was left out.
     pub notes: Vec<String>,
@@ -181,61 +226,34 @@ fn same_path(a: &str, b: &str) -> bool {
 impl ExportModel {
     /// Primary outputs only. A later Also phase or a discovery cannot change this denominator.
     pub fn progress(&self) -> (usize, usize) {
+        let total = self.primary_keys.len();
         if self.summary.is_some() || self.error.is_some() {
-            return (self.primary_keys.len(), self.primary_keys.len());
+            (total, total)
+        } else {
+            (self.primary_finished, total)
         }
-        (
-            self.primary_keys.values().flatten().count(),
-            self.primary_keys.len(),
-        )
     }
 
     pub(super) fn primary_outcomes(&self, cancelled: bool) -> Outcomes {
-        let mut outcomes = Outcomes::default();
         let primary_batch = self.events.first().map(|e| &e.batch);
-        let mut skipped_sources = HashSet::new();
-        for e in self
-            .events
-            .iter()
-            .filter(|e| Some(&e.batch) == primary_batch)
-        {
-            if let EventKind::FileSkipped { kind, .. } = e.kind {
-                if !matches!(
-                    kind,
-                    SkipKind::UpToDate
-                        | SkipKind::OnExistingSkip
-                        | SkipKind::UnknownExisting
-                        | SkipKind::PackedSource
-                ) {
-                    skipped_sources.extend(e.path.as_deref());
-                }
-            }
-        }
-        outcomes.skipped_sources = skipped_sources.len();
-        for index in self.primary_keys.values() {
-            match index.map(|i| &self.events[i].kind) {
-                Some(EventKind::FileDone { validation, .. }) if validation.passed => {
-                    outcomes.written += 1
-                }
-                Some(EventKind::FileSkipped {
-                    kind: SkipKind::UpToDate,
-                    reason,
-                    ..
-                }) if reason.starts_with("kept:") => outcomes.kept += 1,
-                Some(EventKind::FileSkipped {
-                    kind: SkipKind::UpToDate,
-                    ..
-                }) => outcomes.current += 1,
-                Some(EventKind::FileSkipped {
-                    kind: SkipKind::OnExistingSkip,
-                    ..
-                }) => outcomes.kept += 1,
-                Some(EventKind::FileSkipped {
-                    kind: SkipKind::UnknownExisting,
-                    ..
-                }) => outcomes.protected += 1,
+        let mut outcomes = Outcomes {
+            skipped_sources: self
+                .events
+                .iter()
+                .filter(|e| Some(&e.batch) == primary_batch)
+                .filter_map(skipped_source)
+                .collect::<HashSet<_>>()
+                .len(),
+            ..Default::default()
+        };
+        for outcome in self.primary_keys.values() {
+            match outcome {
+                Some(Terminal::Written) => outcomes.written += 1,
+                Some(Terminal::Current) => outcomes.current += 1,
+                Some(Terminal::Kept) => outcomes.kept += 1,
+                Some(Terminal::Protected) => outcomes.protected += 1,
                 None if cancelled => outcomes.cancelled += 1,
-                _ => outcomes.failed += 1,
+                Some(Terminal::Failed) | None => outcomes.failed += 1,
             }
         }
         outcomes
@@ -246,30 +264,32 @@ impl ExportModel {
             "{}/",
             folder.file_name().unwrap_or_default().to_string_lossy()
         );
+        let mut current = 0;
         let mut kept = 0;
         let mut protected = 0;
+        let mut skipped_sources = HashSet::new();
         for ev in self.events.iter().filter(|e| {
             self.events
                 .first()
                 .is_some_and(|first| first.batch != e.batch)
                 && e.job.as_ref().is_some_and(|k| k.starts_with(&prefix))
         }) {
-            if let EventKind::FileSkipped { kind, reason, .. } = &ev.kind {
-                match kind {
-                    SkipKind::UpToDate if reason.starts_with("kept:") => kept += 1,
-                    SkipKind::UnknownExisting => protected += 1,
-                    _ => {}
-                }
+            match Terminal::from_event(&ev.kind) {
+                Some(Terminal::Current) => current += 1,
+                Some(Terminal::Kept) => kept += 1,
+                Some(Terminal::Protected) => protected += 1,
+                _ => {}
             }
+            skipped_sources.extend(skipped_source(ev));
         }
         Outcomes {
             written: (summary.converted - summary.validation_failed) as usize,
             failed: (summary.failed + summary.validation_failed) as usize,
-            current: (summary.up_to_date as usize).saturating_sub(kept),
+            current,
             kept,
             protected,
             cancelled: summary.cancelled.len(),
-            skipped_sources: (summary.skipped as usize).saturating_sub(protected),
+            skipped_sources: skipped_sources.len(),
         }
     }
 
@@ -350,6 +370,7 @@ impl ExportModel {
             .events
             .first()
             .is_none_or(|first| first.batch == ev.batch);
+        let terminal = Terminal::from_event(&ev.kind);
         match &ev.kind {
             EventKind::FileSkipped {
                 kind: SkipKind::PackedSource,
@@ -367,24 +388,23 @@ impl ExportModel {
                 self.note_output(&ev, output);
             }
             EventKind::FileStarted => self.run_row(&ev, RowState::Running),
-            EventKind::FileDone { validation, output } => {
-                let (passed, output) = (validation.passed, output.clone());
+            EventKind::FileDone { output, .. } => {
+                let passed = terminal == Some(Terminal::Written);
                 self.run_row(&ev, RowState::Done { passed });
-                self.note_output(&ev, &output);
+                self.note_output(&ev, output);
                 if primary_batch {
                     self.finished_at(now);
                 }
             }
             EventKind::FileSkipped { kind, reason, .. } => {
                 let state = match kind {
+                    SkipKind::UpToDate if terminal == Some(Terminal::Kept) => RowState::Kept,
                     SkipKind::UpToDate => RowState::UpToDate,
                     k => RowState::Skipped(*k, reason.clone()),
                 };
                 // A skip is not work: it counts in done/total but not in the files/s rate or the ETA.
                 if let Some(r) = self.row(&ev) {
-                    if r.state.accepts_skip()
-                        || (*kind == SkipKind::UnknownExisting && r.state == RowState::Running)
-                    {
+                    if terminal.is_some() || r.state.accepts_skip() {
                         r.state = state;
                     }
                 }
@@ -421,21 +441,10 @@ impl ExportModel {
             EventKind::Progress { .. } => return,
             _ => {}
         }
-        if primary_batch
-            && matches!(
-                ev.kind,
-                EventKind::FileDone { .. }
-                    | EventKind::FileFailed { .. }
-                    | EventKind::FileSkipped {
-                        kind: SkipKind::UnknownExisting
-                            | SkipKind::UpToDate
-                            | SkipKind::OnExistingSkip,
-                        ..
-                    }
-            )
-        {
-            if let Some(slot) = ev.job.as_ref().and_then(|k| self.primary_keys.get_mut(k)) {
-                *slot = Some(self.events.len());
+        if let (true, Some(key), Some(outcome)) = (primary_batch, ev.job.as_ref(), terminal) {
+            let entry = self.primary_keys.entry(key.clone()).or_default();
+            if entry.replace(outcome).is_none() {
+                self.primary_finished += 1;
             }
         }
         self.events.push(ev);

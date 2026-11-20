@@ -68,6 +68,15 @@ fn review_splits_will_be_written_from_up_to_date() {
     std::fs::write(sdc_gui::crash_log::recovery_path(&files_path), "restore").unwrap();
     m.open_review();
     idle(&mut m);
+    let writes = m.review_writes();
+    assert_eq!(writes.outputs.len(), 1);
+    assert!(writes.outputs[0].path.ends_with("g/a.dds") && writes.outputs[0].marked);
+    assert_eq!(writes.current.len(), 3);
+    // With the same source change and an empty destination, the replacement is definite.
+    std::fs::remove_file(&writes.outputs[0].path).unwrap();
+    m.close_review();
+    m.open_review();
+    idle(&mut m);
     assert_eq!(m.written_text(), "Will be written (1) · Up to date (3)");
     let writes = m.review_writes();
     assert_eq!(writes.outputs.len(), 1);
@@ -162,12 +171,11 @@ fn a_stale_preview_result_is_dropped() {
         m.set_reencode_all(change == "re-encode");
         assert_eq!(
             m.written_text(),
-            format!(
-                "Will be written ({}) · Up to date ({})",
-                expected.0, expected.1
-            )
+            format!("Will be written (0) · Up to date ({})", expected.1)
         );
-        assert_eq!(m.review_writes().outputs.len(), expected.0);
+        let writes = m.review_writes();
+        assert_eq!(writes.outputs.len(), expected.0);
+        assert!(writes.outputs.iter().all(|o| o.marked));
         assert!(m.review_gate().is_ok());
         m.close_review();
     }
@@ -178,6 +186,214 @@ fn a_stale_preview_result_is_dropped() {
     assert!(m.export.running.is_some() && !m.reencode_all);
     idle(&mut m);
     assert_eq!(m.export.result.as_ref().unwrap().primary.written, 4);
+}
+
+#[test]
+fn review_replans_for_a_new_ready_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    support::add_ready_set(d.path(), "b");
+    m.open_review();
+    idle(&mut m);
+    assert_eq!(m.export_files(), 6);
+    let writes = m.review_writes();
+    for name in ["b.dds", "b_n.dds"] {
+        assert!(writes.outputs.iter().any(|o| o.path.ends_with(name)));
+    }
+    export_and_compare(&mut m, d.path());
+    assert_eq!(m.export.progress(), (6, 6));
+}
+
+#[test]
+fn export_during_preview_counts_new_writer_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    support::add_ready_set(d.path(), "b");
+    m.open_review();
+    assert!(m.written_text().contains("checking which changed"));
+    assert!(m.review_gate().is_ok());
+    m.export_from_review();
+    idle(&mut m);
+    assert_eq!(support::dds_under(&m.output_root()), 6);
+    assert_eq!(m.export.progress(), (6, 6));
+    assert_eq!(
+        m.export
+            .rows
+            .iter()
+            .filter(|r| r.state.label() == "converted")
+            .count(),
+        6
+    );
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == "Export finished: 6 written, 0 up to date, 0 failed"));
+}
+
+#[test]
+fn a_corrupt_source_counts_as_failed_alongside_ready_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    std::fs::write(d.path().join("textures/g/broken.png"), b"broken image").unwrap();
+    m.open_review();
+    m.export_from_review();
+    idle(&mut m);
+    assert!(m
+        .export
+        .rows
+        .iter()
+        .any(|r| r.path.ends_with("broken.png") && r.state.is_failed()));
+    assert_eq!(m.export.progress(), (5, 5));
+    let line = "4 written, 0 up to date, 1 failed";
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == format!("Export finished: {line}")));
+    let mut h = harness(m);
+    settle(&mut h);
+    assert!(h.query_by_label(line).is_some());
+}
+
+#[test]
+fn an_unreadable_manifest_reports_the_files_result_in_messages() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    std::fs::create_dir_all(m.export_root().join("textures/_sdc/manifest.jsonl")).unwrap();
+    m.open_review();
+    m.export_from_review();
+    idle(&mut m);
+    let error = m.export.error.as_ref().unwrap();
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text == format!("Export failed: {error}")));
+    let line = "0 written, 0 up to date, 4 failed";
+    assert!(m.messages.entries().any(|e| e.text.ends_with(line)));
+    let mut h = harness(m);
+    settle(&mut h);
+    assert!(h.query_by_label(line).is_some());
+}
+
+#[test]
+fn a_file_in_place_of_the_output_directory_keeps_writes_conditional() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let parent = m.output_root().join("textures/g");
+    std::fs::create_dir_all(parent.parent().unwrap()).unwrap();
+    std::fs::write(&parent, b"occupied").unwrap();
+    m.open_review();
+    idle(&mut m);
+    let writes = m.review_writes();
+    assert_eq!(writes.outputs.len(), 4);
+    assert!(writes.outputs.iter().all(|o| o.marked));
+    m.export_from_review();
+    idle(&mut m);
+    assert_eq!(m.export.result.as_ref().unwrap().primary.failed, 4);
+    assert_eq!(std::fs::read(parent).unwrap(), b"occupied");
+}
+
+#[test]
+fn a_dangling_destination_is_conditional_beside_three_definite_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let parent = m.output_root().join("textures").join("g");
+    std::fs::create_dir_all(&parent).unwrap();
+    let link = parent.join("a.dds");
+    dir_link(&link, &d.path().join("missing"));
+    assert!(!link.exists() && link.symlink_metadata().is_ok());
+    m.open_review();
+    idle(&mut m);
+    let writes = m.review_writes();
+    assert_eq!(writes.outputs.len(), 4);
+    for output in &writes.outputs {
+        assert_eq!(
+            output.marked,
+            output.path == link,
+            "{}",
+            output.path.display()
+        );
+    }
+    m.export_from_review();
+    idle(&mut m);
+    assert_eq!(m.export.result.as_ref().unwrap().primary.written, 3);
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink() || link.read_link().is_ok());
+}
+
+#[test]
+fn progress_counts_each_new_terminal_key_once() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    export_and_compare(&mut m, d.path());
+    let done = m
+        .export
+        .events
+        .iter()
+        .find(|e| matches!(e.kind, engine::events::EventKind::FileDone { .. }))
+        .unwrap()
+        .clone();
+    let mut live = sdc_gui::model::export::ExportModel::default();
+    live.on_event(done.clone());
+    assert_eq!(live.progress(), (1, 1));
+    live.on_event(done);
+    assert_eq!(live.progress(), (1, 1));
+}
+
+#[test]
+fn the_review_footer_shows_the_first_dds_with_space_available() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.open_review();
+    idle(&mut m);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1200.0, 900.0))
+        .build_ui_state(sdc_gui::ui::review::tab, m);
+    h.run();
+    let controls_top = h
+        .get_by_label("Export without review next time")
+        .rect()
+        .top();
+    for output in &h.state().review_writes().outputs {
+        let path = output.path.display().to_string();
+        let row = h
+            .get_by_label(&format!("{path} (depends on this export)"))
+            .rect();
+        assert!(
+            row.bottom() <= controls_top,
+            "{path} is clipped at {controls_top}, {row:?}"
+        );
+    }
+}
+
+#[test]
+fn timestamps_catch_identical_rewrites_of_current_and_kept_files() {
+    use std::fs::{File, FileTimes};
+    let d = tempfile::tempdir().unwrap();
+    let mut w = sdc_gui::model::review::ReviewWrites::default();
+    w.current.push(d.path().join("current.dds"));
+    w.kept.push(d.path().join("kept.dds"));
+    for path in w.current.iter().chain(&w.kept) {
+        std::fs::write(path, b"same bytes").unwrap();
+    }
+    let before = support::write_snapshot(d.path(), &w);
+    for path in w.current.iter().chain(&w.kept) {
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(
+                FileTimes::new()
+                    .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
+            )
+            .unwrap();
+    }
+    let after = support::write_snapshot(d.path(), &w);
+    for path in w.current.iter().chain(&w.kept) {
+        assert_ne!(before[path], after[path]);
+        assert!(support::listed(&w).iter().all(|entry| entry.path != *path));
+    }
 }
 
 #[test]
@@ -210,7 +426,24 @@ fn a_failed_currency_check_leaves_the_conditional_list_and_export_available() {
     let mut m = support::opened_chosen_decided(d.path());
     let manifest = m.export_root().join("textures/_sdc/manifest.jsonl");
     std::fs::create_dir_all(&manifest).unwrap();
+    m.hold_plan_results = true;
     m.open_review();
+    assert_eq!(m.written_text(), "4 files · checking which changed…");
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    let reply = loop {
+        m.poll();
+        if let Some(reply) = m.take_held().pop() {
+            break reply;
+        }
+        assert!(std::time::Instant::now() < until, "no preview failure");
+        std::thread::yield_now();
+    };
+    assert!(
+        matches!(&reply, sdc_gui::worker::WorkerMsg::Currency { generation, result: Err(error), .. }
+        if *generation == m.generation() && error.contains("manifest"))
+    );
+    m.hold_plan_results = false;
+    m.handle_held(reply);
     idle(&mut m);
     assert_eq!(m.written_text(), "4 DDS files");
     assert!(m.export.rows.is_empty());
@@ -250,11 +483,15 @@ fn cancelling_before_the_first_discovery_accounts_for_every_primary_key() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened_chosen_decided(d.path());
     m.open_review();
+    m.before_export_worker = Some(|m| {
+        assert!(m.export.events.is_empty());
+        assert_eq!(m.export.progress(), (0, 4));
+        m.export.running.as_ref().unwrap().cancel();
+    });
     m.export_from_review();
-    m.export.running.as_ref().unwrap().cancel();
     idle(&mut m);
     let p = &m.export.result.as_ref().unwrap().primary;
-    assert!(p.cancelled > 0);
+    assert_eq!(p.cancelled, 4);
     assert_eq!(p.cancelled + p.written, 4);
     assert_eq!(m.export.progress(), (4, 4));
 }

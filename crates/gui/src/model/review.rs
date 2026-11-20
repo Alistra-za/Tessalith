@@ -8,7 +8,7 @@ use super::{
     Continue, ExportPress, ItemStatus,
 };
 use engine::api::{CancelToken, PreviewVerdict};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -440,7 +440,7 @@ pub(super) struct Currency {
     pub(super) workers: BTreeSet<u64>,
     pub(super) revision: u64,
     pub(super) pending: Option<CancelToken>,
-    pub(super) verdicts: Option<BTreeMap<String, PreviewVerdict>>,
+    pub(super) verdicts: Option<crate::worker::CurrencyVerdicts>,
     due: bool,
 }
 
@@ -854,7 +854,7 @@ impl AppModel {
                     .currency
                     .verdicts
                     .as_ref()
-                    .and_then(|v| v.get(&item.job_key))
+                    .and_then(|v| v.get(&item.job_key)?.as_ref())
                 {
                     Some(PreviewVerdict::Current) => writes.current.push(path),
                     Some(PreviewVerdict::Kept { .. } | PreviewVerdict::OnExistingSkip) => {
