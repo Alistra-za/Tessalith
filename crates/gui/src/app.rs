@@ -46,6 +46,7 @@ pub struct SdcApp {
     pub state: crate::ui::State,
     /// The GPU state, `None` when eframe found no usable adapter (the preview is then off).
     pub render_state: Option<egui_wgpu::RenderState>,
+    sent_cap: Option<(u32, f32)>,
     uploaded: Uploaded,
     was_focused: bool,
     /// The NIF editor keeps its own buffer while a shell question owns keyboard focus.
@@ -89,6 +90,7 @@ impl SdcApp {
                 ..crate::ui::State::default()
             },
             render_state: None,
+            sent_cap: None,
             uploaded: Uploaded::default(),
             was_focused: true,
             paused_mesh_focus: None,
@@ -202,8 +204,31 @@ impl SdcApp {
             self.render_state = Some(rs.clone());
         } else {
             self.model.gpu_available = false;
+            self.model.gpu_max_dim = 0;
         }
         self
+    }
+
+    fn update_surface_cap(&mut self, ctx: &egui::Context) {
+        let limit = self.model.gpu_max_dim;
+        let ppp = ctx.pixels_per_point();
+        if limit == 0 || self.sent_cap == Some((limit, ppp)) {
+            return;
+        }
+        let cap = crate::layout::surface_cap(limit, ppp);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MaxInnerSize(cap));
+        self.sent_cap = Some((limit, ppp));
+        let size = ctx.input(|i| i.viewport_rect().size());
+        if size.x > cap.x || size.y > cap.y {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(cap));
+            self.model.messages.log(
+                crate::model::messages::Severity::Info,
+                format!(
+                    "Window limited to {}×{}: the graphics card's largest surface.",
+                    cap.x, cap.y
+                ),
+            );
+        }
     }
 
     /// Puts what the model shows on the GPU, when it changed since the last frame.
@@ -339,6 +364,7 @@ impl eframe::App for SdcApp {
             });
         }
         let ctx = ui.ctx().clone();
+        self.update_surface_cap(&ctx);
         self.model.poll();
         let now = std::time::Instant::now();
         self.model.tick(now);

@@ -4,13 +4,124 @@ mod app_harness;
 mod manifest;
 mod support;
 
-use eframe::egui::{Key, Modifiers};
+use eframe::egui::{self, Key, Modifiers, ViewportCommand};
 use egui_kittest::kittest::{NodeT, Queryable};
 use sdc_gui::{model::AppModel, ui::header};
 use std::sync::OnceLock;
 use tempfile::TempDir;
 
 const BANNER_OPEN: &str = "Open a texture folder from the Meshes banner";
+
+fn viewport_commands(h: &app_harness::H) -> &[ViewportCommand] {
+    &h.output()
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .expect("root viewport output")
+        .commands
+}
+
+#[test]
+fn the_app_asks_for_a_max_size_once_the_gpu_limit_is_known() {
+    app_data();
+    let m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    let mut h = app_harness::plain_harness(m);
+    h.state_mut().model.gpu_max_dim = 4096;
+    h.run_steps(1);
+    let cap = sdc_gui::layout::surface_cap(4096, h.ctx.pixels_per_point());
+    let root = h
+        .output()
+        .viewport_output
+        .get(&egui::ViewportId::ROOT)
+        .expect("root viewport output");
+    assert!(
+        root.commands
+            .iter()
+            .any(|c| matches!(c, egui::ViewportCommand::MaxInnerSize(v) if *v == cap)),
+        "{:?}",
+        root.commands.len()
+    );
+}
+
+#[test]
+fn the_surface_cap_tracks_a_scale_change() {
+    let mut h = app_harness::plain_harness(model());
+    h.state_mut().model.gpu_max_dim = 4096;
+    h.run_steps(1);
+    h.set_pixels_per_point(1.5).run_steps(1);
+    assert!(viewport_commands(&h).iter().any(|c| {
+        matches!(c, ViewportCommand::MaxInnerSize(size) if *size == egui::Vec2::splat(2730.0))
+    }));
+}
+
+fn clamp_frame(size: egui::Vec2, limit: u32) -> app_harness::H {
+    let mut h = app_harness::plain_harness(model());
+    h.set_size(size);
+    h.state_mut().model.gpu_max_dim = limit;
+    h.run_steps(1);
+    h
+}
+
+#[test]
+fn an_oversized_inner_window_gets_the_surface_size() {
+    let h = clamp_frame(egui::vec2(800.0, 1100.0), 1024);
+    assert!(viewport_commands(&h).iter().any(|c| {
+        matches!(c, ViewportCommand::InnerSize(size) if *size == egui::Vec2::splat(1024.0))
+    }));
+}
+
+#[test]
+fn a_surface_clamp_logs_once_and_sends_no_repeat_commands() {
+    let mut h = clamp_frame(egui::vec2(1100.0, 800.0), 1024);
+    h.run_steps(1);
+    assert_eq!(
+        h.state()
+            .model
+            .messages
+            .entries()
+            .filter(
+                |e| e.text == "Window limited to 1024×1024: the graphics card's largest surface."
+            )
+            .count(),
+        1
+    );
+    assert!(!viewport_commands(&h).iter().any(|c| matches!(
+        c,
+        ViewportCommand::MaxInnerSize(_) | ViewportCommand::InnerSize(_)
+    )));
+}
+
+#[test]
+fn a_fitting_window_keeps_its_inner_size_without_a_message() {
+    let h = clamp_frame(egui::vec2(1024.0, 800.0), 1024);
+    assert!(!viewport_commands(&h)
+        .iter()
+        .any(|c| matches!(c, ViewportCommand::InnerSize(_))));
+    assert!(!h
+        .state()
+        .model
+        .messages
+        .entries()
+        .any(|e| e.text.starts_with("Window limited to ")));
+}
+
+#[test]
+fn an_unknown_surface_limit_sends_no_size_command() {
+    let h = clamp_frame(egui::vec2(1100.0, 800.0), 0);
+    assert!(!viewport_commands(&h).iter().any(|c| matches!(
+        c,
+        ViewportCommand::MaxInnerSize(_) | ViewportCommand::InnerSize(_)
+    )));
+}
+
+#[test]
+fn starting_without_a_render_state_leaves_the_surface_limit_unknown() {
+    let app = sdc_gui::app::SdcApp::new(model()).with_render_state(None);
+    assert_eq!(app.model.gpu_max_dim, 0);
+}
 
 fn app_data() {
     static DATA: OnceLock<TempDir> = OnceLock::new();

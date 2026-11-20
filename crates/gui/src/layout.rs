@@ -15,6 +15,17 @@ use std::time::{Duration, Instant};
 
 /// The window size of a first start, and of a `gui.toml` without a usable window.
 pub const DEFAULT_SIZE: [f32; 2] = [1400.0, 900.0];
+
+/// The largest window in whole egui points that fits the device's surface.
+pub fn surface_cap(max_dim: u32, ppp: f32) -> egui::Vec2 {
+    egui::Vec2::splat((max_dim as f32 / ppp).floor())
+}
+
+/// Before the device exists, use wgpu's default 8192-pixel limit.
+pub fn cap_to_surface(size: [f32; 2], ppp: f32) -> [f32; 2] {
+    egui::Vec2::from(size).min(surface_cap(8192, ppp)).into()
+}
+
 /// A saved window must show at least this many pixels (both ways) on some monitor.
 const MIN_VISIBLE: f32 = 64.0;
 /// The top of the window that must be on a monitor so it can be dragged.
@@ -79,29 +90,23 @@ pub struct InitialWindow {
 /// The saved window, fitted to `monitors` (pixels). The window is saved in points with the scale it had, so the check
 /// runs in pixels (points x scale) and the answer goes back to points.
 pub fn initial_window(layout: &LayoutSettings, monitors: &[Rect]) -> InitialWindow {
-    let Some(w) = layout.window else {
-        return InitialWindow {
-            size: DEFAULT_SIZE,
-            pos: None,
-            maximized: false,
-        };
+    let ppp = layout.window.map_or(1.0, |w| w.ppp);
+    let (size, pos) = match layout.window {
+        None => (DEFAULT_SIZE, None),
+        Some(w) if monitors.is_empty() => ([w.w, w.h], None),
+        Some(w) => {
+            let px = Rect::from_min_size(pos2(w.x, w.y) * ppp, vec2(w.w, w.h) * ppp);
+            let r = fit_window(px, monitors);
+            (
+                [r.width() / ppp, r.height() / ppp],
+                Some([r.min.x / ppp, r.min.y / ppp]),
+            )
+        }
     };
-    if monitors.is_empty() {
-        return InitialWindow {
-            size: [w.w, w.h],
-            pos: None,
-            maximized: w.maximized,
-        };
-    }
-    let px = Rect::from_min_size(
-        pos2(w.x * w.ppp, w.y * w.ppp),
-        vec2(w.w * w.ppp, w.h * w.ppp),
-    );
-    let r = fit_window(px, monitors);
     InitialWindow {
-        size: [r.width() / w.ppp, r.height() / w.ppp],
-        pos: Some([r.min.x / w.ppp, r.min.y / w.ppp]),
-        maximized: w.maximized,
+        size: cap_to_surface(size, ppp),
+        pos,
+        maximized: layout.window.is_some_and(|w| w.maximized),
     }
 }
 
@@ -467,4 +472,48 @@ pub fn restore_model(
         }),
     };
     view.channel = Channel::from_id(u32::from(l.preview_channel)).unwrap_or_default();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surface_cap_divides_by_the_scale() {
+        assert_eq!(surface_cap(16384, 1.0), egui::vec2(16384.0, 16384.0));
+        assert_eq!(surface_cap(8192, 1.5), egui::vec2(5461.0, 5461.0));
+    }
+
+    #[test]
+    fn the_initial_window_never_exceeds_the_default_surface_limit() {
+        assert_eq!(cap_to_surface([12000.0, 9000.0], 1.0), [8192.0, 8192.0]);
+        assert_eq!(cap_to_surface([6000.0, 900.0], 2.0), [4096.0, 900.0]);
+        assert_eq!(cap_to_surface([1600.0, 900.0], 1.25), [1600.0, 900.0]);
+    }
+
+    fn restored_size(monitors: &[Rect]) -> [f32; 2] {
+        let layout = LayoutSettings {
+            window: Some(WindowSettings {
+                x: 10.0,
+                y: 20.0,
+                w: 6000.0,
+                h: 900.0,
+                ppp: 2.0,
+                maximized: false,
+            }),
+            ..Default::default()
+        };
+        initial_window(&layout, monitors).size
+    }
+
+    #[test]
+    fn the_initial_window_caps_the_monitor_fitted_size() {
+        let monitor = Rect::from_min_size(egui::Pos2::ZERO, vec2(10000.0, 1600.0));
+        assert_eq!(restored_size(&[monitor]), [4096.0, 800.0]);
+    }
+
+    #[test]
+    fn the_initial_window_caps_the_saved_size_without_monitors() {
+        assert_eq!(restored_size(&[]), [4096.0, 900.0]);
+    }
 }
