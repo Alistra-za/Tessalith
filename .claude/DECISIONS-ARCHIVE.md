@@ -850,6 +850,9 @@ ARCHIVED (superseded by Note GT, 2026-11-06)
 ARCHIVED (wording before the edit; superseded in part by Note HS5, 2026-11-10)
 - **GQ5** A set member edit in the set preview no longer pushes the whole scene: the member re-encodes and its new bytes are swapped in (`sync_textures`), as a cap change already was. Only a member the edit newly blocks pushes the scene, so the game's copy of its texture comes back: `Encoder::sync` sets `scene_dirty` and `SetPreview::check` takes it in the same frame. Before, every member edit pushed the scene again.
 
+ARCHIVED (wording before the edit; superseded in part by Note LD, 2026-11-21)
+- **GQ1** A source change makes an exported edit pending again. When the source NIF's bytes change (`reload_source`, or a reopen on a changed source), `export.ops_hash` is set to an empty sentinel (not `None`, which would hide the PGPatcher warning), so the edit is pending and Review exports it again; the export records a real hash again. A reopen saves the document at once only for an exported edit; a never-exported one is saved with its next change. The exported file was built from the old source, so it would otherwise override the mod's update.
+
 ## Note FT — backlog batch B4: gui model 2 (main team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
