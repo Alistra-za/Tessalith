@@ -592,7 +592,105 @@ fn shared_cloak_with_different_normals_warns_on_the_producer() {
     assert!(m
         .warnings
         .iter()
-        .any(|w| w.message.contains(other) && w.message.contains("different normal")));
+        .any(|w| w.message.contains("sets use different normal maps")));
+}
+
+fn assert_unverified_cloak(p: &Plan, user: &str) {
+    let m = cloak_pack(p);
+    assert!(
+        m.bake.is_none(),
+        "unverified normal must leave the pack unbaked"
+    );
+    assert_eq!(set_codes(m), [Code::SetSharedRoughnessNormal]);
+    let w = m
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::SetSharedRoughnessNormal)
+        .unwrap();
+    assert!(
+        w.message.contains(user) && w.message.contains("no verified normal map"),
+        "{}",
+        w.message
+    );
+}
+
+#[test]
+fn shared_cloak_with_a_non_priority_normal_of_the_same_lender_warns() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = shared_cloak(d.path(), &["file:**/second_n.png.subtype=normal"]);
+    let second = "textures/pbr/02/second_n.png";
+    let lender = "textures/pbr/02/cloak";
+    let user = "textures/pbr/09/cloak";
+    normal(d.path(), second, 64, 64);
+    r.set_edits.push(SetEdit::Move {
+        file: second.into(),
+        to: lender.into(),
+    });
+    r.shared_roughness_groups[0].users.insert(
+        user.into(),
+        Some((lender.into(), d.path().join("in").join(second))),
+    );
+    let (p, _) = plan(r);
+    let preferred = job(&p, "02/cloak_n.png");
+    let other = job(&p, "02/second_n.png");
+    assert_eq!(preferred.set_key, other.set_key);
+    assert_eq!(preferred.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(other.profile.subtype, Subtype::Normal);
+    assert_unverified_cloak(&p, user);
+}
+
+#[test]
+fn shared_cloak_with_an_empty_normal_slot_warns() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = shared_cloak(d.path(), &[]);
+    let user = "textures/pbr/08/cloak";
+    r.shared_roughness_groups[0].users.insert(user.into(), None);
+    let (p, _) = plan(r);
+    assert_unverified_cloak(&p, user);
+}
+
+#[test]
+fn shared_cloak_with_an_undecided_normal_warns() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = shared_cloak(d.path(), &[]);
+    let dir = d.path().join("in/textures/pbr/02");
+    let input = dir.join("cloak_normal.png");
+    std::fs::rename(dir.join("cloak_n.png"), &input).unwrap();
+    for (_, path) in r.shared_roughness_groups[0].users.values_mut().flatten() {
+        *path = input.clone();
+    }
+    r.accept = AcceptSuggestions::None;
+    let (p, _) = plan(r);
+    assert!(matches!(
+        job(&p, "02/cloak_normal.png").status,
+        engine::policy::JobStatus::Unresolved { .. }
+    ));
+    assert_unverified_cloak(&p, "textures/pbr/07/cloak");
+}
+
+#[test]
+fn shared_cloak_with_an_explicitly_excluded_user_skips_the_bake() {
+    for excluded in ["textures/pbr/07/cloak", "textures/pbr/09/cloak"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut r = shared_cloak(d.path(), &[]);
+        r.shared_roughness.insert(excluded.into());
+        let (p, _) = plan(r);
+        let m = cloak_pack(&p);
+        assert!(m.bake.is_none(), "excluded {excluded}");
+        assert!(set_codes(m).is_empty());
+    }
+}
+
+#[test]
+fn stale_shared_cloak_pack_does_not_suppress_the_current_member() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = shared_cloak(d.path(), &[]);
+    r.shared_roughness_groups[0].subtype = Subtype::SkinRfaos;
+    let (p, _) = plan(r);
+    assert_eq!(
+        cloak_pack(&p).bake.as_ref().map(|b| &b.normal),
+        Some(&job(&p, "02/cloak_n.png").input)
+    );
 }
 
 #[test]

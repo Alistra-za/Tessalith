@@ -29,12 +29,16 @@ fn shared_roughness_shows_why_it_skipped_the_bake() {
             (E, &["", "_n"], "[sets.borrow]\nslot6 = \"textures/b/cape\""),
         ],
     );
-    let row = sdc_gui::model::bottom::problems(&m)
-        .iter()
-        .find(|p| p.code == Some(Code::SetSharedRoughnessNormal))
-        .expect("the producer has a Problems row")
-        .shown()
-        .into_owned();
+    let reason = |m: &AppModel| {
+        sdc_gui::model::bottom::problems(m)
+            .iter()
+            .find(|p| {
+                p.code == Some(Code::SetSharedRoughnessNormal)
+                    && p.at == sdc_gui::model::bottom::At::Texture("textures/b/cape_rmaos".into())
+            })
+            .map(|p| p.shown().into_owned())
+    };
+    let row = reason(&m).expect("the producer has a Problems row");
     assert!(
         row.contains("roughness") && row.contains("different normal"),
         "{row}"
@@ -53,12 +57,17 @@ fn shared_roughness_shows_why_it_skipped_the_bake() {
             .is_some()
     };
     assert!(baked(&m));
-    assert!(!sdc_gui::model::bottom::problems(&m)
-        .iter()
-        .any(|p| p.code == Some(Code::SetSharedRoughnessNormal)));
+    assert!(reason(&m).is_none());
     m.set_json_value(E, "slot2", Some(json!(r"textures\external\other_n.dds")));
     settle(&mut m);
     assert!(!baked(&m), "an external normal overrides the saved borrow");
+    assert!(reason(&m).unwrap().contains("no verified normal map"));
+    m.undo();
+    settle(&mut m);
+    assert!(baked(&m) && reason(&m).is_none());
+    m.redo();
+    settle(&mut m);
+    assert!(!baked(&m) && reason(&m).unwrap().contains("no verified normal map"));
     m.set_slot_command(E, 2, SlotCommand::RemoveSlotKey)
         .unwrap();
     settle(&mut m);
@@ -66,7 +75,59 @@ fn shared_roughness_shows_why_it_skipped_the_bake() {
     m.set_slot_command(E, 2, SlotCommand::Path(r"textures\other_n.dds".into()))
         .unwrap();
     settle(&mut m);
-    assert!(!baked(&m));
+    assert!(!baked(&m) && reason(&m).unwrap().contains("no verified normal map"));
+    m.set_json_values(
+        E,
+        vec![
+            ("slot2".into(), None),
+            ("specular_level".into(), Some(json!(0.06))),
+        ],
+    );
+    settle(&mut m);
+    assert!(baked(&m) && reason(&m).is_none());
+}
+
+#[test]
+fn slot6_json_links_and_clears_preserve_bake_membership() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_n", "_roughness"], ""),
+            (E, &["", "_n"], "[sets.borrow]\nslot6 = \"textures/b/cape\""),
+        ],
+    );
+    let baked = |m: &AppModel| {
+        m.item("textures/b/cape_rmaos")
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .bake
+            .is_some()
+    };
+    assert!(!baked(&m), "the borrower has its own normal");
+    for path in [r"textures\external\roughness.dds", ""] {
+        m.set_json_value(E, "slot6", Some(json!(path)));
+        settle(&mut m);
+        assert!(
+            !baked(&m),
+            "the slot-6 borrow still counts with JSON path {path:?}"
+        );
+        let groups = m.request().unwrap().shared_roughness_groups;
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].users.contains_key(E));
+    }
+    m.edit_docs("Remove roughness borrow", None, true, |_, s| {
+        s.set_borrow(E, 6, None)
+    });
+    settle(&mut m);
+    assert!(baked(&m), "the producer has a private roughness map");
+    m.set_json_value(E, "slot6", Some(json!(r"textures\pbr\b\cape_rmaos.dds")));
+    settle(&mut m);
+    assert_eq!(cape_view(&m, E).linked[&6].from.as_deref(), Some(B));
+    assert!(baked(&m), "a JSON link alone does not share the bake");
+    assert!(m.request().unwrap().shared_roughness_groups.is_empty());
 }
 
 #[test]

@@ -2180,4 +2180,6 @@ LD is provisional. At merge the controller rechecks the next free main-team lett
 
 ## Note LE — Variance bake for shared roughness (owner, 2026-11-21)
 
-- **LE1 Shared roughness (amends R7 and M4-final-1).** A shared slot-6 output bakes once on its producer when every set using it resolves to the same eligible normal image, including a borrowed normal. Different, missing or unverifiable normals leave the roughness unbaked and put SET-SHARED-ROUGHNESS-NORMAL on the producer's job and in Problems. Explicit bake exclusions and an explicit renormalize setting on the normal still win. Mip 0 stays authored (HD1).
+LE is provisional. At merge the controller rechecks the next free main-team letter and renames LE and its references if needed.
+
+- **LE1 Shared roughness (amends R7 and M4-final-1).** A set joins the bake group through its own or borrowed roughness slot. A JSON slot-6 link or clear leaves that membership intact. The normal check follows slot-2 links and clears. A shared slot-6 output bakes once on its producer when every set using it resolves to the same eligible normal image, including a borrowed normal. Different, missing or unverifiable normals leave the roughness unbaked and put SET-SHARED-ROUGHNESS-NORMAL on the producer's job and in Problems. Explicit bake exclusions and an explicit renormalize setting on the normal still win. Mip 0 stays authored (HD1).

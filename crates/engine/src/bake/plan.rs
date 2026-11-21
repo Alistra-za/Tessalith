@@ -1,6 +1,5 @@
-//! Set-level bake decisions (spec §6.2–6.3, DECISIONS R6–R10): which roughness member bakes which `_n`, and the
-//! two `SET-*` codes it raises (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). `Engine::plan` runs this after packing, so a packed `_rmaos`/`_rfaos` is a member like a
-//! pre-packed one, and before `set_resolved` and `file_planned`, so both show the decision.
+//! Set-level variance bake decisions and companion warnings (R6–R10, LE). The engine plans the bake after packing
+//! so packed and pre-packed roughness jobs participate, and reports the decision on both the set and its files.
 use super::{bake_shift, BakeJob};
 use crate::codes::{Code, Warning};
 use crate::config::{ColorContent, NormalMips, Profile, RawMap, Subtype, Target};
@@ -19,9 +18,11 @@ pub struct BakeCtx<'a> {
     pub files: &'a [InputFile],
     /// Preset suffix aliases (`PresetRegistry::alias_table`), for reading companions' names.
     pub aliases: &'a BTreeMap<String, String>,
-    /// Keys of the sets whose roughness slot is shared (`BatchRequest::shared_roughness`, as set keys; DECISIONS R7).
+    /// Explicit bake exclusions from `BatchRequest::shared_roughness`, as planner set keys.
     pub shared: &'a BTreeSet<String>,
+    /// Resolved slot-6 groups with the Normal slot each user reads (Note LE).
     pub groups: &'a [crate::api::SharedRoughness],
+    /// Output root used to translate group set IDs to planner keys.
     pub output_root: &'a Path,
     /// Borrower set key → the key of the set whose `_n` it borrows (`BatchRequest::borrowed_normal`, as set keys;
     /// DECISIONS Note R M4-final-1).
@@ -421,7 +422,7 @@ fn shared_normal(
             return Err(format!("The shared roughness skips the variance bake because {user} has no verified normal map for it."));
         };
         if common.is_some_and(|first| first != n) {
-            return Err(format!("The shared roughness skips the variance bake because {user} uses a different normal map."));
+            return Err("The shared roughness skips the variance bake because its sets use different normal maps.".into());
         }
         common = Some(n);
     }
@@ -445,8 +446,7 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         by_set.entry(j.set_key.clone()).or_default().push(i);
     }
     let of = |key: &str| by_set.get(key).map_or(&[][..], Vec::as_slice);
-    // DECISIONS Note R M4-final-1: the `_n` jobs that a borrower set with a roughness member of its own uses. Such an
-    // `_n` reports no missing roughness in its own set, whether the borrower bakes or is shared (R7).
+    // A normal used by a borrower's roughness, or verified for a shared output below, has a companion (M4-final-1, LE).
     let mut lent: BTreeSet<usize> = cx
         .borrowed
         .iter()
@@ -461,8 +461,6 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         }
         let key = |id: &str| crate::sets::set_key(cx.output_root, id);
         let producer = key(&group.producer);
-        shared.insert(producer.clone());
-        shared.extend(group.users.keys().map(|id| key(id)));
         let Some(m) = roughness_members(jobs, of(&producer))
             .into_iter()
             .find(|&i| {
@@ -473,6 +471,8 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         else {
             continue;
         };
+        shared.insert(producer.clone());
+        shared.extend(group.users.keys().map(|id| key(id)));
         if cx.shared.contains(&producer)
             || group.users.keys().any(|id| cx.shared.contains(&key(id)))
         {

@@ -400,8 +400,7 @@ pub enum Answer {
     Acknowledge(Code),
 }
 
-/// What a plan takes from the sets: `set_edits`, `output_paths`, and the shared roughness slots and borrowed
-/// normals that gate the bake (DECISIONS R7, Note R M4-final-1). All four settle the two-pass planning.
+/// Inputs compared between planning passes, including roughness slot groups and their resolved normals (Note LE).
 #[derive(Debug, Clone, PartialEq)]
 struct EngineInputs {
     set_edits: Vec<engine::sets::SetEdit>,

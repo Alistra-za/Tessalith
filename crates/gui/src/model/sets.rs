@@ -2495,7 +2495,7 @@ fn slot_item(v: &SetView, slot: SlotKind) -> Option<&str> {
     })
 }
 
-/// The finished roughness outputs used by several sets, with the normal each set actually reads (Note LE).
+/// Group the own and borrowed roughness slots. Only the normal selection follows JSON links and clears (Note LE).
 pub fn shared_roughness(m: &AppModel) -> Vec<engine::api::SharedRoughness> {
     if m.target != Target::Cs {
         return Vec::new();
@@ -2503,7 +2503,7 @@ pub fn shared_roughness(m: &AppModel) -> Vec<engine::api::SharedRoughness> {
     let views = views(m);
     let mut groups = BTreeMap::<_, Vec<_>>::new();
     for v in views.iter() {
-        if let Some(item) = slot_item(v, SlotKind::Rmaos) {
+        if let Some(item) = v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
             groups.entry(item).or_default().push(v);
         }
     }
@@ -5058,9 +5058,10 @@ impl AppModel {
     }
 
     /// A slot path can change the shared bake even when the saved borrow stays in place.
-    fn replan_shared_slot(&mut self, slot: Option<u8>) {
+    /// `game_slot` uses 1-based `slotN` numbering.
+    fn replan_shared_slot(&mut self, game_slot: Option<u8>) {
         if !self.batch
-            && matches!(slot, Some(2 | 6))
+            && game_slot == SlotKind::Normal.game_slot()
             && self
                 .last_inputs
                 .as_ref()
@@ -5090,7 +5091,9 @@ impl AppModel {
         self.edit_docs(&format!("Change {key}"), merge, replan, move |_, d| {
             d.set_value(&s_id, &k, v)
         });
-        self.replan_shared_slot(slot);
+        if !replan {
+            self.replan_shared_slot(slot);
+        }
     }
 
     /// A slot command (spec §4.2). A path is checked first; the reason comes back when it is refused. One step each
