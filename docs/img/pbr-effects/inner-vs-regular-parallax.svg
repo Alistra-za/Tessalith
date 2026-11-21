@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#222">
+  <title>Regular parallax raises and sinks the whole material, coat included; inner-layer parallax keeps the coat flat on the mesh and sinks only the base below it</title>
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker>
+  </defs>
+  <rect width="760" height="400" rx="10" fill="#ffffff"/>
+  <line x1="380" y1="20" x2="380" y2="380" stroke="#d5d9de"/>
+
+  <!-- Regular parallax -->
+  <text x="190" y="32" text-anchor="middle" font-weight="600" font-size="15">Regular parallax, coat on</text>
+  <circle cx="50" cy="70" r="9" fill="none" stroke="#222" stroke-width="2"/><circle cx="50" cy="70" r="3" fill="#222"/>
+  <!-- base profile: raised tiles, sunk grout -->
+  <path d="M30,250 L30,140 L110,140 L110,190 L140,190 L140,140 L230,140 L230,190 L260,190 L260,140 L330,140 L330,250 Z" fill="#c98b6b" stroke="#7d4f37"/>
+  <!-- coat following the profile -->
+  <path d="M30,140 L110,140 L110,190 L140,190 L140,140 L230,140 L230,190 L260,190 L260,140 L330,140" fill="none" stroke="#4f8fc4" stroke-width="6" stroke-opacity="0.7"/>
+  <!-- mesh surface -->
+  <line x1="20" y1="165" x2="340" y2="165" stroke="#555" stroke-dasharray="6 4"/>
+  <text x="343" y="169" font-size="11" fill="#555">0.5</text>
+  <text x="70" y="132" text-anchor="middle" font-size="11">_p white: raised</text>
+  <text x="125" y="214" text-anchor="middle" font-size="11">black: sunk</text>
+  <text x="285" y="132" text-anchor="middle" font-size="11">dashed: the mesh</text>
+  <!-- view ray -->
+  <line x1="58" y1="78" x2="182" y2="140" stroke="#2c6fd0" stroke-width="2.5" marker-end="url(#h)"/>
+  <text x="190" y="290" text-anchor="middle">Albedo, _n, _rmaos and the coat's</text>
+  <text x="190" y="308" text-anchor="middle">normal and roughness (_cnr) all move</text>
+  <text x="190" y="326" text-anchor="middle">with _p; the coat colour (_s) does not.</text>
+  <text x="190" y="344" text-anchor="middle">The view ray goes straight in.</text>
+
+  <!-- Inner-layer parallax -->
+  <text x="570" y="32" text-anchor="middle" font-weight="600" font-size="15">Inner-layer parallax (Coat parallax)</text>
+  <circle cx="430" cy="70" r="9" fill="none" stroke="#222" stroke-width="2"/><circle cx="430" cy="70" r="3" fill="#222"/>
+  <!-- flat coat on the mesh -->
+  <rect x="410" y="132" width="320" height="10" fill="#cfe6f7" stroke="#4f8fc4"/>
+  <text x="740" y="124" font-size="11" text-anchor="end" fill="#2f6a9c">coat stays on the mesh</text>
+  <!-- inside the clear coat, then the base sunk below it -->
+  <rect x="410" y="142" width="320" height="58" fill="#e8f3fb"/>
+  <path d="M410,250 L410,142 L490,142 L490,200 L520,200 L520,142 L610,142 L610,200 L640,200 L640,142 L730,142 L730,250 Z" fill="#c98b6b" stroke="#7d4f37"/>
+  <text x="450" y="160" text-anchor="middle" font-size="11">_p white:</text>
+  <text x="450" y="174" text-anchor="middle" font-size="11">touches coat</text>
+  <text x="505" y="222" text-anchor="middle" font-size="11">black: deepest</text>
+  <!-- view ray bending at the coat -->
+  <line x1="438" y1="78" x2="545" y2="134" stroke="#2c6fd0" stroke-width="2.5"/>
+  <line x1="545" y1="140" x2="575" y2="200" stroke="#2c6fd0" stroke-width="2.5" marker-end="url(#h)"/>
+  <text x="556" y="98" font-size="11" fill="#2c56b0">bends at the coat</text>
+  <text x="570" y="290" text-anchor="middle">Only the base moves, and only down.</text>
+  <text x="570" y="308" text-anchor="middle">The coat (_s, _cnr) stays on the mesh.</text>
+  <text x="570" y="326" text-anchor="middle">View and light rays bend where they</text>
+  <text x="570" y="344" text-anchor="middle">enter the coat, by its specular level.</text>
+</svg>

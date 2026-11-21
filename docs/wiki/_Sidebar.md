@@ -15,7 +15,7 @@ Making textures
 Community Shaders materials
 
 - [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md)
-- [Specular reference (F0 by material)](Specular-Reference.md)
+- [PBR reference: specular (F0) and effects](PBR-Reference.md)
 - [PBR Landscape, Advanced skin, grass, XPMF and CS PBR records](PBR-Landscape.md)
 
 Checking before release
