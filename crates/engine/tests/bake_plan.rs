@@ -729,6 +729,45 @@ fn shared_dds_roughness_keeps_the_r7_skip_for_every_user() {
 }
 
 #[test]
+fn errored_shared_roughness_keeps_the_r7_skip_for_every_user() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = req(d.path(), &["file:**/iron_rmaos.png.mips.bake_clamp=0.0"]);
+    let producer = "textures/pbr/iron";
+    let mut users = std::collections::BTreeMap::new();
+    for id in [producer, "textures/pbr/steel", "textures/pbr/copper"] {
+        let path = format!("{id}_n.png");
+        normal(d.path(), &path, 64, 64);
+        users.insert(id.into(), Some((id.into(), d.path().join("in").join(path))));
+    }
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 64);
+    r.shared_roughness_groups.push(SharedRoughness {
+        producer: producer.into(),
+        source: Some(d.path().join("in/textures/pbr/iron_rmaos.png")),
+        subtype: Subtype::Rmaos,
+        users,
+    });
+
+    let (p, _) = plan(r);
+    let iron = job(&p, "iron_rmaos.png");
+    assert!(
+        matches!(&iron.status, engine::policy::JobStatus::Error { codes } if codes.contains(&Code::CfgInvalid)),
+        "{:?}",
+        iron.status
+    );
+    assert_eq!(job(&p, "steel_rmaos.png").profile.subtype, Subtype::Rmaos);
+    for j in &p.jobs {
+        assert!(j.bake.is_none(), "unexpected bake on {}", j.input.display());
+        assert!(
+            set_codes(j).is_empty(),
+            "{}: {:?}",
+            j.input.display(),
+            j.warnings
+        );
+    }
+}
+
+#[test]
 fn stale_shared_cloak_pack_does_not_suppress_the_current_member() {
     let d = tempfile::tempdir().unwrap();
     let mut r = shared_cloak(d.path(), &[]);

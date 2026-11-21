@@ -463,8 +463,7 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         let producer = key(&group.producer);
         let Some(&m) = of(&producer).iter().find(|&&i| {
             let j = &jobs[i];
-            writable(j)
-                && j.profile.subtype.is_roughness_member()
+            j.profile.subtype.is_roughness_member()
                 && j.profile.subtype == group.subtype
                 && j.pack.is_none().then_some(&j.input) == group.source.as_ref()
         }) else {
@@ -472,8 +471,9 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         };
         shared.insert(producer.clone());
         shared.extend(group.users.keys().map(|id| key(id)));
-        // A shared DDS keeps R7 suppression for every user even though S6 excludes it from baking.
-        if is_dds(&jobs[m])
+        // An errored producer, or a DDS (S6), keeps R7 suppression for every user even though it cannot bake.
+        if !writable(&jobs[m])
+            || is_dds(&jobs[m])
             || cx.shared.contains(&producer)
             || group.users.keys().any(|id| cx.shared.contains(&key(id)))
         {
