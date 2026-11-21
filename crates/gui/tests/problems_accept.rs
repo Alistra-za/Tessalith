@@ -97,11 +97,11 @@ fn one_click_accepts_the_suggestion() {
     let on_disk = std::fs::read_to_string(&toml).ok();
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Set type: subsurface tint ✓").click();
+    h.get_by_label("Set type: Subsurface tint ✓").click();
     idle(&mut h);
     assert_eq!(subtype(h.state(), TINT), Some(json!("subsurface_tint")));
     assert!(!decide_row(h.state(), TINT), "the row leaves the list");
-    assert!(h.query_by_label("Set type: subsurface tint ✓").is_none());
+    assert!(h.query_by_label("Set type: Subsurface tint ✓").is_none());
     // One undo step, in memory: the file waits for Save.
     assert!(h.state().undo_label().is_some());
     assert!(h.state().is_dirty());
@@ -127,7 +127,7 @@ fn review_undecided_row_offers_the_problems_accept() {
             with_tint(d.path()),
         );
     h.run();
-    h.get_by_label("Set type: subsurface tint ✓").click();
+    h.get_by_label("Set type: Subsurface tint ✓").click();
     idle(&mut h);
     assert_eq!(subtype(h.state(), TINT), Some(json!("subsurface_tint")));
 }
@@ -137,7 +137,7 @@ fn the_arrow_opens_the_picker_for_another_type() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(with_tint(d.path()));
     h.run();
-    let main = h.get_by_label("Set type: subsurface tint ✓").rect();
+    let main = h.get_by_label("Set type: Subsurface tint ✓").rect();
     // ▾ is named "Set type…": it is what the plain button was, the picker.
     let arrow = h
         .query_all_by_label("Set type…")
@@ -150,14 +150,14 @@ fn the_arrow_opens_the_picker_for_another_type() {
     arrow.click();
     h.run();
     h.run();
-    h.get_by_label("subsurface tint (suggested)");
+    h.get_by_label("Subsurface tint (suggested)");
     // The list scrolls: narrow it so the entry is on screen, as a user would.
     h.query_all_by_role(egui::accesskit::Role::TextInput)
         .find(|n| n.is_focused())
         .expect("the search box has focus")
         .type_text("back");
     h.run();
-    h.get_by_label("backlight tint").click();
+    h.get_by_label("Backlight tint").click();
     idle(&mut h);
     assert_eq!(subtype(h.state(), TINT), Some(json!("backlight_tint")));
 }

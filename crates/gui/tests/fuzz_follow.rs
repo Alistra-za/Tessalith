@@ -1589,7 +1589,7 @@ fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
         "1 set left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
     );
     assert!(
-        lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+        lines.contains(&"rock01.png: Skin albedo → PBR albedo".to_string()),
         "{lines:?}"
     );
     assert!(
@@ -1721,8 +1721,8 @@ fn two_switched_sets_are_one_step_and_one_undo() {
         "2 sets left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
     );
     for l in [
-        "rock01.png: skin albedo → pbr albedo",
-        "stone01.png: skin albedo → pbr albedo",
+        "rock01.png: Skin albedo → PBR albedo",
+        "stone01.png: Skin albedo → PBR albedo",
     ] {
         assert!(lines.contains(&l.to_string()), "{lines:?}");
     }
@@ -1749,7 +1749,7 @@ fn the_switch_runs_with_accept_off() {
         assert!(!set_view(&m).skin, "{fuzz}");
         let (_, lines) = m.fuzz_note_for_test().unwrap();
         assert!(
-            lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+            lines.contains(&"rock01.png: Skin albedo → PBR albedo".to_string()),
             "{fuzz}: {lines:?}"
         );
     }
@@ -1856,7 +1856,7 @@ fn a_switched_set_can_land_on_another_shader() {
     assert_eq!(set_view(&m).shader.as_ref().unwrap().shader, Shader::Glow);
     let (_, lines) = m.fuzz_note_for_test().unwrap();
     assert!(
-        lines.contains(&"rock01.png: skin albedo → diffuse".to_string()),
+        lines.contains(&"rock01.png: Skin albedo → Diffuse".to_string()),
         "{lines:?}"
     );
     let it = m.item(FUZZ).unwrap();
@@ -2303,7 +2303,7 @@ fn a_reload_switches_the_reloaded_text_again() {
     assert!(m.history.pushes > first, "a fresh step");
     let (text, lines) = m.fuzz_note_for_test().expect("a fresh row");
     assert!(
-        lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+        lines.contains(&"rock01.png: Skin albedo → PBR albedo".to_string()),
         "{lines:?}"
     );
     assert!(problems(&m)
@@ -2328,11 +2328,11 @@ fn a_reload_while_the_switch_is_pending_builds_one_correct_row() {
         assert!(
             !lines
                 .iter()
-                .any(|l| l.contains("skin albedo → skin albedo")),
+                .any(|l| l.contains("Skin albedo → Skin albedo")),
             "{accept:?}: {lines:?}"
         );
         assert!(
-            lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+            lines.contains(&"rock01.png: Skin albedo → PBR albedo".to_string()),
             "{accept:?}: {lines:?}"
         );
         assert_eq!(
@@ -2397,7 +2397,7 @@ fn a_switched_file_gone_before_the_row_gets_a_line_without_an_arrow() {
     let (_, lines) = m.fuzz_note_for_test().expect("the row");
     assert_eq!(
         lines.first().map(String::as_str),
-        Some("rock01.png: skin albedo"),
+        Some("rock01.png: Skin albedo"),
         "{lines:?}"
     );
 }

@@ -1,16 +1,72 @@
-//! A8: schema keys as readable labels. The key itself stays on hover.
+//! Display names for texture types and schema keys.
 
-/// Note FC9: a sub-type as the UI names it, from one table; the id stays on hover. The id with spaces unless the
-/// table says otherwise (`skin_rfaos` is `Skin RFAOS`).
-pub fn subtype_name(st: engine::config::Subtype) -> String {
-    use engine::config::Subtype;
-    match st {
-        Subtype::SkinRfaos => "Skin RFAOS".to_string(),
-        Subtype::SkinDetail => "Skin detail".to_string(),
-        Subtype::ProjectedNoise => "Projected noise".to_string(),
-        Subtype::DetailNormal => "Detail normal".to_string(),
-        _ => st.id().replace('_', " "),
+use engine::config::Subtype;
+
+pub struct TypeInfo {
+    pub label: &'static str,
+    pub description: &'static str,
+    pub suffix: &'static str,
+}
+
+pub fn type_info(st: Subtype) -> TypeInfo {
+    use Subtype::*;
+    let (label, description, suffix) = match st {
+        Diffuse => ("Diffuse", "The colour map of an ordinary (non-PBR) material.", "none, or _d"),
+        LandscapeDiffuse => ("Landscape diffuse", "A landscape colour map; its alpha is the snow or height mask.", "none, under a landscape folder"),
+        PbrAlbedo => ("PBR albedo", "The base colour of a Community Shaders PBR material.", "none, in a PBR set"),
+        PbrEmissive => ("PBR emissive", "The glow of a PBR material; a float source brighter than white becomes HDR.", "_g, in a PBR set"),
+        Glow => ("Glow", "The glow map of an ordinary material.", "_g"),
+        PbrSubsurface => ("PBR subsurface or coat colour", "The subsurface colour of a PBR material, or its coat colour.", "_s, in a PBR set"),
+        PbrFuzz => ("PBR fuzz", "The fuzz (sheen) colour of a PBR material, as on cloth.", "_f, _fuzz, _sheen in PBR; in Advanced Skin only _f beside _fuzz or _sheen stays PBR fuzz"),
+        SubsurfaceTint => ("Subsurface tint", "The subsurface colour map the vanilla shaders read. ENB users often make it black to turn the effect off. Community Shaders ignores it unless Advanced skin is on, and Advanced skin takes Skin subsurface mask instead.", "_s"),
+        BacklightTint => ("Backlight tint", "The colour that shows when light comes from behind, as through leaves.", "_b, _bl"),
+        UiSky => ("Interface or sky", "A menu or sky image, written without mipmaps.", "none, under interface or sky"),
+        SkinAlbedo => ("Skin albedo", "The skin colour of an Advanced skin set.", "none, in an Advanced skin set"),
+        ComplexGrass => ("Complex grass", "Diffuse and normal combined in one texture, because grass has no separate normal texture in the base game. For CS and ENB complex grass.", "none (picked by hand or from the GRAS record)"),
+        Cubemap => ("Cubemap", "A six-sided reflection map.", "_e, or under textures\\cubemaps"),
+        Normal => ("Normal map", "The surface bumps of an ordinary material (tangent space).", "_n"),
+        LandscapeNormal => ("Landscape normal", "The normal map of a landscape texture.", "_n, under a landscape folder"),
+        PbrNormal => ("PBR normal", "The normal map of a PBR material. The default drops specular alpha. Pick Data on the Alpha row to keep it.", "_n, in a PBR set"),
+        DetailNormal => ("Detail normal", "A landscape set's fine detail normal.", "_detail, _detailnorm, _detail_n in a Landscape or PBR Landscape set"),
+        Msn => ("Model-space normal", "A normal map baked in the model's own space, as for vanilla skin and eyes.", "_msn"),
+        CoatNormal => ("PBR coat normal", "The normal of a PBR coat layer, with the coat roughness in alpha.", "_cnr, _crn"),
+        SkinWet => ("Skin wet", "The wetness normal of an Advanced skin set.", "_wet, in an Advanced skin set"),
+        SkinDetail => ("Skin detail", "A skin detail normal with a strength mask in alpha.", "_detail, _detailnorm, _detail_n in an Advanced skin set"),
+        Envmask => ("Environment mask", "A grey mask that sets where the cubemap shines.", "_m, _em, _envmask"),
+        Height => ("Height (parallax)", "A grey height map for parallax. White is raised.", "_p"),
+        ProjectedNoise => ("Projected noise", "A grey noise map for a landscape profile's projected detail.", "_noise"),
+        MsnSpecular => ("Model-space specular", "The grey glossiness beside a model-space normal.", "_s, beside an _msn"),
+        SkinSk => ("Skin subsurface mask", "A greyscale thickness (density) map for the subsurface of an Advanced skin set.", "_sk, in an Advanced skin set"),
+        Gray => ("Grey map", "A plain grey map you pick by hand.", "none (picked by hand)"),
+        ComplexMaterial => ("Complex material", "An _m that packs four maps for complex material: env mask in red, glossiness in green, metallic in blue and parallax height in alpha.", "_m with a varying alpha"),
+        Rmaos => ("PBR RMAOS", "A PBR packed map: roughness, metallic, AO and specular in R, G, B and A.", "_rmaos"),
+        SkinRfaos => ("Skin RFAOS", "An Advanced skin packed map: roughness, fuzz, AO and specular.", "_rfaos"),
+        Flow => ("Hair flow", "The direction hair strands run, for the CS hair shader.", "_flow"),
+        GenericTwoChannel => ("Two-channel data", "A data map that only uses red and green.", "none (picked by hand)"),
+        GenericData => ("Other data", "A data map Tessalith has no type for. Stored as it is.", "none (picked by hand)"),
+        HdrSky => ("HDR sky", "A sky image brighter than white, written as BC6H.", "none, a float source under sky"),
+    };
+    TypeInfo {
+        label,
+        description,
+        suffix,
     }
+}
+
+pub const OWN_SET_HOVER: &str =
+    "A file alone under its base name becomes a set of its own once it has a type.";
+
+pub fn type_hover(st: Subtype) -> String {
+    let info = type_info(st);
+    let name = match info.suffix.strip_prefix("none ") {
+        Some(reason) => format!("No file ending gives this type {reason}"),
+        None => format!("File name: {}", info.suffix),
+    };
+    format!("{}\n{name}\n{OWN_SET_HOVER}", info.description)
+}
+
+pub fn subtype_name(st: Subtype) -> String {
+    type_info(st).label.to_string()
 }
 
 /// Words kept upper case (compared lower case).

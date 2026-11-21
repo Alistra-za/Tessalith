@@ -158,8 +158,8 @@ fn the_automatic_row_explains_high_confidence() {
         "{detail}"
     );
     // The file name and the type the picker shows, not the folder and the id.
-    assert!(detail.contains("rock_n.png: normal"), "{detail}");
-    assert!(detail.contains("g.png: landscape diffuse"), "{detail}");
+    assert!(detail.contains("rock_n.png: Normal map"), "{detail}");
+    assert!(detail.contains("g.png: Landscape diffuse"), "{detail}");
     assert!(!detail.contains("textures/") && !detail.contains("a/rock_n.png"));
     for st in Subtype::ALL {
         let id = st.id().to_string();
@@ -191,7 +191,7 @@ fn a_recording_after_a_user_edit_survives_its_undo() {
     assert!(
         row.detail.as_deref().unwrap_or("").contains(&format!(
             "x_mask.png: {}",
-            st.as_str().unwrap().replace('_', " ")
+            sdc_gui::model::labels::subtype_name(serde_json::from_value(st.clone()).unwrap())
         )),
         "{row:?}"
     );

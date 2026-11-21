@@ -202,7 +202,7 @@ fn the_subtype_combo_lists_the_pbr_group_first() {
     h.run();
     let combo = h
         .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("diffuse"))
+        .find(|n| n.value().as_deref() == Some("Diffuse"))
         .expect("the sub-type combo shows the current sub-type");
     combo.click();
     h.run();
@@ -211,8 +211,8 @@ fn the_subtype_combo_lists_the_pbr_group_first() {
     let first_vanilla = h.get_by_label("Colour maps");
     let y = |n: &egui_kittest::Node<'_>| n.accesskit_node().raw_bounds().unwrap().y0;
     assert!(y(&pbr) < y(&first_vanilla), "the PBR heading comes first");
-    let pbr_albedo = h.get_by_label("pbr albedo");
-    let diffuse = h.get_by_label("diffuse");
+    let pbr_albedo = h.get_by_label("PBR albedo");
+    let diffuse = h.get_by_label("Diffuse");
     assert!(y(&pbr_albedo) < y(&first_vanilla));
     assert!(
         y(&first_vanilla) < y(&diffuse),

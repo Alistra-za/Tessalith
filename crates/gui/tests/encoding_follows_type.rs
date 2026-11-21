@@ -86,7 +86,7 @@ fn switching_grass_to_pbr_resets_a_linear_albedo_and_says_so() {
     assert_eq!((p.format, p.color.tag), (Format::Bc7, ColorTag::Srgb));
     let (line, _) = m.encoding_note.clone().expect("a note");
     assert!(
-        line.starts_with("g.png: complex grass → pbr albedo"),
+        line.starts_with("g.png: Complex grass → PBR albedo"),
         "{line}"
     );
     assert!(line.contains("BC7 · sRGB"), "{line}");
@@ -238,11 +238,11 @@ fn several_textures_give_one_count_line_with_each_on_hover() {
         "{line}"
     );
     assert!(
-        hover.contains("g.png: complex grass → pbr albedo"),
+        hover.contains("g.png: Complex grass → PBR albedo"),
         "{hover}"
     );
     assert!(
-        hover.contains("h.png: complex grass → pbr albedo"),
+        hover.contains("h.png: Complex grass → PBR albedo"),
         "{hover}"
     );
 }
@@ -323,7 +323,7 @@ fn a_cleared_format_is_an_info_row_with_undo() {
     assert!(
         rows[0]
             .text
-            .starts_with("g.png: complex grass → pbr albedo"),
+            .starts_with("g.png: Complex grass → PBR albedo"),
         "{}",
         rows[0].text
     );

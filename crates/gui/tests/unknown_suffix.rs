@@ -235,9 +235,9 @@ fn assigning_a_type_brings_the_card() {
     node.click();
     h.run();
     // The popup's entry (`subtype_label`) below the combo, scrolled into the popup's view first: it starts clipped.
-    entry_below(&h, "diffuse", combo).scroll_to_me();
+    entry_below(&h, "Diffuse", combo).scroll_to_me();
     h.run();
-    entry_below(&h, "diffuse", combo).click();
+    entry_below(&h, "Diffuse", combo).click();
     h.run();
     h.get_by_label("Confirm").click();
     h.run();

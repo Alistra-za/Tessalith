@@ -521,9 +521,9 @@ fn every_input_has_a_name_in_presets_and_rename() {
     m.presets_model().duplicate();
     let mut h = harness(m);
     h.run();
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
-    h.get_by_label_contains("rmaos —").click();
+    h.get_by_label_contains("PBR RMAOS —").click();
     h.run();
     h.get_by_label("TOML preview").click();
     h.run();
