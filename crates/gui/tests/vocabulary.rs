@@ -132,7 +132,7 @@ fn one_set_is_singular() {
     m.open_folder(d.path().to_path_buf());
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(
-        m.status_line.contains("1 texture, 1 set"),
+        m.status_line.contains("1 file → 1 texture · 1 set"),
         "{}",
         m.status_line
     );

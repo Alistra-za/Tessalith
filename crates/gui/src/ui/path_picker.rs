@@ -86,8 +86,7 @@ pub fn menu<R>(
     label: &str,
     content: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    use egui::containers::menu::{MenuButton, MenuConfig};
-    let config = MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-    let (response, inner) = MenuButton::new(label).config(config).ui(ui, content);
-    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+    let config = egui::menu::MenuConfig::find(ui)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    crate::look::menu_button_036_with_config(ui, label, config, content)
 }

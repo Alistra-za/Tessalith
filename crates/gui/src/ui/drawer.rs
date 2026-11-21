@@ -1,8 +1,9 @@
 //! The Files tab of the bottom panel (M3a spec 2.5, layout v2 A1): progress and the report of the last export, by file.
 //! Open export folder, Show in Explorer, the progress line with pace, and a virtualised Files list with filters.
 //! DECISIONS AG34-AG37, CA16. A file's warnings show on hover of its row (R9).
+use crate::model::bottom::open_export_warnings;
 use crate::model::code_text::counted;
-use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex, RowState};
+use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex};
 use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
 use crate::model::shell::StatCache;
 use crate::model::AppModel;
@@ -15,7 +16,7 @@ use std::time::{Duration, Instant};
 pub struct DrawerState {
     /// The Files tab's filters; both on means both must hold.
     pub filter: FileFilter,
-    /// The filtered rows, cached by (filter, export revision).
+    /// The cached indices of the filtered rows.
     pub index: FilesIndex,
     /// Cached "is the export folder / this file on disk" answers (AG39).
     pub stats: StatCache,
@@ -31,12 +32,12 @@ pub fn files_tab(ui: &mut egui::Ui, model: &mut AppModel, state: &mut DrawerStat
         ui.toggle_value(&mut state.filter.failed_only, "Failed only")
             .on_hover_text("Only files that failed or failed validation");
         ui.toggle_value(&mut state.filter.has_warnings, "Has warnings")
-            .on_hover_text("Only files with warnings");
+            .on_hover_text("Only files with warnings not marked as intended");
     });
     let (mut picked, mut reveal) = (None, None);
     files(ui, model, state, &mut picked, &mut reveal);
     if let Some(key) = picked {
-        model.select_job(&key);
+        super::navigate(ui.ctx(), model, move |_, m| m.select_job(&key));
     }
     if let Some(p) = reveal {
         let _ = model.reveal(&p);
@@ -45,22 +46,14 @@ pub fn files_tab(ui: &mut egui::Ui, model: &mut AppModel, state: &mut DrawerStat
 
 /// The header line: counts, then Cancel / Open export folder / Close / Save report / Copy CLI command.
 fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
-    let count =
-        |f: &dyn Fn(&RowState) -> bool| model.export.rows.iter().filter(|r| f(&r.state)).count();
-    let converted = count(&|s| matches!(s, RowState::Done { .. }));
-    let up_to_date = count(&|s| matches!(s, RowState::UpToDate));
-    let skipped = count(&|s| matches!(s, RowState::Skipped(..)));
-    let failed = count(&|s| matches!(s, RowState::Failed(_)));
-    let validation_failed = count(&|s| matches!(s, RowState::Done { passed: false }));
-    let (finished, _) = model.export.progress();
+    let (finished, total) = model.export.progress();
     let running = model.export.running.is_some();
     let (mut cancel, mut close, mut save, mut copy, mut open) = (false, false, false, false, false);
     ui.horizontal_wrapped(|ui| {
         if running {
-            let total = model.export.rows.len().max(1);
             super::name_input(
                 ui.add(
-                    egui::ProgressBar::new(finished as f32 / total as f32)
+                    egui::ProgressBar::new(finished as f32 / total.max(1) as f32)
                         .desired_width(120.0)
                         .animate(false),
                 ),
@@ -68,26 +61,23 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             );
             // `done/total · elapsed · files/s · ETA`; the clock moves between events, so ask for a repaint.
             let line = match &model.export.pace {
-                Some(p) => p.line(finished, model.export.rows.len(), Instant::now()),
-                None => format!("{finished}/{}", model.export.rows.len()),
+                Some(p) => p.line(finished, total, Instant::now()),
+                None => format!("{finished}/{total}"),
             };
             ui.label(format!("Exporting: {line}"));
             ui.ctx().request_repaint_after(Duration::from_millis(500));
         }
         // Note FI14 (rule 1.7): no counts of nothing before an export.
-        if !model.export.rows.is_empty() {
-            ui.label(format!(
-                "{converted} converted, {up_to_date} up to date, {skipped} skipped, {failed} failed, \
-                 {validation_failed} validation failed"
-            ));
+        if let Some(r) = &model.export.result {
+            ui.label(crate::model::export::result_line(r));
         }
         if let Some(e) = &model.export.error {
             ui.colored_label(ui.visuals().error_fg_color, e);
         }
     });
-    // Audit 08c-4: notes can run to hundreds of lines ("not in JSON: …"), so they scroll inside a capped area.
+    // Audit 08c-4: the Export details list can run to hundreds of lines ("not in JSON: …"), so it scrolls inside a capped area.
     if !model.export.notes.is_empty() {
-        egui::CollapsingHeader::new(format!("Notes ({})", model.export.notes.len()))
+        egui::CollapsingHeader::new(format!("Export details ({})", model.export.notes.len()))
             .id_salt("export_notes")
             .default_open(true)
             .show(ui, |ui| {
@@ -102,8 +92,7 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
                     });
             });
     }
-    let exists = stats.is_dir(&model.export_root(), Instant::now());
-    let folder = model.export_folder_check(exists);
+    let state = model.export_folder_check(|p| stats.file_type(p, Instant::now()));
     ui.horizontal(|ui| {
         if running {
             cancel = ui.button("Cancel").clicked();
@@ -122,11 +111,12 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
                 "The command that reproduces this export from the saved sdc.toml. Set edits in sdc-project.toml and mesh evidence are not carried",
             )
             .clicked();
-        let r = ui.add_enabled(folder.is_ok(), egui::Button::new("Open export folder"));
-        open = match &folder {
+        let r = ui.add_enabled(state.folder.is_ok(), egui::Button::new(state.label))
+            .accessible_name(format!("Files: {}", state.label));
+        open = match &state.folder {
             Ok(p) => r.on_hover_text(p.display().to_string()).clicked(),
             Err(why) => {
-                r.on_disabled_hover_text(why);
+                super::disabled_reason(r, why);
                 false
             }
         };
@@ -157,9 +147,8 @@ fn toolbar(ui: &mut egui::Ui, model: &mut AppModel, stats: &mut StatCache) {
             ui.ctx(),
             PickerPurpose::SaveReport,
             PickerSpec {
-                title: None,
                 kind,
-                start: None,
+                ..PickerSpec::folder()
             },
         );
     }
@@ -203,7 +192,7 @@ fn files(
     reveal: &mut Option<std::path::PathBuf>,
 ) {
     let filter = state.filter;
-    let n = state.index.len(&model.export, filter);
+    let n = state.index.len(model, filter);
     if n == 0 {
         ui.weak(if model.export.rows.is_empty() {
             "Not exported yet."
@@ -217,7 +206,7 @@ fn files(
         .auto_shrink([false, false])
         .show_rows(ui, row_h, n, |ui, range| {
             for i in range {
-                let Some(r) = state.index.row(&model.export, filter, i) else {
+                let Some(r) = state.index.row(model, filter, i) else {
                     continue;
                 };
                 ui.horizontal(|ui| {
@@ -226,11 +215,19 @@ fn files(
                     }
                     ui.label(r.state.label());
                     if !r.warnings.is_empty() {
-                        // A Label's hover never becomes its name (0.37), so it is built only while shown.
-                        ui.label(counted(r.warnings.len(), "warning", "warnings"))
-                            .on_hover_ui(|ui| {
-                                ui.label(warnings_hover(model, r));
-                            });
+                        // shortcut: every visible warning scans the intended keys each frame. A marked code
+                        // costs up to two item scans. Has warnings pays the same per row on an index rebuild.
+                        // Cache the open counts in FilesIndex if a profile shows it.
+                        let n = open_export_warnings(model, r);
+                        let label = if n > 0 {
+                            ui.label(counted(n, "warning", "warnings"))
+                        } else {
+                            let k = r.warnings.len() - n;
+                            ui.weak(format!("{k} marked"))
+                        };
+                        label.on_hover_ui(|ui| {
+                            ui.label(warnings_hover(model, r));
+                        });
                     }
                     // The written output once it exists, otherwise the source.
                     let now = Instant::now();

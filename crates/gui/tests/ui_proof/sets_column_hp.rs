@@ -15,7 +15,7 @@ journey!(
     "helpers",
     [
         r#"{"op":"type","text":"crate","at":{"placeholder":"Search sets"}}"#,
-        r#"{"op":"click","at":{"label":"crate_roughness.png, fills RMAOS R"}}"#,
+        r#"{"op":"click","mods":"Shift","at":{"label":"crate_roughness.png, fills RMAOS R"}}"#,
         r#"{"op":"expect","fact":"/selection","equals":"item:props/crate_roughness.png"}"#
     ]
 );
@@ -82,7 +82,7 @@ journey!(
     g7_open_one_map_of_a_set_from_its_slot_chip,
     "demo",
     [
-        r#"{"op":"click","at":{"label":"RMAOS","index":0}}"#,
+        r#"{"op":"click","mods":"Shift","at":{"label":"RMAOS","index":0}}"#,
         r#"{"op":"expect","fact":"/selection","equals":"item:architecture/stone/cobble_rmaos.png"}"#
     ]
 );

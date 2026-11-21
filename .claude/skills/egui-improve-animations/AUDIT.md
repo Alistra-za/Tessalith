@@ -86,7 +86,7 @@ Hunt for: `animate_bool(` on deliberate entrances, any `*_in` curve, duration li
 
 ## 3. Physicality & origin
 
-- **Never scale from 0.** Target: scale 0.9-0.97 plus `multiply_opacity(t)`. `pop_in_layer` uses 0.96.
+- **Never scale from 0.** Target: scale 0.95-0.97 plus `multiply_opacity(t)`. `pop_in_layer` uses 0.96.
 - **Popups, menus and tooltips scale from their trigger**, not the screen corner: `T(origin) * S(scale) * T(-origin)` via `pop_in_layer(ui, area.response.layer_id, btn.rect.center_bottom(), t)`. A bare `TSTransform::from_scaling` scales toward (0, 0).
   **Modals are exempt**: they appear centered; scaling around the modal's own centre is correct. Do not report it.
 - **Press feedback**: draw the pressable at 0.97 scale around its centre while `response.is_pointer_button_down_on()`, over `dur::PRESS` (160ms) with `open_t`. Keep it subtle (0.95-0.98). The allocation stays fixed; only the drawing shrinks.

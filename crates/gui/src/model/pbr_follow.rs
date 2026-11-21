@@ -6,19 +6,20 @@
 //! The switched members are recorded in `sdc-project.toml` (`[project] auto_pbr`), because `sdc.toml`'s
 //! `[files]` entries reject unknown keys. While `sdc-project.toml` is read-only (DECISIONS P8) the diffuse still
 //! changes but nothing propagates: there would be no way to find the members again to revert them.
-use super::bottom::USE_PBR_NORMAL;
 use super::items::Decision;
 use super::sets::{is_pbr_diffuse, locked_items, set_views, SlotFill, SlotKind};
 use super::AppModel;
 use engine::config::{PackRecipe, Subtype};
 use engine::presets::Provenance;
+use engine::shader::Shader;
 use serde_json::json;
 
 /// The PBR counterpart of an inferred member sub-type; `None` leaves the member alone (`height` stays `height`, and
-/// `msn` stays `msn`: a model-space normal is not a tangent-space one, Note IA3).
+/// `msn` stays `msn`: a model-space normal is not a tangent-space one, Note IA3); `landscape_normal` too (Note JS6,
+/// N-19).
 fn pbr_counterpart(st: Subtype) -> Option<Subtype> {
     match st {
-        Subtype::Normal => Some(Subtype::PbrNormal),
+        Subtype::Normal | Subtype::LandscapeNormal => Some(Subtype::PbrNormal),
         Subtype::Glow => Some(Subtype::PbrEmissive),
         _ => None,
     }
@@ -33,45 +34,19 @@ fn pbr_like(st: Subtype) -> bool {
 /// What a sub-type edit on the Diffuse-slot member does to the rest of its set.
 enum Follow {
     Nothing,
-    /// Members to switch, with their new sub-type.
-    Switch(Vec<(String, Subtype)>),
-    /// The set's members; those listed in `auto_pbr` that still hold their auto value go back to inferred.
-    Revert(Vec<String>),
+    /// Members to switch, with their new sub-type and whether the key is an untouched listed normal (Note JS6, N-28:
+    /// it keeps its `auto_normal` listing, with the new word, and never joins `auto_pbr`).
+    Switch(Vec<(String, Subtype, bool)>),
+    /// The set's members (those listed in `auto_pbr` that still hold their auto value go back to inferred), and the
+    /// untouched listed `pbr_normal`s with the engine type they go back to (Note JS6), and the keys untouched in
+    /// `auto_normal`, which the normal rule alone decides (`members` leaves them out).
+    Revert(Vec<String>, Vec<(String, Subtype)>, Vec<String>),
 }
 
 impl AppModel {
     /// Note FC10 (X10, X3): `Tag as grass` writes `subtype = "complex_grass"`, an explicit user value (one undo step).
     pub fn tag_as_grass(&mut self, key: &str) {
         self.edit_subtype("Tag as grass", key, Some(Subtype::ComplexGrass));
-    }
-
-    /// Note JP3: `Use PBR normal` writes `subtype = "pbr_normal"` for `key`, an explicit user value (one undo step).
-    /// Refused with `fix_off`'s reason or [`Self::use_pbr_normal_refusal`]'s, writing nothing: `edit_subtype` checks no
-    /// lock and returns silently on a read-only project, so the model guards itself.
-    pub fn use_pbr_normal(&mut self, key: &str) -> Result<(), String> {
-        if let Some(why) = self.fix_off().or_else(|| self.use_pbr_normal_refusal(key)) {
-            return Err(why);
-        }
-        self.edit_subtype(USE_PBR_NORMAL, key, Some(Subtype::PbrNormal));
-        Ok(())
-    }
-
-    /// Note JP3 (B3-11): why `Use PBR normal` cannot switch `key`, or `None`. Runs per drawn row per frame, so it looks
-    /// up only the item's own set (`leaves_locked`), never every set.
-    // shortcut: a set that borrows this normal into its own locked slot is not checked: the type change rebuilds the
-    // lender's set, and the borrower's lock guards its slot, not the lender's file. Check borrowers too if a lock
-    // comes to mean "this file's output never changes".
-    pub fn use_pbr_normal_refusal(&self, key: &str) -> Option<String> {
-        let Some(i) = self.item(key) else {
-            return Some(format!("{key} is not in this project"));
-        };
-        if i.kept_dds() {
-            return Some(format!(
-                "{} is kept as it is (a DDS is not converted again), so its type can't change its alpha",
-                i.name
-            ));
-        }
-        self.leaves_locked(key).err()
     }
 
     /// Change (`Some`) or reset (`None`) `key`'s sub-type, with the PBR follow-on for its set, as one step.
@@ -116,6 +91,17 @@ impl AppModel {
         if self.project.as_ref().is_none_or(|p| p.read_only()) {
             return;
         }
+        self.batch_edit(label, |m| {
+            m.edit(label, |p| match new {
+                Some(st) => p.set_file_value(key, "subtype", &json!(st)),
+                None => p.clear_file_value(key, "subtype"),
+            });
+            // The pick may have created the table another member would now use as its stem.
+            m.follow_subtype_pick(label, key, new);
+        });
+    }
+
+    fn follow_subtype_pick(&mut self, label: &str, key: &str, new: Option<Subtype>) {
         let follow = self.follow_of(key, new);
         // Recorded members whose file is gone, found once here (O(auto_pbr) lookups) rather than by scanning a copy
         // of every item key per entry. Anything the edit adds below is a live set member.
@@ -129,10 +115,6 @@ impl AppModel {
             .collect();
         let k = key.to_string();
         self.edit_docs(label, None, true, move |p, s| {
-            match new {
-                Some(st) => p.set_file_value(&k, "subtype", &json!(st)),
-                None => p.clear_file_value(&k, "subtype"),
-            }
             if s.read_only() {
                 return;
             }
@@ -141,20 +123,30 @@ impl AppModel {
             if skin.remove(&k).is_some() {
                 s.set_auto_skin(&skin);
             }
+            // Note JS5 (N-27): only the listed word itself takes the key off; another value is already the user's,
+            // and the edit stays files-only.
+            super::normal_follow::unlist_same(s, &k, new);
             let before = s.auto_pbr();
             // A sub-type the user just chose is no longer automatic.
             let mut auto: Vec<String> = before.iter().filter(|a| **a != k).cloned().collect();
+            let mut relisted: Vec<(String, Option<Subtype>)> = vec![];
             match follow {
                 Follow::Nothing => {}
                 Follow::Switch(members) => {
-                    for (mk, st) in members {
+                    for (mk, st, listed) in members {
                         p.set_file_value(&mk, "subtype", &json!(st));
-                        if !auto.contains(&mk) {
+                        if listed {
+                            // An untouched key lives in `auto_normal` only.
+                            auto.retain(|a| *a != mk);
+                            relisted.push((mk, Some(st)));
+                        } else if !auto.contains(&mk) {
                             auto.push(mk);
                         }
                     }
                 }
-                Follow::Revert(members) => {
+                Follow::Revert(members, back, owned) => {
+                    // A key untouched in `auto_normal` is `back`'s alone (never the legacy loop's); it leaves `auto_pbr`.
+                    auto.retain(|a| !owned.contains(a));
                     for mk in members {
                         let held = p.file_value(&mk, "subtype");
                         let is_auto = held == Some(json!(Subtype::PbrNormal))
@@ -164,6 +156,10 @@ impl AppModel {
                             auto.retain(|a| *a != mk);
                         }
                     }
+                    for (mk, st) in back {
+                        p.set_file_value(&mk, "subtype", &json!(st));
+                        relisted.push((mk, Some(st)));
+                    }
                 }
             }
             // Files that no longer exist drop off the list whenever it is written.
@@ -171,6 +167,7 @@ impl AppModel {
             if auto != before {
                 s.set_auto_pbr(&auto);
             }
+            super::normal_follow::relist(p, s, &relisted);
         });
     }
 
@@ -223,9 +220,35 @@ impl AppModel {
         }
         // F3a Task 8: a member filling a locked slot, here or in a set borrowing it, keeps its sub-type (the bulk rule).
         let locked = locked_items(self);
-        let free = |mk: &&String| !locked.contains_key(*mk);
+        let safe = super::shared_alpha::safe_subtype_write(self);
+        let free = |mk: &&String| !locked.contains_key(*mk) && safe(mk);
         if leaves {
-            return Follow::Revert(v.members.iter().filter(free).cloned().collect());
+            // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`), unless
+            // the set's explicit pick is a PBR-set shader, which keeps it `pbr_normal` (the pick types it).
+            let explicit_pbr =
+                super::normal_follow::explicit_pick(v).is_some_and(Shader::is_pbr_or_advanced_skin);
+            let back = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| !explicit_pbr && self.untouched_normal(m) == Some(Subtype::PbrNormal))
+                .map(|m| (m.clone(), self.tangent_back(m)))
+                .collect();
+            let owned: Vec<String> = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| self.untouched_normal(m).is_some())
+                .cloned()
+                .collect();
+            let members = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| !owned.contains(m))
+                .cloned()
+                .collect();
+            return Follow::Revert(members, back, owned);
         }
         let shader = v.shader.as_ref().map(|s| s.shader);
         let switch = v
@@ -243,15 +266,36 @@ impl AppModel {
                 // the user wrote resolves with a provenance other than the engine's own suggestion.
                 let inferred = p.file_value(m, "subtype").is_none()
                     && job.provenance.get("subtype") == Some(&Provenance::Suggestion);
-                if !inferred && !untouched {
-                    return None;
-                }
                 let suggested = it.decisions.iter().find_map(|d| match d {
                     Decision::Subtype { suggested } => *suggested,
                     _ => None,
                 });
-                let st = pbr_counterpart(suggested.unwrap_or(job.profile.subtype))?;
-                Some((m.clone(), st))
+                let from = suggested.unwrap_or(job.profile.subtype);
+                // Note JS6 (N-28): a member storing a tangent-space type is the user's unless it is untouched in
+                // `auto_normal` (R5's "equal to the suggestion" does not make a typed `normal` Tessalith's); the stored
+                // value decides, never the plan's `from`. An inferred normal switches while its alpha is not the user's
+                // (N-17, N-19).
+                let stored = p
+                    .file_value(m, "subtype")
+                    .and_then(|v| serde_json::from_value::<Subtype>(v).ok());
+                if stored.is_some_and(super::normal_follow::tangent) {
+                    let listed =
+                        self.untouched_normal(m).is_some() && stored != Some(Subtype::PbrNormal);
+                    return listed.then(|| (m.clone(), Subtype::PbrNormal, true));
+                }
+                if matches!(from, Subtype::Normal | Subtype::LandscapeNormal) {
+                    let alpha_free = self
+                        .sets_doc
+                        .as_ref()
+                        .is_some_and(|s| super::normal_follow::alpha_free(p, s, m));
+                    return (inferred && alpha_free)
+                        .then(|| (m.clone(), Subtype::PbrNormal, false));
+                }
+                if !inferred && !untouched {
+                    return None;
+                }
+                let st = pbr_counterpart(from)?;
+                Some((m.clone(), st, false))
             })
             .collect();
         Follow::Switch(switch)

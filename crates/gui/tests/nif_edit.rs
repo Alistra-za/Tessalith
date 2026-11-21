@@ -2892,14 +2892,11 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     use sdc_gui::app::SdcApp;
     app_data();
     let d = files(false);
-    let model = sdc_gui::model::AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
+    let project = tempfile::tempdir().unwrap();
+    let model = support::opened_as_the_app(
+        project.path().to_owned(),
+        d.path().join("mods").join(EDIT_MOD),
     );
-    let mut model = model;
-    // Note GD5: the app hands the chosen export folder to the meshes each frame
-    model.set_export_folder(d.path().join("mods").join(EDIT_MOD));
     let mut app = SdcApp::new(model);
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     app.meshes.store_path = Some(d.path().join("scan.db"));
@@ -2922,7 +2919,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(6);
     // The shared header and the open bottom panel are still there.
-    for l in ["Save", "MO2…", "Files"] {
+    for l in ["Save", "Files"] {
         h.get_by_label(l);
     }
     support::header_export_label(&h);
@@ -3005,6 +3002,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     // Minor 5: an untouched session is idle, not blocked: weak text, no red.
     h.get_by_label("No edits to export.");
     assert!(h.query_by_label("Blocked: No edits to export.").is_none());
+    support::reveal_header_control(&mut h, "MO2…");
 }
 
 // ---- v2 A18: Controllers (scalars) and Extra data tabs ----
@@ -5024,6 +5022,41 @@ fn header_undo_enabled_state_and_hover_follow_the_nif_history() {
     support::header_undo(&h, "Redo").hover();
     h.run_steps(30);
     h.get_by_label_contains("Shift+Z). Acts on the NIF edit history");
+}
+
+#[test]
+fn overlay_history_commands_leave_the_hidden_nif_edit_alone() {
+    let (_t, _d, mut h) = both_histories(1);
+    h.get_by_label("Settings…").click();
+    h.run_steps(4);
+    h.get_by_label("Back to meshes");
+    let tex = textures(&h);
+    support::header_undo(&h, "Undo").click();
+    h.run_steps(4);
+    assert!(
+        h.state().model.can_redo(),
+        "the overlay header undoes Textures"
+    );
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Y);
+    assert_eq!(textures(&h), tex, "the overlay shortcut redoes Textures");
+    palette_undo(&mut h);
+    assert!(
+        h.state().model.can_redo(),
+        "the overlay palette undoes Textures"
+    );
+    support::header_undo(&h, "Redo").click();
+    h.run_steps(4);
+    assert_eq!(textures(&h), tex);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert!(h.state().model.can_redo());
+    h.get_by_label("Back to meshes").click();
+    h.run_steps(4);
+    assert!(!h.state().model.centre_over_meshes);
+    assert_eq!(
+        nif(&h),
+        (1, false),
+        "Back must never apply a queued NIF undo"
+    );
 }
 
 /// Review: in the Textures view the header Undo and Ctrl+Z act on Textures although a NIF edit is open.
@@ -14205,6 +14238,69 @@ fn a_cancelled_export_drops_the_overwrite_answer() {
     );
 }
 
+/// Plan 3c Task 4, ruling 3c-51 (b): pending edits recovered from a newer scan-store autosave, and Review's Export is
+/// their first save. With dirty texture settings, the export removes both the NIF autosave and the settings recovery.
+/// Each removal counts under its own listed document.
+#[test]
+fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    let model = support::opened(&t.path().join("mod"));
+    let d = files(false);
+    let mut app = sdc_gui::app::SdcApp::new(model);
+    app.meshes.procs = sdc_gui::model::meshes::no_procs;
+    app.meshes.store_path = Some(d.path().join("scan.db"));
+    scan_and_select(&mut app.meshes, d.path());
+    // An edit made with no export folder autosaves beside the scan store (Note GD5)…
+    app.meshes.set_nif_export_root(None);
+    app.meshes.open_edit();
+    tick(&mut app.meshes, 40.5);
+    app.meshes.edit.as_mut().unwrap().flush();
+    app.meshes.close_edit();
+    assert!(autosave(&d).is_file());
+    // …and the next session, in the Textures export folder, recovers it unsaved (Note GD11).
+    let root = app.model.nif_export_root();
+    app.meshes.set_nif_export_root(root);
+    app.meshes.open_edit();
+    assert_eq!(op_values(&app.meshes).len(), 1, "recovered");
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
+            app,
+        );
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    assert!(autosave(&d).is_file(), "guard: nothing saved before Export");
+    let m = &mut h.state_mut().model;
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Alpha(engine::config::AlphaPolicy::Blend),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let settings = m.project.as_ref().unwrap();
+    assert!(settings.is_dirty());
+    let recovery = sdc_gui::crash_log::recovery_path(settings.path());
+    std::fs::write(&recovery, "pending texture settings").unwrap();
+    let (store, mods) = (d.path().join("nif-edits"), d.path().join("mods"));
+    let roots = [t.path(), store.as_path(), mods.as_path()];
+    let before = support::tree_hashes(&roots);
+    let pending = support::PendingRemovals::before_export(&h.state().model);
+    export_from_review(&mut h);
+    let after = support::tree_hashes(&roots);
+    assert!(!autosave(&d).exists(), "the export's save removed it");
+    assert!(before.contains_key(&recovery) && !after.contains_key(&recovery));
+    let model = &h.state().model;
+    let w = model.review_writes_at_open();
+    let removals = pending.after_export(model);
+    let bad = support::compare_listing(&w, &before, &after, Some(d.path()), &removals).violations;
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
 // ---- Note GH5, GH8: the footer before any edit, and Review's NIF export with no project ----
 
 /// Note GH5: nothing edited is the idle state with no export folder too (the folder check used to come first and
@@ -14281,7 +14377,31 @@ fn tree(p: &Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn meshes_only_review_exports_the_nif_edit() {
     let out = tempfile::tempdir().unwrap();
-    let (_d, mut h) = no_project_app(Some(out.path()), 1);
+    let (_d, mut h) = no_project_app(Some(out.path()), 0);
+    assert!(h.state().meshes.selected_nif.is_some());
+    assert!(h.state().model.nif_review_rows().is_empty());
+    assert_eq!(support::header_export_action(&h), None);
+    assert!(h.query_by_label("Files").is_none());
+    tick(&mut h.state_mut().meshes, 40.5);
+    h.state_mut().meshes.edit.as_mut().unwrap().flush();
+    h.run_steps(4);
+    assert_eq!(h.state().model.nif_review_rows().len(), 1);
+    support::header_undo(&h, "Undo");
+    support::header_undo(&h, "Redo");
+    assert_eq!(support::header_export_label(&h), "Review 1 NIF edit…");
+    let review = h.get_by_role_and_label(AkRole::Button, "Review 1 NIF edit…");
+    assert!(review.accesskit_node().is_disabled());
+    review.hover();
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run_steps(4);
+    h.get_by_label("Open Review from the NIF edit panel (Review…)");
+    h.get_by_label("Files");
+    h.get_by_label_contains("Problems");
+    h.get_by_label_contains("Messages");
+    assert!(h.query_by_label("Save").is_none(), "texture Save is hidden");
     let (_path, out_path, bytes) = nif_out(&h);
     assert!(out_path.starts_with(out.path()), "{out_path:?}");
     h.state_mut().model.open_review();
@@ -14289,6 +14409,10 @@ fn meshes_only_review_exports_the_nif_edit() {
     assert_eq!(h.state().model.review_gate(), Ok((0, 0)));
     let b = h.get_by_role_and_label(AkRole::Button, "Export 1 NIF edit");
     assert!(!b.accesskit_node().is_disabled());
+    // Ruling 3c-43: no project, nothing to set the key for: the opt-out box is not drawn (Review is, as the button shows).
+    assert!(h
+        .query_by_label("Export without review next time")
+        .is_none());
     h.get_by_role_and_label(AkRole::Button, "Export 1 NIF edit")
         .click();
     h.run_steps(6);
@@ -14419,6 +14543,49 @@ fn right_click_on_the_3d_view_offers_export_this_nif() {
         "the result goes through nif_export_result"
     );
     assert!(!h.state().meshes.edit.as_ref().unwrap().doc.pending());
+}
+
+#[test]
+fn exporting_the_last_nif_keeps_its_unseen_message_unread() {
+    let out = tempfile::tempdir().unwrap();
+    let (_d, mut h) = no_project_app(Some(out.path()), 1);
+    let (_, path, bytes) = nif_out(&h);
+    assert_eq!(h.state().model.nif_review_rows().len(), 1);
+    h.get_by_label_contains("Messages").click();
+    h.run_steps(4);
+    h.get_by_label("Clear");
+    assert_eq!(h.state().model.messages.unread(), 0);
+
+    right_click_3d(&mut h);
+    let read = h.state().model.messages.len();
+    h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+        .click();
+    h.run_steps(6);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    let model = &h.state().model;
+    assert!(model.nif_review_rows().is_empty());
+    assert!(h.query_by_label_contains("Messages").is_none());
+    assert_eq!(
+        model.messages.entries().next_back().unwrap().text,
+        "NIF edits written: 1 file"
+    );
+    let unread = model.messages.unread();
+    assert_eq!(
+        unread,
+        model.messages.len() - read,
+        "the tab never drew these entries"
+    );
+    assert_eq!(
+        model
+            .messages
+            .entries()
+            .rev()
+            .take(unread)
+            .filter(|e| e.text == "NIF edits written: 1 file")
+            .count(),
+        1,
+        "the export result is unread"
+    );
 }
 
 /// Q5: the model keeps the result for the app to hand over.
@@ -14653,13 +14820,12 @@ fn the_edit_panel_has_no_undo_redo_of_its_own() {
     assert!(!support::header_undo(&h, "Undo")
         .accesskit_node()
         .is_disabled());
-    // The header's own text names the step.
-    let hdr = sdc_gui::ui::header::undo_button(
-        sdc_gui::ui::meshes::undo_target(&h.ctx).as_ref(),
-        true,
-        None,
-    );
-    assert!(hdr.text.starts_with("Undo NIF edit: "), "{}", hdr.text);
+    let target = sdc_gui::ui::meshes::undo_target(&h.ctx).unwrap();
+    let step = target.undo_label.as_ref().unwrap();
+    let hdr = sdc_gui::ui::header::undo_button(Some(&target), true, None);
+    assert_eq!(hdr.text, "Undo NIF edit");
+    assert_eq!(hdr.name, format!("Undo (NIF edit history): {step}"));
+    assert!(hdr.hover.contains(&format!("Undo NIF edit: {step}")));
     press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
     assert_eq!(nif(&h), (0, true), "Ctrl+Z undid the NIF step");
 }
@@ -15239,6 +15405,16 @@ fn the_meshes_cap_keeps_the_users_review_height() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(review_height(&h) < 600.0, "Meshes view: capped");
+    h.get_by_label("Settings…").click();
+    h.run_steps(4);
+    h.get_by_label("Back to meshes");
+    assert_eq!(review_height(&h), 600.0, "Settings covers the NIF preview");
+    h.get_by_label("Back to meshes").click();
+    h.run_steps(4);
+    assert!(
+        review_height(&h) < 600.0,
+        "Back restores the NIF preview cap"
+    );
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
     assert_eq!(review_height(&h), 600.0, "back in the Textures view");

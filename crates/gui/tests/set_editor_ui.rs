@@ -116,7 +116,7 @@ fn the_set_editor_shows_slot_rows_alpha_and_slot_commands() {
         .key
         .clone();
     m.select_set(&key);
-    // Tall enough for the packed card's recipe choice and fill rows, which push the commands button down.
+    // Tall enough for the packed card's fill rows, which push the commands button down.
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -406,6 +406,9 @@ fn an_unset_number_shows_the_fixed_default_and_an_edit_is_the_sets_own() {
     h.run();
     assert!(spin_values(&h).contains(&"0.5".to_string()));
     assert_eq!(h.query_all_by_label("reset").count(), 1);
+    // The Output files group above the rows moved the button below the 900 px window: scroll to it first.
+    h.get_by_label("reset").scroll_to_me();
+    h.run();
     h.get_by_label("reset").click();
     h.run();
     assert!(!rock_settings(&h).contains_key("roughness_scale"));
@@ -892,12 +895,18 @@ fn the_header_has_the_json_editor_and_the_also_export_tab_has_no_pgpatcher_keys(
     let mut h = harness(m);
     h.run();
     // Note JI2: the set panel's second tab is Also export (no drawer body); the TruePBR box is on its Material tab.
-    // Opened first: the Material tab's row has its own JSON editor button.
+    // Both launchers are on screen when Tools opens over the Material tab.
+    h.get_by_label("Tools").click();
+    h.run();
+    h.get_by_label("Material: PGPatcher JSON editor…");
+    h.get_by_label(sdc_gui::ui::header::JSON_EDITOR);
+    h.key_press(eframe::egui::Key::Escape);
+    h.run();
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Also export")
         .click();
     h.run();
-    // R14: the editor is an entry of Export to ▾.
-    h.get_by_label_contains("Export to: ").click();
+    // R14: the editor is available from the header.
+    h.get_by_label("Tools").click();
     h.run();
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR);
     // Close the menu again before the tab checks.
@@ -1152,6 +1161,18 @@ fn a_coat_source_titles_the_subsurface_card_coat_colour_and_strength() {
     h.run();
     h.get_by_label("Coat colour + strength");
     assert!(h.query_by_label("Subsurface _s").is_none());
+    // Final wave Group 2: the Output files line of that file takes the row's title, not the bare slot's name.
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Coat colour + strength: ")
+            .is_some(),
+        "the _coat output line reads as its row"
+    );
+    assert!(
+        h.query_by_label_contains("Subsurface _s: ").is_none(),
+        "no output line calls the _coat Subsurface"
+    );
 }
 
 fn text_inputs(h: &Harness<'static, AppModel>) -> Vec<String> {
@@ -1178,7 +1199,7 @@ fn the_matching_header_lists_the_default_match1() {
 
 fn match_toggles(h: &Harness<'static, AppModel>) -> Vec<bool> {
     use eframe::egui::accesskit::Toggled;
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .map(|n| n.accesskit_node().toggled() == Some(Toggled::True))
         .collect()
 }
@@ -1210,12 +1231,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
             .count(),
         1
     );
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .click();
@@ -1225,12 +1246,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
         serde_json::json!(r"landscape\rock01_n")
     );
     assert!(text_inputs(&h).contains(&r"landscape\rock01_n".to_string()));
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .click();
@@ -1240,6 +1261,56 @@ fn the_card_toggles_mirror_the_matching_rows() {
         "back to the derived default"
     );
     assert_eq!(match_toggles(&h), vec![true, true]);
+}
+
+/// Final wave Group 4 (Important 5): Match on this is a discrete toggle, so each click is its own Undo step and one
+/// Undo takes back the last click only.
+#[test]
+fn each_match_click_is_one_undo_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    rock_selected(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let click_normal = |h: &mut Harness<'static, AppModel>| {
+        h.query_all_by_label_contains("Match on this")
+            .nth(1)
+            .unwrap()
+            .scroll_to_me();
+        h.run();
+        h.query_all_by_label_contains("Match on this")
+            .nth(1)
+            .unwrap()
+            .click();
+        h.step();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+    };
+    let steps = h.state().history.undo.len();
+    click_normal(&mut h);
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "premise: the first click turns the normal's match on"
+    );
+    click_normal(&mut h);
+    assert!(
+        !rock_settings(&h).contains_key("match2"),
+        "premise: the second click turns it off"
+    );
+    assert_eq!(
+        h.state().history.undo.len(),
+        steps + 2,
+        "two clicks, two Undo steps"
+    );
+    h.state_mut().undo();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "one Undo takes back the second click only"
+    );
 }
 
 /// Owner, 2026-10-12: + offers slots 3–8. A slot the set fills starts from the set's path for it; an empty slot adds
@@ -1444,6 +1515,92 @@ fn a_clashing_slot_card_shows_and_removes_either_member() {
         h.run();
         assert!(!members(&h).contains(&key), "{name} left the set");
         assert!(h.query_by_label_contains("both use slot 7").is_none());
+    }
+}
+
+/// Ruling 3b-F8: the editor's conflict line and its Remove buttons read what Export's clash reads. A clear or a typed
+/// path on slot 7 (`_cnr` + `_f`) or slot 3 (`_g` + `_sk`) leaves one path in the JSON, so the editor shows no conflict
+/// and Export has no clash block; before the command both show one.
+#[test]
+fn a_slot_the_json_overrides_shows_no_conflict_as_export_has_none() {
+    use sdc_gui::model::sets::SlotCommand;
+    let blocks = |m: &AppModel| -> Vec<String> {
+        sdc_gui::model::pbr_export::export_blocks(m)
+            .iter()
+            .map(|i| i.text.clone())
+            .collect()
+    };
+    let cases = [
+        (
+            7u8,
+            ["rock01_cnr.png", "rock01_f.png"],
+            "_cnr and _f both use slot 7",
+        ),
+        (
+            3,
+            ["rock01_g.png", "rock01_sk.png"],
+            "_g and _sk both use slot 3",
+        ),
+    ];
+    for (n, files, block) in cases {
+        let block = format!("landscape/rock01: {block}");
+        let line = format!("{} and {} both use slot {n}", files[0], files[1]);
+        for cmd in [
+            SlotCommand::Clear,
+            SlotCommand::Path(r"effects\white.dds".into()),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let r = d.path().join("textures/landscape");
+            std::fs::create_dir_all(&r).unwrap();
+            for f in files {
+                image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+                    .save(r.join(f))
+                    .unwrap();
+            }
+            let mut m = pbr_opened(d.path());
+            if n == 3 {
+                // As `pbr_export::emissive_and_skin_sk_clash_on_any_set`: the two are decided by hand.
+                let pick = |m: &mut AppModel, f: &str, s: &str| {
+                    m.set_field(&format!("landscape/{f}"), "subtype", serde_json::json!(s))
+                };
+                pick(&mut m, files[0], "glow");
+                pick(&mut m, files[1], "skin_sk");
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            }
+            rock_selected(&mut m);
+            let mut h = harness(m);
+            h.run();
+            h.get_by_label_contains(&line);
+            for f in files {
+                h.get_by_label(&format!("Remove {f}"));
+            }
+            assert!(
+                blocks(h.state()).contains(&block),
+                "premise ({cmd:?}): {:?}",
+                blocks(h.state())
+            );
+            h.state_mut()
+                .set_slot_command("landscape/rock01", n, cmd.clone())
+                .unwrap();
+            assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+            h.run();
+            assert!(
+                !blocks(h.state()).contains(&block),
+                "{cmd:?}: {:?}",
+                blocks(h.state())
+            );
+            assert!(
+                h.query_by_label_contains(&format!("both use slot {n}"))
+                    .is_none(),
+                "{cmd:?}: the editor shows a conflict Export does not have"
+            );
+            for f in files {
+                assert!(
+                    h.query_by_label(&format!("Remove {f}")).is_none(),
+                    "{cmd:?}: Remove {f} is offered"
+                );
+            }
+        }
     }
 }
 
@@ -1668,13 +1825,20 @@ fn diffuse_top(h: &Harness<'static, AppModel>) -> f32 {
         .fold(f32::MAX, f32::min)
 }
 
-/// Scroll the centre under `at` by `dy` points with the wheel, as a user would.
-fn wheel(h: &mut Harness<'static, AppModel>, at: eframe::egui::Pos2, dy: f32) {
+/// Wheel inside the visible editor. A slot row can already be below the viewport before scrolling.
+fn scroll_editor(h: &mut Harness<'static, AppModel>) {
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    let bar = h
+        .query_all_by_role(eframe::egui::accesskit::Role::ScrollBar)
+        .map(|n| n.rect())
+        .find(|r| r.height() > r.width() && centre.contains(r.center()))
+        .expect("the editor has a vertical scroll bar");
+    let at = eframe::egui::pos2(centre.center().x, bar.center().y);
     h.event(eframe::egui::Event::PointerMoved(at));
     h.run();
     h.event(eframe::egui::Event::MouseWheel {
         unit: eframe::egui::MouseWheelUnit::Point,
-        delta: eframe::egui::vec2(0.0, dy),
+        delta: eframe::egui::vec2(0.0, -3000.0),
         source: eframe::egui::MouseWheelSource::Wheel,
         modifiers: eframe::egui::Modifiers::NONE,
         phase: eframe::egui::TouchPhase::Move,
@@ -1684,7 +1848,16 @@ fn wheel(h: &mut Harness<'static, AppModel>, at: eframe::egui::Pos2, dy: f32) {
 }
 
 /// Short, so both the texture panel and the set editor overflow and scroll.
-fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
+fn short_harness(mut m: AppModel) -> Harness<'static, AppModel> {
+    // Start these editor walks at the saved fixture, with the normal recorder enabled.
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.save().unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_undo());
+    check_close(&mut m, (false, false), (false, false));
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -1696,6 +1869,34 @@ fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
 
 fn set_keys(m: &AppModel) -> Vec<String> {
     m.sets.iter().map(|s| s.key.clone()).collect()
+}
+
+fn walk_scrolled_edit(m: &mut AppModel) {
+    let set = "landscape/rock01";
+    if !m.can_undo() {
+        m.set_json_value(set, "roughness_scale", Some(serde_json::json!(0.5)));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let edited = m.sets_doc.as_ref().unwrap().text();
+    check_close(m, (false, true), (false, true));
+    m.undo();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_undo());
+    check_close(m, (false, false), (false, false));
+    record_another_colour(m);
+    check_close(m, (false, false), (false, false));
+    m.redo();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_redo());
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), edited);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("extra_d.png", "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    check_close(m, (false, true), (true, true));
 }
 
 #[test]
@@ -1718,11 +1919,7 @@ fn the_set_editor_opens_at_its_top_after_a_scrolled_texture() {
     h.state_mut().select_item(&diffuse);
     h.run();
     let back = h.get_by_label_contains("← ").rect();
-    wheel(
-        &mut h,
-        eframe::egui::pos2(back.min.x + 40.0, back.min.y + 150.0),
-        -3000.0,
-    );
+    scroll_editor(&mut h);
     assert!(
         h.get_by_label_contains("← ").rect().min.y < back.min.y - 20.0,
         "the texture panel scrolled"
@@ -1737,6 +1934,7 @@ fn the_set_editor_opens_at_its_top_after_a_scrolled_texture() {
         "the first slot row is at the top: {} vs {top}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 #[test]
@@ -1751,17 +1949,13 @@ fn going_back_to_a_set_opens_it_at_its_top() {
     let mut h = short_harness(m);
     h.run();
     let top = diffuse_top(&h);
-    let at = eframe::egui::pos2(
-        h.get_by_label("Slot commands…").rect().min.x + 40.0,
-        top + 30.0,
-    );
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     assert!(diffuse_top(&h) < top - 20.0, "set A's editor scrolled");
     // B is scrolled too, so the old shared offset would survive the way back.
     h.state_mut().select_set(&keys[1]);
     h.run();
     let top_b = diffuse_top(&h);
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     assert!(diffuse_top(&h) < top_b - 20.0, "set B's editor scrolled");
     h.state_mut().select_set(&keys[0]);
     h.run();
@@ -1770,6 +1964,7 @@ fn going_back_to_a_set_opens_it_at_its_top() {
         "set A reopens at its top: {} vs {top}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 /// A guard: it passes before the fix too. The reset fires on a switch only, never on a re-plan of the same set.
@@ -1781,11 +1976,7 @@ fn the_offset_survives_a_replan_of_the_same_set() {
     let mut h = short_harness(m);
     h.run();
     let top = diffuse_top(&h);
-    let at = eframe::egui::pos2(
-        h.get_by_label("Slot commands…").rect().min.x + 40.0,
-        top + 30.0,
-    );
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     let scrolled = diffuse_top(&h);
     assert!(scrolled < top - 20.0, "the editor scrolled");
     h.state_mut().set_json_value(
@@ -1801,6 +1992,7 @@ fn the_offset_survives_a_replan_of_the_same_set() {
         "the offset is kept: {} vs {scrolled}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 #[test]
@@ -1819,14 +2011,6 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
             .min
             .y
     };
-    let x = widget(
-        &h,
-        eframe::egui::accesskit::Role::DisclosureTriangle,
-        "Type",
-    )
-    .rect()
-    .min
-    .x + 40.0;
     // The set editor is scrolled first; the bulk panel then opens at its top, not at that offset.
     rock_selected(h.state_mut());
     h.run();
@@ -1835,8 +2019,9 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     let top = type_header_y(&h);
     rock_selected(h.state_mut());
     h.run();
-    let at = eframe::egui::pos2(x, diffuse_top(&h) + 30.0);
-    wheel(&mut h, at, -3000.0);
+    let set_top = diffuse_top(&h);
+    scroll_editor(&mut h);
+    assert!(diffuse_top(&h) < set_top - 20.0, "the set editor scrolled");
     h.state_mut().select_all_visible();
     h.run();
     assert!(
@@ -1844,4 +2029,5 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
         "the bulk panel is at its top: {} vs {top}",
         type_header_y(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }

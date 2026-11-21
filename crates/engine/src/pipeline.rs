@@ -28,6 +28,7 @@ use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
 use crate::validate::{validate, ValidationInput, ValidationReport};
 use std::cell::Cell;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -451,8 +452,31 @@ pub(crate) fn encode_levels(
     Ok(levels)
 }
 
-/// Convert one file and append its manifest record. Cancellation is checked between stages and between encode
-/// bands, last just before the write, so a cancelled file never leaves an output behind. Everything that can fail
+/// Publish a complete new DDS without replacing a destination that appeared during encoding.
+/// Only a collision at the final move is a skip. Staging and other move errors fail the job.
+fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".sdc-").suffix(".tmp");
+    #[cfg(unix)]
+    builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
+    let mut temp = builder.tempfile_in(dir)?;
+    temp.write_all(bytes)?;
+    temp.as_file().sync_all()?;
+    match temp.persist_noclobber(path) {
+        Ok(_) => Ok(true),
+        Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e.error),
+    }
+}
+
+/// Convert one file and append its manifest record. Returns `None` when a late unrecorded output was kept.
+/// Cancellation is checked between stages and encode bands, last just before the write.
+/// A cancelled file never leaves an output behind. Everything that can fail
 /// before the output exists (validation of the in-memory DDS bytes, the profile hash, the record)
 /// runs before the write; only the manifest append comes after it. When that fails,
 /// or anything panics, `tracker.written` tells the caller to remove the output, so an output on disk has its
@@ -470,7 +494,8 @@ pub fn process_file(
     rep: &Reporter,
     manifest: &Manifest,
     tracker: &FileTracker,
-) -> Result<FileOutcome, FileError> {
+    replace_existing: bool,
+) -> Result<Option<FileOutcome>, FileError> {
     let enter = |st: Stage| tracker.stage.set(st);
     enter(Stage::Load);
     // Test hook (Task 44, `test-hooks` feature only): panic on the named input file to prove per-file panic isolation.
@@ -594,7 +619,12 @@ pub fn process_file(
     };
     stop()?;
 
-    write_atomic(&job.output, &bytes).map_err(|e| fail(Stage::Write)(e.to_string()))?;
+    let write_error = |e: io::Error| fail(Stage::Write)(e.to_string());
+    if replace_existing {
+        write_atomic(&job.output, &bytes).map_err(write_error)?;
+    } else if !write_new_dds(&job.output, &bytes).map_err(write_error)? {
+        return Ok(None);
+    }
     tracker.written.set(true);
     drop(bytes);
     // Note Y1: taken after the rename, so `if-changed` notices a replaced output. Any failure from here on removes
@@ -605,10 +635,10 @@ pub fn process_file(
         .map_err(|e| fail(Stage::Write)(format!("manifest {}: {e}", manifest.path().display())))?;
     // `Warn`: listed with the file's warnings only; the record and its validation summary do not carry it.
     report.warnings.extend(low_detail);
-    Ok(FileOutcome {
+    Ok(Some(FileOutcome {
         output: job.output.clone(),
         report,
-    })
+    }))
 }
 
 #[cfg(test)]

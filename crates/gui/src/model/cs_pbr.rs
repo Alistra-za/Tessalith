@@ -406,6 +406,8 @@ pub fn overlay(settings: &mut Settings, b: &CsBlock) {
 impl AppModel {
     /// Set `set`'s block of `kind`, as the document holds it.
     pub fn cs_block(&self, set: &str, kind: Kind) -> Option<CsBlock> {
+        #[cfg(feature = "test-hooks")]
+        self.doc_block_reads.set(self.doc_block_reads.get() + 1);
         let entries = self.sets_doc.as_ref()?.entries();
         let e = entries.iter().find(|e| same_id(&e.id, set))?;
         match kind {
@@ -815,7 +817,7 @@ pub const PGP_BOX_UNAVAILABLE: &str = "Not available: the set's colour map is no
 impl AppModel {
     /// `None` without a texture-set block (the set's entry is written as before).
     pub fn statics_status(&self, v: &SetView) -> Option<StaticsStatus> {
-        let b = self.cs_block(&v.id, Kind::Txst)?;
+        let b = v.cs_block(Kind::Txst)?;
         Some(match b.statics {
             Statics::Never => StaticsStatus::Never,
             Statics::Always => StaticsStatus::Always,
@@ -852,7 +854,7 @@ impl AppModel {
     pub fn cs_records_written(&self, v: &SetView) -> bool {
         [Kind::Txst, Kind::Mato]
             .into_iter()
-            .any(|k| self.cs_block(&v.id, k).is_some_and(|b| !b.edids.is_empty()))
+            .any(|k| v.cs_block(k).is_some_and(|b| !b.edids.is_empty()))
     }
 }
 

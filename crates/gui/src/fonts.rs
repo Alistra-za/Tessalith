@@ -582,7 +582,7 @@ pub fn embedded() -> (egui::FontDefinitions, FontChoice) {
 /// Every non-ASCII character in `crates/gui/src`, CJK aside; in this file only the code before its test module, without
 /// this literal (`ui_symbols_cover_the_source`).
 #[cfg(test)]
-pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥≈≡✓ⓘẞ°±Δ²α↔üïÄ✎●←‹›äÖΩω≠π▼◀▶▸✖“”🔗é⏵";
+pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥≈≡✓ⓘẞ°±Δ²α↔üïÄ✎●←‹›äÖΩω≠π▼◀▶▸✖“”é⏵⋯";
 
 #[cfg(test)]
 mod tests {
@@ -1300,7 +1300,7 @@ mod tests {
             .chars()
             .filter(|c| !fonts.has_glyph(&id, *c))
             .collect();
-        let mut want: Vec<char> = "ẞⓘ⚠✎✓✕✖🔒🔗⏵".chars().collect();
+        let mut want: Vec<char> = "ẞⓘ⚠✎✓✕✖🔒⏵".chars().collect();
         want.sort();
         got.sort();
         assert_eq!(got, want, "floor gaps changed");

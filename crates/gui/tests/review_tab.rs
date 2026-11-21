@@ -13,6 +13,149 @@ use support::*;
 
 const ROCK: &str = "landscape/rock01.png";
 
+#[test]
+fn reviews_first_screen_is_blockers_list_and_button() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(cs_opened_chosen(d.path()));
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    assert_eq!(h.query_all_by_label("Skip these sets").count(), 0);
+    assert_eq!(
+        h.query_all_by_label_contains("Choose where the Also folders go")
+            .count(),
+        0
+    );
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    assert_eq!(h.query_all_by_label_contains("▸").count(), 0);
+    let list = h.get_by_label("What will be written").rect();
+    for heading in ["Blockers (", "Undecided ("] {
+        assert!(h.get_by_label_contains(heading).rect().bottom() <= list.top());
+    }
+    let export = h
+        .get_by_role_and_label(Role::Button, &h.state().review_button_text())
+        .rect();
+    assert!(list.bottom() <= export.top());
+}
+
+#[test]
+fn options_stay_open_until_review_closes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cs_opened_chosen(d.path());
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    for open in [true, false, true] {
+        h.get_by_role_and_label(Role::DisclosureTriangle, "Options")
+            .click();
+        h.run();
+        assert_eq!(h.state().review.as_ref().unwrap().options_open, open);
+        assert_eq!(h.query_by_label("Skip these sets").is_some(), open);
+    }
+    h.state_mut().open_review();
+    h.run();
+    assert!(h.state().review.as_ref().unwrap().options_open);
+    assert!(h.query_by_label("Skip these sets").is_some());
+    h.state_mut().close_review();
+    h.state_mut().open_review();
+    h.run();
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn a_closed_options_still_names_the_also_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    let mut h = harness(m);
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options · Also export as Vanilla");
+    h.get_by_label_contains("plus the Vanilla folder");
+}
+
+#[test]
+fn a_closed_options_names_the_skipped_sets_and_both_cm_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Cm, true);
+    m.set_skip_also("landscape/rock01", true);
+    m.set_skip_also("landscape/leaf", true);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.header_export_clicked();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(
+        Role::DisclosureTriangle,
+        "Options · Also export as Vanilla and CM · skipping 2 sets",
+    );
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn the_closed_header_names_a_saved_skip_only_while_an_also_folder_is_on() {
+    use engine::presets::AlsoTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.set_skip_also("landscape/rock01", true);
+    m.set_also_tick(AlsoTarget::Vanilla, false);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    h.state_mut().set_also_tick(AlsoTarget::Vanilla, true);
+    settle(&mut h);
+    h.get_by_role_and_label(
+        Role::DisclosureTriangle,
+        "Options · Also export as Vanilla · skipping 1 set",
+    );
+}
+
+#[test]
+fn an_also_blocker_opens_options_and_names_the_reason_in_blockers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    m.set_also_location(&m.root.clone().unwrap());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.open_review();
+    let reason = m.also_gate().unwrap_err();
+    let mut h = harness(m);
+    h.run();
+    assert!(h.state().review.as_ref().unwrap().options_open);
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    h.get_by_role_and_label(Role::Button, "Choose where the Also folders go…");
+    let heading = h.get_by_label("Blockers (1)").rect();
+    let next = h.get_by_label_contains("Undecided (").rect();
+    assert!(h
+        .query_all_by_label(&reason)
+        .any(|n| n.rect().top() >= heading.bottom() && n.rect().right() <= next.left()));
+    assert!(disabled(&h, &h.state().review_button_text()));
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options")
+        .click();
+    h.run();
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    h.get_by_label("Blockers (1)");
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn the_footer_says_when_every_output_will_be_reencoded() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cs_opened_chosen(d.path());
+    m.open_review();
+    let mut h = harness(m);
+    let text = "Re-encode every output is on: every file Tessalith recorded is written again.";
+    h.run();
+    assert!(h.query_by_label(text).is_none());
+    h.state_mut().set_reencode_all(true);
+    h.run();
+    assert!(support::panel(&h.ctx, "review-footer").contains_rect(h.get_by_label(text).rect()));
+}
+
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     harness_dt(model, 0.25)
 }
@@ -190,7 +333,9 @@ fn review_export_is_disabled_with_the_blocker_count() {
 #[test]
 fn deciding_a_row_in_review_keeps_the_columns_usable() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(opened(d.path()));
+    let mut m = opened(d.path());
+    m.set_json_name("review-pack");
+    let mut h = harness(m);
     h.run();
     press_export(&mut h);
     // One `Set type: X ✓` per row that asks its sub-type with a suggestion, in list order (Backlog L64).
@@ -201,10 +346,16 @@ fn deciding_a_row_in_review_keeps_the_columns_usable() {
         .filter(|k| matches!(h.state().subtype_question(k), Some(Some(_))))
         .collect();
     let at = with_check.iter().position(|k| k == ROCK).unwrap();
+    h.get_by_label("New project: nothing saved yet.");
     let before = h.query_all_by_label_contains("Set type: ").count();
     assert_eq!(before, with_check.len());
     let node = h.query_all_by_label_contains("Set type: ").nth(at).unwrap();
-    node.hover();
+    node.scroll_to_me();
+    h.run();
+    h.query_all_by_label_contains("Set type: ")
+        .nth(at)
+        .unwrap()
+        .hover();
     h.run();
     h.query_all_by_label_contains("Set type: ")
         .nth(at)
@@ -222,15 +373,26 @@ fn deciding_a_row_in_review_keeps_the_columns_usable() {
         before - 1
     );
     // The Textures column still takes a click while Review is open (Note DY16: the raw roughness is a helper row now).
-    h.query_all_by_role(eframe::egui::accesskit::Role::Button)
-        .find(|n| {
-            n.accesskit_node()
-                .label()
-                .is_some_and(|l| l.starts_with("Helper rock01_roughness.png:"))
-        })
-        .expect("the roughness helper row")
-        .click();
-    h.run();
+    h.hover_at(
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures")
+            .unwrap()
+            .center(),
+    );
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        source: egui::MouseWheelSource::Wheel,
+        phase: egui::TouchPhase::Move,
+        modifiers: Default::default(),
+    });
+    h.run_steps(10);
+    let helper = h
+        .get_by_label_contains("Helper rock01_roughness.png:")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_owned();
+    press(&mut h, &helper);
     assert!(
         matches!(&h.state().selection, Selection::Item(k) if k.ends_with("rock01_roughness.png")),
         "{:?}",
@@ -671,4 +833,86 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     h.state_mut().show_tab(BottomTab::Review);
     h.run_steps(4);
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
+}
+
+const OPT_OUT_TICK: &str = "Export without review next time";
+const OPT_OUT_WAIT: &str = "Export without review can be set once the folder has finished opening.";
+
+#[test]
+fn reviews_opt_out_tick_sets_the_project_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(support::opened_chosen_decided(d.path()));
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    settle(&mut h);
+    assert!(h.state().export_without_review());
+    // Ticking it again turns it off.
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+}
+
+// Round 1: the tick sits left of Close, and every footer control lies inside the Review panel at 1100 points.
+#[test]
+fn reviews_opt_out_tick_sits_left_of_close_inside_the_footer() {
+    let d = tempfile::tempdir().unwrap();
+    let h = review_at(d.path(), egui::vec2(1100.0, 864.0));
+    let panel = support::panel(&h.ctx, "bottom-review");
+    let tick = h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK).rect();
+    let close = h.get_by_role_and_label(Role::Button, "Close").rect();
+    let export_text = h.state().review_button_text();
+    let export = h.get_by_role_and_label(Role::Button, &export_text).rect();
+    assert!(tick.right() <= close.left(), "{tick:?} {close:?}");
+    assert!(close.right() <= export.left(), "{close:?} {export:?}");
+    for (name, r) in [("tick", tick), ("Close", close), ("Export", export)] {
+        assert!(panel.contains_rect(r), "{name} {r:?} outside {panel:?}");
+    }
+}
+
+// Minor: a project document that takes no edit draws the box off with its own reason.
+#[test]
+fn reviews_opt_out_tick_is_off_for_a_read_only_project_document() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(&bad));
+    assert!(m.sets_doc.as_ref().unwrap().read_only(), "guard");
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    assert!(disabled(&h, OPT_OUT_TICK));
+    h.get_by_label(OPT_OUT_TICK).hover();
+    h.run_steps(8);
+    h.get_by_label_contains("sdc-project.toml is read-only");
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}
+
+// Ruling 3c-13: while the folder's open can still be cancelled the setter refuses, so the tick is drawn off.
+#[test]
+fn reviews_opt_out_tick_is_off_while_the_open_can_be_cancelled() {
+    let a = tempfile::tempdir().unwrap();
+    let od = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(a.path());
+    m.open_folder(support::mod_folder(od.path()));
+    assert!(m.can_cancel_open(), "guard: the open is in flight");
+    m.open_review();
+    assert!(m.review.is_some(), "guard: Review is open");
+    let mut h = harness(m);
+    h.run();
+    assert!(disabled(&h, OPT_OUT_TICK));
+    h.get_by_label(OPT_OUT_TICK).hover();
+    h.run_steps(8);
+    h.get_by_label(OPT_OUT_WAIT);
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    h.run();
+    assert!(!h.state().export_without_review());
 }

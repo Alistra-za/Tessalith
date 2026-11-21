@@ -17,6 +17,8 @@ fn cmd(label: &str, before: Snapshot, after: Snapshot, merge: Option<&str>) -> C
         after,
         merge: merge.map(str::to_string),
         created_file: None,
+        type_alpha: false,
+        normal_prunes: Default::default(),
     }
 }
 
@@ -332,6 +334,64 @@ fn an_edit_during_an_export_is_not_saved_by_the_hash_record() {
     assert!(!doc.is_dirty());
     let disk = std::fs::read_to_string(doc.path()).unwrap();
     assert!(disk.contains("0.37") && disk.contains(&sha), "{disk}");
+}
+
+#[test]
+fn undoing_a_rename_during_export_leaves_only_the_json_hash_to_write() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_json_value("landscape/rock01", "specular_level", Some(json!(0.05)));
+    export_through(&mut m);
+    assert!(m.export.running.is_some());
+    m.rename_set("landscape/rock01", "landscape/renamed")
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let doc = m.sets_doc.as_ref().unwrap();
+    let hash = doc.last_json_sha256().expect("export recorded the JSON");
+    assert!(doc.user_dirty() && doc.text().contains("landscape/renamed"));
+    let disk = std::fs::read_to_string(doc.path()).unwrap();
+    assert!(!disk.contains(&hash) && !disk.contains("landscape/renamed"));
+    m.undo();
+    let doc = m.sets_doc.as_ref().unwrap();
+    assert!(!doc.text().contains("landscape/renamed"));
+    assert!(doc.is_dirty() && doc.text().contains(&hash));
+    assert!(!m.unsaved(), "the export hash alone is pending");
+    assert!(m.request_close());
+    let target = tempfile::tempdir().unwrap();
+    m.set_target_mod(Some(target.path().to_owned())).unwrap();
+    assert!(m.unsaved());
+    m.set_target_mod(None).unwrap();
+    assert!(
+        m.request_close(),
+        "clearing the target leaves only the export hash"
+    );
+}
+
+#[test]
+fn returning_both_fields_to_their_saved_values_clears_user_dirty() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let texture = "landscape/rock01.png";
+    m.set_json_name("saved");
+    m.set_field(texture, "alpha.threshold", json!(100));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.save().unwrap();
+    let original = m.project.as_ref().unwrap().text();
+    m.set_field(texture, "alpha.threshold", json!(120));
+    m.set_json_name("draft");
+    assert!(m.unsaved());
+    m.set_field(texture, "alpha.threshold", json!(100));
+    m.set_json_name("saved");
+    assert_eq!(m.project.as_ref().unwrap().text(), original);
+    assert!(
+        !m.project.as_ref().unwrap().user_dirty(),
+        "saved texture settings"
+    );
+    assert!(
+        !m.sets_doc.as_ref().unwrap().user_dirty(),
+        "saved JSON name"
+    );
+    assert!(m.request_close());
 }
 
 /// Backlog T37 (Note FP4): a step recorded while the engine's rejection blames `sdc.toml` keeps the stashed text, not

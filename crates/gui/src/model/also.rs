@@ -1,7 +1,7 @@
 //! Track A (DECISIONS Note CN): "Also export as" Vanilla and Complex Material in the GUI model (Task 11, C1 under
 //! layout v2). The ticks and settings are `[export]` in `sdc.toml` (TA9), the location is `[project] also_location`
 //! in `sdc-project.toml` (TA10). Review opens whenever a tick is on, and its Export is the only way out (CA2).
-use super::{messages, sets, AppModel};
+use super::{messages, sets, AppModel, SetTarget};
 use crate::project::ProjectDoc;
 use engine::also::{AlsoSpec, AlsoSummary, Phase};
 use engine::config::Target;
@@ -19,6 +19,19 @@ pub const EXPORT_RUNNING: &str = "Wait for the export to finish";
 /// TA11: a set Vanilla and CM derive from, by its PBR-phase shader pick (as `engine::also::derive_sets` reads it).
 pub fn is_pbr_set(v: &sets::SetView) -> bool {
     v.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family())
+}
+
+// Document-only cards have no engine shader pick. Use their saved shader or borrowed diffuse.
+pub(crate) fn document_pbr_set(v: &sets::SetView) -> bool {
+    v.key.is_empty() && v.shader_choice.map_or(v.pbr, Shader::is_pbr_family)
+}
+
+/// (Vanilla, CM) ticked in configuration `c`.
+fn ticks_of(c: &ExportConfig) -> (bool, bool) {
+    (
+        c.also.contains(&AlsoTarget::Vanilla),
+        c.also.contains(&AlsoTarget::Cm),
+    )
 }
 
 /// Why an "Also export as" tick (`on`: ticked now) is off, in one order for Export to ▾, Review and the set editor's
@@ -46,20 +59,26 @@ pub(super) fn phase_name(p: Phase) -> &'static str {
 impl AppModel {
     /// `[export]` of the project (the default without a usable `sdc.toml`).
     pub fn also_config(&self) -> ExportConfig {
-        self.project
-            .as_ref()
-            .filter(|p| !p.read_only())
-            .map(|p| p.export_config())
+        self.export_project()
+            .map(ProjectDoc::export_config)
             .unwrap_or_default()
+    }
+
+    fn export_project(&self) -> Option<&ProjectDoc> {
+        #[cfg(feature = "test-hooks")]
+        sets::count_root_read(true);
+        self.project.as_ref().filter(|p| !p.read_only())
     }
 
     /// (Vanilla, CM) from `[export] also`.
     pub fn also_ticks(&self) -> (bool, bool) {
-        let c = self.also_config();
-        (
-            c.also.contains(&AlsoTarget::Vanilla),
-            c.also.contains(&AlsoTarget::Cm),
-        )
+        self.also_summary().0
+    }
+
+    pub(crate) fn also_summary(&self) -> ((bool, bool), usize) {
+        self.export_project()
+            .map(|p| p.with_export_config(|c| (ticks_of(c), c.skip.len())))
+            .unwrap_or_default()
     }
 
     /// Either tick is on.
@@ -120,21 +139,21 @@ impl AppModel {
         });
     }
 
-    /// Note JI2 (correction 6): the set Review's "Recipe settings…" opens, by key: the selected set when it is PBR, else
+    /// Note JI2 (correction 6): the set Review's "Recipe settings…" opens: the selected set when it is PBR, else
     /// the first PBR set in list order that is not skipped, else the first PBR set; `None` without a PBR set.
-    pub fn recipe_set(&self) -> Option<String> {
+    pub fn recipe_set(&self) -> Option<SetTarget> {
         let all = sets::views(self);
-        let pbr = || all.iter().filter(|v| is_pbr_set(v));
-        if let super::Selection::Set(k) = &self.selection {
-            if pbr().any(|v| &v.key == k) {
-                return Some(k.clone());
+        let pbr = || all.iter().filter(|v| is_pbr_set(v) || document_pbr_set(v));
+        if let Some(target) = self.selection.set_target() {
+            if let Some(v) = pbr().find(|v| target.matches(v)) {
+                return Some(SetTarget::view(v));
             }
         }
         let skip = self.also_config().skip;
         pbr()
             .find(|v| !skip.iter().any(|s| engine::sets::same_id(s, &v.id)))
             .or_else(|| pbr().next())
-            .map(|v| v.key.clone())
+            .map(SetTarget::view)
     }
 
     /// C2: set `id` is in `[export] skip`.
@@ -159,10 +178,13 @@ impl AppModel {
 
     /// TA10: where the three folders go: `[project] also_location`, else the export folder.
     pub fn also_location(&self) -> PathBuf {
-        self.sets_doc
-            .as_ref()
-            .and_then(|d| d.also_location())
+        self.chosen_also_location()
             .unwrap_or_else(|| self.export_root())
+    }
+
+    /// `[project] also_location`, if set.
+    fn chosen_also_location(&self) -> Option<PathBuf> {
+        self.sets_doc.as_ref().and_then(|d| d.also_location())
     }
 
     /// The project name the engine names the folders by: the opened folder's name (`also::project_name`).
@@ -174,8 +196,12 @@ impl AppModel {
     /// The PBR, Vanilla and CM folders: the location joined with `[export.names]` (default `<project> PBR`, …).
     pub fn also_folders(&self) -> [PathBuf; 3] {
         let loc = self.also_location();
-        self.also_config()
-            .folder_names(&self.also_project().unwrap_or_default())
+        self.folders_in(&self.also_config(), loc)
+    }
+
+    /// `also_folders` under location `loc`, named by configuration `c`.
+    fn folders_in(&self, c: &ExportConfig, loc: PathBuf) -> [PathBuf; 3] {
+        c.folder_names(&self.also_project().unwrap_or_default())
             .map(|n| loc.join(n))
     }
 
@@ -183,12 +209,37 @@ impl AppModel {
     /// Review M1: only in the cs mode, so a tick left from it never sends the plan or the NIF edits into a PBR folder
     /// no export can fill (Review names TA20 instead).
     pub fn also_root(&self) -> Option<PathBuf> {
-        (self.also_on() && self.target == Target::Cs).then(|| self.also_folders()[0].clone())
+        self.also_root_in(&self.export_root())
+    }
+
+    /// Borrow the cached configuration: a root lookup on a warm Assign frame never copies the skip list.
+    fn also_root_in(&self, export: &Path) -> Option<PathBuf> {
+        self.export_project()?.with_export_config(|c| {
+            let (vanilla, cm) = ticks_of(c);
+            ((vanilla || cm) && self.target == Target::Cs).then(|| {
+                let loc = self
+                    .chosen_also_location()
+                    .unwrap_or_else(|| export.to_path_buf());
+                let [pbr, ..] = self.folders_in(c, loc);
+                pbr
+            })
+        })
     }
 
     /// The folder the plan and the PBR outputs are under: the PBR folder while a tick is on, else the export folder.
     pub fn output_root(&self) -> PathBuf {
-        self.also_root().unwrap_or_else(|| self.export_root())
+        // E7 (test hook, ruling 3c-49): a call made while `review_writes` runs is one of its file-system queries.
+        #[cfg(feature = "test-hooks")]
+        if self.review_writes_probe.get() {
+            self.review_writes_fs.set(self.review_writes_fs.get() + 1);
+        }
+        self.output_root_in(&self.export_root())
+    }
+
+    /// `sets::output_roots` already read the export folder; use that same path for both roots.
+    pub(crate) fn output_root_in(&self, export: &Path) -> PathBuf {
+        self.also_root_in(export)
+            .unwrap_or_else(|| export.to_path_buf())
     }
 
     /// Note CI29 / P16: where NIF edits go, handed to the Meshes model every frame by `app.rs`: `output_root()` when
@@ -265,6 +316,12 @@ impl AppModel {
         if !self.also_runs() {
             return None;
         }
+        self.toml_unwritable_now()
+    }
+
+    /// Why `sdc.toml` cannot be saved now (one metadata read), whatever the scope; `None`: writable. The whole-project
+    /// header's drawing cache reads it (ruling 3c-28), Review through `also_toml_unwritable`.
+    pub(super) fn toml_unwritable_now(&self) -> Option<String> {
         self.sdc_toml_writable()
             .err()
             .map(|_| TOML_READ_ONLY.to_string())
@@ -273,8 +330,18 @@ impl AppModel {
     /// Review's Also rows, in A9's order: the read-only `sdc.toml`, the cs mode (TA20), the location (TA19), the
     /// `[export]` values. The first `Err` is the button's reason.
     pub fn also_gate(&self) -> Result<(), String> {
-        if let Some(why) = self.review.as_ref().and_then(|r| r.toml_unwritable.clone()) {
-            return Err(why);
+        self.also_gate_with(
+            self.review
+                .as_ref()
+                .and_then(|r| r.toml_unwritable.as_deref()),
+        )
+    }
+
+    /// `also_gate` for a writability reading the caller took (`None`: writable): Review's own, taken when it opened,
+    /// or the whole-project header's (ruling 3c-28).
+    pub(super) fn also_gate_with(&self, toml_unwritable: Option<&str>) -> Result<(), String> {
+        if let Some(why) = toml_unwritable {
+            return Err(why.to_string());
         }
         if self.target != Target::Cs {
             return Err(NEEDS_CS.into());
@@ -338,13 +405,34 @@ impl AppModel {
                 "Also export: the {} phase failed (exit {code}): {msg}",
                 phase_name(*phase)
             );
+            self.export.notes.push(t.clone());
             // Review M2: a PBR-phase error is the export's `Err`, logged and shown once by `export_ended`.
             if *phase != Phase::Pbr {
                 self.messages.notify(messages::Severity::Error, t.clone());
+                self.also_error = Some(t);
             }
-            self.export.notes.push(t.clone());
-            self.also_error = Some(t);
         }
+        let phases = s
+            .phases
+            .iter()
+            .filter_map(|(phase, batch)| {
+                let idx = match phase {
+                    Phase::Pbr => return None,
+                    Phase::Vanilla => 1,
+                    Phase::Cm => 2,
+                };
+                Some((
+                    *phase,
+                    self.export.secondary_outcomes(batch, &s.folders[idx]),
+                ))
+            })
+            .collect();
+        self.export.result = Some(super::export::ExportResult {
+            phases,
+            copied: s.copied,
+            phase_error: self.also_error.clone(),
+            ..Default::default()
+        });
         self.also_written = Some(s.folders);
     }
 
@@ -380,6 +468,19 @@ mod tests {
     use super::super::tests::{bare_model, panicked};
     use engine::also::{AlsoSummary, Phase};
     use engine::events::{EngineEvent, EventKind, EVENT_SCHEMA};
+
+    #[test]
+    fn repeated_also_reads_borrow_the_same_skip_list_until_an_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = super::ProjectDoc::open(dir.path());
+        doc.set_skip_also("rock", true);
+        doc.with_export_config(|first| {
+            assert_eq!(first.skip, ["rock"]);
+            doc.with_export_config(|second| assert!(std::ptr::eq(&first.skip[0], &second.skip[0])));
+        });
+        doc.set_skip_also("rock", false);
+        doc.with_export_config(|cfg| assert!(cfg.skip.is_empty()));
+    }
 
     fn discovered(m: &mut super::AppModel, job: &str) {
         m.export.on_event(EngineEvent {

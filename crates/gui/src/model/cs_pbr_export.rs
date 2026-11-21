@@ -268,4 +268,18 @@ impl super::json_finish::Guarded for PendingCs {
     ) -> std::io::Result<()> {
         d.set_cs_pbr_shas(shas)
     }
+    fn planned(
+        &self,
+        _: &dyn Fn(&std::path::Path) -> bool,
+    ) -> Vec<super::json_finish::PlannedFolder> {
+        let files = self
+            .files
+            .iter()
+            .map(|(rel, text)| (self.root.join(rel), Some(text.clone())))
+            .collect();
+        vec![(self.root.clone(), files)]
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_cs_pbr_shas(shas);
+    }
 }

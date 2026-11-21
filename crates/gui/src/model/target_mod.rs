@@ -174,23 +174,55 @@ pub fn overlaps(a: &Path, b: &Path) -> bool {
 }
 
 fn canon(p: &Path) -> PathBuf {
-    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    // The overlap check walks on past any failed read, as it always has.
+    let (full, _) = nearest_existing(p, |_| true);
+    PathBuf::from(full.to_string_lossy().to_lowercase())
+}
+
+/// Ruling 3c-40: where an export destination resolves on disk, for comparing a click with its landing: the canonical
+/// path of its nearest existing ancestor plus the components that do not exist yet (`overlaps`' walk, without its
+/// case fold), so a missing folder under a retargeted junction is another destination. `None` when a read failed for
+/// another reason than "not found", or nothing on the path resolved: an indeterminate read, which equals nothing.
+pub(super) fn resolve_destination(p: &Path) -> Option<PathBuf> {
+    let (full, sure) = nearest_existing(p, |_| true);
+    sure.then_some(full)
+}
+
+/// A job can create a dangling link's target during export. Only append a component when the entry itself is absent.
+pub(super) fn resolve_review_directory(p: &Path) -> Option<PathBuf> {
+    let (full, sure) = nearest_existing(p, |part| {
+        part.symlink_metadata()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    });
+    sure.then_some(full)
+}
+
+/// `p` as the canonical path of its nearest existing ancestor plus the missing components below it, and whether every
+/// failed read was an accepted missing component and an ancestor resolved.
+fn nearest_existing(p: &Path, missing: impl Fn(&Path) -> bool) -> (PathBuf, bool) {
+    let (abs, mut sure) = match std::path::absolute(p) {
+        Ok(a) => (a, true),
+        Err(_) => (p.to_path_buf(), false),
+    };
     let mut tail = vec![];
     let mut cur = abs.as_path();
     let base = loop {
-        if let Ok(c) = cur.canonicalize() {
-            break c;
+        match cur.canonicalize() {
+            Ok(c) => break c,
+            Err(e) => sure = sure && e.kind() == std::io::ErrorKind::NotFound && missing(cur),
         }
         match (cur.file_name(), cur.parent()) {
             (Some(n), Some(par)) => {
                 tail.push(n);
                 cur = par;
             }
-            _ => break cur.to_path_buf(),
+            _ => {
+                sure = false;
+                break cur.to_path_buf();
+            }
         }
     };
-    let full: PathBuf = base.iter().chain(tail.into_iter().rev()).collect();
-    PathBuf::from(full.to_string_lossy().to_lowercase())
+    (base.iter().chain(tail.into_iter().rev()).collect(), sure)
 }
 
 impl AppModel {
@@ -209,7 +241,7 @@ impl AppModel {
         let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
             return Err("sdc-project.toml is read-only, so the target mod can't be saved");
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = d.defer_record_save();
         d.set_target_mod(p.as_deref());
         if was_dirty {
             self.status_line =

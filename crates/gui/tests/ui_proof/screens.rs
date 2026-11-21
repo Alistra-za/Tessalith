@@ -20,6 +20,7 @@ use crate::app_harness::{plain_harness_no_mo2, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
 use crate::invariants::{arm, strike, Entry, Pressed};
+use crate::support::reveal_header_control;
 use eframe::egui::{Key, Pos2, Rect, Vec2};
 use sdc_gui::app::SdcApp;
 use sdc_gui::model::bottom::BottomTab;
@@ -251,6 +252,16 @@ pub const SCREENS: &[Screen] = &[
         open: nothing,
         steps: &[r#"{"op":"click","at":{"starts":"Export to","role":"Button"}}"#],
         act: None,
+        marker: &[has("Choose export folder…"), has("Also export as Vanilla")],
+        transient: true,
+        dialog: false,
+    },
+    Screen {
+        name: "tools menu",
+        fixture: "demo",
+        open: |h| reveal_header_control(h, "Tools"),
+        steps: &[r#"{"op":"click","at":{"label":"Tools","role":"Button"}}"#],
+        act: None,
         marker: &[has("Re-encode every output")],
         transient: true,
         dialog: false,
@@ -305,7 +316,17 @@ pub const SCREENS: &[Screen] = &[
         open: |h| model(h).open_review(),
         steps: &[],
         act: None,
-        marker: &[has("What will be written")],
+        marker: &[has("What will be written"), lacks("Also export as")],
+        transient: false,
+        dialog: false,
+    },
+    Screen {
+        name: "review tab with Options open",
+        fixture: "demo",
+        open: |h| model(h).open_review(),
+        steps: &[r#"{"op":"click","at":{"starts":"Options","role":"DisclosureTriangle"}}"#],
+        act: None,
+        marker: &[has("What will be written"), has("Also export as")],
         transient: false,
         dialog: false,
     },
@@ -416,7 +437,10 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "pgp material tab",
         fixture: "demo",
-        open: |h| select_set(h, "architecture/stone/cobble"),
+        open: |h| {
+            model(h).save().expect("saved material editor fixture");
+            select_set(h, "architecture/stone/cobble");
+        },
         steps: &[],
         act: None,
         // the path is the editor's name box (its header), drawn whatever the tab; the Specular level box is the
@@ -453,7 +477,7 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "mo2 popup",
         fixture: "demo",
-        open: nothing,
+        open: |h| reveal_header_control(h, "MO2…"),
         steps: &[r#"{"op":"click","at":{"label":"MO2…"}}"#],
         act: None,
         marker: &[has("Scan a folder…")],
@@ -480,10 +504,11 @@ pub const SCREENS: &[Screen] = &[
         open: |h| material_tab(h, "pbr/metal", engine::shader::Shader::PbrLandscape),
         steps: &[],
         act: None,
-        // a control of the card's body: "PBR Landscape" is also the Sets column's shader value and its card's label
+        // a line of the card's body: "PBR Landscape" is also the Sets column's shader value and its card's label, and
+        // at 1100x800 the set editor's slot heading and Output files group put the template combo under the fold
         marker: &[
             has("textures/pbr/metal"),
-            has_role("ComboBox", "PBR texture set template"),
+            has("Shared (texture set, material object and PGPatcher JSON)"),
         ],
         transient: false,
         dialog: false,
@@ -825,6 +850,30 @@ fn the_export_witness_counts_the_exports_started() {
     assert_ne!(export_witness(h.state()), before, "an export started");
     h.state_mut().model.folder_epoch += 1;
     assert_eq!(export_witness(h.state()), before, "a folder opened");
+}
+
+#[test]
+fn the_walk_opens_review_options_at_each_size() {
+    let screen = SCREENS
+        .iter()
+        .find(|s| s.name == "review tab with Options open")
+        .unwrap();
+    for size in crate::invariants::SIZES {
+        let (_dir, h) = enter(screen, size).unwrap();
+        let snap = snapshot(&h);
+        assert!(holds(&snap, &[has("Also export as")]));
+        if size.x >= 1280.0 {
+            assert!(holds(
+                &snap,
+                &[
+                    has_role("Button", "Choose where the Also folders go…"),
+                    has_role("TextInput", "Vanilla folder name"),
+                    has_role("TextInput", "CM folder name"),
+                    has_role("TextInput", "PBR folder name"),
+                ]
+            ));
+        }
+    }
 }
 
 #[test]

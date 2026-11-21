@@ -9,11 +9,11 @@ A map of the GUI (`tessalith.exe`) for anyone who just opened it, plus the keys,
 The picture shows a small made-up mod. Double-clicking a tile replaces the centre with the 2D preview: see [Previews](Previews.md).
 
 1. **Open, Undo, Redo**: [Main window](GUI-Main-Window.md#header).
-2. **MO2…, Preset**: the scan source and the preset the folder converts with. The Mode (the target, `cs` or `vanilla`) is set in the [Settings tab](GUI-Main-Window.md#settings-tab); what modes and presets do: [Presets and targets](Presets-and-Targets.md).
+2. **MO2…**, **Preset** and **Tools ▾** share this part of the header. [Header menus](GUI-Main-Window.md#header). The Mode (the target, `cs` or `vanilla`) is set in the [Settings tab](GUI-Main-Window.md#settings-tab); what modes and presets do: [Presets and targets](Presets-and-Targets.md).
 3. **Textures / Meshes tabs**: [Main window](GUI-Main-Window.md#header); the Meshes view is [Mod scanning](Mod-Scanning.md).
 4. **Export to ▾**: [Export to](GUI-Main-Window.md#export-to).
 5. **Save**: writes `sdc.toml` and `sdc-project.toml`.
-6. **Export**: [Review and Export](GUI-Review-and-Export.md#the-export-button).
+6. **Review n files…**: [Review and Export](GUI-Review-and-Export.md#the-export-button).
 7. **Texture filters**: [Finding a texture](GUI-Main-Window.md#finding-a-texture).
 8. **Texture tiles**: [Finding a texture](GUI-Main-Window.md#finding-a-texture). An amber border means the texture waits for an answer: [Deciding](GUI-Texture-Panel.md#deciding).
 9. **Sets filters**: [Finding a set](GUI-Sets-Column.md#finding-a-set).
@@ -42,11 +42,13 @@ Press **F1** or **?** for the list of shortcuts, grouped by where they work. **C
 
 While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act, so a shortcut never eats what you type.
 
-- **Ctrl+S**, **Save**, **Export** and Review's **Export** end the edit first and keep what you typed, then save or export.
+- **Ctrl+S**, **Save**, the header's review or export button and Review's **Export** finish the edit and keep what you typed before carrying out the action.
 - **Esc** in a field that commits when you leave it (a name, a match path) cancels the edit.
 - No shortcut acts while a dialog, a menu or a box is open. A key whose action is off, such as Ctrl+Z with nothing to undo, does nothing.
 
 ### All shortcuts
+
+For Ctrl+A in Textures and Sets, see [Selecting several](GUI-Bulk-and-Rename.md#selecting-several).
 
 | Area | Keys | Action |
 |---|---|---|
@@ -56,7 +58,7 @@ While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act
 | Global | Ctrl+S | Save |
 | Global | Ctrl+Z | Undo |
 | Global | Ctrl+Y or Ctrl+Shift+Z | Redo |
-| Textures grid | Ctrl+A | Select every visible texture (every set when a set is active) |
+| Textures grid | Ctrl+A | Select visible tiles or, from a set, matching sets with their own files outside folded groups |
 | Textures grid | Left | Select the texture to the left |
 | Textures grid | Right | Select the texture to the right |
 | Textures grid | Up | Select the texture above |
@@ -86,12 +88,12 @@ While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act
 | JSON editor | F8 | Next error in the PGPatcher JSON editor |
 | JSON editor | Shift+F8 | Previous error in the PGPatcher JSON editor |
 | Problems list | Enter or Space | Accept the focused Problems row's suggestion and go to the next row |
-| Dialogs | Enter | Press the dialog's safe default |
+| [Dialogs](GUI-Guide.md#dialogs) | Enter | Press the dialog's safe default. In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. |
 | Dialogs | Esc | Cancel the dialog |
 
 ## Dialogs
 
 - **Esc**, or a click outside, cancels. The rename dialogs, **Copy settings** and **Fill from names** ignore a click outside, so a stray click can't lose what you typed.
-- **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 -->
+- In most dialogs, **Enter** presses the filled teal button, the safe default, and never saves, deletes or exports. <!-- D:FC5 --> In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click. The documents change when the drop completes. Duplicate creates its copy at that point. If Replace opens, both wait for confirmation. <!-- D:JW6 -->
 
 Where to go next: [Troubleshooting](Troubleshooting.md) covers crash recovery.

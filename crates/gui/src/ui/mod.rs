@@ -52,6 +52,62 @@ use std::cell::RefCell;
 /// The badge rule lives in the model (the "Has warnings" filter shares it).
 pub use crate::model::counts_toward_badge;
 
+/// Retain a drawing value while it is in use. Text layout must run outside the context lock.
+fn paint_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: egui::Id,
+    build: impl FnOnce() -> T,
+) -> T {
+    type Cache<T> = egui::cache::FramePublisher<egui::Id, T>;
+    if let Some(value) = ctx.memory_mut(|m| {
+        let cache = m.caches.cache::<Cache<T>>();
+        let value = cache.get(&key)?.clone();
+        cache.set(key, value.clone());
+        Some(value)
+    }) {
+        return value;
+    }
+    let value = build();
+    ctx.memory_mut(|m| m.caches.cache::<Cache<T>>().set(key, value.clone()));
+    value
+}
+
+/// Measurements of paint work on the current GUI thread.
+#[cfg(feature = "test-hooks")]
+pub mod paint_counts {
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy)]
+    pub enum Work {
+        Title,
+        TitleFit,
+        ShortTitles,
+        OutputSummary,
+        OutputLine,
+        Format,
+        Picker,
+        FoldedNames,
+        FoldedGroups,
+        FoldedItemLookups,
+        DropPosition,
+    }
+
+    thread_local! { static BUILDS: Cell<[usize; 11]> = const { Cell::new([0; 11]) }; }
+
+    impl Work {
+        pub(super) fn built(self) {
+            BUILDS.with(|b| {
+                let mut counts = b.get();
+                counts[self as usize] += 1;
+                b.set(counts);
+            });
+        }
+        pub fn count(self) -> usize {
+            BUILDS.with(|b| b.get()[self as usize])
+        }
+    }
+}
+
 /// Per-window drawing state that is not part of the model.
 #[derive(Default)]
 pub struct State {
@@ -97,6 +153,43 @@ pub fn draw_with(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
     draw_with_scan(ui, model, state, None);
 }
 
+pub(crate) fn new_project_line(ui: &mut egui::Ui, model: &mut AppModel) {
+    if model.never_saved && model.needs_write() {
+        panel_ids::top(ui, "new-project-line").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("New project: nothing saved yet.");
+                let r = ui.button("Write project files now").on_hover_text(
+                    "Writes sdc.toml and sdc-project.toml with the types Tessalith set, so sdc.exe plans the same.",
+                );
+                commit_click(ui, &r, model, AppModel::write_project_now);
+            });
+        });
+    } else {
+        // A panel consumes one parent id. Keep focused editors and pending values stable as the line appears.
+        ui.skip_ahead_auto_ids(1);
+    }
+}
+
+/// A pending or visible modal owns the window, including Explorer and in-app drops (Note JW2).
+fn drop_blocked(
+    ctx: &egui::Context,
+    model: &AppModel,
+    drops: &sets_column::DropState,
+    cmds: &slot_commands::SlotCmdState,
+) -> bool {
+    model.dialog.is_some()
+        || drops.pending.is_some()
+        || cmds.open.is_some()
+        || ctx.memory(|m| m.top_modal_layer()).is_some()
+}
+
+pub(crate) fn scan_feedback(ui: &mut egui::Ui, meshes: &mut crate::model::meshes::MeshesModel) {
+    if meshes::scan_row_shown(meshes) {
+        panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, meshes));
+    }
+    meshes::scan_dialogs(ui.ctx(), meshes);
+}
+
 /// [`draw_with`] with the mod scan's row under the header (the app passes its Meshes model; tests pass `None`).
 pub fn draw_with_scan(
     ui: &mut egui::Ui,
@@ -111,15 +204,15 @@ pub fn draw_with_scan(
         .replace(model.folder_epoch)
         .is_some_and(|e| e != model.folder_epoch)
     {
-        state.drops = Default::default();
+        state.drops = sets_column::DropState {
+            last_choice: state.drops.last_choice,
+            ..Default::default()
+        };
         state.slot_cmds = Default::default();
     }
     // Item 17: files dropped from Explorer wait for a slot card to take them (see the end of this function).
     // Backlog T21: a modal open at this frame's start owns the window; a drop under it is ignored.
-    let modal = model.dialog.is_some()
-        || state.drops.pending.is_some()
-        || state.slot_cmds.open.is_some()
-        || ui.ctx().memory(|m| m.top_modal_layer()).is_some();
+    let modal = drop_blocked(ui.ctx(), model, &state.drops, &state.slot_cmds);
     let paths: Vec<std::path::PathBuf> = if modal {
         Vec::new()
     } else {
@@ -131,9 +224,12 @@ pub fn draw_with_scan(
                 .collect()
         })
     };
-    state.drops.file = (!paths.is_empty()).then(|| sets_column::FileDrop {
-        paths,
-        pos: drop_pos(ui.ctx()),
+    let previous_strip = state.drops.strip.take();
+    state.drops.file = (!paths.is_empty()).then(|| {
+        // Note JW2: a release on the previous strip belongs to Sets even if the editor now occupies that space.
+        let pos = drop_pos(ui.ctx())
+            .filter(|&p| sets_column::strip_owner_at(&previous_strip, p).is_none());
+        sets_column::FileDrop { paths, pos }
     });
     // First, before any widget sees the keys (items 5 and 19).
     actions::keys(ui.ctx(), model, state.drops.pending.is_some());
@@ -141,36 +237,43 @@ pub fn draw_with_scan(
     model.nav.cols = 0;
     if let Some(m) = scan {
         header::draw(ui, model, Some(&mut *m));
-        if meshes::scan_row_shown(m) {
-            panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, m));
-        }
-        meshes::scan_dialogs(ui.ctx(), m);
+        new_project_line(ui, model);
+        scan_feedback(ui, m);
     } else {
         header::draw(ui, model, None);
+        new_project_line(ui, model);
     }
     // A9: what is left under the header and the scan row, for windows that must not cover them.
     record_centre_rect(ui);
     // Under the header and the scan row, before the columns (R7).
     bottom::draw(ui, model, &mut state.drawer, false);
     // Note FB7: a new selection (or preview) brings the selection back to the front of the centre.
-    let seen = (model.selection.clone(), model.expanded.clone());
-    let seen_id = egui::Id::unique("centre-tab-seen");
-    if ui
-        .data(|d| d.get_temp::<(Selection, Option<String>)>(seen_id))
-        .is_some_and(|s| s != seen)
-    {
+    let changed = ui.data_mut(|d| {
+        let prev = d.get_temp_mut_or_insert_with(egui::Id::unique("centre-tab-seen"), || {
+            (model.selection.clone(), model.expanded.clone())
+        });
+        if prev.0 == model.selection && prev.1 == model.expanded {
+            false
+        } else {
+            prev.0.clone_from(&model.selection);
+            prev.1.clone_from(&model.expanded);
+            true
+        }
+    });
+    if changed {
         model.centre_tab = CentreTab::Selection;
     }
-    ui.data_mut(|d| d.insert_temp(seen_id, seen));
     // The 2D | 3D switch (AB4, AG78): in 3D the set's 3D view takes the centre in place of the set editor's body.
     let three_d = state.set3d.enabled && set_preview::wanted(model);
+    let selection_in_front = model.centre_front() == CentreTab::Selection;
     // A11: no columns until a folder is open. Note JI7: nothing is drawn at the window's right edge in any state.
     if model.root.is_some() {
         let (thumbs, drops, cmds) = (&mut state.thumbs, &mut state.drops, &mut state.slot_cmds);
         // Each column stops at its minimum and leaves the columns after it theirs and the centre its floor.
         let mut floor = centre_floor(ui.ctx(), model);
         // Note FB2: the 2D set editor's one column needs its slot rows' width, so the columns yield it.
-        let editor = !three_d && set_editor_shown(model, false);
+        // Review E24: only while the Selection tab is in front; a centre tab has no slot rows to make room for.
+        let editor = !three_d && selection_in_front && set_editor_shown(model, false);
         if editor {
             floor = floor.max(set_editor::ROWS_MIN);
         }
@@ -210,12 +313,12 @@ pub fn draw_with_scan(
             columns::SETS_MIN..=ui.available_width() - floor,
             model,
             |ui, model| {
+                drops.strip = previous_strip;
                 sets_column::draw(ui, model, thumbs, drops, cmds);
             },
         );
     }
     let c = egui::CentralPanel::default().show(ui, |ui| centre(ui, model, state, three_d));
-    let selection_in_front = model.centre_front() == CentreTab::Selection;
     ui.ctx()
         .data_mut(|d| d.insert_temp(centre_id(), c.response.rect));
     // Folders (or files, which stand for their folder) dropped anywhere but on a slot card open like Open folder
@@ -229,11 +332,13 @@ pub fn draw_with_scan(
     slot_commands::draw(ui.ctx(), model, &mut state.slot_cmds);
     dialogs::draw(ui.ctx(), model);
     centre_tabs::popped(ui.ctx(), model);
-    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab).
+    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab). The front
+    // tab is read again here, after `centre()` ran, not taken from the hoisted value: a strip click this frame must
+    // show or hide the window this frame.
     set_preview::settings_window(
         ui.ctx(),
         model,
-        three_d && selection_in_front && set_editor_shown(model, three_d),
+        three_d && model.centre_front() == CentreTab::Selection && set_editor_shown(model, three_d),
     );
     // T7 K10: last, so it is over everything and survives a virtualised source.
     columns::drag_ghost(ui.ctx(), model, &mut state.thumbs);
@@ -259,6 +364,20 @@ pub(crate) fn after_commit(
     ctx.request_repaint();
 }
 
+/// Let the docked tool draw its focused field once more before another panel navigates away.
+pub(super) fn navigate(
+    ctx: &egui::Context,
+    model: &mut AppModel,
+    f: impl FnOnce(&egui::Context, &mut AppModel) + 'static,
+) {
+    if model.centre_over_meshes {
+        let nav_ctx = ctx.clone();
+        after_commit(ctx, model, move |m| f(&nav_ctx, m));
+    } else {
+        f(ctx, model);
+    }
+}
+
 /// Note FC8: a button that saves (Save, Export, Review's Export) blurs a focused text field on the press, so the
 /// field commits on that frame and the release runs `f` (`after_commit` covers a press and release in one frame).
 pub(crate) fn commit_click(
@@ -281,6 +400,13 @@ pub(crate) fn name_input(r: egui::Response, name: &str) -> egui::Response {
     r.accessible_name(name)
 }
 
+/// egui's disabled tooltip does not set the AccessKit description.
+fn disabled_reason(r: egui::Response, why: &str) -> egui::Response {
+    r.ctx
+        .accesskit_node_builder(r.id, |b| b.set_description(why));
+    r.on_disabled_hover_text(why)
+}
+
 /// Ends text input when the primary press lands in `rect`, so a commit-on-focus-loss field drawn later this frame
 /// commits before the release acts.
 pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {
@@ -291,9 +417,10 @@ pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {
 
 /// The narrowest the centre gets: `CENTRE_MIN`, and while a texture is expanded enough for `PREVIEW_MIN` beside the
 /// collapsed settings strip (K8), or beside the open settings in a window where they start open (Note FC8). The 16 is
-/// `Frame::central_panel`'s 8 px margin a side.
+/// `Frame::central_panel`'s 8 px margin a side. Review E24: the preview's part holds only while the Selection tab is in
+/// front, as the set editor's floor does; behind a centre tab the floor is `CENTRE_MIN`. The only caller sizes the columns.
 pub(crate) fn centre_floor(ctx: &egui::Context, model: &AppModel) -> f32 {
-    if model.expanded.is_some() {
+    if model.expanded.is_some() && model.centre_front() == CentreTab::Selection {
         let settings = if ctx.content_rect().width() >= preview::WIDE_WINDOW {
             preview::SETTINGS_WIDTH
         } else {
@@ -315,8 +442,28 @@ pub fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
         && model.expanded.is_none()
         && !model.in_bulk()
         && (three_d
-            || matches!(&model.selection, Selection::Set(key)
-                if crate::model::sets::views(model).iter().any(|v| v.key == *key)))
+            || matches!(&model.selection, Selection::Set(_) | Selection::SetId(_))
+                && model.resolved_selection().index.is_some())
+}
+
+/// GH8: a pending NIF edit in Meshes uses the header and bottom tabs without a texture project.
+fn edit_controls_visible(ctx: &egui::Context, model: &AppModel) -> bool {
+    model.root.is_some() || (header::meshes_view_active(ctx) && !model.nif_review_rows().is_empty())
+}
+
+pub fn no_project_banner(ui: &mut egui::Ui, model: &mut AppModel) {
+    panel_ids::top(ui, "no-project-banner").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("No project open. This list is your MO2 instance; open a folder to edit its textures.");
+            let open = ui.add_enabled(!model.picker.busy(), egui::Button::new("Open folder…"));
+            if name_input(open, "Open a texture folder from the Meshes banner")
+                .on_disabled_hover_text(crate::model::picker::BUSY_HOVER)
+                .clicked()
+            {
+                model.pick(ui.ctx(), PickerPurpose::OpenFolder, model.open_folder_spec());
+            }
+        });
+    });
 }
 
 /// A11: with no folder, one big Open folder…, the recent folders and the drop hint.
@@ -355,35 +502,56 @@ fn start_screen(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// What the centre's scroll area showed last (Note FI6).
-#[derive(Clone, PartialEq)]
-enum CentreShown {
-    Item(String),
-    Set(String),
-    Bulk,
+fn track_scroll_target(ctx: &egui::Context, now: Option<&Selection>) {
+    ctx.data_mut(|d| {
+        let seen = d.get_temp_mut_or_insert_with::<Option<Option<Selection>>>(
+            egui::Id::unique("centre-shown"),
+            || None,
+        );
+        if seen.as_ref().is_some_and(|old| old.as_ref() == now) {
+            return;
+        }
+        *seen = Some(now.cloned());
+        d.insert_temp(egui::Id::unique("centre-scroll-reset"), true);
+    })
 }
 
-/// True on the frame the centre shows something other than it showed before: that area opens at its top. Call it
-/// once per frame.
-fn switched_to(ctx: &egui::Context, now: CentreShown) -> bool {
-    let id = egui::Id::unique("centre-shown");
-    let before = ctx.data(|d| d.get_temp::<CentreShown>(id));
-    let changed = before.as_ref() != Some(&now);
-    if changed {
-        ctx.data_mut(|d| d.insert_temp(id, now));
+fn take_scroll_reset(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| {
+        d.remove_temp::<bool>(egui::Id::unique("centre-scroll-reset"))
+            .unwrap_or(false)
+    })
+}
+
+/// The docked tool in place of the Meshes list, below the shared header and banner.
+pub fn centre_over_meshes(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
+    egui::CentralPanel::default().show(ui, |ui| {
+        let back = ui.link("Back to meshes");
+        commit_click(ui, &back, model, |m| m.centre_over_meshes = false);
+        centre(ui, model, state, false);
+    });
+    if model.centre_front() == CentreTab::Selection {
+        model.centre_over_meshes = false;
+        ui.ctx().request_repaint();
     }
-    changed
 }
 
 /// The centre: a docked Presets, JSON editor or Settings tab in front (Note FB7, JI1), else the preview of an expanded
 /// texture, else the settings of the selected texture or set, else a hint.
 fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: bool) {
+    let bulk = model.in_bulk();
+    track_scroll_target(ui.ctx(), (!bulk).then_some(&model.selection));
     // Before the start screen: Presets… opens with no folder too (K5).
     centre_tabs::strip(ui, model);
     match model.centre_front() {
         CentreTab::Presets => return presets::view(ui, model),
         CentreTab::Json => return json_editor::view(ui, model),
         CentreTab::Settings => return settings_tab::view(ui, model),
+        CentreTab::Selection if model.centre_over_meshes => {
+            // A click on Selection opens Textures. Closing or popping the tool uncovers Meshes.
+            model.reveal_centre |= model.centre_tab == CentreTab::Selection;
+            return;
+        }
         CentreTab::Selection => {}
     }
     if model.root.is_none() {
@@ -397,20 +565,20 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
     // A texture expanded again starts fitted.
     state.preview = preview::PreviewUi::default();
     // F3a D2/D3: two or more textures or sets.
-    if model.in_bulk() {
-        let top = switched_to(ui.ctx(), CentreShown::Bulk);
+    if bulk {
+        let top = take_scroll_reset(ui.ctx());
         bulk_panel::draw(ui, model, top);
         return;
     }
-    let selection = model.selection.clone();
-    match selection {
-        // AG87: on 3D, any member of a set opens or keeps that set's 3D view (`three_d` needs `followed_set`), its own
+    let active = model.resolved_selection();
+    match &active.selection {
+        // AG87: on 3D, any member of a set opens or keeps that set's 3D view when 3D follows its set, its own
         // settings in the settings window (AG132).
         Selection::Item(key) if three_d => {
-            let name = model.item(&key).map_or(key.clone(), |i| i.name.clone());
             ui.horizontal_wrapped(|ui| {
                 set_preview::view_switch(ui, model);
-                ui.heading(&name);
+                let name = model.item(key).map_or(key.as_str(), |i| i.name.as_str());
+                ui.heading(name);
                 // AG132: its own settings are in the settings window, with the set's.
                 set_preview::settings_toggle(ui, model);
             });
@@ -423,22 +591,21 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-texture")
                 .auto_shrink([false, false]);
-            if switched_to(ui.ctx(), CentreShown::Item(key.clone())) {
+            if take_scroll_reset(ui.ctx()) {
                 area = area.vertical_scroll_offset(0.0);
             }
-            area.show(ui, |ui| settings_panel::draw(ui, model, &key, false));
+            area.show(ui, |ui| settings_panel::draw(ui, model, key, false));
         }
-        Selection::Set(key) => {
+        Selection::Set(_) | Selection::SetId(_) => {
             let view = set_editor::View {
                 switch: state.set3d.enabled,
                 three_d,
-                to_top: switched_to(ui.ctx(), CentreShown::Set(key.clone())),
                 noise_uv: three_d.then(|| state.set3d.mato_noise_uv_scale()).flatten(),
             };
             set_editor::draw(
                 ui,
                 model,
-                &key,
+                &active,
                 &mut state.thumbs,
                 &mut state.slot_cmds,
                 &mut state.drops,
@@ -456,17 +623,26 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
 
 /// Item 17 (DECISIONS AG98): where a file from Explorer was dropped, in this window's points. winit 0.30 reports a
 /// drop without a position and no mouse moves reach the window during the drag, so the pointer egui knows is stale:
-/// on Windows the cursor is read from the OS and placed with the window's inner position. Elsewhere, and without
-/// viewport information (tests), the last pointer position egui has.
+/// on Windows the cursor is read from the OS and placed with the window's inner position, or is unknown if the
+/// lookup fails. Elsewhere, and without viewport information (tests), use egui's last pointer position.
 fn drop_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
-    os_cursor(ctx).or_else(|| ctx.input(|i| i.pointer.latest_pos()))
+    #[cfg(feature = "test-hooks")]
+    paint_counts::Work::DropPosition.built();
+    #[cfg(windows)]
+    if let Some(inner) = ctx.input(|i| i.viewport().inner_rect) {
+        return os_cursor(ctx, inner);
+    }
+    ctx.pointer_latest_pos()
 }
 
 #[cfg(windows)]
-fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
+fn os_cursor(ctx: &egui::Context, inner: egui::Rect) -> Option<egui::Pos2> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    let inner = ctx.input(|i| i.viewport().inner_rect)?;
+    #[cfg(feature = "test-hooks")]
+    if ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("failed-cursor-lookup")) == Some(true)) {
+        return None;
+    }
     let mut p = POINT { x: 0, y: 0 };
     // SAFETY: GetCursorPos writes one POINT through a valid pointer.
     if unsafe { GetCursorPos(&mut p) } == 0 {
@@ -477,9 +653,10 @@ fn os_cursor(ctx: &egui::Context) -> Option<egui::Pos2> {
     Some(egui::pos2(p.x as f32 / ppp, p.y as f32 / ppp) - inner.min.to_vec2())
 }
 
-#[cfg(not(windows))]
-fn os_cursor(_: &egui::Context) -> Option<egui::Pos2> {
-    None
+/// Simulate GetCursorPos failing in this harness's viewport.
+#[cfg(all(windows, feature = "test-hooks"))]
+pub fn fail_cursor_lookup(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("failed-cursor-lookup"), true));
 }
 
 /// The two resizable columns of the Textures view.

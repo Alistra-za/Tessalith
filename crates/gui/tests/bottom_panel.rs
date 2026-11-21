@@ -565,9 +565,12 @@ fn a_ready_set_and_tile_show_a_green_dot() {
 fn the_header_export_is_clean_only_with_a_folder_and_nothing_undecided() {
     let m = AppModel::new(Default::default(), None, session());
     assert!(!m.export_is_clean(), "no folder");
+    // E3: with no folder the label has no count to give; with one, the header reads Review in every state below.
+    assert_eq!(m.header_export_text(), "Export");
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     assert!(!m.export_is_clean(), "textures are undecided");
+    assert!(m.header_export_text().starts_with("Review "));
     decide_all(&mut m);
     m.poll();
     for i in m.items.iter_mut() {
@@ -580,12 +583,16 @@ fn the_header_export_is_clean_only_with_a_folder_and_nothing_undecided() {
     {
         assert!(sdc_gui::model::bottom::problems(&m).is_empty());
         assert!(m.export_is_clean());
+        assert!(
+            m.header_export_text().starts_with("Review "),
+            "clean still reads Review"
+        );
     }
     // Nothing to export (an empty project, or items cleared while the plan runs) is never "ready".
     m.items.clear();
     m.invalidate_views();
     assert!(!m.export_is_clean(), "nothing to export");
-    assert!(!m.header_export_text().starts_with("Export "));
+    assert!(m.header_export_text().starts_with("Review "));
 }
 
 #[test]
@@ -767,11 +774,13 @@ fn export_files_follows_a_decision_without_a_frame_of_lag() {
     assert!(h.state().header_export_text().starts_with("Review "));
     decide_all(h.state_mut());
     // The text follows the last decision with no frame in between.
+    // E3: the Review label reads `export_files()` live (only the write-now label is held while a plan runs).
     assert!(
-        h.state().header_export_text().starts_with("Export "),
+        h.state().header_export_text().starts_with("Review "),
         "{}",
         h.state().header_export_text()
     );
+    assert!(h.state().undecided() == 0);
     h.run();
     assert_eq!(export_files_builds(h.state()), builds + 1);
     let m = h.state();
@@ -782,7 +791,7 @@ fn export_files_follows_a_decision_without_a_frame_of_lag() {
     );
     assert_eq!(m.export_files(), files);
     assert!(
-        m.header_export_text().ends_with(&format!("{files} files")),
+        m.header_export_text().ends_with(&format!("{files} files…")),
         "{}",
         m.header_export_text()
     );

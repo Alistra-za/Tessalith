@@ -36,6 +36,133 @@ fn json_to_toml_deep(v: &Json) -> Option<Value> {
         _ => json_to_toml(v),
     }
 }
+/// `set_project`'s test: removing an absent key or writing the stored value is no edit (trace-debug #58).
+fn project_value_same(doc: &toml_edit::DocumentMut, key: &str, v: &Option<Value>) -> bool {
+    let now = doc
+        .get("project")
+        .and_then(|p| p.get(key))
+        .and_then(item_json); // review M7: a hand-written `[project.<key>]` table too
+    match v {
+        None => now.is_none(),
+        Some(x) => now.is_some() && toml_to_json(&Item::Value(x.clone())) == now,
+    }
+}
+
+/// `set_project`'s write into `doc`; false when no `[project]` table can be made there.
+fn put_project(doc: &mut toml_edit::DocumentMut, key: &str, v: Option<Value>) -> bool {
+    let Some(p) = sub_table(doc.as_table_mut(), "project", || Item::Table(Table::new())) else {
+        return false;
+    };
+    match v {
+        Some(v) => {
+            let inserting = !p.contains_key(key);
+            set_value(p, key, v);
+            // Export, its baseline and Undo insert new records in the same order. Keep key comments.
+            if let Some(index) = HASH_KEYS
+                .iter()
+                .position(|k| *k == key)
+                .filter(|_| inserting)
+            {
+                for later in &HASH_KEYS[index + 1..] {
+                    if let Some(formatted) = p.key(later).cloned() {
+                        let item = p.remove(later).expect("key present");
+                        p.entry_format(&formatted).or_insert(item);
+                    }
+                }
+            }
+        }
+        None => {
+            p.remove(key);
+        }
+    }
+    true
+}
+
+/// A hash table as the document stores it (`None`: an empty table is removed).
+fn shas_value(shas: &BTreeMap<String, String>) -> Option<Value> {
+    let mut t = toml_edit::InlineTable::new();
+    for (k, v) in shas {
+        t.insert(k, Value::from(v.as_str()));
+    }
+    (!shas.is_empty()).then_some(Value::InlineTable(t))
+}
+
+/// A hash table as the sidecar stores it.
+fn shas_json(shas: &BTreeMap<String, String>) -> Json {
+    let m = shas
+        .iter()
+        .map(|(k, v)| (k.clone(), Json::from(v.as_str())));
+    Json::Object(m.collect())
+}
+
+/// `put_side`'s test: the sidecar already holds `v` under `key`, so nothing is written.
+fn side_same(side: &serde_json::Map<String, Json>, key: &str, v: &Json) -> bool {
+    side.get(key) == Some(v)
+}
+
+/// E7 (ruling 3c-46): the hash records an export would make, applied to a copy of the document and the sidecar with
+/// the tests `set_project` and `put_side` use, so Review can say which of `sdc-project.toml` and `_sdc/generated.json`
+/// they change. Each method is the setter of the same name on `SetsDoc`.
+pub struct RecordPreview {
+    doc: toml_edit::DocumentMut,
+    side: serde_json::Map<String, Json>,
+    read_only: bool,
+    side_changed: bool,
+}
+
+impl RecordPreview {
+    fn project(&mut self, key: &str, v: Option<Value>) {
+        if !self.read_only && !project_value_same(&self.doc, key, &v) {
+            put_project(&mut self.doc, key, v);
+        }
+    }
+
+    fn side(&mut self, key: &str, v: Json) {
+        if !side_same(&self.side, key, &v) {
+            self.side.insert(key.to_string(), v);
+            self.side_changed = true;
+        }
+    }
+
+    fn record_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) {
+        self.project(key, shas_value(shas));
+        self.side(key, shas_json(shas));
+    }
+
+    pub fn set_last_json_sha256(&mut self, sha: &str) {
+        self.project(LAST_SHA, Some(Value::from(sha)));
+        self.side(LAST_SHA, Json::from(sha));
+    }
+    pub fn set_pgp_json_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(PGP_SHA, shas);
+    }
+    pub fn set_copy_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(COPY_SHA, shas);
+    }
+    pub fn set_cs_pbr_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CS_SHA, shas);
+    }
+    pub fn set_cm_json_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CM_SHA, shas);
+    }
+    pub fn set_xpmf_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(XPMF_SHA, shas);
+    }
+    pub fn set_cs_skin_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CS_SKIN_SHA, shas);
+    }
+
+    /// The text a save of the document would write now.
+    pub fn text(&self) -> String {
+        self.doc.to_string()
+    }
+
+    /// Some record differs from the sidecar's, so `put_side` writes `_sdc/generated.json`.
+    pub fn side_changed(&self) -> bool {
+        self.side_changed
+    }
+}
+
 /// GUI tweaks G4: the array of extra PGPatcher entries (delete sections).
 const SECTIONS: &str = "pgp_sections";
 /// Design §5: `[project] cs_pbr_sha256`, path under the export root → hash of the CS JSON sdc last wrote there.
@@ -55,6 +182,15 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// Advanced skin materials: `[project] cs_skin_sha256` (and the sidecar table), path under the export root → hash of
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
+const HASH_KEYS: [&str; 7] = [
+    COPY_SHA,
+    LAST_SHA,
+    PGP_SHA,
+    CS_SHA,
+    CM_SHA,
+    XPMF_SHA,
+    CS_SKIN_SHA,
+];
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 17] = [
     "id",
@@ -225,6 +361,8 @@ pub struct SetsDoc {
     /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
     /// holds even when the document is never saved; a table it holds wins over the document's.
     side: serde_json::Map<String, Json>,
+    /// The clean baseline includes sidecar hashes that the TOML on disk does not yet hold.
+    sidecar_pending_save: bool,
 }
 
 /// Note FC11: the `[project]` key of the current PGPatcher JSON's hash (also a sidecar key).
@@ -367,6 +505,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AUTO_NORMAL_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl SetsDoc {
     pub fn open(root: &Path) -> SetsDoc {
         let mut d = SetsDoc {
@@ -375,6 +518,7 @@ impl SetsDoc {
             no_set_cache: RefCell::default(),
             intended_cache: RefCell::default(),
             side: Default::default(),
+            sidecar_pending_save: false,
         };
         d.load_sidecar();
         d
@@ -393,6 +537,7 @@ impl SetsDoc {
     /// Note FC11: read the sidecar (missing or unreadable: nothing, as before it existed) and reconcile the document's
     /// readable copy from it. A value that differs is an unsaved edit; an equal one changes nothing.
     fn load_sidecar(&mut self) {
+        self.sidecar_pending_save = false;
         let was_dirty = self.f.dirty;
         self.side = std::fs::read(self.sidecar_path())
             .ok()
@@ -417,7 +562,10 @@ impl SetsDoc {
         // Note FC14: only a document that was clean before; `TomlFile::open`/`reload` always leave it so today.
         if self.f.dirty && !was_dirty {
             self.f.dirty = false;
+            self.sidecar_pending_save = true;
             self.f.saved_text = self.text();
+            self.f.baseline_text.clone_from(&self.f.saved_text);
+            self.f.user_dirty = false;
         }
     }
 
@@ -425,7 +573,7 @@ impl SetsDoc {
     /// the next Save writes, as before the sidecar; Note FC14: the error is returned, since a read-only document has
     /// no such copy.
     fn put_side(&mut self, key: &str, v: Json) -> std::io::Result<()> {
-        if self.side.get(key) == Some(&v) {
+        if side_same(&self.side, key, &v) {
             return Ok(());
         }
         self.side.insert(key.to_string(), v);
@@ -442,15 +590,46 @@ impl SetsDoc {
         self.f.rev
     }
 
+    /// The text last loaded or saved (`TomlFile::saved_text`): it changes on every save and reload (Note JS5, N-26).
+    pub fn saved_text(&self) -> &str {
+        &self.f.saved_text
+    }
+
     pub fn path(&self) -> &Path {
         &self.f.path
     }
     pub fn is_dirty(&self) -> bool {
         self.f.dirty
     }
+    pub(crate) fn needs_save(&self) -> bool {
+        !self.read_only()
+            && (self.is_dirty() || self.sidecar_pending_save || self.text() != self.saved_text())
+    }
+    /// A save-if-clean site may persist a pending automatic normal listing. Other pending writes still wait for Save.
+    pub fn defer_record_save(&self) -> bool {
+        if !self.is_dirty() {
+            return false;
+        }
+        if self.user_dirty() {
+            return true;
+        }
+        let mut saved = self
+            .saved_text()
+            .parse()
+            .expect("saved text is serialized TOML");
+        let listing = shas_value(&Self::normal_listing(&self.f.doc));
+        project_value_same(&saved, "auto_normal", &listing)
+            || !put_project(&mut saved, "auto_normal", listing)
+            || saved.to_string() != self.text()
+    }
+
+    pub fn user_dirty(&self) -> bool {
+        self.f.user_dirty
+    }
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
+        self.f.update_user_dirty(&self.text());
     }
     pub fn read_only(&self) -> bool {
         self.f.read_only()
@@ -475,11 +654,15 @@ impl SetsDoc {
     /// does not change, so it is outside the undoable state. When only the hash differs, nothing changes (and the
     /// document is not marked dirty).
     pub fn restore_keeping_json_sha(&mut self, text: &str) {
-        if self.read_only() || self.text() == text {
+        if self.read_only() {
+            return;
+        }
+        if self.text() == text {
+            self.f.reconcile(text);
             return;
         }
         // Note FC11: the document's own copies (not the sidecar's), put back into the document only.
-        let (doc, dirty, sha) = (self.f.doc.clone(), self.f.dirty, self.project_str(LAST_SHA));
+        let sha = self.project_str(LAST_SHA);
         let cs = self.doc_shas(CS_SHA);
         let cm = self.doc_shas(CM_SHA);
         let pgp = self.doc_shas(PGP_SHA);
@@ -487,13 +670,13 @@ impl SetsDoc {
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
+        let review = self.export_without_review();
         let target = self.target_mod();
-        let old = self.text();
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
             self.set_project(LAST_SHA, sha.map(Value::from));
         }
-        // In the order an export writes them, so a restore that only puts them back leaves the text as it was.
+        // put_project orders new keys alongside the hashes already in the snapshot.
         for (k, m) in [
             (PGP_SHA, &pgp),
             (CS_SHA, &cs),
@@ -511,21 +694,23 @@ impl SetsDoc {
             let v = folder.map(|p| Value::from(p.to_string_lossy().as_ref()));
             self.set_project("export_folder", v);
         }
+        // Nor is the export-without-review preference.
+        if self.export_without_review() != review {
+            self.set_export_without_review(review);
+        }
         // Note HL: nor is the target mod.
         if self.target_mod() != target {
             self.set_target_mod(target.as_deref());
         }
-        if self.text() == old {
-            self.f.doc = doc;
-            self.f.dirty = dirty;
-        } else {
-            // The `set_*` calls above touch the document; back at the saved text it is clean again (Note FB3).
-            self.f.dirty = self.text() != self.f.saved_text;
-        }
+        self.f.reconcile(&self.text());
     }
 
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
-        self.f.save(force)
+        self.f.save(force)?;
+        self.sidecar_pending_save = false;
+        // Review must see a successful save even when the dirty flag was already clear.
+        self.f.rev = next_rev();
+        Ok(())
     }
 
     fn project_str(&self, key: &str) -> Option<String> {
@@ -538,44 +723,42 @@ impl SetsDoc {
     }
 
     fn set_project(&mut self, key: &str, v: Option<Value>) {
-        // Removing an absent key or writing the stored value is no edit (trace-debug #58).
-        let now = self
-            .f
-            .doc
-            .get("project")
-            .and_then(|p| p.get(key))
-            .and_then(item_json); // review M7: a hand-written `[project.<key>]` table too
-        let same = match &v {
-            None => now.is_none(),
-            Some(x) => now.is_some() && toml_to_json(&Item::Value(x.clone())) == now,
-        };
-        if self.read_only() || same {
+        if self.read_only() || project_value_same(&self.f.doc, key, &v) {
             return;
         }
-        let Some(p) = sub_table(self.f.doc.as_table_mut(), "project", || {
-            Item::Table(Table::new())
-        }) else {
-            return;
-        };
-        match v {
-            Some(v) => set_value(p, key, v),
-            None => {
-                p.remove(key);
-            }
+        if put_project(&mut self.f.doc, key, v) {
+            self.f.touch();
         }
-        self.f.touch();
     }
 
     /// Owner ruling (Note BV6): `[project] export_folder`, this project's export folder (GUI-only state).
     pub fn export_folder(&self) -> Option<std::path::PathBuf> {
-        self.project_str("export_folder")
-            .map(std::path::PathBuf::from)
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
+        Some(Path::new(
+            self.f.doc.get("project")?.get("export_folder")?.as_str()?,
+        ))
     }
     pub fn set_export_folder(&mut self, path: &std::path::Path) {
         self.set_project(
             "export_folder",
             Some(Value::from(path.to_string_lossy().as_ref())),
         );
+    }
+
+    /// `[project] export_without_review`, this project's opt-out of Review before an export (GUI-only; absent = off).
+    pub fn export_without_review(&self) -> bool {
+        self.f
+            .doc
+            .get("project")
+            .and_then(|p| p.get("export_without_review"))
+            .and_then(Item::as_bool)
+            .unwrap_or(false)
+    }
+    pub fn set_export_without_review(&mut self, on: bool) {
+        self.set_project("export_without_review", on.then(|| Value::from(true)));
     }
 
     /// Note HL: `[project] target_mod`, the mod folder being worked on (an absolute path; GUI-only state).
@@ -615,7 +798,7 @@ impl SetsDoc {
         }
     }
     pub fn set_last_json_sha256(&mut self, sha: &str) -> std::io::Result<()> {
-        self.set_project(LAST_SHA, Some(Value::from(sha)));
+        self.record_project_hash(LAST_SHA, Some(Value::from(sha)));
         self.put_side(LAST_SHA, Json::from(sha))
     }
 
@@ -645,21 +828,41 @@ impl SetsDoc {
     }
 
     fn set_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) {
-        let mut t = toml_edit::InlineTable::new();
-        for (k, v) in shas {
-            t.insert(k, Value::from(v.as_str()));
-        }
-        self.set_project(key, (!shas.is_empty()).then_some(Value::InlineTable(t)));
+        self.set_project(key, shas_value(shas));
     }
 
     /// A hash record made now: the document's copy (if writable) and the sidecar (Note FC11). Err: the sidecar was not
     /// written (Note FC14).
     fn record_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
-        self.set_shas(key, shas);
-        let m = shas
-            .iter()
-            .map(|(k, v)| (k.clone(), Json::from(v.as_str())));
-        self.put_side(key, Json::Object(m.collect()))
+        self.record_project_hash(key, shas_value(shas));
+        self.put_side(key, shas_json(shas))
+    }
+
+    fn record_project_hash(&mut self, key: &str, value: Option<Value>) {
+        if self.read_only() {
+            return;
+        }
+        self.set_project(key, value.clone());
+        let mut baseline = self
+            .f
+            .baseline_text
+            .parse::<toml_edit::DocumentMut>()
+            .expect("baseline is serialized TOML");
+        if !project_value_same(&baseline, key, &value) && put_project(&mut baseline, key, value) {
+            self.f.baseline_text = baseline.to_string();
+        }
+        self.f.update_user_dirty(&self.text());
+    }
+
+    /// E7 (ruling 3c-46): a copy of the records as they are now, for Review to apply the hash records an export would
+    /// make and read which of the two files they change. Nothing is written.
+    pub fn record_preview(&self) -> RecordPreview {
+        RecordPreview {
+            doc: self.f.doc.clone(),
+            side: self.side.clone(),
+            read_only: self.read_only(),
+            side_changed: false,
+        }
     }
 
     pub fn cs_pbr_shas(&self) -> BTreeMap<String, String> {
@@ -1020,6 +1223,141 @@ impl SetsDoc {
             "auto_skin",
             (!keys.is_empty()).then_some(Value::InlineTable(t)),
         );
+    }
+
+    /// Note JS5 (N-17, N-27): the tangent-space normal sub-types Tessalith wrote, each with the word it wrote
+    /// (`normal`, `landscape_normal` or `pbr_normal`). A key whose `[files]` sub-type no longer equals it is the
+    /// user's. `[project] auto_normal`.
+    pub fn auto_normal(&self) -> BTreeMap<String, String> {
+        #[cfg(test)]
+        AUTO_NORMAL_READS.set(AUTO_NORMAL_READS.get() + 1);
+        Self::normal_listing(&self.f.doc)
+    }
+
+    pub(crate) fn baseline(&self) -> &str {
+        &self.f.baseline_text
+    }
+
+    fn normal_listing(doc: &toml_edit::DocumentMut) -> BTreeMap<String, String> {
+        let t = doc.get("project").and_then(|p| p.get("auto_normal"));
+        t.and_then(Item::as_table_like)
+            .map(|t| {
+                t.iter()
+                    .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The word listed under this exact key, including after a recorder write.
+    pub(crate) fn auto_normal_word(&self, key: &str) -> Option<&str> {
+        self.f
+            .doc
+            .get("project")?
+            .get("auto_normal")?
+            .get(key)?
+            .as_str()
+    }
+
+    pub fn set_auto_normal(&mut self, keys: &BTreeMap<String, String>) {
+        self.set_project("auto_normal", shas_value(keys));
+    }
+
+    /// Replay just the recorder's changes. A shader pick or an explicit unlisting in this state still owns its keys.
+    pub(crate) fn apply_auto_normals(
+        text: &mut String,
+        snapshot_files: Option<&str>,
+        before: &BTreeMap<String, String>,
+        after: &BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+            return BTreeMap::new();
+        };
+        let mut removed = BTreeMap::new();
+        let mut listing = Self::normal_listing(&doc);
+        let project = std::cell::LazyCell::new(|| {
+            snapshot_files.map(|files| {
+                crate::project::ProjectDoc::from_snapshot(files).expect("serialized project")
+            })
+        });
+        for (key, old) in before {
+            if !after.contains_key(key)
+                && listing.get(key) == Some(old)
+                && project.as_ref().is_none_or(|p| {
+                    p.file_value(key, "subtype").as_ref().and_then(Json::as_str) != Some(old)
+                })
+            {
+                listing.remove(key);
+                removed.insert(key.clone(), old.clone());
+            }
+        }
+        for (key, word) in after {
+            if before.get(key) != Some(word) && listing.get(key) == before.get(key) {
+                listing.insert(key.clone(), word.clone());
+            }
+        }
+        let value = shas_value(&listing);
+        if !project_value_same(&doc, "auto_normal", &value)
+            && put_project(&mut doc, "auto_normal", value)
+        {
+            *text = doc.to_string();
+        }
+        removed
+    }
+
+    pub(crate) fn touch_auto_normals(
+        &mut self,
+        before: &BTreeMap<String, String>,
+        after: &BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        if before == after {
+            return BTreeMap::new();
+        }
+        let removed = Self::apply_auto_normals(&mut self.f.baseline_text, None, before, after);
+        self.f.update_user_dirty(&self.text());
+        removed
+    }
+
+    pub(crate) fn restore_normal_baseline(
+        &mut self,
+        saved_files: &str,
+        restore: &BTreeMap<String, String>,
+        prune: &BTreeMap<String, String>,
+    ) {
+        if restore.is_empty() && prune.is_empty() {
+            return;
+        }
+        let files = std::cell::LazyCell::new(|| {
+            crate::project::ProjectDoc::from_snapshot(saved_files)
+                .expect("serialized files document")
+        });
+        let saved = std::cell::LazyCell::new(|| {
+            Self::normal_listing(&self.f.saved_text.parse().expect("serialized sets document"))
+        });
+        // Undo may restore a listing the user has since claimed and saved.
+        let mut restore = restore.clone();
+        restore.retain(|key, word| {
+            saved.get(key) == Some(word)
+                || files
+                    .file_value(key, "subtype")
+                    .as_ref()
+                    .and_then(Json::as_str)
+                    != Some(word)
+        });
+        Self::apply_auto_normals(&mut self.f.baseline_text, None, prune, &restore);
+    }
+
+    /// Note JS7 (N-10, N-27): the owner normals the share step wrote `alpha.policy = "data"` on; one that no longer
+    /// holds `data` is the user's. `[project] auto_data`.
+    pub fn auto_data(&self) -> Vec<String> {
+        strings(self.f.doc.get("project").and_then(|p| p.get("auto_data")))
+    }
+    pub fn set_auto_data(&mut self, keys: &[String]) {
+        let mut arr = Array::new();
+        for k in keys {
+            arr.push(k.as_str());
+        }
+        self.set_project("auto_data", (!keys.is_empty()).then_some(Value::Array(arr)));
     }
 
     /// The `[[sets]]` entries, parsed once per revision (REPORT #9).

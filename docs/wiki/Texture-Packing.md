@@ -59,7 +59,7 @@ A **helper** is a source file that fills one channel of another output in its ow
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
 | Opacity (`opacity`) | the colour texture's alpha (`diffuse.a`) | packed channels |
-| Specular (`specular`) | the `_n` alpha of a non-PBR set (`n.a`), plus its packed channel in the tables above | other packed channels |
+| Specular (`specular`) | `n.a` on a texture of sub-type `normal`, plus the [packed channel for the target](#packing-loose-maps) | other packed channels |
 | Fuzz weight, PBR (`fuzzweight`) | the PBR `_f` alpha (`f.a`) | packed channels |
 | Subsurface weight, PBR (`subsurfaceweight`) | the PBR `_s` alpha (`s.a`) | packed channels |
 | Roughness, glossiness, metallic, AO, height, fuzz mask (skin), `_orm`, curvature, cavity | the packed channels of the tables above | any planned alpha target; the `_cnr` alpha (`cnr.a`, coat roughness) is offered, never suggested |
@@ -81,6 +81,7 @@ A `_fuzz` or `_sheen` map that no set reads is not converted. [Problems](GUI-Pro
 |---|---|
 | `the <shader> shader reads no fuzz map` | Pick **Advanced Skin** or a PBR shader for the set, or leave the map out: no other shader reads a fuzz map. <!-- D:JQ3 --> |
 | `<f file> is the set's PBR fuzz texture (_f)` | Remove one of the two fuzz files: both would be `<base>_f.dds`. The `_f` can be an image or a kept `_f.dds`, but not the `<base>_f.dds` the map itself wrote when you export into the source folder: the map keeps converting to that file. <!-- D:JQ4,JQ53 --> |
+| `<f file> (<type>) is written at the set's _f path` | Check the type Tessalith gave the file, including any preset rule. For example, a height map called `iron_f.png` takes the output name `iron_f.dds`. Rename the height map if you want the fuzz map to write there. If the set also has a PBR fuzz texture or a kept `_f.dds`, the Note names that file first. <!-- D:JQ53 --> |
 | `the <shader> shader of set <id> reads no fuzz map, and set <id> (<shader> shader) would read it as its fuzz texture, which only the file's own set can convert` | The map is shared between sets. Pick **Advanced Skin** or a PBR shader for the set that holds the file. <!-- D:JQ51 --> |
 
 A shared fuzz map does the job its own set gives it. An Advanced skin set that borrows a map its own PBR set converts gets the default G, and its `_rfaos` row reads *{output} G: the shared {file} is converted by its own set {id} ({shader} shader) and is not read here, so the default 0 (no fuzz) is used.* A PBR set that borrows a skin set's fuzz map gets no `<base>_f.dds` and no row. <!-- D:JQ51 -->
@@ -118,7 +119,11 @@ A helper that fills nothing is reported (`PACK-UNUSED-INPUT`, or `IN-PACKING-INP
 
 ## Variance and gloss bake
 
-In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces don't look too shiny. Mip 0 stays as authored; `mips.bake_clamp` limits the amount. A `_cnr` bakes into its own coat roughness. <!-- D:HD1 -->
+On `cs`, the red channel of an `_rmaos` or `_rfaos` can gain roughness where normal directions vary across a smaller mip. Tessalith takes the direction of each texel after resizing, before fitting the normal to the roughness map. Short normals that all point the same way add zero roughness. Mip 0 keeps its authored roughness. `mips.bake_clamp` limits the increase. A `_cnr` uses its own directions to bake coat roughness into alpha. <!-- D:HD1,LA3 -->
 
-- **Both files must be in the batch.** Otherwise the bake is skipped and reported (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). Sizes needn't match: a smaller, larger or differently shaped map bakes from the `_n` at the matching detail. A map with `mips.levels = "none"` isn't baked. A shared `_rmaos` (borrowed by several sets in the GUI) is never baked. <!-- D:HD2,HD5 -->
-- **Complex `_m` gloss bake (opt-in).** Set `mips.normal = "renormalize_bake"` (GUI: *Normal handling: Renormalise and bake*) on the set's `_n`. Every smaller mip of the `_m`'s green channel then gets the detail the normal loses, so distant surfaces shimmer less; mip 0 is unchanged. The conditions above apply.
+Tessalith looks for a `pbr_normal` first under any shader. A chosen or automatic PBR, PBR Grass or PBR Landscape shader can then use a plain `normal`, followed by a `landscape_normal`. Advanced Skin can use a plain normal too. It flags a landscape normal as an extra map and leaves the roughness unbaked if that is its only normal. Ties within a type go to the first source path in sort order. <!-- D:JS2 -->
+
+When you borrow a Normal slot, your set’s shader decides which normals it can bake from in the other set. For example, the slot can show that set’s landscape normal while your PBR roughness bakes from its plain normal. The bake takes the highest-priority normal your shader accepts. Even if the other set shows a borrowed normal, it can lend you its own. <!-- D:JS2 -->
+
+- **Include both inputs in the batch.** A decided normal and a writable linear roughness map with smaller mips can bake. DDS inputs and a shared roughness map skip the bake. With `mips.levels = "none"` the roughness has no smaller mips to bake. Different sizes or shapes work. Set `mips.normal = "renormalize"` on the normal to opt out. See [companion diagnostics](Diagnostic-Codes.md#sets-and-suggestions) for a missing input. <!-- D:HD2,HD5 -->
+- **Complex `_m` gloss bake (opt-in).** On either target, choose **Renormalise and bake** under **Normal handling** (`mips.normal = "renormalize_bake"`) on the set's plain `_n`. Variation in its directions reduces gloss in the smaller mips of the `_m`'s green channel. Mip 0 keeps its gloss. Only an explicit choice enables this bake. <!-- D:CL40,JS2 -->

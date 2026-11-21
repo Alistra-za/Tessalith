@@ -102,7 +102,7 @@ pub enum EventKind {
         /// M6 (DECISIONS Note S): the set's shader and why it was chosen.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shader: Option<crate::shader::ShaderPick>,
-        /// SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP / SHADER-NORMAL-SPECULAR for the set.
+        /// SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP for the set.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<crate::codes::Warning>,
     },

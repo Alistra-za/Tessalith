@@ -131,6 +131,51 @@ pub fn after_device_loss_folder(
     None
 }
 
+/// Check the same access the planner needs before the folder goes into Recent.
+pub fn checked_folder(path: PathBuf) -> Result<PathBuf, String> {
+    checked_folder_with(path, |p| std::fs::read_dir(p))
+}
+
+fn checked_folder_with<I>(
+    path: PathBuf,
+    list: impl FnOnce(&Path) -> std::io::Result<I>,
+) -> Result<PathBuf, String>
+where
+    I: Iterator<Item = std::io::Result<std::fs::DirEntry>>,
+{
+    std::path::absolute(&path)
+        .and_then(|absolute| {
+            for entry in list(&absolute)? {
+                entry?;
+            }
+            // Windows grants listing entries and reading folder attributes separately.
+            std::fs::metadata(&absolute)?;
+            Ok(absolute)
+        })
+        .map_err(|e| format!("Could not open {}. {e}", path.display()))
+}
+
+/// The first usable positional folder, or why the first candidate failed.
+pub fn folder_arg(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Option<PathBuf>, String> {
+    let mut args = args.into_iter();
+    let mut first_error = None;
+    while let Some(arg) = args.next() {
+        if arg == "--after-device-loss" {
+            args.next();
+        } else if !arg.as_encoded_bytes().starts_with(b"-") {
+            match checked_folder(arg.into()) {
+                Ok(folder) => return Ok(Some(folder)),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+    }
+    first_error.map_or(Ok(None), Err)
+}
+
 /// Note FC4 (DN3): the arguments the restarted process gets, so it reopens the folder and FB5's restore runs.
 /// The bare flag (no folder open) still marks the restart, so the loop guard holds.
 pub fn relaunch_args(folder: Option<&Path>) -> Vec<std::ffi::OsString> {
@@ -398,6 +443,49 @@ pub fn install_in(dir: Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_arg_reports_an_error_after_the_first_directory_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("texture.png"), []).unwrap();
+        let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+        let expected = format!("Could not open {}. {error}", dir.path().display());
+        let result = checked_folder_with(dir.path().to_owned(), |path| {
+            Ok(std::fs::read_dir(path)?.chain(std::iter::once(Err(error))))
+        });
+        assert_eq!(result, Err(expected));
+    }
+
+    #[test]
+    fn folder_arg_takes_the_first_existing_folder() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let file = a.path().join("texture.png");
+        std::fs::write(&file, []).unwrap();
+        let args = [
+            "--verbose".into(),
+            file.into_os_string(),
+            a.path().as_os_str().to_owned(),
+            b.path().as_os_str().to_owned(),
+        ];
+        assert_eq!(folder_arg(args).unwrap(), Some(a.path().to_path_buf()));
+        let missing = a.path().join("missing");
+        assert!(folder_arg([missing.into_os_string()]).is_err());
+    }
+
+    #[test]
+    fn folder_arg_skips_the_after_device_loss_value() {
+        let d = tempfile::tempdir().unwrap();
+        let args = [
+            "--after-device-loss".into(),
+            d.path().as_os_str().to_owned(),
+        ];
+        assert_eq!(
+            folder_arg(args).unwrap(),
+            None,
+            "that folder is reopened by the device-loss path"
+        );
+    }
 
     #[test]
     fn the_line_names_thread_location_message_and_one_line_backtrace() {

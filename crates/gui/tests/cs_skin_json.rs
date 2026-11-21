@@ -14,6 +14,84 @@ use std::path::Path;
 use std::time::Duration;
 use support::session;
 
+#[test]
+fn a_skin_set_warns_only_for_the_slots_its_material_reads() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for f in ["a_n.png", "b_n.png", "c.png"] {
+        colour(&r, f);
+    }
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    m.decide(
+        "textures/x/c.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::SkinAlbedo),
+    );
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    for f in ["textures/x/a_n.png", "textures/x/b_n.png"] {
+        m.decide(
+            f,
+            sdc_gui::model::Answer::Green(engine::config::GreenConvention::Directx),
+        );
+    }
+    m.edit_docs("Borrow controls and normal", None, true, |_, s| {
+        s.set_borrow(&a, 6, Some(&b));
+        s.set_borrow(&a, 2, Some(&b));
+    });
+    idle(&mut m);
+    let v = view(&m, &a);
+    for kind in [SlotKind::Normal, SlotKind::Rmaos] {
+        assert!(matches!(v.slots.get(&kind), Some(SlotFill::Borrowed { from, .. }) if from == &b));
+    }
+    let rows = crate::slot_links::unused_rows(&m);
+    assert_eq!(rows.len(), 1, "skin reads controls only");
+    assert!(rows[0].shown().contains("Slot 6"));
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/b_rfaos.dds"));
+    assert!(j["textures"].get("normal").is_none());
+
+    let c = id_of(&m, "x/c");
+    m.edit_docs("Read a's controls", None, true, |_, s| {
+        s.set_borrow(&c, 6, Some(&a));
+    });
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/c.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/a_rfaos.dds"));
+    assert!(
+        crate::slot_links::unused_rows(&m).is_empty(),
+        "c reads a's controls"
+    );
+
+    m.edit_docs("Remove the controls borrow", None, true, |_, s| {
+        s.set_borrow(&c, 6, None);
+    });
+    idle(&mut m);
+    let restored = crate::slot_links::unused_rows(&m);
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].at, rows[0].at);
+    assert_eq!(restored[0].shown(), rows[0].shown());
+
+    m.edit_docs("Borrow wet and detail", None, true, |_, s| {
+        s.set_borrow(&a, 9, Some(&b));
+        s.set_borrow(&a, 10, Some(&b));
+    });
+    export_and_wait(&mut m);
+    let rows = crate::slot_links::unused_rows(&m);
+    assert_eq!(rows.len(), 3);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    for (slot, field, suffix) in [(9, "wet", "wet"), (10, "detail", "detail_n")] {
+        assert!(rows
+            .iter()
+            .any(|r| r.shown().contains(&format!("Slot {slot} "))));
+        assert_eq!(
+            j["textures"][field],
+            json!(format!("textures/x/b_{suffix}.dds"))
+        );
+        assert!(out(&m, &format!("textures/x/a_{suffix}.dds")).is_file());
+    }
+}
+
 fn grey(dir: &Path, name: &str) {
     ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
         .save(dir.join(name))
@@ -106,9 +184,13 @@ fn wet_can_be_shared_from_another_skin_set() {
     // rock01 gives its own `_wet` up for rock02's: Share rock02's into rock01 (replacing the occupant).
     let out = m.drop_choice("m/rock02_wet.png", "m/rock01", DropChoice::Share);
     let r = match out {
-        sdc_gui::model::sets::DropOutcome::AskReplace { .. } => {
-            m.drop_replace("m/rock02_wet.png", "m/rock01", DropChoice::Share)
-        }
+        sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } => m.drop_replace(
+            "m/rock02_wet.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        ),
         sdc_gui::model::sets::DropOutcome::Joined => Ok(()),
         other => panic!("{other:?}"),
     };
@@ -150,9 +232,15 @@ fn a_wet_slot_can_be_pinned() {
 /// rock01 borrows rock02's `_wet` (slot 9).
 fn with_borrowed_wet(m: &mut AppModel) {
     let out = m.drop_choice("m/rock02_wet.png", "m/rock01", DropChoice::Share);
-    if matches!(out, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
-        m.drop_replace("m/rock02_wet.png", "m/rock01", DropChoice::Share)
-            .unwrap();
+    if let sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(
+            "m/rock02_wet.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        )
+        .unwrap();
     }
     idle(m);
     assert!(matches!(
@@ -316,12 +404,18 @@ fn share_of_wet_or_detail_needs_an_advanced_skin_set() {
     use sdc_gui::model::sets::DropOutcome;
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
-    for item in ["m/rock02_wet.png", "m/rock02_detail_n.png"] {
+    for (item, kind) in [
+        ("m/rock02_wet.png", SlotKind::SkinWet),
+        ("m/rock02_detail_n.png", SlotKind::SkinDetail),
+    ] {
         match m.drop_choice(item, "m/plain", DropChoice::Share) {
             DropOutcome::Refused(why) => assert!(why.contains("not an Advanced skin set"), "{why}"),
             other => panic!("{item}: {other:?}"),
         }
-        assert!(m.drop_replace(item, "m/plain", DropChoice::Share).is_err());
+        assert!(m
+            .drop_replace(item, "m/plain", DropChoice::Share, kind, &SlotFill::Empty)
+            .unwrap_err()
+            .contains("not an Advanced skin set"));
     }
     idle(&mut m);
     let e = m
@@ -441,8 +535,9 @@ fn read_json(p: &Path) -> Json {
 /// Share `item` into set `to` (replacing its own occupant).
 fn share(m: &mut AppModel, item: &str, to: &str) {
     let o = m.drop_choice(item, to, DropChoice::Share);
-    if matches!(o, sdc_gui::model::sets::DropOutcome::AskReplace { .. }) {
-        m.drop_replace(item, to, DropChoice::Share).unwrap();
+    if let sdc_gui::model::sets::DropOutcome::AskReplace { kind, existing } = o {
+        m.drop_replace(item, to, DropChoice::Share, kind, &existing)
+            .unwrap();
     }
     idle(m);
 }

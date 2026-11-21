@@ -128,7 +128,7 @@ fn undo_clears_the_encoding_note_and_keeps_the_export_cancelled_note() {
 fn the_undo_note_stands_in_front_of_the_counts_and_goes_with_the_next_plan_or_after_5_s() {
     let d = tempfile::tempdir().unwrap();
     let mut m = with_a_step(d.path());
-    let counts = format!("{} textures, {} sets", m.items.len(), m.sets.len());
+    let counts = "6 files → 5 textures (1 packed or generated) · 3 sets";
     m.undo();
     assert_eq!(m.status_line, format!("Undid: hair. {counts}"));
     // The plan the undo started shows it; the next plan drops it.
@@ -871,12 +871,15 @@ fn the_set_dialogs_enter_still_presses_what_it_pressed() {
             (opened(d.path()), State::default()),
         );
     let steps = h.state().0.history.undo.len();
-    // Enter does nothing on a Replace (K1) or a Choice; Esc cancels both.
+    // Enter does nothing on a Replace (K1), or on a Choice with no remembered answer (Note JW6); Esc cancels both.
     for p in [
         Pending::Replace {
             item: "landscape/leaf.png".into(),
             set: "s".into(),
-            existing: "landscape/rock01".into(),
+            kind: sdc_gui::model::sets::SlotKind::Diffuse,
+            existing: sdc_gui::model::sets::SlotFill::Own {
+                item: "landscape/rock01".into(),
+            },
             choice: DropChoice::Move,
         },
         Pending::Choice {
@@ -1050,7 +1053,10 @@ fn focused_destructive_buttons_ignore_enter_and_space() {
         let replace = Pending::Replace {
             item: "landscape/leaf.png".into(),
             set: "s".into(),
-            existing: "landscape/rock01".into(),
+            kind: sdc_gui::model::sets::SlotKind::Diffuse,
+            existing: sdc_gui::model::sets::SlotFill::Own {
+                item: "landscape/rock01".into(),
+            },
             choice: DropChoice::Move,
         };
         h.state_mut().1.drops.pending = Some(replace.clone());
@@ -1166,7 +1172,10 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
     h.state_mut().1.drops.pending = Some(Pending::Replace {
         item: "landscape/leaf.png".into(),
         set: "s".into(),
-        existing: existing.clone(),
+        kind: sdc_gui::model::sets::SlotKind::Diffuse,
+        existing: sdc_gui::model::sets::SlotFill::Own {
+            item: existing.clone(),
+        },
         choice: DropChoice::Move,
     });
     assert_dialog_settles_on_screen(

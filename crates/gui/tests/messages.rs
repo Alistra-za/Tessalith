@@ -125,9 +125,13 @@ fn the_log_keeps_500_counts_unread_and_clears() {
     assert_eq!(m.entries().next().unwrap().time, "12:00:00");
     assert_eq!(m.unread(), LOG_CAP);
     m.set_open(true);
+    assert_eq!(m.unread(), LOG_CAP, "opening alone shows no entries");
+    m.mark_read();
     assert_eq!(m.unread(), 0);
     m.log(Severity::Warning, "while open");
-    assert_eq!(m.unread(), 0, "an open panel reads as it goes");
+    assert_eq!(m.unread(), 1, "the next frame has yet to draw this entry");
+    m.mark_read();
+    assert_eq!(m.unread(), 0);
     m.set_open(false);
     m.log(Severity::Error, "closed");
     assert_eq!(m.unread(), 1);
@@ -148,11 +152,8 @@ fn ctrl_m_is_an_action_in_global_and_toggles_the_panel() {
     let a = actions::action("messages").expect("listed");
     assert_eq!(actions::keys_text("messages"), "Ctrl+M");
     assert_eq!(a.area, actions::Area::Global);
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
     actions::run("messages", &mut m, &egui::Context::default());
     assert!(m.bottom.open && m.messages.is_open());
     actions::run("messages", &mut m, &egui::Context::default());
@@ -210,11 +211,9 @@ fn the_panel_counts_one_message_in_the_singular() {
 /// R14 (K9): the unread count is on the bottom panel's Messages tab (the header button is gone).
 #[test]
 fn the_messages_tab_shows_the_unread_count_and_opens_the_panel() {
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
+    m.messages.clear();
     m.messages.log(Severity::Info, "a");
     m.messages.log(Severity::Info, "b");
     let mut h = Harness::builder()
@@ -264,11 +263,8 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
 /// its buttons (Review's Export); with it collapsed they keep the window's bottom-right corner.
 #[test]
 fn toasts_sit_above_an_open_bottom_panel() {
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings::default(),
-        None,
-        support::session(),
-    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = support::opened(dir.path());
     m.messages.notify(Severity::Info, "Saved");
     m.toggle_tab(sdc_gui::model::bottom::BottomTab::Messages);
     assert!(m.bottom.open);
@@ -327,15 +323,18 @@ fn saved_undo_and_export_results_raise_toasts() {
         "{:?}",
         toasts(&m)
     );
-    let s = engine::api::BatchSummary {
-        converted: 7,
-        skipped: 2,
-        failed: 1,
+    let s = sdc_gui::model::export::ExportResult {
+        primary: sdc_gui::model::export::Outcomes {
+            written: 7,
+            skipped_sources: 2,
+            failed: 1,
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert_eq!(
         sdc_gui::model::export_finished_text(&s),
-        "Export finished: 7 written, 2 skipped, 1 failed"
+        "Export finished: 7 written, 0 up to date, 1 failed, 2 skipped sources"
     );
 }
 

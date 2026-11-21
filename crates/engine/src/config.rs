@@ -147,6 +147,19 @@ cfg_enum!(NormalMips, "snake_case" { Renormalize, RenormalizeBake });
 cfg_enum!(NormalBase, "lowercase" { Renormalize, Keep });
 cfg_enum!(CoverageMode, "lowercase" { Auto, On, Off });
 pub use texcore::dds::{Format, HeaderForm};
+
+pub(crate) fn stores_xyz(format: Format) -> bool {
+    match format {
+        Format::Bc4 | Format::Bc5 | Format::R8 | Format::Rg8 => false,
+        Format::Bc1
+        | Format::Bc3
+        | Format::Bc6hUf16
+        | Format::Bc7
+        | Format::Rgba8
+        | Format::Rgb8
+        | Format::Rgba16f => true,
+    }
+}
 // bc7e quality level. `max` is sdc patch 0002 (veryslow's search plus a fully refined, wider partition ranking,
 // uber 4, two least-squares passes and a quantised endpoint search); the vendored objects always carry it
 // (docs/research/bc7e-tuning.md).
@@ -357,6 +370,18 @@ pub enum MipLevels {
 }
 
 impl Subtype {
+    /// Whether this normal output uses unit directions at mip 0 even under Keep.
+    pub fn always_unit_base(self, format: Format) -> bool {
+        self == Self::SkinDetail
+            || (self.category() == Category::Normal && self != Self::Msn && !stores_xyz(format))
+    }
+
+    // Only these base profiles reject Keep at Resolve (LA1).
+    pub(crate) fn needs_unit_base(self, format: Format) -> bool {
+        matches!(self, Self::Normal | Self::LandscapeNormal | Self::PbrNormal)
+            && !stores_xyz(format)
+    }
+
     pub const ALL: [Subtype; 34] = {
         use Subtype::*;
         [
@@ -538,8 +563,11 @@ pub struct MipSpec {
     #[serde(default, skip_serializing_if = "MipEdge::is_wrap")]
     pub edge: MipEdge,
     pub normal: NormalMips,
-    /// Mip 0 of a normal map (spec §5.4, DECISIONS R1): `renormalize` (default) stores every base vector at unit
-    /// length; `keep` stores the source as authored. Read only for the Normal category.
+    /// Normal length after resizing. `renormalize` (default) stores unit vectors.
+    /// Advanced Skin detail normals and tangent-space normal outputs in formats that drop Z always start from unit length.
+    /// For other normal maps, `keep` preserves mip 0 as authored.
+    /// On XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,
+    /// up to what XYZ can hold. Other normal maps renormalize lower mips.
     #[serde(default = "default_normal_base")]
     pub normal_base: NormalBase,
     /// Clamp `t` of the variance bake (spec §6.2, DECISIONS Note E): the added variance is at most `t²`. 0.25;

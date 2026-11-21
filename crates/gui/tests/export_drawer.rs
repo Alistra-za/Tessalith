@@ -203,8 +203,9 @@ fn big() -> ExportModel {
 
 #[test]
 fn the_filters_combine_with_and() {
-    let x = big();
-    let n = |f: FileFilter| x.rows.iter().filter(|r| f.matches(r)).count();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.export = big();
+    let n = |f: FileFilter| m.export.rows.iter().filter(|r| f.matches(&m, r)).count();
     let failed_only = FileFilter {
         failed_only: true,
         ..Default::default()
@@ -225,7 +226,8 @@ fn the_filters_combine_with_and() {
 
 #[test]
 fn the_filtered_list_is_computed_once_per_change() {
-    let mut x = big();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.export = big();
     let mut idx = FilesIndex::default();
     let both = FileFilter {
         failed_only: true,
@@ -233,8 +235,8 @@ fn the_filtered_list_is_computed_once_per_change() {
     };
     // 200 frames over 10k rows with nothing changing: one computation.
     for _ in 0..200 {
-        assert_eq!(idx.len(&x, both), 500);
-        assert_eq!(idx.row(&x, both, 0).unwrap().job_key, "t/f00000.dds");
+        assert_eq!(idx.len(&m, both), 500);
+        assert_eq!(idx.row(&m, both, 0).unwrap().job_key, "t/f00000.dds");
     }
     assert_eq!(idx.computed, 1);
     // A change of filter recomputes once ...
@@ -243,22 +245,22 @@ fn the_filtered_list_is_computed_once_per_change() {
         ..Default::default()
     };
     for _ in 0..50 {
-        assert_eq!(idx.len(&x, warn), 2500);
+        assert_eq!(idx.len(&m, warn), 2500);
     }
     assert_eq!(idx.computed, 2);
     // ... so does an event that changes a row ...
-    x.on_event(ev(
+    m.export.on_event(ev(
         0,
         "t/f00001.dds",
         "t/f00001.png",
         EventKind::Warning(Warning::new(Code::DimNpot, "late")),
     ));
     for _ in 0..50 {
-        assert_eq!(idx.len(&x, warn), 2501);
+        assert_eq!(idx.len(&m, warn), 2501);
     }
     assert_eq!(idx.computed, 3);
     // ... but progress does not, and no filter needs no index at all.
-    x.on_event(ev(
+    m.export.on_event(ev(
         0,
         "t/f00001.dds",
         "t/f00001.png",
@@ -268,8 +270,8 @@ fn the_filtered_list_is_computed_once_per_change() {
             total: 2,
         },
     ));
-    assert_eq!(idx.len(&x, warn), 2501);
-    assert_eq!(idx.len(&x, FileFilter::default()), 10_000);
+    assert_eq!(idx.len(&m, warn), 2501);
+    assert_eq!(idx.len(&m, FileFilter::default()), 10_000);
     assert_eq!(idx.computed, 3);
 }
 
@@ -288,11 +290,10 @@ fn drawer_harness(m: AppModel) -> Harness<'static, (AppModel, DrawerState)> {
     h
 }
 
-fn model_with(export: &Path, x: ExportModel) -> AppModel {
-    let mut m = AppModel::placeholder(GuiSettings {
-        export_folder: Some(export.to_path_buf()),
-        ..GuiSettings::default()
-    });
+fn model_with(dir: &Path, export: &Path, x: ExportModel) -> AppModel {
+    let root = dir.join("project");
+    std::fs::create_dir(&root).unwrap();
+    let mut m = opened_as_the_app(root, export.to_owned());
     m.export = x;
     m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
     m
@@ -302,15 +303,16 @@ fn model_with(export: &Path, x: ExportModel) -> AppModel {
 fn open_export_folder_is_disabled_until_the_folder_exists() {
     let d = tempfile::tempdir().unwrap();
     let out = d.path().join("export");
-    let mut h = drawer_harness(model_with(&out, ExportModel::default()));
+    let mut h = drawer_harness(model_with(d.path(), &out, ExportModel::default()));
     h.run();
     assert!(h
-        .get_by_label("Open export folder")
+        .get_by_label("Files: Open export folder (not created yet: export creates it)")
         .accesskit_node()
         .is_disabled());
-    let why = h.state().0.export_folder_state().unwrap_err();
+    let why = h.state().0.export_folder_state().folder.unwrap_err();
     assert!(why.contains("does not exist yet"), "{why}");
-    h.get_by_label("Open export folder").click();
+    h.get_by_label("Files: Open export folder (not created yet: export creates it)")
+        .click();
     h.run();
     assert!(
         h.state().0.shell.is_empty(),
@@ -322,10 +324,10 @@ fn open_export_folder_is_disabled_until_the_folder_exists() {
     h.run();
     h.run();
     assert!(!h
-        .get_by_label("Open export folder")
+        .get_by_label("Files: Open export folder")
         .accesskit_node()
         .is_disabled());
-    h.get_by_label("Open export folder").click();
+    h.get_by_label("Files: Open export folder").click();
     h.run();
     assert_eq!(h.state_mut().0.take_shell(), vec![ShellRequest::Open(out)]);
 }
@@ -333,7 +335,7 @@ fn open_export_folder_is_disabled_until_the_folder_exists() {
 #[test]
 fn the_files_list_draws_only_the_rows_on_screen() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), big()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), big()));
     h.run();
     h.run();
     let drawn = h.query_all_by_label_contains("t/f").count();
@@ -343,7 +345,7 @@ fn the_files_list_draws_only_the_rows_on_screen() {
 #[test]
 fn the_filter_toggles_narrow_the_files_list() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), big()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), big()));
     h.run();
     h.get_by_label("Failed only").click();
     h.run();
@@ -358,6 +360,16 @@ fn the_filter_toggles_narrow_the_files_list() {
     assert!(h.query_by_label("t/f00010.dds").is_none(), "no warning");
     h.get_by_label("t/f00020.dds");
     assert_eq!(h.state().1.index.computed, 2, "once per filter change");
+}
+
+#[test]
+fn has_warnings_explains_which_warnings_it_counts() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = drawer_harness(model_with(d.path(), d.path(), ExportModel::default()));
+    h.get_by_label("Has warnings").hover();
+    h.run();
+    h.run();
+    h.get_by_label("Only files with warnings not marked as intended");
 }
 
 #[test]
@@ -381,7 +393,7 @@ fn a_files_row_lists_its_warnings_on_hover() {
             "1000x750 is not a power of two; mips will be uneven",
         )),
     ));
-    let mut h = drawer_harness(model_with(d.path(), x));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), x));
     h.run();
     h.run();
     h.get_by_label("1 warning").hover();
@@ -399,6 +411,30 @@ fn a_files_row_lists_its_warnings_on_hover() {
     );
 }
 
+/// Plan 3c Task 17b (F4): the Files tab heads what the export did besides converting "Export details (n)", so it never
+/// shares the name of the Problems tab's Notes pill.
+#[test]
+fn the_files_tab_heads_its_export_notes_export_details() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.export.notes = vec![
+        "1 kept at a higher quality target".into(),
+        "PGPatcher JSON written: out/pgp.json".into(),
+        "not in JSON: rock01 (no normal)".into(),
+    ];
+    m.show_tab(sdc_gui::model::bottom::BottomTab::Files);
+    let mut h = drawer_harness(m);
+    h.run();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("Notes (3)").count(),
+        0,
+        "no Notes heading in the Files tab"
+    );
+    h.get_by_label("Export details (3)");
+    h.get_by_label("1 kept at a higher quality target");
+}
+
 #[test]
 fn a_files_row_reveals_the_output_once_written_else_the_source() {
     let d = tempfile::tempdir().unwrap();
@@ -414,7 +450,7 @@ fn a_files_row_reveals_the_output_once_written_else_the_source() {
             output: out.to_string_lossy().replace('\\', "/"),
         },
     ));
-    let m = model_with(d.path(), x);
+    let m = model_with(d.path(), d.path(), x);
     assert_eq!(m.row_reveal_target(&m.export.rows[0]), Some(src.clone()));
     std::fs::write(&out, b"y").unwrap();
     assert_eq!(m.row_reveal_target(&m.export.rows[0]), Some(out));
@@ -586,7 +622,7 @@ fn packed_source_skips_drop_rows_and_later_events_find_the_rest() {
 #[test]
 fn the_drawer_forgets_its_file_checks_on_a_new_epoch() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = drawer_harness(model_with(d.path(), ExportModel::default()));
+    let mut h = drawer_harness(model_with(d.path(), d.path(), ExportModel::default()));
     h.run();
     let now = Instant::now();
     let p = d.path().join("x");

@@ -221,6 +221,8 @@ impl AppModel {
                 after,
                 merge: None,
                 created_file: None,
+                type_alpha: false,
+                normal_prunes: Default::default(),
             }),
         }
         self.type_pending = Some(pending);

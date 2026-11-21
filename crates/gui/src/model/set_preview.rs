@@ -6,14 +6,14 @@
 //! during an export. Results come back on this module's own channel, so `worker.rs` needs no new message.
 use crate::model::cs_pbr::{self, CsBlock};
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
-use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
-use crate::model::sets::set_views;
-use crate::model::sets::{SetView, SlotFill, SlotKind};
+use crate::model::sets::views;
+use crate::model::sets::{slot_shown, SetView, SlotFill, SlotKind, SlotShown};
 use crate::model::viewport3d::FileSource;
 use crate::model::viewport3d::{read_file, Content, Viewport3d};
 use crate::model::AppModel;
-use crate::model::Selection;
+use crate::model::ResolvedSelection;
+use crate::model::SetTarget;
 use crate::pgp::prefix::output_rel;
 use crate::pgp::writer::EntryInput;
 use crate::pgp::writer::{document, entry_node};
@@ -164,10 +164,42 @@ pub struct MemberSlot {
 
 /// The set's filled slots (02 §1.1). With the PGPatcher entry (CS and a PBR set): the slot's path in
 /// `entry.slots[slotN]` when sdc names it there (a borrowed slot, or a file another set owns, `pbr_export::slots_of`),
-/// and for the set's own texture `<prefix>_<suffix>.dds`. A user's own `slotN` setting points at some other file
-/// and is not served. Without the entry (D3): [`plain_path`]. Coat and fuzz share slot 7: both claim an explicit
-/// slot-7 path, and the later one wins in [`Encoder::memory_sources`].
+/// and for the set's own texture `<prefix>_<suffix>.dds`. The preview shows what the JSON carries (review E1): a
+/// linked slot (`v.linked` with an item and a row) serves the linked file at the link's path, keyed by the row the
+/// link fills (`Encoder.members` is keyed by kind, so no two slots leave here with one kind); the row's own file is
+/// not served then, and neither is an own or borrowed file whose slot holds a link for another kind
+/// (`SlotShown::Replaced`). A typed path naming no file pushes nothing: the own file under it keeps only its prefix
+/// path and the view reads the game data for the rest. A link with no slot row also reads game data.
+/// Without the entry (D3): [`plain_path`], no links.
+/// Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one wins in
+/// [`Encoder::memory_sources`].
 pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Vec<MemberSlot> {
+    // The links' files first: each takes its row, and the row's own fill is then left out.
+    let mut linked_out: Vec<MemberSlot> = vec![];
+    // The plain preview has no entry, even when its SetView carries links.
+    if entry.is_some() {
+        for link in v.linked.values() {
+            let Some(key) = &link.item else {
+                continue;
+            };
+            // shortcut: no SlotKind uses game slot 5. Serve rowless links when members can be keyed by game slot.
+            let Some(row) = link.row else {
+                continue;
+            };
+            // Links are unique per game slot and each destination row belongs to one game slot.
+            let Some(item) = m.item(key) else {
+                continue;
+            };
+            linked_out.push(MemberSlot {
+                kind: row,
+                item: key.clone(),
+                job_key: item.job_key.clone(),
+                status: format!("{:?}", item.status),
+                sig: signature(item),
+                paths: vec![canon(&link.path)],
+            });
+        }
+    }
     let mut out = vec![];
     for (kind, fill) in &v.slots {
         let (key, own) = match fill {
@@ -178,6 +210,11 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
         let Some(item) = m.item(key) else {
             continue;
         };
+        let shown = slot_shown(v, *kind);
+        if matches!(shown, SlotShown::Replaced { .. }) || linked_out.iter().any(|s| s.kind == *kind)
+        {
+            continue;
+        }
         let mut paths = vec![];
         match entry {
             None => paths.push(plain_path(*kind)),
@@ -210,6 +247,7 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
             paths,
         });
     }
+    out.extend(linked_out);
     out
 }
 
@@ -1008,20 +1046,10 @@ pub fn count_text(n: usize) -> String {
     }
 }
 
-/// The set the panel follows: the selected set, or the set of the selected texture (spec §8, 02 Q5).
-pub fn followed_set(m: &AppModel) -> Option<String> {
-    match &m.selection {
-        Selection::Set(k) => Some(k.clone()),
-        // Note HF1: a no-set texture has no set.
-        Selection::Item(k) => m.set_key_of_item(k),
-        Selection::None => None,
-    }
-}
-
 /// Everything the preview depends on, for one set (02 §3.2).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetFingerprint {
-    pub set_key: String,
+    pub set_key: SetTarget,
     pub label: String,
     /// Design §7 (plan ruling R1): the set has a texture-set block or is PBR Landscape (Note BM), so it is shown on
     /// the plane only.
@@ -1035,24 +1063,33 @@ pub struct SetFingerprint {
 }
 
 /// `None` when the set is gone.
-pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
-    let (v, entry) = match json_entries(m).into_iter().find(|(v, _)| v.key == set_key) {
-        Some((v, e)) => (v, Some(e)),
-        None => (set_views(m).into_iter().find(|v| v.key == set_key)?, None),
-    };
-    let members = member_slots(m, &v, entry.as_ref());
-    Some(SetFingerprint {
-        set_key: set_key.into(),
+pub fn fingerprint(m: &AppModel, target: impl Into<SetTarget>) -> Option<SetFingerprint> {
+    let target = target.into();
+    let all = views(m);
+    let v = all.iter().find(|v| target.matches(v))?;
+    Some(fingerprint_of(m, &target, &all, v))
+}
+
+fn fingerprint_of(
+    m: &AppModel,
+    target: &SetTarget,
+    all: &[SetView],
+    v: &SetView,
+) -> SetFingerprint {
+    let entry = super::pbr_export::exports_json(m, v).then(|| {
+        let (_, paths) = super::sets::engine_inputs(m);
+        let roots = super::sets::output_roots(m);
+        super::pbr_export::candidate_entry(m, v, all, &paths, &roots).input
+    });
+    SetFingerprint {
+        set_key: target.clone(),
         label: v.id.clone(),
-        landscape: m
-            .cs_block(&v.id, crate::model::cs_pbr::Kind::Txst)
-            .is_some()
-            || crate::model::sets::is_pbr_landscape(&v),
-        grass: crate::model::sets::is_pbr_grass(&v),
-        entry,
+        landscape: v.cs_txst.is_some() || super::sets::is_pbr_landscape(v),
+        grass: super::sets::is_pbr_grass(v),
         prefix: v.prefix.clone(),
-        members,
-    })
+        members: member_slots(m, v, entry.as_ref()),
+        entry,
+    }
 }
 
 fn strip_ext(v: &str) -> String {
@@ -1635,7 +1672,9 @@ pub struct SetPreview {
     pub fp: Option<SetFingerprint>,
     pub candidates: Candidates,
     /// The mesh per set key, this session only (spec §8).
-    pub choice: HashMap<String, MeshChoice>,
+    pub choice: HashMap<SetTarget, MeshChoice>,
+    /// Document-only mesh choices belong to this project.
+    project: Option<PathBuf>,
     /// Design §7: the landscape plane's tiling, 1.0-3.0 in steps of 0.5; this session only.
     pub tiling: f32,
     pub rows: Vec<ShapeRow>,
@@ -1649,7 +1688,7 @@ pub struct SetPreview {
     /// Fingerprint evaluations so far (tests assert an unchanged frame within `THROTTLE` does none).
     pub checks: u32,
     default: Value,
-    gone: Option<String>,
+    gone: Option<SetTarget>,
     vfs_err: RefCell<Option<String>>,
     entry: Option<Value>,
     nif: Option<Arc<LoadedNif>>,
@@ -1709,7 +1748,7 @@ pub struct SetPreview {
     xpmf_resume: bool,
     /// What `xpmf_doc` and `xpmf_tex` were built from (the project, the followed set, whether it has a `cs_mato`
     /// block, the shown encodes): an idle frame rebuilds nothing.
-    xpmf_key: Option<(super::ViewKey, String, bool, u64)>,
+    xpmf_key: Option<(std::sync::Weak<ResolvedSelection>, u64)>,
 }
 
 impl Default for SetPreview {
@@ -1737,6 +1776,7 @@ impl SetPreview {
             fp: None,
             candidates: Candidates::NotAsked,
             choice: HashMap::new(),
+            project: None,
             tiling: 1.0,
             rows: vec![],
             notices: vec![],
@@ -1863,6 +1903,13 @@ impl SetPreview {
 
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
+        if self.project != m.root {
+            self.project.clone_from(&m.root);
+            self.choice
+                .retain(|target, _| matches!(target, SetTarget::Key(_)));
+            self.fp = None;
+            self.gone = None;
+        }
         self.v3.poll();
         // A finished encode on a scene that is already loaded is swapped in (`sync_textures`); the scene is pushed
         // for a first load and when an encode failed (the game's copy of the texture must come back).
@@ -1878,23 +1925,23 @@ impl SetPreview {
         if !shown || !self.enabled {
             return;
         }
-        let key = followed_set(m);
+        let active = m.resolved_selection();
+        let key = active.target.as_ref();
         let due = input
-            || (key.as_ref() != self.fp.as_ref().map(|f| &f.set_key)
-                && key.as_ref() != self.gone.as_ref())
+            || (key != self.fp.as_ref().map(|f| &f.set_key) && key != self.gone.as_ref())
             || self
                 .last_check
                 .is_none_or(|t| now.duration_since(t) >= THROTTLE);
         if due {
             self.last_check = Some(now);
             if let Some(k) = key {
-                self.check(m, &k, now);
+                self.check(m, &active, k, now);
             }
         }
         let mato_due = std::mem::take(&mut self.mato_due);
         // Every frame with the layer on, so a dragged value shows on the next frame (cached reads; Note GG).
         if due || mato_due || self.mato_layer {
-            self.sync_mato(m);
+            self.sync_mato(m, &active);
         }
         self.enc
             .pump(m.session.as_ref(), now, m.export.running.is_some());
@@ -1929,9 +1976,12 @@ impl SetPreview {
         }
     }
 
-    fn check(&mut self, m: &AppModel, key: &str, now: Instant) {
+    fn check(&mut self, m: &AppModel, active: &ResolvedSelection, key: &SetTarget, now: Instant) {
         self.checks += 1;
-        let Some(fp) = fingerprint(m, key) else {
+        let Some(fp) = active
+            .view()
+            .map(|v| fingerprint_of(m, key, &active.views, v))
+        else {
             // The followed set is gone: drop the scene and remember the key so the next frames settle.
             if self.fp.is_some() {
                 self.enc.reset();
@@ -1948,7 +1998,9 @@ impl SetPreview {
                 self.want_scene = false;
                 self.v3.set_content(None, false);
             }
-            self.gone = Some(key.to_string());
+            if self.gone.as_ref() != Some(key) {
+                self.gone = Some(key.clone());
+            }
             return;
         };
         self.gone = None;
@@ -1977,6 +2029,9 @@ impl SetPreview {
             self.querying = None;
             self.loading = None;
             self.on_screen = None;
+            if self.fp.as_ref().is_none_or(|old| &old.set_key != key) {
+                self.v3.set_content(None, false);
+            }
         }
         self.entry = fp.entry.as_ref().map(|e| entry_node(e).to_value());
         self.enc.sync(m, fp.members.clone(), now, d.set);
@@ -2692,27 +2747,19 @@ impl SetPreview {
 
     /// The followed set's block, and with the layer on its record (design D3): the first EDID of `edids` the scan
     /// has as a winning MATO (ASCII case-insensitive, as `esp::mato_data` matches it). Then the layer is pushed.
-    fn sync_mato(&mut self, m: &AppModel) {
-        self.mato_block = self
-            .fp
+    fn sync_mato(&mut self, m: &AppModel, active: &Arc<ResolvedSelection>) {
+        let shown = self.shown_rev();
+        let changed = self
+            .xpmf_key
             .as_ref()
-            .and_then(|f| m.cs_block(&f.label, cs_pbr::Kind::Mato));
-        // Note GI10: the layer needs the cs_mato block; the profile only adds to it.
-        let key = self.fp.as_ref().map(|f| {
-            (
-                m.view_key(),
-                f.label.clone(),
-                self.mato_block.is_some(),
-                self.shown_rev(),
-            )
-        });
-        if key != self.xpmf_key {
-            self.xpmf_key = key;
-            self.xpmf_doc = self
-                .fp
-                .as_ref()
+            .is_none_or(|(owner, rev)| owner.as_ptr() != Arc::as_ptr(active) || *rev != shown);
+        if changed {
+            self.xpmf_key = Some((Arc::downgrade(active), shown));
+            let v = active.view().filter(|_| self.fp.is_some());
+            self.mato_block = v.and_then(|v| v.cs_mato.as_deref()).cloned();
+            self.xpmf_doc = v
                 .filter(|_| self.mato_block.is_some())
-                .and_then(|f| super::xpmf_json::preview_profile(m, &f.label));
+                .and_then(|v| super::xpmf_json::preview_profile(m, &v.id));
             let root = m.output_root();
             let tex: Vec<XpmfTex> = self
                 .xpmf_doc

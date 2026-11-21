@@ -112,6 +112,283 @@ fn app_data() -> &'static std::path::Path {
     .path()
 }
 
+#[test]
+fn close_with_only_a_focused_json_name_neither_prompts_nor_writes() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    m.save().unwrap();
+    m.open_json_editor();
+    let roots = [("project", d.path().to_owned())];
+    let before = invariants::tree_of(&roots).unwrap();
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.run_steps(3);
+    let role = egui::accesskit::Role::TextInput;
+    h.get_by_role_and_label(role, "JSON file name").click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("my-pack".into()));
+    h.run_steps(2);
+    let field = h.get_by_role_and_label(role, "JSON file name");
+    assert!(field.is_focused());
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("my-pack"));
+    assert_eq!(h.state().model.sets_doc.as_ref().unwrap().json_name(), None);
+    close_event(&mut h);
+    h.run_steps(3);
+    assert_eq!(
+        h.state().model.dialog,
+        None,
+        "a field draft alone lets close proceed"
+    );
+    assert_eq!(h.state().model.sets_doc.as_ref().unwrap().json_name(), None);
+    assert_eq!(invariants::tree_of(&roots).unwrap(), before);
+}
+
+fn close_event(h: &mut app_harness::H) {
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .events
+        .push(egui::ViewportEvent::Close);
+}
+
+#[test]
+fn closing_with_a_focused_mesh_slot_starts_no_write() {
+    for project_dirty in [false, true] {
+        close_with_mesh_slot_draft(project_dirty);
+    }
+}
+
+fn close_with_mesh_slot_draft(project_dirty: bool) {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    use sdc_gui::model::meshes::nif_edit::{NifEdit, Selection};
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    m.save().unwrap();
+    if project_dirty {
+        m.set_json_name("unsaved");
+    }
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.run_steps(3);
+    let blocker = d.path().join("not-a-directory");
+    std::fs::write(&blocker, b"keep").unwrap();
+    let path = d.path().join("slot-edit.toml");
+    let copy = modscan::store::PathCopy {
+        copy_id: 1,
+        origin: "A".into(),
+        kind: modscan::store::KIND_MOD,
+        root: d.path().display().to_string(),
+        priority: 1,
+        derived: false,
+    };
+    let mut edit = NifEdit::open(
+        include_bytes!("../../nif/tests/fixtures/TestNifFile_Skinned_SE.nif").to_vec(),
+        copy,
+        "meshes/x.nif",
+        None,
+        Some(&path),
+    )
+    .unwrap();
+    let shape = edit
+        .model
+        .shapes
+        .iter()
+        .find(|s| {
+            s.shader
+                .is_some_and(|b| edit.model.lighting.contains_key(&b))
+        })
+        .unwrap();
+    edit.selection = Selection::Shape(shape.block);
+    edit.doc_path = blocker.join("slot-edit.toml");
+    h.state_mut().meshes.edit = Some(edit);
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(3);
+    let field = h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Diffuse path (slot 1)");
+    field.focus();
+    h.run_steps(1);
+    h.event(egui::Event::Text("typed.dds".into()));
+    h.run_steps(2);
+    assert!(!path.exists());
+    close_event(&mut h);
+    h.run_steps(4);
+    assert_eq!(
+        h.state().model.dialog,
+        project_dirty.then_some(sdc_gui::model::Dialog::CloseUnsaved)
+    );
+    assert!(
+        h.state().meshes.edit.as_ref().unwrap().doc.ops.is_empty(),
+        "close must not push the slot edit"
+    );
+    assert!(!path.exists(), "close must not autosave the pending slot");
+    assert!(h.state().meshes.error.is_none());
+    assert_eq!(std::fs::read(blocker).unwrap(), b"keep");
+    if project_dirty {
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "Cancel")
+            .click();
+        h.run_steps(5);
+        let field =
+            h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Diffuse path (slot 1)");
+        assert!(field
+            .accesskit_node()
+            .value()
+            .unwrap()
+            .contains("typed.dds"));
+        assert!(h.state().meshes.edit.as_ref().unwrap().doc.ops.is_empty());
+        assert!(h.state().meshes.error.is_none());
+    }
+}
+
+#[test]
+fn popped_json_show_opens_the_second_borrower_from_meshes() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::{pbr_export::written_json_entries, CentreTab, Selection};
+    use sdc_gui::ui::{header, json_editor::WINDOW_TITLE};
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    let id = "landscape/other";
+    let entries = written_json_entries(&m);
+    let at = entries
+        .iter()
+        .position(|(v, _)| v.key.is_empty() && v.id == id)
+        .unwrap();
+    m.expand("landscape/rock01.png");
+    m.open_json_editor();
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.run_steps(4);
+    h.get_by_label(&format!("Pop out {WINDOW_TITLE}")).click();
+    h.run_steps(4);
+    assert!(h.state().model.json_editor_popped);
+    header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    assert!(header::meshes_view_active(&h.ctx));
+    assert!(!h.state().model.reveal_centre);
+    assert_eq!(
+        h.state().model.expanded.as_deref(),
+        Some("landscape/rock01.png")
+    );
+    h.get_by_label(&format!("Dock {WINDOW_TITLE}"));
+    assert_eq!(h.query_all_by_label("Show").count(), entries.len());
+    h.query_all_by_label("Show").nth(at).unwrap().scroll_to_me();
+    h.run_steps(4);
+    h.query_all_by_label("Show").nth(at).unwrap().click();
+    h.run_steps(4);
+    assert_eq!(h.state().model.selection, Selection::SetId(id.into()));
+    assert!(h.state().model.expanded.is_none());
+    assert!(
+        !header::meshes_view_active(&h.ctx),
+        "Show must reveal the main Textures view"
+    );
+    assert_eq!(h.state().model.centre_front(), CentreTab::Selection);
+    assert!(h.state().model.json_editor_open && h.state().model.json_editor_popped);
+    h.get_by_label(&format!("Close {WINDOW_TITLE}")).click();
+    h.run_steps(4);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    assert!(h
+        .query_all_by_label(id)
+        .any(|n| centre.contains(n.rect().center())));
+    h.get_by_label("Also export").scroll_to_me();
+    h.run_steps(4);
+    assert!(centre.contains(h.get_by_label("Also export").rect().center()));
+}
+
+#[test]
+fn fix_path_from_meshes_focuses_the_main_rename_with_json_popped() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    use sdc_gui::model::{CentreTab, Selection};
+    use sdc_gui::ui::{header, json_editor::WINDOW_TITLE};
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    let id = "landscape/other";
+    let bad = r"..\name";
+    m.set_json_value(id, "rename", Some(serde_json::json!(bad)));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.open_problems(None);
+    m.open_json_editor();
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.get_by_label(&format!("Pop out {WINDOW_TITLE}")).click();
+    h.run_steps(4);
+    header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    assert!(header::meshes_view_active(&h.ctx));
+    h.get_by_label(&format!("Dock {WINDOW_TITLE}"));
+    // Only popped JSON renders Rename on Meshes. Its value identifies the expanded written entry.
+    let json_rename = h.get_by_role_and_label(Role::TextInput, "Rename");
+    assert_eq!(json_rename.accesskit_node().value().as_deref(), Some(bad));
+    let json_field_id = json_rename.accesskit_node().id();
+    // Give the Problems row room below the embedded JSON window for a pointer click.
+    h.set_size(vec2(1600.0, 1600.0));
+    h.run_steps(4);
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("Fix path").click();
+    h.run_steps(12);
+
+    assert!(!header::meshes_view_active(&h.ctx));
+    assert_eq!(h.state().model.selection, Selection::SetId(id.into()));
+    assert_eq!(h.state().model.centre_front(), CentreTab::Selection);
+    assert!(h.state().model.json_editor_open && h.state().model.json_editor_popped);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    h.get_by_label("Advanced TruePBR settings");
+    assert!(
+        h.query_all_by_role_and_label(Role::TextInput, "Rename")
+            .any(|n| n.accesskit_node().id() != json_field_id
+                && n.accesskit_node().is_focused()
+                && n.accesskit_node().value().as_deref() == Some(bad)
+                && centre.contains(n.rect().center())),
+        "Fix path must focus Rename in the main Material editor's Advanced group"
+    );
+}
+
+#[test]
+fn tab_after_fix_path_preserves_an_untouched_literal_rename() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    m.save().unwrap();
+    let doc = m.sets_doc.as_ref().unwrap();
+    let path = doc.path().to_owned();
+    let id = r#"id = "landscape/other""#;
+    let literal = r"rename = '\custom'";
+    let text = doc.text().replace(id, &format!("{id}\n{literal}"));
+    assert!(text.contains(literal));
+    std::fs::write(&path, &text).unwrap();
+    m.open_folder(m.root.clone().unwrap());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.open_problems(None);
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("Fix path").click();
+    h.run_steps(6);
+    let rename = h.get_by_role_and_label(Role::TextInput, "Rename");
+    assert!(rename.accesskit_node().is_focused());
+    assert_eq!(rename.accesskit_node().value().as_deref(), Some(r"\custom"));
+    let steps = h.state().model.history.pushes;
+    h.key_press(Key::Tab);
+    h.run_steps(4);
+    assert!(!h
+        .get_by_role_and_label(Role::TextInput, "Rename")
+        .accesskit_node()
+        .is_focused());
+    assert_eq!(
+        h.state().model.history.pushes,
+        steps,
+        "Tab added an undo step"
+    );
+    h.state_mut().model.save().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+}
+
 #[derive(Default)]
 struct Tiny {
     clicks: Vec<u32>,
@@ -537,6 +814,38 @@ fn filter_matches_names_wrong_rows_and_flags_hide_all_and_no_change() {
         Ok(Some("hides everything".into()))
     );
     assert_eq!(fm(&all, &all, |_| true), Ok(Some("changes nothing".into())));
+}
+
+#[test]
+fn one_set_open_resolves_a_key_less_selection() {
+    use sdc_gui::model::SetTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    let (_, run) = oracles::ORACLES
+        .iter()
+        .find(|(n, _)| *n == "one_set_open")
+        .unwrap();
+    m.select_target(SetTarget::Id("landscape/other".into()));
+    assert_eq!(run(&m), Ok(None));
+    let id = "landscape/other";
+    m.sets_filter.search = "rock01".into();
+    let state = state::state_json(&m);
+    assert_eq!(state["selection"], "set:landscape/other");
+    assert_eq!(state["selected_sets"], serde_json::json!([id]));
+    assert_eq!(state["sets"][id]["selected"], true);
+    assert_eq!(state["sets"]["landscape/empty"]["selected"], false);
+    assert_eq!(state["sets"][id]["visible"], false);
+    let (_, hidden) = oracles::ORACLES
+        .iter()
+        .find(|(n, _)| *n == "selected_set_kept_while_hidden")
+        .unwrap();
+    assert_eq!(hidden(&m), Ok(None));
+    m.select_target(SetTarget::Id("Landscape/Other".into()));
+    assert_eq!(state::state_json(&m)["selection"], "set:landscape/other");
+    m.select_target(SetTarget::Id("missing-card".into()));
+    assert!(run(&m).is_err());
+    assert!(hidden(&m).is_err());
+    assert_eq!(state::state_json(&m)["selection"], "set:missing-card");
 }
 
 #[test]

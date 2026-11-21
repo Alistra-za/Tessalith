@@ -99,6 +99,8 @@ mod export_drawer;
 mod export_folder;
 #[path = "../export_layout.rs"]
 mod export_layout;
+#[path = "../export_shell.rs"]
+mod export_shell;
 #[path = "../export_undecided.rs"]
 mod export_undecided;
 #[path = "../fast_replan.rs"]
@@ -175,6 +177,8 @@ mod no_codes;
 mod no_rnm_ui;
 #[path = "../no_set.rs"]
 mod no_set;
+#[path = "../normal_alpha.rs"]
+mod normal_alpha;
 #[path = "../open_cancel.rs"]
 mod open_cancel;
 #[path = "../open_in_textures.rs"]
@@ -257,6 +261,8 @@ mod scroll_bars;
 mod set_cards;
 #[path = "../set_cleanup.rs"]
 mod set_cleanup;
+#[path = "../set_drag.rs"]
+mod set_drag;
 #[path = "../set_editor_ui.rs"]
 mod set_editor_ui;
 #[path = "../set_editor_width.rs"]
@@ -297,12 +303,16 @@ mod skin_card;
 mod slot_alpha;
 #[path = "../slot_file_drop.rs"]
 mod slot_file_drop;
+#[path = "../slot_links.rs"]
+mod slot_links;
 #[path = "../slot_lock.rs"]
 mod slot_lock;
 #[path = "../slot_menu.rs"]
 mod slot_menu;
 #[path = "../slot_menu_ui.rs"]
 mod slot_menu_ui;
+#[path = "../start_shell.rs"]
+mod start_shell;
 #[path = "../subsurface_mode.rs"]
 mod subsurface_mode;
 #[path = "../subtype_hints.rs"]
@@ -493,12 +503,13 @@ fn no_it_module_changes_process_state() {
 /// least one needle, and the list is the manifest's (Note HU2).
 #[test]
 fn process_state_needles_match_the_files_kept_apart() {
-    // Kept apart for process-wide state: the six that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
+    // Kept apart for process-wide state: the seven that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
     // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
     // `it` is the shared binary and `ui_drive` is a driver with its own `main` (`harness = false`), not kept apart
     // for state, so neither is on the list.
     let apart = [
         "app_no_local_store",
+        "app_shell",
         "doc_shots",
         "meshes_header",
         "nif_edit",

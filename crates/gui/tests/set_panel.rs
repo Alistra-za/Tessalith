@@ -183,13 +183,21 @@ fn title<'a>(h: &'a H, t: &'a str) -> egui_kittest::Node<'a> {
         .unwrap_or_else(|| panic!("no group {t}"))
 }
 
-/// The value right-aligned in a group's header row ("on"/"off" repeat, so it is found beside its title).
+/// The value right-aligned in a group's header row (the same words can repeat, so it is found beside its title).
 fn header_value(h: &H, t: &str) -> String {
     let r = title(h, t).rect();
     h.query_all_by_role(Role::Label)
         .filter(|n| n.rect().min.x > r.max.x && (n.rect().center().y - r.center().y).abs() < 2.0)
         .find_map(|n| n.value())
         .unwrap_or_else(|| panic!("no header value beside {t}"))
+}
+
+/// C14: a feature's group repeats neither its state nor its mode in the header.
+fn header_has_no_value(h: &H, t: &str) -> bool {
+    let r = title(h, t).rect();
+    h.query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x > r.max.x && (n.rect().center().y - r.center().y).abs() < 2.0)
+        .all(|n| n.value().is_none())
 }
 
 #[test]
@@ -214,6 +222,7 @@ fn the_material_groups_are_framed_in_order_with_values() {
     .collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
     assert!(h.query_all_by_label("Coat").next().is_none());
+    // Subsurface has no Features tick: closed at Off, its header says the mode.
     assert_eq!(header_value(&h, "Subsurface"), "Off");
     assert_eq!(header_value(&h, "Matching"), "1 match");
     assert_eq!(header_value(&h, "NiAlphaProperty"), "off");
@@ -233,7 +242,7 @@ fn turning_multilayer_on_opens_the_coat_group() {
     h.run();
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    assert_eq!(header_value(&h, "Coat"), "on");
+    assert!(header_has_no_value(&h, "Coat"));
     h.get_by_label("Coat colour");
 }
 
@@ -246,7 +255,7 @@ fn the_json_editor_button_is_small_and_on_the_tab_row() {
     let mut h = harness(m);
     h.run();
     let tab = h.get_by_role_and_label(Role::Button, "Also export").rect();
-    let b = h.get_by_label("PGPatcher JSON editor…");
+    let b = h.get_by_label("Material: PGPatcher JSON editor…");
     assert!(b.rect().width() < 220.0);
     assert!(
         b.rect().min.x > tab.max.x && tab.y_range().contains(b.rect().center().y),
@@ -282,7 +291,7 @@ fn the_json_editor_button_stays_inside_a_narrow_centre() {
     let mut h = harness_with(m, 1000.0, 800.0, false);
     h.run();
     let p = centre(&h);
-    let b = h.get_by_label("PGPatcher JSON editor…").rect();
+    let b = h.get_by_label("Material: PGPatcher JSON editor…").rect();
     assert!(b.max.x <= p.max.x, "button {b:?} inside the centre {p:?}");
 }
 
@@ -436,16 +445,15 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
     h.run();
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    assert_eq!(header_value(&h, "Coat"), "on");
+    assert!(header_has_no_value(&h, "Coat"));
     h.get_by_label("Emissive").scroll_to_me();
     h.run();
     h.get_by_label("Emissive").click();
     h.run();
     let p = centre(&h);
+    // C14: Coat and Emissive settings have no header value; Subsurface is closed at Off here, so it says its mode.
     for t in [
-        "Coat",
         "Subsurface",
-        "Emissive settings",
         "NiAlphaProperty",
         "Matching",
         "CS PBR records",
@@ -464,5 +472,37 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
             "{t}: value at {:?}, panel {p:?}",
             v.rect()
         );
+    }
+    // Final wave Group 6 (ledger 212): a blocked feature's amber reason ("{state}, blocked by {x}", CC10) still shows
+    // in the Coat and Emissive headers once Hair blocks both, and it stays inside the centre too.
+    // Written as the key: the Hair tick is itself blocked (by Coat and Emissive) and refuses a click.
+    use sdc_gui::pgp::settings::{feature_key, Feature};
+    h.state_mut().0.set_json_value(
+        "landscape/rock01",
+        feature_key(Feature::Hair),
+        Some(serde_json::Value::Bool(true)),
+    );
+    h.run();
+    let p = centre(&h);
+    let reasons: Vec<egui::Rect> = ["Coat", "Emissive"]
+        .iter()
+        .flat_map(|t| {
+            let r = title(&h, t).rect();
+            h.query_all_by_role(Role::Label)
+                .filter(move |n| {
+                    n.rect().min.x > r.max.x
+                        && (n.rect().center().y - r.center().y).abs() < 2.0
+                        && n.value().is_some_and(|v| v.contains("blocked by"))
+                })
+                .map(|n| n.rect())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "premise: a blocked header reason shows"
+    );
+    for r in reasons {
+        assert!(r.max.x <= p.max.x, "blocked reason at {r:?}, panel {p:?}");
     }
 }

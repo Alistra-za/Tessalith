@@ -108,7 +108,7 @@ pub enum SkinSkip {
 }
 
 /// The JSON's texture slots and the set slots that fill them.
-const SLOTS: [(&str, SlotKind); 3] = [
+pub(super) const SLOTS: [(&str, SlotKind); 3] = [
     ("controls", SlotKind::Rmaos),
     ("wet", SlotKind::SkinWet),
     ("detail", SlotKind::SkinDetail),
@@ -118,19 +118,19 @@ const SLOTS: [(&str, SlotKind); 3] = [
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlanRow {
     id: String,
-    key: String,
+    pub(super) key: String,
     json: PathBuf,
     diffuse: PathBuf,
     material: SkinMaterial,
     /// (slot, output path) of each texture named in `material`, for the on-disk check at finish.
-    outputs: Vec<(&'static str, PathBuf)>,
+    pub(super) outputs: Vec<(&'static str, PathBuf)>,
     /// Textures left out for want of a game path.
     notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Plan {
-    rows: Vec<PlanRow>,
+    pub(super) rows: Vec<PlanRow>,
     /// (set id, set key, why).
     skips: Vec<(String, String, SkinSkip)>,
 }
@@ -266,7 +266,7 @@ fn build_plan(m: &AppModel) -> Plan {
     p
 }
 
-fn plan(m: &AppModel) -> Arc<Plan> {
+pub(super) fn plan(m: &AppModel) -> Arc<Plan> {
     super::cached(
         m,
         |c| c.cs_skin.clone(),
@@ -488,6 +488,29 @@ impl super::json_finish::Guarded for PendingCsSkin {
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
         d.set_cs_skin_shas(shas)
+    }
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        let files = self
+            .files
+            .iter()
+            .filter_map(|f| {
+                let path = self.root.join(&f.rel);
+                // Ruling 3c-50: the text hashes the diffuse's bytes and leaves out a texture not on disk (`text_now`), so
+                // with a DDS of the file this run may write, the run decides it.
+                let pending = std::iter::once(&f.diffuse)
+                    .chain(f.outputs.iter().map(|(_, o)| o))
+                    .any(|p| written(p));
+                if pending {
+                    return Some((path, None));
+                }
+                // `finish` skips a file whose diffuse cannot be read.
+                text_now(f).ok().map(|(text, _)| (path, Some(text)))
+            })
+            .collect();
+        vec![(self.root.clone(), files)]
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_cs_skin_shas(shas);
     }
 }
 

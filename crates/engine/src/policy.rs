@@ -1514,10 +1514,7 @@ fn encoding_warnings(
         );
     }
     // CS rebuilds Z from a BC5 detail map (loader contract), so `skin_detail` is exempt.
-    if category == Category::Normal
-        && st != Subtype::SkinDetail
-        && matches!(format, Format::Bc4 | Format::Bc5 | Format::R8 | Format::Rg8)
-    {
+    if category == Category::Normal && st != Subtype::SkinDetail && !stores_xyz(format) {
         add(
             FmtBc5Normal,
             "BC4/BC5/R8/RG8 on a normal: Skyrim reads Z directly, so Z decodes -1 and alpha is lost [SC §2]".into(),
@@ -1771,6 +1768,12 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     let mut add = |c: Code, m: String| w.push(Warning::new(c, m));
     // An HDR format (BC6H, RGBA16F) outside cs cannot be acknowledged: an error, added after the other checks.
     let hdr_outside_cs = hdr_outside_cs(p.format, p.target);
+    if p.mips.normal_base == NormalBase::Keep && st.needs_unit_base(p.format) {
+        add(
+            CfgInvalid,
+            format!("{} cannot keep normal length in {}. Choose XYZ storage or set mips.normal_base=renormalize.", st.id(), p.format.id()),
+        );
+    }
     if a.dds_cube && st != Subtype::Cubemap {
         add(
             CfgInvalid,
@@ -2347,7 +2350,7 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
             // resolves a fuzz-stem member against the real set, never against the clone that gains `f`, and the real
             // set never gains it (only `set_resolved` reads a copy with it). A kept DDS at the fuzz map's own
             // `<base>_f.dds` is no `_f` of the set (`group::is_fuzz_own_f`, Note JQ53): `api::member_set` hands the
-            // fuzz map a copy without that `f`. `pack::plan::pbr_f_name` asks the same.
+            // fuzz map a copy without that `f`. Packing names the member from its resolved subtype (F15).
             if !pbr || f.set.suffixes.contains("f") {
                 return packing_input_job(ctx, f, term, *role, false);
             }

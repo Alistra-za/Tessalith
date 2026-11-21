@@ -7,6 +7,74 @@ use engine::codes::Warning;
 use sdc_gui::model::AppModel;
 use support::*;
 
+#[test]
+fn the_borrowed_slot_warning_marks_by_set_and_slot() {
+    use crate::slot_links::{cape_packs, cape_view, settle, unused_rows, A, AO, E};
+    use sdc_gui::model::{
+        bottom::{counts_for, set_ready},
+        sets::borrowed_unused,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    let row = |m: &AppModel| {
+        let rows = unused_rows(m);
+        assert_eq!(rows.len(), 1);
+        rows.into_iter().next().unwrap()
+    };
+    let before = row(&m);
+    m.mark_intended(before.mark.clone().unwrap(), true, "slot 6");
+    let key = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .intended()
+        .into_iter()
+        .next()
+        .unwrap();
+    assert_eq!(key.subject, "set:textures/e/cape");
+    assert_eq!(key.sentence, "slot 6");
+    assert!(row(&m).intended && !row(&m).in_worklist());
+    let e = cape_view(&m, E);
+    assert!(set_ready(&m, &e));
+    let warnings = borrowed_unused(&m);
+    assert!(
+        !counts_for(&m, &before.at, &warnings[&e.key][0]),
+        "marked warning leaves the badge"
+    );
+    let output = m.producers[&e.key]
+        .iter()
+        .find(|p| p.kind == Some(sdc_gui::model::sets::SlotKind::Rmaos))
+        .unwrap()
+        .output
+        .clone();
+    export_through(&mut m);
+    settle(&mut m);
+    assert!(output.is_file());
+    m.edit_docs("Change lender", None, true, |_, s| {
+        s.set_borrow(E, 6, Some(A))
+    });
+    settle(&mut m);
+    let changed = row(&m);
+    assert_ne!(before.shown(), changed.shown());
+    assert!(changed.intended);
+    m.edit_docs("Remove share", None, true, |_, s| s.remove_share(E, AO));
+    settle(&mut m);
+    assert!(unused_rows(&m).is_empty());
+    assert!(m.sets_doc.as_ref().unwrap().is_intended(&key));
+    m.undo();
+    settle(&mut m);
+    assert!(row(&m).intended);
+    m.rename_set(E, "textures/e/cloth").unwrap();
+    settle(&mut m);
+    let renamed = row(&m);
+    assert!(renamed.intended);
+    let key = renamed.mark.unwrap();
+    assert_eq!(key.subject, "set:textures/e/cloth");
+    assert!(m.sets_doc.as_ref().unwrap().is_intended(&key));
+    m.mark_intended(key, false, "slot 6");
+    assert!(row(&m).in_worklist());
+}
+
 fn harness_at(model: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -141,7 +209,7 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
     assert_eq!(engine::codes::Code::ALL.len(), 94);
-    assert_eq!(notes, 23);
+    assert_eq!(notes, 22);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),
         RowClass::Problem
@@ -161,11 +229,10 @@ fn plain_normal_in_pbr(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// B3-13 (Note JP3): the set loses one counted problem ("needs _n"); a note never takes Ready away, so the set reads
-/// Ready exactly when the same set with a `pbr_normal` does. Baseline: `pbr_opened_plain` (rock01's normal decided
-/// `pbr_normal`, DirectX green; `support/mod.rs` `pbr_opened`).
+/// N-8, N-9 (Note JS4): rock01 on plain `pbr` with its own normal decided `normal` has no counted row and reads Ready
+/// exactly when the same set with a `pbr_normal` does (baseline `pbr_opened_plain`).
 #[test]
-fn the_set_loses_one_counted_problem_and_can_be_ready() {
+fn a_plain_normal_in_a_pbr_set_counts_nothing_and_the_set_can_be_ready() {
     use sdc_gui::model::bottom::{counts_for, set_ready, At};
     let base_dir = tempfile::tempdir().unwrap();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -192,222 +259,19 @@ fn the_set_loses_one_counted_problem_and_can_be_ready() {
         set_ready(&plain, &rock01(&plain)),
         set_ready(&base, &rock01(&base))
     );
-}
-
-fn specular_rows(m: &AppModel) -> Vec<sdc_gui::model::bottom::Problem> {
-    sdc_gui::model::bottom::problems(m)
-        .iter()
-        .filter(|p| p.code == Some(engine::codes::Code::ShaderNormalSpecular))
-        .cloned()
-        .collect()
-}
-
-/// rock01 still carries the engine's "needs _n".
-fn needs_n(m: &AppModel) -> bool {
-    rock01(m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")
-}
-
-fn subtype_written(m: &AppModel) -> Option<serde_json::Value> {
-    m.project.as_ref().unwrap().file_value(NORMAL, "subtype")
-}
-
-fn specular_note(member: &str, shader: &str) -> Warning {
-    Warning::new(engine::codes::Code::ShaderNormalSpecular, "m")
-        .with_data(serde_json::json!({"member": member, "shader": shader, "map": "_n"}))
-}
-
-/// Only `specular_note(member, shader)`, on the set whose key is `set_key` (for states where no decision can be made).
-fn put_specular_note(m: &mut AppModel, set_key: &str, member: &str, shader: &str) {
-    for s in m.sets.iter_mut() {
-        s.warnings.clear();
-    }
-    m.sets
-        .iter_mut()
-        .find(|s| s.key == set_key)
-        .unwrap()
-        .warnings = vec![specular_note(member, shader)];
-    m.invalidate_views();
-}
-
-/// The button's AccessKit name, which names its file: the note's sentence says "Use PBR normal" too, so the bare label
-/// would find the sentence on the same row.
-fn use_pbr_normal_button(file: &str) -> String {
-    format!("{} for {file}", sdc_gui::model::bottom::USE_PBR_NORMAL)
-}
-
-/// B3-1, B3-2 (Note JP3): the set shows one note in place of "needs _n" and "not used", with **Use PBR normal**.
-/// One click writes `pbr_normal`, the note goes and "needs _n" does not come back; one Undo restores `normal`.
-#[test]
-fn use_pbr_normal_switches_the_type_in_one_click_and_one_undo_restores_it() {
-    use sdc_gui::model::bottom::{Fix, USE_PBR_NORMAL};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(!needs_n(&m), "the Info replaces needs _n");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(NORMAL.into())),
-        "Go to set outlines the normal's row"
-    );
-    let sentence = rows[0].shown().into_owned();
-    assert!(sentence.contains("_rmaos"), "{sentence}");
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    on_row(&h, &sentence, &use_pbr_normal_button("rock01_normal.png")).click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("pbr_normal"))
-    );
-    assert!(specular_rows(h.state()).is_empty(), "the note goes");
-    assert!(!needs_n(h.state()), "needs _n does not come back");
-    assert_eq!(h.state().undo_label(), Some(USE_PBR_NORMAL));
-    h.state_mut().undo();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("normal"))
-    );
-    assert_eq!(specular_rows(h.state()).len(), 1, "the note is back");
-}
-
-/// B3-7 (Note BM): PBR Landscape takes a vanilla normal as its `_n`: no note.
-#[test]
-fn no_specular_note_under_pbr_landscape() {
-    let d = tempfile::tempdir().unwrap();
-    // `pbr_opened` leaves rock01 on its automatic pick, PBR Landscape (`textures/landscape/`).
-    let mut m = pbr_opened(d.path());
-    m.decide(
-        NORMAL,
-        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
-    );
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    assert!(specular_rows(&m).is_empty());
-    assert!(!rock01(&m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular));
-}
-
-/// B3-11 (Note JP3): a locked slot turns the button off with `lock_refusal`'s reason, and the model writes nothing.
-#[test]
-fn use_pbr_normal_is_off_on_a_locked_slot() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    // Slot 2 is Normal (`SlotKind::slot_number`).
-    m.set_slot_lock("landscape/rock01", 2, true).unwrap();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(
-        sdc_gui::model::sets::locked_items(&m).contains_key(NORMAL),
-        "the normal fills rock01's slot 2"
+        !rock01(&plain)
+            .set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderExtraMap
+                || (w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")),
+        "{:?}",
+        rock01(&plain).set_warnings
     );
-    let why = m.use_pbr_normal_refusal(NORMAL).expect("refused");
-    assert!(why.contains("is locked"), "{why}");
-    assert!(m.use_pbr_normal(NORMAL).is_err());
-    assert_eq!(subtype_written(&m), Some(serde_json::json!("normal")));
-    let sentence = specular_rows(&m)[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("is locked");
 }
-
-/// B3-11 (Note JP3): a read-only `sdc.toml` turns the button off with `fix_off`'s reason; the file is not written.
-#[test]
-fn use_pbr_normal_is_off_on_a_read_only_sdc_toml() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    assert!(m.save().is_ok());
-    let file = m.root.clone().unwrap().join("sdc.toml");
-    std::fs::write(&file, "[files\n").unwrap();
-    m.reload_documents();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    // Read-only: the plan no longer reads the decision, so the note is put on the set directly.
-    let key = rock01(&m).key;
-    put_specular_note(&mut m, &key, "rock01_normal.png", "pbr");
-    assert!(m
-        .fix_off()
-        .is_some_and(|w| w.contains("sdc.toml is read-only")));
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "the note's row");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    let before = std::fs::read(&file).unwrap();
-    let sentence = rows[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("sdc.toml is read-only");
-    assert_eq!(std::fs::read(&file).unwrap(), before);
-}
-
-/// B3-11 (Note JP3): a kept DDS gets the note with its own sentence and no button; its type cannot drop the alpha.
-#[test]
-fn a_kept_dds_normal_gets_the_note_without_a_button() {
-    let d = tempfile::tempdir().unwrap();
-    let root = dds_pbr_sets(d.path(), &["iron"]);
-    let mut m = opened_as_the_app(root, d.path().join("export"));
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("iron"))
-        .expect("the set");
-    let key = v
-        .members
-        .iter()
-        .find(|k| k.ends_with("iron_n.dds"))
-        .expect("the kept _n")
-        .clone();
-    assert!(matches!(
-        m.item(&key).unwrap().kind,
-        sdc_gui::model::items::ItemKind::Dds
-    ));
-    put_specular_note(&mut m, &v.key, "iron_n.dds", "pbr");
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().contains("is a kept DDS"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(key.clone()))
-    );
-    assert!(m.use_pbr_normal_refusal(&key).is_some());
-}
-
-/// The kept `_n.dds` of `kept_dds_normal_wall`.
-const WALL_N: &str = "test/wall_n.dds";
 
 /// `textures/test/wall.png` decided `pbr_albedo` beside a kept `wall_n.dds` (no job: typed by its `_n` suffix as a
-/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`: the engine itself raises
-/// SHADER-NORMAL-SPECULAR on it (`engine/tests/shaders.rs` `a_kept_dds_normal_in_a_pbr_set_is_the_same_info`).
+/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`.
 fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
@@ -431,134 +295,18 @@ fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// Final review I1 (Note JP3): a DDS with `reencode = true` has a job and is encoded again, so its type drops the
-/// alpha like any source image's: its note has the plain sentence and **Use PBR normal**, nothing refuses it, and the
-/// click writes `subtype = "pbr_normal"`. (A kept DDS: `a_kept_dds_normal_gets_the_note_without_a_button`.)
+/// N-9 (Note JS4), a pin: a kept DDS normal in a PBR set fills its `_n`: no EXTRA row and no "needs _n" row. (The
+/// set's own "needs _rmaos" is a SHADER-MISSING-MAP row too, so the match names the `_n`.)
 #[test]
-fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = kept_dds_normal_wall(d.path());
-    m.set_reencode(&[WALL_N.to_string()], true);
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(
-        i.input.extension().is_some_and(|x| x == "dds"),
-        "precondition: a DDS input"
-    );
-    assert_eq!(
-        i.job.as_ref().map(|j| j.profile.subtype),
-        Some(engine::config::Subtype::Normal),
-        "precondition: re-encoded, as a vanilla normal"
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(WALL_N.into())));
-    let sentence = rows[0].shown().into_owned();
-    // Final review M1: the words hold for a set with no _rmaos, as this one is.
-    assert!(
-        sentence.starts_with("wall_n.dds is a vanilla normal:")
-            && sentence.ends_with(
-                "Use PBR normal to drop the alpha and bake any _rmaos in this set from it."
-            ),
-        "{sentence}"
-    );
-    assert_eq!(m.use_pbr_normal_refusal(WALL_N), None);
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let button = use_pbr_normal_button("wall_n.dds");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("its alpha is dropped, and any _rmaos in this set bakes from it");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        h.state()
-            .project
-            .as_ref()
-            .unwrap()
-            .file_value(WALL_N, "subtype"),
-        Some(serde_json::json!("pbr_normal"))
-    );
-}
-
-/// B3-27 (Note JP3): **Use PBR normal** keeps Enter and Space. Each key on the focused button writes `pbr_normal`, as
-/// a click does: it switches a type, as Rebuild Z does, so it is not a `click_only_button`.
-#[test]
-fn use_pbr_normal_answers_enter_and_space() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    for key in [egui::Key::Enter, egui::Key::Space] {
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("normal")),
-            "{key:?}: before"
-        );
-        h.get_by_role_and_label(egui::accesskit::Role::Button, &name)
-            .focus();
-        h.run();
-        h.key_press(key);
-        h.step();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("pbr_normal")),
-            "{key:?}"
-        );
-        h.state_mut().undo();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-    }
-}
-
-/// Final review M4 (Note JP3): with no injection, the engine's own SHADER-NORMAL-SPECULAR on a kept DDS joins its
-/// item (`extra_member` matches the engine's member name): the set's row has the kept-DDS sentence and no button.
-#[test]
-fn the_engines_own_note_on_a_kept_dds_has_no_button() {
+fn a_kept_dds_normal_in_a_pbr_set_has_no_shader_row() {
+    use engine::codes::Code;
     let d = tempfile::tempdir().unwrap();
     let m = kept_dds_normal_wall(d.path());
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(i.kept_dds(), "precondition: kept as it is");
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("wall"))
-        .expect("the set");
+    let rows = sdc_gui::model::bottom::problems(&m);
     assert!(
-        v.set_warnings
-            .iter()
-            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
-        "the engine raises it: {:?}",
-        v.set_warnings
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(
-        matches!(&rows[0].at, sdc_gui::model::bottom::At::Set { key, .. } if *key == v.key),
-        "on the set"
-    );
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().starts_with("wall_n.dds is a kept DDS:"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(WALL_N.into()))
+        !rows.iter().any(|p| p.code == Some(Code::ShaderExtraMap)
+            || (p.code == Some(Code::ShaderMissingMap) && p.text.contains("needs _n"))),
+        "{rows:?}"
     );
 }
 
@@ -634,6 +382,15 @@ fn an_unused_input_note_names_the_file_and_the_reason() {
         sdc_gui::model::code_text::note_sentence(&odd),
         "no colon here",
         "a message that doesn't parse shows unchanged"
+    );
+}
+
+/// Controller ruling (2026-11-18): the code sentence no longer sends the user to the recipe combo, which is gone (A1-1).
+#[test]
+fn the_unused_input_sentence_names_the_shader_and_the_type() {
+    assert_eq!(
+        sdc_gui::model::code_text::code_sentence(engine::codes::Code::PackUnusedInput),
+        "A packing input isn't used by this set — remove it, or change the set's shader or the file's type"
     );
 }
 
@@ -1917,6 +1674,41 @@ fn the_status_line_scans_its_reasons_once_per_change() {
     assert_eq!(steps(&mut h), n + 3, "another set");
 }
 
+/// Final wave Group 7 (ledger 253, Q6 rank 1): the chip of a set filter resolves its set once per change of the
+/// filter or the views, not on every frame it is drawn.
+#[test]
+fn the_set_filter_chip_resolves_its_set_once_per_change() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{scope_label_lookups, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let rock = rock01(&m);
+    let other = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key != rock.key && !v.key.is_empty())
+        .expect("another set")
+        .clone();
+    m.open_problems(Some(ProblemsFilter::Set(rock.key.clone())));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&format!("Set: {} ×", rock.id));
+    let steps = |h: &mut Harness<'static, AppModel>| {
+        for _ in 0..5 {
+            h.step();
+        }
+        scope_label_lookups(h.state())
+    };
+    let n = steps(&mut h);
+    assert!(n >= 1, "the chip resolved its set");
+    assert_eq!(steps(&mut h), n, "five frames, no change: no lookup");
+    h.state_mut()
+        .open_problems(Some(ProblemsFilter::Set(other.key.clone())));
+    assert_eq!(steps(&mut h), n + 1, "another filter");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+    h.state_mut().invalidate_views();
+    assert_eq!(steps(&mut h), n + 2, "new views");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+}
+
 /// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
 /// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
 #[test]
@@ -2355,6 +2147,100 @@ fn the_files_hover_reads_the_mark_of_the_textures_row() {
     );
 }
 
+/// Plan 3c Task 17a (F3): a Files row's "n warnings" and the Has warnings filter leave a warning marked as intended
+/// out, as its hover and the card badge do; a mark made while the filter is on takes the row out at once.
+#[test]
+fn a_marked_warning_leaves_the_files_count_and_filter() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::BottomTab;
+    use sdc_gui::model::export::{warning_line, Row, RowState};
+    let (_d, mut m) = with_warnings(&[]);
+    let (mip, cov) = (
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage 0.4"),
+    );
+    m.export.rows = vec![Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: RowState::Done { passed: true },
+        warnings: vec![mip.clone(), cov.clone()],
+    }];
+    m.invalidate_views();
+    m.show_tab(BottomTab::Files);
+    mark_first(&mut m, Code::ValMipError);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("2 warnings").count(),
+        0,
+        "the marked warning is not counted"
+    );
+    h.get_by_label("1 warning");
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.run();
+    h.get_by_label("derived/x"); // one warning still open: listed
+    mark_first(h.state_mut(), Code::ValCoverage);
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label("derived/x").is_none(),
+        "every warning marked: gone from Has warnings"
+    );
+    // Ruling 3c-11: with the filter off, the row shows a weak "2 marked" whose hover lists both under their line.
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.run();
+    for open in ["1 warning", "2 warnings"] {
+        assert_eq!(
+            h.query_all_by_label(open).count(),
+            0,
+            "no count of open warnings"
+        );
+    }
+    h.get_by_label("2 marked").hover();
+    h.run();
+    h.run();
+    h.get_by_label(&format!(
+        "Marked as intended:\n{}\n{}",
+        warning_line(&mip),
+        warning_line(&cov)
+    ));
+}
+
+#[test]
+fn has_warnings_tracks_the_texture_now_owning_an_export_warning() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::BottomTab;
+    use sdc_gui::model::export::{Row, RowState};
+
+    let warning = Warning::new(Code::ValMipError, "mip 3");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&warning));
+    let key = rock01(&m).members[0].clone();
+    mark_first(&mut m, warning.code);
+    m.export.rows = vec![Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: RowState::Done { passed: true },
+        warnings: vec![warning],
+    }];
+    m.show_tab(BottomTab::Files);
+    let mut h = harness(m);
+    h.get_by_label("Has warnings").click();
+    h.run();
+    h.get_by_label("derived/x");
+
+    let m = h.state_mut();
+    m.items.iter_mut().find(|i| i.key == key).unwrap().job_key = "derived/x".into();
+    m.invalidate_views();
+    h.run();
+    assert!(
+        h.query_by_label("derived/x").is_none(),
+        "the same export warning now belongs to the marked texture"
+    );
+}
+
 /// Review E4: the Textures column's "Has warnings" pill, its filter and the Status sort drop a marked warning.
 #[test]
 fn a_marked_warning_leaves_the_warnings_pill_filter_and_status_sort() {
@@ -2594,7 +2480,7 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     // Controller ruling 2: left to right, the fix, the second fix, then Go to set.
     let xs: Vec<f32> = [
         remove.as_str(),
-        "Change shader for landscape/rock01",
+        "Change shader for landscape/rock01 (SHADER-EXTRA-MAP)",
         "Go to set",
     ]
     .iter()
@@ -2765,7 +2651,7 @@ fn a_missing_map_row_offers_change_shader() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -2783,7 +2669,7 @@ fn a_missing_map_row_offers_change_shader() {
             .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
     );
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -3369,6 +3255,72 @@ fn a_shader_map_label_names_its_slot_card() {
     ] {
         assert_eq!(slot_for_shader_map(label), want, "{label}");
     }
+}
+
+/// Final wave Group 3 (review Important 4, ledger line 124): a SHADER-EXTRA-MAP row that names a packed output other
+/// than the RMAOS slot's (here vanilla's complex `_m`) keeps that member as its Go to set target.
+#[test]
+fn an_extra_packed_output_row_keeps_its_member_target() {
+    use sdc_gui::model::items::ItemKind;
+    use sdc_gui::model::nav::SlotTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    support::complex_material(&mut m, "landscape/rock01");
+    let (key, file) = rock01(&m)
+        .members
+        .iter()
+        .find_map(|k| {
+            let i = m.item(k).filter(|i| i.kind == ItemKind::Packed)?;
+            let f = i.job.as_ref()?.output.file_name()?.to_string_lossy();
+            f.contains("_m.").then(|| (k.clone(), f.into_owned()))
+        })
+        .expect("premise: rock01 packs a complex _m");
+    inject_set(&mut m, &[extra_map(&file)]);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(engine::codes::Code::ShaderExtraMap))
+        .expect("the SHADER-EXTRA-MAP row");
+    assert_eq!(row.target, Some(SlotTarget::Item(key)));
+}
+
+/// Final wave Group 3 (ledger line 255): a Problems set filter belongs to the project it was set in, so opening
+/// another folder drops it.
+#[test]
+fn opening_another_folder_drops_the_set_filter() {
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = rock01(&m).key;
+    let root = m.root.clone().expect("premise: a folder is open");
+    for f in [
+        ProblemsFilter::Set(key.clone()),
+        ProblemsFilter::SetNotes(key.clone()),
+        ProblemsFilter::SetChecks(key.clone()),
+    ] {
+        m.bottom.filter = Some(f.clone());
+        let e = tempfile::tempdir().unwrap();
+        let other = e.path().join("textures");
+        std::fs::create_dir_all(&other).unwrap();
+        m.open_folder(other);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, None, "{f:?} is the old project's");
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        // Reopening the same folder keeps it: its sets are the same sets.
+        m.bottom.filter = Some(f.clone());
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, Some(f.clone()), "{f:?}: same folder");
+    }
+    // A filter that names no set is not the folder's.
+    m.bottom.filter = Some(ProblemsFilter::Notes);
+    let e = tempfile::tempdir().unwrap();
+    m.open_folder(e.path().to_path_buf());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.bottom.filter, Some(ProblemsFilter::Notes));
 }
 
 /// Each set row that names a slot or a file carries it for Go to set; the others carry nothing.
@@ -4032,14 +3984,16 @@ fn missing_normal() -> (tempfile::TempDir, AppModel, String) {
 /// `ui::draw` reads it when the 3D panel can show), and the column it was given.
 struct Editor {
     m: AppModel,
-    key: String,
     thumbs: sdc_gui::ui::thumbs::ThumbCache,
     cmds: sdc_gui::ui::slot_commands::SlotCmdState,
     drops: sdc_gui::ui::sets_column::DropState,
     column: egui::Rect,
 }
 
-fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Editor> {
+fn editor_harness(mut m: AppModel, key: String, width: f32) -> Harness<'static, Editor> {
+    if !matches!(&m.selection, sdc_gui::model::Selection::Set(k) if k == &key) {
+        m.select_set(&key);
+    }
     Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -4053,10 +4007,11 @@ fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Edit
                 };
                 let r = ui.allocate_ui(egui::vec2(width, ui.available_height()), |ui| {
                     ui.set_width(width);
+                    let active = e.m.resolved_selection();
                     sdc_gui::ui::set_editor::draw(
                         ui,
                         &mut e.m,
-                        &e.key,
+                        &active,
                         &mut e.thumbs,
                         &mut e.cmds,
                         &mut e.drops,
@@ -4067,7 +4022,6 @@ fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Edit
             },
             Editor {
                 m,
-                key,
                 thumbs: Default::default(),
                 cmds: Default::default(),
                 drops: Default::default(),
@@ -5093,9 +5047,1043 @@ fn key_less_sets(dir: &std::path::Path) -> AppModel {
     m
 }
 
+fn wall_cards(dir: &std::path::Path) -> (AppModel, String) {
+    let root = dir.join("textures");
+    std::fs::create_dir(&root).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    std::fs::write(root.join("wall-note.txt"), "notes").unwrap();
+    let mut m = AppModel::new(Default::default(), None, session());
+    m.open_folder(root);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    choose_export(&mut m, dir.join("export"));
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "wall-note.txt");
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(sdc_gui::model::sets::views(&m).len(), 2);
+    assert_eq!(view_by_id(&m, "wall").key, id);
+    assert!(view_by_id(&m, &id).key.is_empty());
+    (m, id)
+}
+
+fn card<'a>(h: &'a Harness<'static, AppModel>, id: &'a str) -> egui_kittest::Node<'a> {
+    let panel = support::panel(&h.ctx, "sets");
+    h.query_all_by_label(id)
+        .find(|n| panel.contains(n.rect().center()))
+        .expect("the card title in Sets")
+}
+
+#[test]
+fn a_deferred_card_click_uses_the_card_that_survives_the_landing() {
+    use sdc_gui::model::Selection;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(key_less_sets(d.path()));
+    h.run();
+    let id = "landscape/other";
+    let file = "landscape/two.png";
+    let rock = "landscape/rock01";
+    let defer = |h: &mut Harness<'static, AppModel>| {
+        card(h, rock).click();
+        h.run();
+        h.get_by_role_and_label(
+            egui::accesskit::Role::TextInput,
+            sdc_gui::ui::input_name::HINT,
+        )
+        .click();
+        h.run();
+        let pos = card(h, id).rect().center();
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            h.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.step();
+        assert_eq!(
+            h.state().after_commit.len(),
+            1,
+            "the card click awaits the field"
+        );
+    };
+    defer(&mut h);
+    give_a_file(h.state_mut(), id, file);
+    let gained = view_by_id(h.state(), id).key;
+    assert!(!gained.is_empty());
+    h.run();
+    assert_eq!(h.state().selection, Selection::Set(gained.clone()));
+    card(&h, rock).click_modifiers(egui::Modifiers::COMMAND);
+    h.run();
+    assert_eq!(
+        h.state().selected_sets(),
+        [gained, view_by_id(h.state(), rock).key]
+    );
+
+    defer(&mut h);
+    std::fs::remove_file(h.state().root.as_ref().unwrap().join(file)).unwrap();
+    h.state_mut().replan();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(h.state(), id).key.is_empty());
+    h.run();
+    assert_eq!(h.state().selection, id_selection(id));
+
+    defer(&mut h);
+    assert!(h.state_mut().delete_set(id));
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(h.state().selection, Selection::None);
+}
+
+#[test]
+fn a_click_on_a_key_less_card_selects_that_set_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let texture = "landscape/rock01.png";
+    m.expand(texture);
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().expanded.as_deref(), Some(texture));
+    assert!(!sdc_gui::ui::set_editor_shown(h.state(), false));
+    card(&h, "landscape/other").click();
+    h.run();
+    assert_eq!(h.state().selection, id_selection("landscape/other"));
+    assert!(card_selected(&h, "landscape/other"));
+    assert!(!card_selected(&h, "landscape/empty"));
+    assert!(h.state().expanded.is_none());
+    assert_eq!(
+        h.state().centre_front(),
+        sdc_gui::model::CentreTab::Selection
+    );
+    assert_editor(&h, "landscape/other");
+}
+
+#[test]
+fn modifier_clicks_never_mix_a_key_less_set_into_a_multi_selection() {
+    use sdc_gui::model::Selection;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rock = view_by_id(&m, "landscape/rock01").key;
+    m.select_set(&rock);
+    let mut h = harness(m);
+    h.run();
+    for mods in [egui::Modifiers::COMMAND, egui::Modifiers::SHIFT] {
+        card(&h, "landscape/other").click_modifiers(mods);
+        h.run();
+        assert_eq!(h.state().selection, id_selection("landscape/other"));
+        assert!(!h.state().in_bulk());
+        card(&h, "landscape/rock01").click_modifiers(mods);
+        h.run();
+        assert_eq!(h.state().selection, Selection::Set(rock.clone()));
+        assert!(!h.state().in_bulk());
+    }
+}
+
+#[test]
+fn the_model_keeps_ids_out_of_modified_clicks_and_select_all() {
+    use sdc_gui::model::{Selection, SetTarget};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rock = view_by_id(&m, "landscape/rock01").key;
+    let id = "landscape/other";
+    for (ctrl, shift) in [(false, false), (true, false), (false, true), (true, true)] {
+        m.select_set(&rock);
+        m.click_set(SetTarget::Id(id.into()), ctrl, shift);
+        assert_eq!(m.selection, id_selection(id));
+        assert!(!m.in_bulk());
+        m.click_set(&rock, ctrl, shift);
+        assert_eq!(m.selection, Selection::Set(rock.clone()));
+        assert!(!m.in_bulk());
+    }
+    pick_id(&mut m, id);
+    let views = sdc_gui::model::sets::views(&m);
+    let expected: Vec<_> = m
+        .visible_sets()
+        .iter()
+        .map(|&i| &views[i])
+        .filter(|v| !v.key.is_empty())
+        .map(|v| v.key.clone())
+        .collect();
+    assert!(expected.contains(&rock));
+    m.select_all_visible();
+    assert_eq!(m.selected_sets(), expected);
+    assert!(matches!(m.selection, Selection::Set(_)));
+}
+
+#[test]
+fn a_right_click_on_a_key_less_card_selects_that_set_and_edit_match_closes_the_menu() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let texture = "landscape/rock01.png";
+    m.expand(texture);
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().expanded.as_deref(), Some(texture));
+    card(&h, "landscape/empty").click_secondary();
+    h.run();
+    assert_eq!(h.state().selection, id_selection("landscape/empty"));
+    assert!(h.state().expanded.is_none());
+    assert_editor(&h, "landscape/empty");
+    h.state_mut().expand(texture);
+    h.run();
+    assert_eq!(h.state().expanded.as_deref(), Some(texture));
+    h.get_by_label("Edit match…").click();
+    h.run();
+    assert_eq!(h.state().selection, id_selection("landscape/empty"));
+    assert!(h.query_by_label("Edit match…").is_none());
+    assert!(h.state().expanded.is_none());
+    assert_editor(&h, "landscape/empty");
+}
+
+#[test]
+fn toggling_two_keyed_sets_down_to_one_opens_its_editor() {
+    use sdc_gui::model::Selection;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let keys: Vec<_> = sdc_gui::model::sets::views(&m)
+        .iter()
+        .filter(|v| !v.key.is_empty())
+        .map(|v| v.key.clone())
+        .take(2)
+        .collect();
+    assert_eq!(keys.len(), 2);
+    m.click_set(&keys[0], false, false);
+    m.click_set(&keys[1], true, false);
+    assert!(m.in_bulk());
+    m.expanded = Some("arch/wall.png".into());
+    m.click_set(&keys[1], true, false);
+    assert_eq!(m.selection, Selection::Set(keys[0].clone()));
+    assert!(!m.in_bulk());
+    assert!(m.expanded.is_none());
+    assert_eq!(m.centre_front(), sdc_gui::model::CentreTab::Selection);
+    assert!(sdc_gui::ui::set_editor_shown(&m, false));
+}
+
+#[test]
+fn go_to_set_on_a_key_less_sets_row_opens_that_set() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let id = "landscape/other";
+    for click_link in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = key_less_sets(d.path());
+        let filter = ProblemsFilter::Set(id.into());
+        let rows = filtered(&m, Some(&filter));
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0].at, At::Set { key, id: row }
+            if key.is_empty() && row == id));
+        let texture = "landscape/rock01.png";
+        m.expand(texture);
+        m.open_problems(Some(filter));
+        let mut h = harness(m);
+        h.run();
+        assert_eq!(h.state().expanded.as_deref(), Some(texture));
+        if click_link {
+            h.get_by_role_and_label(egui::accesskit::Role::Link, id)
+                .click();
+        } else {
+            h.get_by_label("Go to set").click();
+        }
+        h.run();
+        assert_eq!(h.state().selection, id_selection(id));
+        assert!(h.state().expanded.is_none());
+        assert_eq!(
+            h.state().centre_front(),
+            sdc_gui::model::CentreTab::Selection
+        );
+        assert_editor(&h, id);
+    }
+}
+
+fn assert_editor(h: &Harness<'static, AppModel>, id: &str) {
+    use egui::accesskit::Role;
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    if let Some(name) = h.state().input_name_of(id) {
+        assert!(h
+            .query_all_by_role(Role::TextInput)
+            .any(|n| centre.contains(n.rect().center())
+                && n.accesskit_node().value().as_deref() == Some(name.as_str())));
+    } else {
+        assert!(h
+            .query_all_by_label(id)
+            .any(|n| centre.contains(n.rect().center())));
+    }
+}
+
+#[test]
+fn a_wall_key_and_an_identical_document_id_are_two_different_cards() {
+    use sdc_gui::model::Selection;
+    for delete_document_card in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let (m, id) = wall_cards(d.path());
+        let mut h = harness(m);
+        h.run();
+        let order = if delete_document_card {
+            ["wall", id.as_str()]
+        } else {
+            [id.as_str(), "wall"]
+        };
+        for name in order {
+            card(&h, name).click();
+            h.run();
+            let expected = if name == "wall" {
+                Selection::Set(id.clone())
+            } else {
+                id_selection(&id)
+            };
+            assert_eq!(h.state().selection, expected);
+            assert_eq!(card_selected(&h, "wall"), name == "wall");
+            assert_eq!(card_selected(&h, &id), name == id.as_str());
+            assert_editor(&h, name);
+        }
+        let [survivor, selected] = order;
+        assert!(h.state_mut().delete_set(selected));
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+        let remaining = sdc_gui::model::sets::views(h.state());
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, survivor);
+        assert_eq!(h.state().selection, Selection::None);
+        assert!(!card_selected(&h, survivor));
+    }
+}
+
+#[test]
+fn a_click_with_an_absent_engine_key_keeps_the_selected_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rock = view_by_id(&m, "landscape/rock01").key;
+    m.select_set(&rock);
+    // A document with this id is present, but the caller supplied an engine key.
+    m.click_set("landscape/other", true, false);
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(rock));
+    assert!(!m.in_bulk());
+}
+
+#[test]
+fn a_right_click_preserves_a_selected_group_and_reopens_a_single_editor() {
+    use sdc_gui::model::CentreTab;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let keys: Vec<_> = sdc_gui::model::sets::views(&m)
+        .iter()
+        .filter(|v| !v.key.is_empty())
+        .map(|v| v.key.clone())
+        .take(2)
+        .collect();
+    assert_eq!(keys.len(), 2);
+    m.click_set(&keys[0], false, false);
+    m.click_set(&keys[1], true, false);
+    m.right_click_set(&keys[0]);
+    assert_eq!(m.selected_sets(), keys);
+    m.select_set(&keys[0]);
+    m.open_settings_tab();
+    assert_eq!(m.centre_front(), CentreTab::Settings);
+    m.right_click_set(&keys[0]);
+    assert_eq!(m.centre_front(), CentreTab::Selection);
+}
+
+fn card_selected(h: &Harness<'static, AppModel>, id: &str) -> bool {
+    h.get_by_label_contains(&format!("Set {id}, position"))
+        .accesskit_node()
+        .is_selected()
+        == Some(true)
+}
+
+#[test]
+fn a_key_less_set_selected_by_its_id_opens_its_own_editor() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    assert!(sdc_gui::ui::set_editor_shown(&m, false));
+    let mut h = harness(m);
+    h.run();
+    let reasons: Vec<_> = h
+        .query_all_by_label_contains("go to the fix")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("two.txt") && !reasons[0].contains("one.txt"));
+    assert!(card_selected(&h, "landscape/other"));
+    assert!(!card_selected(&h, "landscape/empty"));
+}
+
+#[test]
+fn the_key_shaped_document_cards_editor_shows_its_own_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = wall_cards(d.path());
+    m.select_set(&id);
+    let mut h = harness(m);
+    h.run();
+    assert!(!h.query_all_by_label_contains("go to the fix").any(|n| n
+        .accesskit_node()
+        .label()
+        .is_some_and(|s| s.contains("wall-note.txt"))));
+    pick_id(h.state_mut(), &id);
+    h.run();
+    assert!(h.query_all_by_label_contains("go to the fix").any(|n| n
+        .accesskit_node()
+        .label()
+        .is_some_and(|s| s.contains("wall-note.txt"))));
+    // Warm the ordinary key-first list and chip with the same spelling.
+    h.state_mut()
+        .open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Set(
+            id.clone(),
+        )));
+    h.run();
+    h.get_by_label("Set: wall ×");
+    let name = h
+        .query_all_by_label_contains("go to the fix")
+        .filter_map(|n| n.accesskit_node().label())
+        .find(|s| s.contains("wall-note.txt"))
+        .unwrap();
+    click_and_settle(&mut h, &name);
+    let remove = format!("Remove wall-note.txt from {id}");
+    assert!(
+        h.query_by_label(&remove)
+            .is_some_and(|n| n.accesskit_node().is_focused()),
+        "the reason must show and focus the document card's own row"
+    );
+    h.get_by_label(&format!("Set: {id} ×"));
+    h.state_mut()
+        .open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Set(id)));
+    h.run();
+    h.get_by_label("Set: wall ×");
+    assert!(h.query_by_label(&remove).is_none());
+}
+
+#[test]
+fn output_rename_uses_only_the_selected_borrower() {
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    for id in ["landscape/empty", "landscape/other"] {
+        assert!(
+            m.renames_outputs(&view_by_id(&m, id)),
+            "{id} qualifies for Outputs"
+        );
+    }
+    pick_id(&mut m, "landscape/other");
+    assert_eq!(m.rename_keys(RenameMode::Outputs), ["landscape/other"]);
+    assert!(m.rename_keys(RenameMode::Inputs).is_empty());
+    assert_eq!(m.selected_set_total(), 1);
+    let mut h = harness(m);
+    h.run();
+    h.key_press(egui::Key::F2);
+    h.run();
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = &h.state().dialog else {
+        panic!("F2 on the second borrower must open Rename");
+    };
+    assert_eq!(dlg.mode, RenameMode::Outputs);
+    assert_eq!(dlg.keys, ["landscape/other"]);
+}
+
+#[test]
+fn f2_on_a_texture_in_an_output_eligible_set_renames_the_input() {
+    use sdc_gui::model::{rename::RenameMode, Dialog};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let item = "landscape/rock01.png";
+    m.select_item(item);
+    assert!(!m.rename_keys(RenameMode::Outputs).is_empty());
+    let mut h = harness(m);
+    h.run();
+    h.key_press(egui::Key::F2);
+    h.run();
+    let Some(Dialog::Rename(dlg)) = &h.state().dialog else {
+        panic!("expected Rename")
+    };
+    assert_eq!(dlg.mode, RenameMode::Inputs);
+    assert_eq!(dlg.keys, [item]);
+}
+
+#[test]
+fn the_unnamed_sets_focused_problems_row_reopens_its_editor() {
+    for click_link in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = empty_id_set(d.path());
+        pick_id(&mut m, "");
+        let mut h = harness(m);
+        h.run();
+        let reason = h
+            .get_by_label_contains("go to the fix")
+            .accesskit_node()
+            .label()
+            .unwrap();
+        click_and_settle(&mut h, &reason);
+        assert!(h
+            .get_by_label("Remove landscape/empty-id.txt from ")
+            .accesskit_node()
+            .is_focused());
+        h.state_mut().expand("landscape/rock01.png");
+        h.run();
+        if click_link {
+            h.get_by_role_and_label(egui::accesskit::Role::Link, "Unnamed set")
+                .click();
+        } else {
+            h.get_by_label("Go to set").click();
+        }
+        h.run();
+        assert_eq!(h.state().selection, id_selection(""));
+        assert!(h.state().expanded.is_none());
+        assert_eq!(h.state().resolved_selection().view().unwrap().id, "");
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        assert!(centre.contains(h.get_by_label("Also export").rect().center()));
+    }
+}
+
+fn empty_id_set(dir: &std::path::Path) -> AppModel {
+    let mut m = key_less_sets(dir);
+    let rel = "landscape/empty-id.txt";
+    std::fs::write(m.root.as_ref().unwrap().join(rel), "notes").unwrap();
+    m.edit_docs("t", None, true, |_, doc| {
+        doc.create_set("");
+        doc.add_member("", rel);
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "").key.is_empty());
+    m
+}
+
+fn check_more_unhides_own_kind(mut m: AppModel, id: &str, other_id: &str) {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{is_hidden, problems, At};
+
+    let other_key = view_by_id(&m, other_id).key;
+    m.sets
+        .iter_mut()
+        .find(|s| s.key == other_key)
+        .unwrap()
+        .warnings = vec![Warning::new(Code::ValCoverage, "other card")];
+    sdc_gui::model::sets::inject_view_warnings(
+        &mut m,
+        id,
+        vec![
+            Warning::new(Code::ValMipError, "mip"),
+            Warning::new(Code::LossReencode, "encode"),
+            Warning::new(Code::InNonfinite, "input"),
+            Warning::new(Code::ChanNotGray, "colour"),
+        ],
+    );
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.set_kind_hidden(Code::ValCoverage, true);
+    let all = problems(&m);
+    let hidden_row = |id: &str, code| {
+        all.iter()
+            .find(|p| {
+                matches!(&p.at, At::Set { id: row_id, .. } if row_id == id)
+                    && p.code == Some(code)
+                    && is_hidden(p, &m.hidden_kinds())
+            })
+            .unwrap()
+    };
+    let own = hidden_row(id, Code::ChanNotGray);
+    let other = hidden_row(other_id, Code::ValCoverage);
+    pick_id(&mut m, id);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, "+2 more in Problems");
+    let hidden = h.state().hidden_kinds();
+    assert!(
+        !is_hidden(own, &hidden) && is_hidden(other, &hidden),
+        "only the selected card's kind should be shown, hidden: {hidden:?}"
+    );
+    // The link opens an ordinary filter. Clear it to see both cards' row visibility together.
+    h.state_mut().open_problems(None);
+    h.run();
+    h.get_by_label(own.shown().as_ref());
+    assert!(h.query_by_label(other.shown().as_ref()).is_none());
+}
+
+#[test]
+fn more_in_problems_unhides_own_kind_for_a_key_shaped_id() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = wall_cards(d.path());
+    check_more_unhides_own_kind(m, &id, "wall");
+}
+
+#[test]
+fn more_in_problems_unhides_own_kind_for_an_empty_id() {
+    let d = tempfile::tempdir().unwrap();
+    check_more_unhides_own_kind(empty_id_set(d.path()), "", "landscape/rock01");
+}
+
+#[test]
+fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
+    use sdc_gui::model::bottom::{filtered, problems, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = empty_id_set(d.path());
+    assert!(problems(&m)
+        .iter()
+        .any(|p| matches!(&p.at, At::Set { key, id }
+        if key.is_empty() && id.is_empty())
+            && p.text.contains("empty-id.txt")));
+    pick_id(&mut m, "");
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().selection, id_selection(""));
+    assert!(filtered(h.state(), Some(&ProblemsFilter::Set(String::new()))).is_empty());
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    let reasons: Vec<_> = h
+        .query_all_by_label_contains("go to the fix")
+        .filter(|n| centre.contains(n.rect().center()))
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("empty-id.txt"), "{reasons:?}");
+    assert!(!h
+        .query_all_by_label("Ready: nothing in this set needs you.")
+        .any(|n| centre.contains(n.rect().center())));
+    click_and_settle(&mut h, &reasons[0]);
+    assert!(
+        h.query_by_label("Remove landscape/empty-id.txt from ")
+            .is_some_and(|n| n.accesskit_node().is_focused()),
+        "the empty-id card must show and focus its own row"
+    );
+    h.get_by_role_and_label(egui::accesskit::Role::Link, "Unnamed set");
+    assert!(filtered(h.state(), Some(&ProblemsFilter::Set(String::new()))).is_empty());
+}
+
+#[test]
+fn a_key_gain_returns_the_scrolled_editor_to_its_top() {
+    use sdc_gui::model::{CentreTab, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    let mut h = harness_at(m, egui::vec2(1400.0, 420.0));
+    h.run();
+    let offset = |h: &Harness<'static, AppModel>| {
+        h.ctx
+            .data(|d| d.get_temp::<f32>(egui::Id::unique("set-editor-observed-offset")))
+            .expect("2D editor drew its scroll area")
+    };
+    assert_eq!(offset(&h), 0.0);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    h.query_all_by_label("Advanced TruePBR settings")
+        .find(|n| centre.x_range().contains(n.rect().center().x))
+        .unwrap()
+        .scroll_to_me();
+    h.run();
+    assert!(offset(&h) > 0.0, "precondition: the editor scrolled");
+    h.state_mut().open_json_editor();
+    h.run();
+    assert_eq!(h.state().centre_tab, CentreTab::Json);
+    give_a_file(h.state_mut(), "landscape/empty", "landscape/one.png");
+    h.run();
+    let v = view_by_id(h.state(), "landscape/empty");
+    assert!(!v.key.is_empty());
+    assert_eq!(h.state().selection, Selection::Set(v.key));
+    assert_eq!(h.state().centre_tab, CentreTab::Selection);
+    assert_eq!(offset(&h), 0.0);
+}
+
+#[test]
+fn choosing_a_keyed_set_over_a_texture_opens_its_editor() {
+    use sdc_gui::model::{CentreTab, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let rock = view_by_id(&m, "landscape/rock01").key;
+    m.expand("landscape/rock01.png");
+    m.select_set(&rock);
+    assert!(m.expanded.is_none());
+    assert_eq!(m.selection, Selection::Set(rock));
+    assert_eq!(m.centre_front(), CentreTab::Selection);
+    assert!(m.reveal_centre);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Also export");
+}
+
+#[test]
+fn a_key_less_editor_resolves_once_per_view_revision() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    let mut h = harness(m);
+    h.run();
+    let before = h.state().resolved_selection();
+    assert_eq!(before.view().unwrap().id, "landscape/other");
+    assert!(before.view().unwrap().key.is_empty());
+    let n = h.state().selection_builds.get();
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n,
+        "idle editor rebuilt identity"
+    );
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "editor copied or searched for its set"
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &before,
+        &h.state().resolved_selection()
+    ));
+    pick_id(h.state_mut(), "landscape/empty");
+    h.run();
+    let next = h.state().resolved_selection();
+    assert_eq!(next.view().unwrap().id, "landscape/empty");
+    assert_eq!(h.state().selection_builds.get(), n + 1);
+    h.state_mut().invalidate_views();
+    h.run_steps(5);
+    let fresh = h.state().resolved_selection();
+    assert!(!std::sync::Arc::ptr_eq(&next.views, &fresh.views));
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n + 2,
+        "one build for replacement views"
+    );
+    pick_id(h.state_mut(), "missing-card");
+    h.run_steps(5);
+    assert!(h.state().resolved_selection().view().is_none());
+    assert_eq!(
+        h.state().selection_builds.get(),
+        n + 3,
+        "cache a missing target too"
+    );
+}
+
+#[test]
+fn the_selected_headers_output_name_tracks_document_edits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    m.edit_docs("t", None, true, |_, doc| {
+        doc.set_output_name(id, Some("other-output"))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    pick_id(&mut m, id);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("Output name \"other-output\" is ignored");
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(sdc_gui::model::identity_work(), work);
+    h.state_mut().clear_output_name(id);
+    h.step();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert!(h.query_by_label_contains("other-output").is_none());
+}
+
+#[test]
+fn the_records_header_counts_the_selected_borrowers_blocks() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    m.add_cs_block(id, Kind::Txst);
+    m.add_cs_block(id, Kind::Mato);
+    pick_id(&mut m, id);
+    assert!(!m.resolved_selection().view().unwrap().shared);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
+    h.run();
+    h.get_by_label("2 records");
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    h.run();
+    h.get_by_label("PGPatcher entry for statics:");
+    let reads = h.state().doc_block_reads.get();
+    let work = sdc_gui::model::identity_work();
+    h.run_steps(5);
+    assert_eq!(
+        h.state().doc_block_reads.get(),
+        reads,
+        "the expanded records panel looked its blocks up again"
+    );
+    assert_eq!(
+        sdc_gui::model::identity_work(),
+        work,
+        "the records header searched for its blocks"
+    );
+    pick_id(h.state_mut(), "landscape/empty");
+    h.run();
+    h.get_by_label("0 records");
+}
+
+#[test]
+fn the_landscape_checkbox_uses_the_selected_views_txst() {
+    use sdc_gui::model::cs_pbr::{Kind, PGP_BOX};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let id = "landscape/rock01";
+    m.add_cs_block(id, Kind::Txst);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_set(&view_by_id(&m, id).key);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
+    h.run();
+    h.get_by_label(PGP_BOX);
+    let reads = h.state().doc_block_reads.get();
+    h.run_steps(5);
+    assert_eq!(
+        h.state().doc_block_reads.get(),
+        reads,
+        "the Landscape checkbox looked its block up again"
+    );
+}
+
+#[test]
+fn a_warmed_partial_keeps_the_other_cards_member_storage() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_set(&view_by_id(&m, "landscape/rock01").key);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut().hold_plan_results = true;
+    h.state_mut().set_field(
+        "landscape/leaf.png",
+        "alpha.policy",
+        serde_json::json!("cutout"),
+    );
+    h.run_steps(2);
+    let m = h.state_mut();
+    let member_ptr = |m: &AppModel| m.resolved_selection().view().unwrap().members[0].as_ptr();
+    let before = member_ptr(m);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let delivered = loop {
+        m.poll();
+        if let Some(msg @ WorkerMsg::Partial { seq, .. }) = m
+            .take_held()
+            .into_iter()
+            .find(|msg| matches!(msg, WorkerMsg::Partial { seq, .. } if *seq > m.applied_seq))
+        {
+            m.handle_held(msg);
+            break seq;
+        }
+        assert!(std::time::Instant::now() < until);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(!m.partial_pending);
+    assert_eq!(
+        m.applied_seq, delivered,
+        "the delivered partial must have applied"
+    );
+    assert_eq!(before, member_ptr(m), "the splice cloned an unchanged set");
+}
+
+#[test]
+fn advanced_reads_the_material_edit_in_the_same_frame() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    pick_id(&mut m, id);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
+    h.run();
+    h.get_by_label("Advanced TruePBR settings").click();
+    h.run();
+    let observed = |h: &Harness<'static, AppModel>| {
+        h.ctx
+            .data(|d| d.get_temp::<bool>(egui::Id::unique("advanced-observed-parallax")))
+    };
+    assert_eq!(observed(&h), Some(false));
+    h.get_by_label("Parallax").click();
+    for _ in 0..3 {
+        h.step();
+        if view_by_id(h.state(), id).settings.get("parallax") == Some(&serde_json::json!(true)) {
+            assert_eq!(observed(&h), Some(true), "Advanced drew the pre-edit view");
+            return;
+        }
+    }
+    panic!("Material did not commit Parallax");
+}
+
+#[test]
+fn repeated_selection_reads_do_not_construct_owned_view_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    let active = m.resolved_selection();
+    let start = sdc_gui::model::sets::root_reads();
+    for _ in 0..5 {
+        assert!(std::sync::Arc::ptr_eq(&active, &m.resolved_selection()));
+    }
+    assert_eq!(sdc_gui::model::sets::root_reads(), start);
+}
+
+fn pick_id(m: &mut AppModel, id: &str) {
+    m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
+}
+
+fn id_selection(id: &str) -> sdc_gui::model::Selection {
+    sdc_gui::model::Selection::SetId(id.into())
+}
+
+fn give_a_file(m: &mut AppModel, id: &str, rel: &str) {
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join(rel))
+    .unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| s.add_member(id, rel));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+}
+
+fn view_by_id(m: &AppModel, id: &str) -> sdc_gui::model::sets::SetView {
+    sdc_gui::model::sets::set_views(m)
+        .into_iter()
+        .find(|v| engine::sets::same_id(&v.id, id))
+        .expect("the set has a card")
+}
+
+#[test]
+fn a_full_plan_keeps_a_key_less_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.selection, id_selection("landscape/other"));
+}
+
+#[test]
+fn a_key_less_selection_follows_the_set_once_it_has_a_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    give_a_file(&mut m, "landscape/empty", "landscape/one.png");
+    let v = view_by_id(&m, "landscape/empty");
+    assert!(
+        !v.key.is_empty(),
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(v.key.clone()));
+}
+
+#[test]
+fn a_mixed_case_key_less_selection_follows_the_set_once_it_has_a_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("Landscape/Big"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = view_by_id(&m, "Landscape/Big");
+    assert!(
+        v.key.is_empty() && v.id == "Landscape/Big",
+        "precondition: {v:?}"
+    );
+    pick_id(&mut m, "Landscape/Big");
+    give_a_file(&mut m, "Landscape/Big", "landscape/big.png");
+    let v = view_by_id(&m, "landscape/big");
+    assert!(
+        !v.key.is_empty(),
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(v.key.clone()));
+}
+
+#[test]
+fn a_keyed_selection_follows_the_set_once_it_loses_its_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("landscape/solo"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    give_a_file(&mut m, "landscape/solo", "landscape/solo.png");
+    let v = view_by_id(&m, "landscape/solo");
+    assert!(!v.key.is_empty(), "precondition: a keyed set: {v:?}");
+    m.select_set(&v.key);
+    std::fs::remove_file(m.root.clone().unwrap().join("landscape/solo.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = view_by_id(&m, "landscape/solo");
+    assert!(
+        v.key.is_empty(),
+        "precondition: the set lost its key: {v:?}"
+    );
+    assert_eq!(m.selection, id_selection("landscape/solo"));
+}
+
+fn two_selected_created_sets(dir: &std::path::Path) -> AppModel {
+    let mut m = pbr_opened(dir);
+    for (id, file) in [
+        ("landscape/first", "landscape/one.png"),
+        ("landscape/active", "landscape/two.png"),
+    ] {
+        m.edit_docs("t", None, true, |_, s| s.create_set(id));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        give_a_file(&mut m, id, file);
+    }
+    let first = view_by_id(&m, "landscape/first");
+    let active = view_by_id(&m, "landscape/active");
+    m.click_set(&first.key, false, false);
+    m.click_set(&active.key, true, false);
+    assert_eq!(m.selected_sets(), [first.key, active.key.clone()]);
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(active.key));
+    m
+}
+
+#[test]
+fn reload_keeps_the_active_set_when_both_selected_keys_disappear() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_selected_created_sets(d.path());
+    let root = m.root.as_ref().unwrap();
+    for file in ["landscape/one.png", "landscape/two.png"] {
+        std::fs::remove_file(root.join(file)).unwrap();
+    }
+    m.reload_changed();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "landscape/first").key.is_empty());
+    assert!(view_by_id(&m, "landscape/active").key.is_empty());
+    assert_eq!(m.selection, id_selection("landscape/active"));
+    assert!(m.multi.keys.is_empty());
+}
+
+#[test]
+fn reload_keeps_the_surviving_key_when_the_active_set_loses_its_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_selected_created_sets(d.path());
+    let first = view_by_id(&m, "landscape/first").key;
+    std::fs::remove_file(m.root.as_ref().unwrap().join("landscape/two.png")).unwrap();
+    m.reload_changed();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "landscape/active").key.is_empty());
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(first));
+    assert!(m.multi.keys.is_empty());
+}
+
+#[test]
+fn a_selected_set_that_gains_its_key_brings_the_selection_tab_back() {
+    use sdc_gui::model::CentreTab;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    m.open_json_editor();
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().centre_tab, CentreTab::Json, "precondition");
+    give_a_file(h.state_mut(), "landscape/empty", "landscape/one.png");
+    h.run();
+    let landed = view_by_id(h.state(), "landscape/empty");
+    assert!(!landed.key.is_empty());
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(landed.key)
+    );
+    assert_eq!(h.state().centre_tab, CentreTab::Selection);
+}
+
+#[test]
+fn deleting_a_selected_key_less_set_selects_no_other_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    assert!(m.delete_set("landscape/other"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.selection, sdc_gui::model::Selection::None);
+}
+
 /// B3-16, B3-17 (Note JP5; F6 N1): a key-less set is named by its id. Each of two key-less sets lists and reasons
 /// its own missing entry and not the other's, through the model, for both sets; the empty string names no set. The
-/// editor opens the first key-less set for the empty key (selection by key is Plan 3b's, F2): its status line reads
+/// editor opens the chosen key-less set by document id: its status line reads
 /// "Not ready:" with its own reason, not "no files yet".
 #[test]
 fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
@@ -5146,7 +6134,7 @@ fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
     } else {
         ("two.txt", "one.txt")
     };
-    m.go_to_set("", None);
+    m.go_to_target(sdc_gui::model::SetTarget::Id(first.clone()), None);
     let mut h = harness(m);
     h.run();
     assert!(h.query_by_label(NO_FILES_YET).is_none(), "it has a row");
@@ -5220,6 +6208,268 @@ fn a_key_less_sets_filter_follows_a_mixed_case_id() {
     );
     assert_eq!(*rows, *by_key);
     assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
+}
+
+/// Follow-up F7 (Note JR11): a filter opened by a keyed set's key follows the set once it loses every file and has no
+/// key: it lists the key-less set's rows, the same rows as a filter by its id.
+#[test]
+fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
+    use sdc_gui::model::bottom::{filtered, scope_key, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    // A text file no plan item matches: the entry stays and shows as "No file matches" once the image is gone.
+    std::fs::write(root.join("landscape/one.txt"), "notes").unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("landscape/big");
+        s.add_member("landscape/big", "landscape/one.png");
+        s.add_member("landscape/big", "landscape/one.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let find = |m: &sdc_gui::model::AppModel| {
+        sdc_gui::model::sets::set_views(m)
+            .into_iter()
+            .find(|v| v.id == "landscape/big")
+            .expect("the set has a card")
+    };
+    let v = find(&m);
+    assert!(!v.key.is_empty(), "precondition: the set has a key: {v:?}");
+    let f = ProblemsFilter::Set(v.key.clone());
+    m.open_problems(Some(f.clone()));
+    // The set's only real file goes; the other files of the folder stay, so the plan still has items.
+    std::fs::remove_file(root.join("landscape/one.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = find(&m);
+    assert!(
+        v.key.is_empty(),
+        "precondition: every entry is missing, so no key: {v:?}"
+    );
+    // Final wave Group 6 (ledger 259): the rows are those of the filter the model holds, not of the local `f`.
+    let installed = m.bottom.filter.clone();
+    let rows = filtered(&m, installed.as_ref());
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_id = filtered(&m, Some(&ProblemsFilter::Set(scope_key(&v).to_string())));
+    assert!(
+        rows.iter().any(|p| p.text.contains("one.txt")),
+        "the missing entry's row: {texts:?}"
+    );
+    assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+    assert_eq!(installed, Some(f.clone()), "nothing resets the filter");
+    // The chip resolves the key as the list does: it names the set, not the old output-root path.
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("Set: landscape/big").count() > 0,
+        "the chip names the set by its id"
+    );
+}
+
+/// A set filter's rows after the output root changes to `to` (an export folder), for a filter opened on `landscape/leaf`
+/// under `<tmp>/out/textures/sub`. `also` creates a key-less set of that name first.
+fn leaf_filter_after_a_root_change(
+    d: &std::path::Path,
+    to: std::path::PathBuf,
+    also: Option<&str>,
+) -> (Vec<String>, Vec<sdc_gui::model::bottom::Problem>) {
+    use sdc_gui::model::bottom::{filtered, ProblemsFilter};
+    let mut m = pbr_opened(d);
+    let root = m.root.clone().unwrap();
+    choose_export(&mut m, d.join("out/textures/sub"));
+    if let Some(id) = also {
+        std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.add_member(id, "landscape/stray.txt")
+        });
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let views = sdc_gui::model::sets::set_views(&m);
+    let leaf = views
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .expect("the leaf set has a card");
+    assert!(!leaf.key.is_empty(), "precondition: {leaf:?}");
+    if let Some(id) = also {
+        let v = views.iter().find(|v| v.id == id).expect("the key-less set");
+        assert!(v.key.is_empty(), "precondition: {v:?}");
+    }
+    let f = ProblemsFilter::Set(leaf.key.clone());
+    m.open_problems(Some(f.clone()));
+    assert!(
+        !filtered(&m, Some(&f)).is_empty(),
+        "precondition: leaf has rows"
+    );
+    choose_export(&mut m, to);
+    assert!(m.bottom.filter.is_some(), "nothing resets the filter");
+    let ids = sdc_gui::model::sets::set_views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect();
+    let f = m.bottom.filter.clone();
+    (ids, filtered(&m, f.as_ref()).to_vec())
+}
+
+/// Review of Task 12a (plan-mandated): a filter opened by a set's key under one output root keeps listing that set's
+/// rows after the root changes to an ancestor, even when a key-less set's id rebuilds the old key under the new root.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_moves_to_an_ancestor() {
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let nested = "sub/textures/landscape/leaf";
+    let (ids, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("out"), Some(nested));
+    assert!(ids.iter().any(|i| i == nested), "{ids:?}");
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+    assert!(
+        !rows.iter().any(|p| p.text.contains("stray.txt")),
+        "another set's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { id, .. } => id == "landscape/leaf",
+            At::Texture(t) => t == "landscape/leaf.png",
+            _ => false,
+        }),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn a_root_move_keeps_the_original_bulk_reset_targets() {
+    use engine::sets::set_key;
+    use sdc_gui::model::{Dialog, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("inputs");
+    let root = d.path().join("R");
+    let old = root.join("sub");
+    std::fs::create_dir_all(input.join("sub/sub")).unwrap();
+    for path in ["a.png", "sub/a.png", "sub/sub/a.png"] {
+        image::RgbImage::from_pixel(16, 16, image::Rgb([90, 60, 30]))
+            .save(input.join(path))
+            .unwrap();
+    }
+    let mut m = opened_as_the_app(input, old.clone());
+    m.click_set(&set_key(&old, "a"), false, false);
+    m.click_set(&set_key(&old, "sub/a"), true, false);
+    assert_eq!(
+        m.selected_sets(),
+        [set_key(&old, "a"), set_key(&old, "sub/a")]
+    );
+    choose_export(&mut m, root.clone());
+    assert_eq!(m.selection, Selection::Set(set_key(&root, "sub/a")));
+    m.ask_reset_all();
+    let Some(Dialog::ConfirmResetAll(keys)) = m.dialog else {
+        panic!("the selected sets have reset targets");
+    };
+    assert_eq!(keys, ["a.png", "sub/a.png"]);
+}
+
+/// The plain case of the same rekey: an ordinary root change leaves the open filter on its set.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("elsewhere"), None);
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+}
+
+/// A key-less entry's id is typed by the user and read as it stands: one that reads like a key under the old output
+/// root (the folded root, a slash, `wall`) is still an id, so a root change leaves the filter on it and never on the
+/// different set `wall` whose key the rewritten value would be.
+#[test]
+fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = move_root_with_id_filter(d.path(), None);
+    assert_eq!(m.selection, id_selection(&id));
+    let entry = view_by_id(&m, &id);
+    assert!(entry.key.is_empty());
+    assert!(entry.missing.iter().any(|v| matches!(v,
+        sdc_gui::model::sets::Missing::File(path) if path.ends_with("stray.txt"))));
+    assert_ne!(view_by_id(&m, "wall").key, id);
+}
+
+#[test]
+fn a_keyed_selection_moves_when_the_filter_names_a_key_less_id() {
+    let d = tempfile::tempdir().unwrap();
+    let selected = "landscape/rock01";
+    let (m, _) = move_root_with_id_filter(d.path(), Some(selected));
+    assert_eq!(
+        m.selection,
+        sdc_gui::model::Selection::Set(engine::sets::set_key(&m.sets_root(), selected)),
+        "the selected set moves even when the filter names an explicit id"
+    );
+}
+
+fn move_root_with_id_filter(dir: &std::path::Path, keyed_set: Option<&str>) -> (AppModel, String) {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let mut m = pbr_opened(dir);
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+    // The entry's id: what the key of a set `wall` is under the plan's output root now.
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "landscape/stray.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let entry = views.iter().find(|v| v.id == id).expect("the entry's card");
+    assert!(entry.key.is_empty(), "precondition: key-less: {entry:?}");
+    assert!(
+        !views.iter().any(|v| v.id == "wall"),
+        "precondition: no set wall yet"
+    );
+    if let Some(selected) = keyed_set {
+        m.select_set(&engine::sets::set_key(&m.sets_root(), selected));
+    } else {
+        pick_id(&mut m, &id);
+    }
+    let f = ProblemsFilter::Set(id.clone());
+    m.open_problems(Some(f.clone()));
+    let before = filtered(&m, Some(&f));
+    assert!(
+        before.iter().any(|p| p.text.contains("stray.txt")),
+        "precondition: the entry's row"
+    );
+    // The different set `wall` comes with the plan the move starts: one file at the top of the folder, too small for
+    // its format, so it has rows; its key under the new root is what a rewritten id would be.
+    image::ImageBuffer::from_fn(3, 3, |x, y| {
+        image::Rgb([(x * 40) as u8, (y * 40) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    choose_export(&mut m, dir.join("elsewhere"));
+    assert!(
+        sdc_gui::model::sets::set_views(&m)
+            .iter()
+            .any(|v| v.id == "wall" && !v.key.is_empty()),
+        "precondition: set wall has a key now"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(
+        rows.iter().any(|p| p.text.contains("stray.txt")),
+        "the entry's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { key, id: i } => key.is_empty() && *i == id,
+            _ => false,
+        }),
+        "another set's row: {texts:?}"
+    );
+    assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+    (m, id)
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
@@ -5306,7 +6556,7 @@ fn a_key_less_sets_reason_opens_its_own_rows() {
     use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
     let d = tempfile::tempdir().unwrap();
     let mut m = key_less_sets(d.path());
-    // The editor opens the first key-less set for the empty key (selection by key, B3-20).
+    // Open the chosen document card by id.
     let first = sdc_gui::model::sets::set_views(&m)
         .into_iter()
         .find(|v| v.key.is_empty())
@@ -5317,7 +6567,7 @@ fn a_key_less_sets_reason_opens_its_own_rows() {
     } else {
         ("two.txt", "one.txt")
     };
-    m.go_to_set("", None);
+    m.go_to_target(sdc_gui::model::SetTarget::Id(first.clone()), None);
     let mut h = harness(m);
     h.run();
     h.get_by_label_contains("— go to the fix").click();
@@ -5376,7 +6626,10 @@ fn a_set_with_no_entry_says_no_files_yet_on_its_status_line() {
     );
     assert!(no_files_yet(&flagged(&m), &v));
     assert!(set_reasons(&m, "landscape/empty").is_empty());
-    m.go_to_set("", None);
+    m.go_to_target(
+        sdc_gui::model::SetTarget::Id("landscape/empty".into()),
+        None,
+    );
     let mut h = harness(m);
     h.run();
     h.get_by_label(NO_FILES_YET);

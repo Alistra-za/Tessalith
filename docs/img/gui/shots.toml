@@ -164,6 +164,12 @@ page = "PBR-Landscape"
 scenario = "landscape_card"
 used_by = ["PBR-Landscape.md"]
 
+[[shot]]
+id = "tools-menu"
+page = "GUI-Main-Window"
+scenario = "tools_menu"
+used_by = ["GUI-Main-Window.md"]
+
 [[exempt]]
 what = "3D set preview content"
 page = "Previews"

@@ -32,6 +32,11 @@ pub struct MeshEvidence {
 }
 
 pub enum WorkerMsg {
+    Currency {
+        generation: u64,
+        request: u64,
+        result: Result<CurrencyVerdicts, String>,
+    },
     /// Planning has decoded `done` of `total` discovered files (DECISIONS AG91; the header shows a bar).
     PlanProgress {
         generation: u64,
@@ -198,6 +203,75 @@ pub(crate) fn or_send<T>(
         let _ = tx.send(failed(panic_text(&*p)));
         std::panic::resume_unwind(p)
     })
+}
+
+/// Review reads the same request as Export. Discoveries from this plan belong to neither Files nor progress.
+pub fn spawn_currency(
+    tx: Sender<WorkerMsg>,
+    session: Arc<Session>,
+    req: BatchRequest,
+    cancel: CancelToken,
+    generation: u64,
+    request: u64,
+) {
+    spawn_guarded(tx, "currency", move |tx| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let rep = Reporter::new(
+                Arc::new(engine::events::NullSink),
+                engine::events::new_batch_id(),
+            );
+            session
+                .plan(req, &rep, &cancel)
+                .and_then(|plan| {
+                    let mut verdicts = session
+                        .engine()
+                        .currency_preview(&plan, &cancel)?
+                        .into_iter()
+                        .map(|(key, verdict)| (key, Some(verdict)))
+                        .collect();
+                    check_destinations(
+                        &mut verdicts,
+                        &plan.request.output_root,
+                        plan.jobs.iter().map(|j| j.output.as_path()),
+                        &cancel,
+                    )?;
+                    Ok(verdicts)
+                })
+                .map_err(|e| e.to_string())
+        }))
+        .unwrap_or_else(|p| Err(panic_text(&*p)));
+        let _ = tx.send(WorkerMsg::Currency {
+            generation,
+            request,
+            result,
+        });
+    });
+}
+
+/// A ready key remains in the preview even when its destination makes the write conditional.
+pub type CurrencyVerdicts = std::collections::BTreeMap<String, Option<engine::api::PreviewVerdict>>;
+
+fn check_destinations<'a>(
+    verdicts: &mut CurrencyVerdicts,
+    root: &std::path::Path,
+    paths: impl Iterator<Item = &'a std::path::Path>,
+    cancel: &CancelToken,
+) -> Result<(), EngineError> {
+    for path in paths {
+        if cancel.is_cancelled() {
+            return Err(EngineError::Fatal("currency preview cancelled".into()));
+        }
+        let key = engine::manifest::output_key(root, path);
+        if let Some(verdict @ Some(engine::api::PreviewVerdict::WillWrite)) = verdicts.get_mut(&key)
+        {
+            let absent = std::fs::symlink_metadata(path)
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+            if !absent || !path.parent().is_some_and(std::path::Path::is_dir) {
+                *verdict = None;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Plan (through the session's cache) and run, streaming every event into the channel, then send `ExportDone`.
@@ -505,6 +579,26 @@ pub fn start_scan(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_replaced_preview_stops_checking_destinations() {
+        let cancel = engine::api::CancelToken::default();
+        let mut visited = 0;
+        let paths = ["first", "second", "third"].iter().map(|p| {
+            visited += 1;
+            if visited == 2 {
+                cancel.cancel();
+            }
+            std::path::Path::new(p)
+        });
+        let result = super::check_destinations(
+            &mut Default::default(),
+            std::path::Path::new(""),
+            paths,
+            &cancel,
+        );
+        assert_eq!(visited, 2);
+        assert!(result.is_err());
+    }
     #[test]
     fn a_panicking_plan_is_a_plan_failure_of_its_generation() {
         let r = super::plan_result(|| panic!("boom"));

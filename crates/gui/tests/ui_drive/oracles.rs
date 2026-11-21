@@ -24,17 +24,24 @@ pub const ORACLES: &[(&str, Oracle)] = &[
 
 /// Exactly one set is selected and the selection is that set (`/selection` starts with `set:`).
 fn one_set_open(m: &AppModel) -> Result<Option<String>, String> {
-    let sel = m.selected_sets();
-    if !matches!(m.selection, Selection::Set(_)) {
+    if !matches!(&m.selection, Selection::Set(_) | Selection::SetId(_)) {
         return Err(format!(
             "the open selection is {:?}, not a set",
             m.selection
         ));
     }
-    if sel.len() != 1 {
-        return Err(format!("{} sets selected, not one: {sel:?}", sel.len()));
+    if m.in_bulk() {
+        return Err("more than one set selected".into());
     }
-    Ok(None)
+    let active = m.resolved_selection();
+    let v = active
+        .view()
+        .ok_or_else(|| format!("{:?} has no card", active.selection))?;
+    let ids = m.selected_set_ids();
+    match ids.as_slice() {
+        [id] if id == &v.id => Ok(None),
+        _ => Err(format!("expected only {}, got {ids:?}", v.id)),
+    }
 }
 
 // ---- the Sets column filter, one predicate per row of sets-column/goals.md "Filters and controls" ----
@@ -168,15 +175,17 @@ fn all_parts(m: &AppModel) -> Result<Option<String>, String> {
 /// Exactly one set is selected and the Sets filter hides it, and the model reports it hidden (the column's
 /// "{id} is hidden by the Sets filter" strip). The set shown again is a note, not a pass: the goal is the hidden state.
 fn selected_kept_while_hidden(m: &AppModel) -> Result<Option<String>, String> {
-    let sel = m.selected_sets();
-    let [key] = sel.as_slice() else {
-        return Err(format!("{} sets selected, not one", sel.len()));
-    };
-    let views = sets::views(m);
-    let Some(i) = views.iter().position(|v| v.key == *key) else {
-        return Err(format!("the selected set {key} has no card"));
-    };
-    let id = &views[i].id;
+    if !matches!(m.selection, Selection::Set(_) | Selection::SetId(_)) || m.in_bulk() {
+        return Err(format!(
+            "{} sets selected, not one",
+            m.selected_set_ids().len()
+        ));
+    }
+    let active = m.resolved_selection();
+    let i = active
+        .index
+        .ok_or_else(|| format!("the selected set {:?} has no card", active.selection))?;
+    let id = &active.views[i].id;
     let hidden = !m.visible_sets().contains(&i);
     match (hidden, m.selected_set_hidden_by_filter()) {
         (true, Some(h)) if h == *id => Ok(None),

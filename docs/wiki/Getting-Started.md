@@ -41,15 +41,15 @@ Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alp
 
 ### Check the set
 
-Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TruePBR settings are optional, and **Matching** stays on the diffuse path.
+Select your set in the Sets column. In the demo shown below, choose `textures/architecture/stone/stonewall` and open **Set**. For the iron plate example, choose `ironplate`, check that **Shader** reads `pbr` (auto) and leave **Matching** on the diffuse path.
 
-![The set editor for a set in the demo project.](../img/gui/GUI-Set-Editor/set-editor.png)
+![The Set tab for textures/architecture/stone/stonewall in the demo project.](../img/gui/GUI-Set-Editor/set-editor.png)
 
 ### Export
 
 1. Pick **Export to**. Each project remembers its own folder; the rule is on [Main window](GUI-Main-Window.md#export-to).
-2. Optional: in the JSON editor (**Export to ▾ → PGPatcher JSON editor…**), set **JSON name:**, the name of the PGPatcher JSON. It defaults to the folder name.
-3. Press **Export**. If Review opens first, something is undecided or blocking: fix it or tick it there, then press Review's **Export** ([Review and Export](GUI-Review-and-Export.md)).
+2. Optional: in the JSON editor (**Tools ▾** → **PGPatcher JSON editor…**), set **JSON name:**, the name of the PGPatcher JSON. It defaults to the folder name.
+3. Click **Review n files…**, check the output list and resolve any blockers. Press Review's **Export** to write the files. [Review and Export](GUI-Review-and-Export.md).
 
 ![The Review tab in the demo project.](../img/gui/GUI-Review-and-Export/review-tab.png)
 

@@ -140,6 +140,104 @@ fn bc5_on_normal_blocks_unless_allowed() {
 }
 
 #[test]
+fn xy_only_keep_is_an_error_even_when_the_format_is_allowed() {
+    use Subtype::{LandscapeNormal, Normal, PbrNormal, SkinDetail};
+    let resolve = |target, st: Subtype, format: Format, base, allow: &[Code]| {
+        let j = run(
+            target,
+            "textures/a/x_n.png",
+            Some("n"),
+            &["n"],
+            opaque(),
+            &[
+                &format!("subtype={}", st.id()),
+                &format!("format={}", format.id()),
+                &format!("mips.normal_base={base}"),
+                "color.tag=unorm",
+                "mips.levels=1",
+            ],
+            allow,
+        );
+        assert_eq!(j.profile.format, format);
+        j
+    };
+    let ack = &[Code::FmtBc5Normal];
+    for (target, st, resolved, allow) in [
+        (Target::Cs, Normal, Normal, ack.as_slice()),
+        (Target::Cs, LandscapeNormal, LandscapeNormal, ack),
+        (Target::Cs, PbrNormal, PbrNormal, ack),
+        (Target::Vanilla, Normal, Normal, ack),
+        (Target::Vanilla, LandscapeNormal, LandscapeNormal, ack),
+        (
+            Target::Vanilla,
+            PbrNormal,
+            Normal,
+            &[Code::FmtBc5Normal, Code::CfgUnavailable],
+        ),
+    ] {
+        for format in [Format::Bc5, Format::Rg8, Format::Bc4, Format::R8] {
+            let j = resolve(target, st, format, "keep", allow);
+            assert_eq!(j.profile.subtype, resolved);
+            assert_eq!(
+                j.status,
+                JobStatus::Error {
+                    codes: vec![Code::CfgInvalid]
+                },
+                "{target:?} {st:?} {format:?}: {:?}",
+                j.warnings
+            );
+            let error = j
+                .warnings
+                .iter()
+                .find(|w| w.code == Code::CfgInvalid)
+                .unwrap();
+            assert!(
+                error.message.contains("XYZ") && error.message.contains("renormalize"),
+                "{}",
+                error.message
+            );
+            assert_eq!(
+                resolve(target, st, format, "renormalize", allow).status,
+                JobStatus::Ready
+            );
+        }
+        assert_eq!(
+            resolve(target, st, Format::Bc7, "keep", allow).status,
+            JobStatus::Ready
+        );
+    }
+    let j = resolve(Target::Vanilla, PbrNormal, Format::Bc5, "keep", ack);
+    assert_eq!(j.profile.subtype, PbrNormal);
+    assert_eq!(
+        j.status,
+        JobStatus::Blocked {
+            codes: vec![Code::CfgUnavailable]
+        }
+    );
+    let skin = resolve(Target::Cs, SkinDetail, Format::Bc5, "keep", &[]);
+    assert_eq!(skin.profile.subtype, SkinDetail);
+    assert_eq!(skin.status, JobStatus::Ready);
+}
+
+#[test]
+fn skin_detail_accepts_project_wide_keep_with_bc5() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x_detail_n.png",
+        Some("detail_n"),
+        &["detail_n"],
+        opaque(),
+        &["subtype=skin_detail", "mips.normal_base=keep"],
+        &[],
+    );
+    assert_eq!(j.profile.subtype, Subtype::SkinDetail);
+    assert_eq!(j.profile.mips.normal_base, NormalBase::Keep);
+    assert_eq!(j.profile.format, Format::Bc5);
+    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+    assert_eq!(j.status, JobStatus::Ready);
+}
+
+#[test]
 fn pbr_albedo_unavailable_under_vanilla_and_srgb_is_an_error_there() {
     let j = run(
         Target::Vanilla,

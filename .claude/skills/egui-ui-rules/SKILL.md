@@ -12,7 +12,7 @@ For visual feel (Style and Visuals tokens, hover and press feel, tooltips, toast
 
 ## How to use this
 
-1. **Read `Cargo.toml` first.** Note the exact egui, eframe and egui_kittest versions, and write code for those versions only. All the egui-* skills now target egui 0.37.0 (`App::ui`), and the gotchas here were measured on 0.37.0 in Tessalith. On another version, check each gotcha that matters against that version's egui source in the cargo registry. Run `cargo check` after each edit. [Report; E37 T11]
+1. **Read `Cargo.toml` first.** Note the exact egui, eframe and egui_kittest versions, and write code for those versions only. All the egui-* skills target egui 0.37.0 (`App::ui`), and the gotchas here were measured on 0.37.0 in Tessalith. On another version, check each gotcha that matters against that version's egui source in the cargo registry. Run `cargo check` after each edit. [Report; E37 T11]
 2. While building or reviewing, go through the groups below. The long gotcha list, with the egui-source reason for each item, is in `references/gotchas-egui-0.37.md`; its section 0 lists the names 0.37 changed. Read it before you write panel, id, scroll, collapsing, drag-and-drop, popup or accessibility code.
 3. The code for each rule is in `references/examples.md`, taken from Tessalith's `crates/gui/src/ui/`.
 4. Write tests by `references/kittest.md`. Layout bugs here were caught by RED-first pins and by screenshots, not by reading code.
@@ -23,7 +23,7 @@ For visual feel (Style and Visuals tokens, hover and press feel, tooltips, toast
 - [Spec]: the layout v2 design (`converter/docs/superpowers/specs/2026-10-17-gui-layout-v2-design.md`).
 - [Rev-A n] / [Rev-B n]: designer reviews A and B, proposal n. Only A1-A12, B2 and the Sets filter were built.
 - [B1/B2/B3 final In], [B1/B2/B3 pre Kn]: the final review or preflight scan of branch 1, 2 or 3.
-- [CAn] / [CCn] / [CDn]: Tessalith `docs/DECISIONS.md` Notes CA, CC and CD.
+- [CAn] / [CCn] / [CDn]: Tessalith `.claude/DECISIONS-1.x.md` Notes CA, CC and CD.
 - [E37 Tn]: Tessalith's egui 0.37 upgrade, task n (tests `crates/gui/tests/egui_gotchas.rs`, `accepted_037.rs`, `accessible_names.rs`).
 
 ## 1. Layout and information hierarchy
@@ -125,7 +125,7 @@ The details and code are in `references/kittest.md`.
 2. **Pin layout RED-first.** "No widget past its column edge", "the value's `rect.max.x <= panel.max.x`", "content width <= view width". Show the test failing before the fix. [B1 fix I1/I2; CC20]
 3. **For clipped widgets, use the clipped `interact_rect` from `ctx.viewport(|v| v.this_pass.widgets)`.** AccessKit bounds aren't clipped. [B1 fix I1]
 4. **Every shown scroll bar has a `Role::ScrollBar` node, but its opacity is paint-only.** This holds for the thin style and for egui's default floating one alike. Assert that a bar exists from its nodes; prove that it is visible with screenshots. [CC21; E37 T11]
-5. **A viewport that never goes idle (a spinner, a 3D view) needs `run_steps(n)`, not `run()`.** A tooltip needs `run()`, to wait out egui's delay. With `run_steps`, a tooltip's text reaches the AccessKit tree one step later than on 0.36.2, because 0.37 leaves the tooltip's invisible sizing pass out of the tree (Tessalith's `TOOLTIP_STEPS` is 4). [CLAUDE.md; B3 3.1 report; E37 T10]
+5. **A viewport that never goes idle (a spinner, a 3D view) needs `run_steps(n)`, not `run()`.** A tooltip needs `run()`, to wait out egui's delay. With `run_steps`, a tooltip's text reaches the AccessKit tree one step later than on 0.36.2, because 0.37 leaves the tooltip's invisible sizing pass out of the tree (Tessalith's `TOOLTIP_STEPS` is 4). [B3 3.1 report; E37 T10]
 6. **Tests never touch real app-data folders.** Redirect `%APPDATA%` and `%LOCALAPPDATA%` to a temp dir, in a test binary of its own, because the environment is process-wide. [CA23; global constraints]
 7. **A comment-only test passes.** Every test asserts something, and a mutation that disables the fix must fail it. [B3 progress; B3 final Strengths]
 8. **A TextEdit's hint is a placeholder, not a label, and a combo's selected text is its value, not its name.** Find a box or a combo by role and name (`get_by_role_and_label(Role::ComboBox, "Sort order")`), or a combo by its value with `get_by_value(..)`. A label query never matches a hint. [B3 pre K21; B3 3.3 report; E37 T2, T11]

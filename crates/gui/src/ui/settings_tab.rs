@@ -3,7 +3,7 @@
 //! only: every edit is collected and applied once the tab is drawn.
 use super::header::{self, target_help, target_name};
 use crate::look::Combo036 as _;
-use crate::model::{AppModel, CentreTab};
+use crate::model::{AppModel, CentreTab, EXPORT_WITHOUT_REVIEW_WAIT};
 use crate::settings::ChecksSettings;
 use eframe::egui;
 use engine::config::Target;
@@ -34,6 +34,7 @@ enum Act {
     CacheMb(u32),
     /// (Textures shown, Sets shown).
     Columns(bool, bool),
+    ExportWithoutReview(bool),
 }
 
 /// The tab, in the centre column or in its popped-out window.
@@ -64,6 +65,7 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
                 // As Export to ▾'s: the button is enabled only when the folder is there.
                 let _ = model.open_export_folder();
             }
+            Act::ExportWithoutReview(on) => model.set_export_without_review(on),
             Act::Live(on) => model.set_live(on),
             Act::Checks(c) => model.set_checks(c),
             Act::CacheMb(mb) => model.set_analysis_cache_mb(mb),
@@ -101,9 +103,40 @@ fn project(ui: &mut egui::Ui, model: &mut AppModel, acts: &mut Vec<Act>) {
         acts.push(Act::Preset(p));
     }
     export_folder_row(ui, model, acts);
+    if let Some(on) = opt_out_checkbox(
+        ui,
+        model,
+        "Export without review",
+        "For this project only. Off: the header's Export opens Review first.",
+    ) {
+        acts.push(Act::ExportWithoutReview(on));
+    }
     ui.weak(
         "Mode and Preset save with Save. The export folder saves at once unless sdc-project.toml has unsaved edits.",
     );
+}
+
+/// The project's "Export without review" box, here and in Review's footer: the text is the accessible name. Drawn off
+/// with its reason while the folder's open can be cancelled (ruling 3c-13, the setter refuses then) and while
+/// `sdc-project.toml` takes no edit. Returns the new value when it was toggled.
+pub(super) fn opt_out_checkbox(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    text: &str,
+    hover: &str,
+) -> Option<bool> {
+    let off = if model.can_cancel_open() {
+        Some(EXPORT_WITHOUT_REVIEW_WAIT.to_string())
+    } else {
+        model.sets_read_only_reason()
+    };
+    let mut on = model.export_without_review();
+    let r = ui.add_enabled(off.is_none(), egui::Checkbox::new(&mut on, text));
+    let r = match &off {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r.on_hover_text(hover),
+    };
+    r.changed().then_some(on)
 }
 
 /// Note FI16 (owner O7), moved from the Presets tab (Note JI1): the project's Mode (`target` in `sdc.toml`). The pick
@@ -241,7 +274,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                             r
                         };
                         // Stat only while the tab is drawn (rule 9.4).
-                        let state = model.export_folder_state();
+                        let state = model.export_folder_state().folder;
                         let r = button(ui, state.is_ok(), "Open", OPEN_NAME);
                         let open = match &state {
                             Ok(p) => r.on_hover_text(format!("Show {} in Explorer", p.display())),

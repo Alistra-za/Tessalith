@@ -8,9 +8,9 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 
 | Shader | Required maps | Optional maps | vanilla |
 |---|---|---|---|
-| `pbr` | albedo, `_n`, `_rmaos` | `_g` emissive, `_s` subsurface/coat, `_cnr`, `_f`, `_p` | no |
+| `pbr` | albedo, `_n` (`pbr_normal`, `normal` or `landscape_normal`), `_rmaos` <!-- D:JS4 --> | `_g` emissive, `_s` subsurface/coat, `_cnr`, `_f`, `_p` | no |
 | `pbr_landscape` | albedo (or landscape diffuse), `_n` | `_rmaos`, `_p` | no |
-| `pbr_grass` | albedo, `_n`, `_rmaos` | `_s` | no |
+| `pbr_grass` | albedo, `_n` (`pbr_normal`, `normal` or `landscape_normal`), `_rmaos` | `_s` | no |
 | `advanced_skin` | skin albedo, `_n`/`_msn`, `_rfaos` | `_sk`, `_wet` | no |
 | `default` | diffuse, `_n` | `_b`/`_bl` | yes |
 | `envmap` | diffuse, `_n` | `_m`, `_e` | yes |
@@ -24,7 +24,9 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 | `landscape` | diffuse, `_n` | | yes |
 | `complex_grass` | the complex-grass texture ([layout](PBR-Landscape.md#complex-grass)) | | yes |
 
-- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 --> A vanilla normal in a `pbr`/`pbr_grass` set with no `pbr_normal` gives one note instead: [SHADER-NORMAL-SPECULAR](Diagnostic-Codes.md#shaders-skin-and-grass).
+- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 -->
+
+For roughness inputs, see [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). For shared specular, see [Keep alpha](GUI-Problems.md#keep-alpha).
 
 ## How the shader is picked
 
@@ -57,13 +59,20 @@ A `_fuzz` or `_sheen` map picks no shader before rule 11: another map, such as a
 
 In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)).
 
+### Picking a shader for a normal
+
+The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. When a normal follows its set’s shader, Tessalith changes its settings only if the entry controls one input. The same check applies to **Keep alpha**, a shader pick, the diffuse’s **Switch** and **Revert**, and **Reset all**.
+
+If a cube face is read through `wall.png.tga`, recording its type can also mark `wall.png` as a cubemap. A mesh scan can write an alpha setting for `wall.png` that also applies to `wall.png.tga`. If the second file is a shared normal, **Remove** can drop its alpha without a **Keep alpha** row, as before this release. <!-- D:JS5,JS6 -->
+
 ## Also export as Vanilla and CM
 
 For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is converted from its albedo, `_n`, `_rmaos` (or raw roughness, metallic and AO maps) and `_p`; every other texture is copied from the PBR folder, or encoded when the copy would differ.
 
 ### Turn it on
 
-- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, the **Also export as** column in Review, or a set's [Also export tab](GUI-Set-Editor.md#also-export-tab). While a tick is on, Export always opens Review.
+- Open your `cs` project. Under **Export to ▾**, tick **Also export as Vanilla** or **Also export as Complex material**, or both. You can also set these in whole-project Review under **Options** or in a set's [Also export tab](GUI-Set-Editor.md#also-export-tab).
+- Either tick opens Review for a whole-project export. A [set or group export](GUI-Review-and-Export.md#exporting-part-of-the-project) ignores both ticks and can start immediately if the selection is clean and **Export without review** is on.
 - **Saved as** `[export] also` in the project `sdc.toml`.
 - **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
@@ -84,7 +93,7 @@ Three folders side by side, where `<project>` is the opened folder's name:
 
 ### Where the folders go
 
-In Review's **Also export as** column:
+Open **Options** in Review to set the destination and folder names.
 
 - **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder.
 - The three folder names: empty means the default name, shown as the hint.
@@ -99,7 +108,7 @@ In Review's **Also export as** column:
 
 ### The recipe
 
-The recipe is one box per `[export.legacy]` key, under **All sets in this project** in the [Also export tab](GUI-Set-Editor.md#also-export-tab) of any set; it applies to every set. Review's **Recipe settings…** opens that tab on a PBR set. <!-- D:JI2 --> Keys, defaults and ranges are on [Project config](Project-Config.md#export).
+The recipe is one box per `[export.legacy]` key, under **All sets in this project** in the [Also export tab](GUI-Set-Editor.md#also-export-tab) of any set; it applies to every set. In Review's **Options**, **Recipe settings…** opens the selected PBR set's tab. With another set selected, it opens the first unskipped PBR set, or the first PBR set if all are skipped. <!-- D:JI2,JY15 --> Keys, defaults and ranges are on [Project config](Project-Config.md#export).
 
 ### Files this export did not write
 

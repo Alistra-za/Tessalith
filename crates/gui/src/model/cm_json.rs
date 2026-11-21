@@ -116,6 +116,8 @@ use engine::sets::same_id;
 impl AppModel {
     /// Set `set`'s `[sets.cm]` block, as the document holds it.
     pub fn cm_block(&self, set: &str) -> Option<CmBlock> {
+        #[cfg(feature = "test-hooks")]
+        self.doc_block_reads.set(self.doc_block_reads.get() + 1);
         self.sets_doc
             .as_ref()?
             .entries()
@@ -187,25 +189,27 @@ pub fn to_text(values: &Map<String, Json>) -> String {
 /// The set's complex `_m` members, as item keys (design §4): resolved `complex_material`, or `envmask` in a set whose
 /// shader (the choice, else the engine's pick) is Complex Material.
 pub fn cm_members(m: &AppModel, v: &SetView) -> Vec<String> {
-    let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
     v.members
         .iter()
         .filter(|k| {
             m.item(k)
                 .and_then(|i| i.job.as_ref())
-                .is_some_and(|j| match j.profile.subtype {
-                    Subtype::ComplexMaterial => true,
-                    Subtype::Envmask => shader == Some(Shader::ComplexMaterial),
-                    _ => false,
-                })
+                .is_some_and(|j| is_cm_member(v, j.profile.subtype))
         })
         .cloned()
         .collect()
 }
 
+pub(super) fn is_cm_member(v: &SetView, subtype: Subtype) -> bool {
+    subtype == Subtype::ComplexMaterial
+        || (subtype == Subtype::Envmask
+            && v.shader_choice.or(v.shader.as_ref().map(|p| p.shader))
+                == Some(Shader::ComplexMaterial))
+}
+
 /// Whether the set editor draws the card: a complex `_m` member, or a stored block (never hide the user's values).
-pub fn shows_card(m: &AppModel, v: &SetView) -> bool {
-    !cm_members(m, v).is_empty() || m.cm_block(&v.id).is_some()
+pub fn shows_card(_: &AppModel, v: &SetView) -> bool {
+    v.shows_cm_card
 }
 
 /// One member's JSON (design §6).
@@ -305,7 +309,7 @@ pub fn refuse_clashes(out: &mut [CmTarget], exporting: impl Fn(&str) -> bool) {
 
 use super::history::{orphans, records_at};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// What an export about to start writes once it has ended (computed when it starts, like the CS PBR files).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -382,6 +386,11 @@ pub fn prepare(m: &AppModel) -> Option<PendingCm> {
     Some(p)
 }
 
+/// The `_m` a complex material JSON at `path` belongs to: it is written only while that file is on disk.
+fn json_dds(path: &Path) -> PathBuf {
+    path.with_extension("dds")
+}
+
 /// After a clean export (design §6): write each file whose `_m` is on disk, unless it was edited outside Tessalith,
 /// then report the recorded files this run did not write (D7: never deleted). `shas` is the record (path → hash of
 /// what was last written there); returns the new record.
@@ -396,7 +405,7 @@ pub fn finish(
     let mut written = 0;
     for (rel, text) in &p.files {
         let path = p.root.join(rel);
-        let dds = path.with_extension("dds");
+        let dds = json_dds(&path);
         if !dds.is_file() {
             notes.push(format!(
                 "{}: {} was not exported; JSON not written",
@@ -464,6 +473,27 @@ impl super::json_finish::Guarded for PendingCm {
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
         d.set_cm_json_shas(shas)
+    }
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        // `finish` writes a file whose `_m` is on disk after the run (and its phase): decided by the run when this run
+        // may write the `_m`, even when it is there now (ruling 3c-56); else decided now by its presence.
+        let files = self
+            .files
+            .iter()
+            .map(|(rel, text)| (self.root.join(rel), text))
+            .filter_map(|(path, text)| {
+                let dds = json_dds(&path);
+                if written(&dds) {
+                    Some((path, None))
+                } else {
+                    dds.is_file().then(|| (path, Some(text.clone())))
+                }
+            })
+            .collect();
+        vec![(self.root.clone(), files)]
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_cm_json_shas(shas);
     }
 }
 

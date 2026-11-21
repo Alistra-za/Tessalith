@@ -16,6 +16,7 @@ pub const STRIP_WIDTH: f32 = 24.0;
 /// The tile size a fresh install starts at (the buttons run 64 up to `ColumnPrefs::tile_cap`, 128 at 100 %; Note FC13); the narrowest column is sized for it.
 const TILE: f32 = crate::model::texture_view::ColumnPrefs::TILE_DEFAULT;
 const MEMBER: f32 = 32.0;
+pub(super) const MEMBER_HINT: &str = "Shift+click to open its settings.";
 const TILE_MARGIN: f32 = 4.0;
 const TILE_STROKE: f32 = 2.0;
 /// Scroll bar and margin allowance when fitting tiles to a row.
@@ -348,8 +349,9 @@ pub struct ColumnStats {
     pub vram: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct StatsKey {
+    views: std::sync::Weak<Vec<crate::model::sets::SetView>>,
     items: u64,
     filter: crate::model::Filter,
     search: String,
@@ -362,7 +364,29 @@ struct StatsKey {
 
 /// `changed on disk` and `undecided` stay uncounted here: they are one cheap pass and move without the items revision.
 pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStats> {
+    let views = crate::model::sets::views(model);
+    let id = egui::Id::unique("column-stats");
+    type Stats = Option<(StatsKey, Arc<ColumnStats>)>;
+    if let Some(stats) = ctx.data_mut(|d| {
+        let cache = d.get_temp_mut_or_insert_with::<Stats>(id, || None);
+        cache
+            .as_ref()
+            .filter(|(k, _)| {
+                k.views.as_ptr() == Arc::as_ptr(&views)
+                    && k.items == model.items_rev()
+                    && k.filter == model.filter
+                    && k.search == model.search
+                    && k.sort == model.prefs.sort
+                    && k.selection == model.selection
+                    && k.selection_rev == model.multi.selection_rev
+                    && k.sizes == model.sizes_rev()
+            })
+            .map(|(_, stats)| stats.clone())
+    }) {
+        return stats;
+    }
     let key = StatsKey {
+        views: Arc::downgrade(&views),
         items: model.items_rev(),
         filter: model.filter.clone(),
         search: model.search.clone(),
@@ -371,22 +395,16 @@ pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStat
         selection_rev: model.multi.selection_rev,
         sizes: model.sizes_rev(),
     };
-    let id = egui::Id::unique("column-stats");
-    if let Some((k, s)) = ctx.data(|d| d.get_temp::<(StatsKey, Arc<ColumnStats>)>(id)) {
-        if k == key {
-            return s;
-        }
-    }
     let items = model.selected_items();
     // Asking for the sizes can start a header job; the key above then changes when it lands.
     let vram = model.vram_text(&items);
     let s = Arc::new(ColumnStats {
         summary: model.selection_summary(false),
         chosen: items.into_iter().collect(),
-        sets: model.selected_sets().into_iter().collect(),
+        sets: model.selected_set_ids().into_iter().collect(),
         vram,
     });
-    ctx.data_mut(|d| d.insert_temp(id, (key, s.clone())));
+    ctx.data_mut(|d| d.insert_temp(id, Some((key, s.clone()))));
     s
 }
 
@@ -1007,12 +1025,12 @@ pub(super) fn interact_stroke(
 /// T7 K10: the dragged texture's ghost, a 40 x 40 thumbnail beside the pointer. Painted once per frame from the
 /// payload, not from the source widget, so it survives a source that scrolled out of a virtualised list.
 pub(super) fn drag_ghost(ctx: &egui::Context, model: &AppModel, thumbs: &mut ThumbCache) {
-    let Some(p) = egui::DragAndDrop::payload::<crate::ui::sets_column::DragItem>(ctx) else {
+    let Some(key) = crate::ui::sets_column::dragged_item_key(ctx) else {
         return;
     };
     // No repaint request: the ghost moves only with pointer events, and egui repaints after the release frame's
     // events, which takes the ghost away (final review D1).
-    let (Some(pos), Some(item)) = (ctx.pointer_interact_pos(), model.item(&p.0)) else {
+    let (Some(pos), Some(item)) = (ctx.pointer_interact_pos(), model.item(&key)) else {
         return;
     };
     let rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 12.0), egui::Vec2::splat(40.0));
@@ -1050,8 +1068,8 @@ pub(super) fn member(
     locked: bool,
     pgp_locked: bool,
     thumbs: &mut ThumbCache,
-    // A line added to the one hover (a set card's "borrowed from …").
-    note: Option<&str>,
+    // A line added to the one hover (a set card's "borrowed from …"), built only when the hover shows.
+    note: Option<&dyn Fn() -> String>,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(MEMBER, MEMBER), egui::Sense::click_and_drag());
@@ -1079,40 +1097,69 @@ pub(super) fn member(
             egui::Stroke::new(if selected { 2.0 } else { 1.0 }, color),
             egui::StrokeKind::Inside,
         );
-        // F3a Task 8: the member fills a locked slot.
-        if locked {
-            ui.painter().text(
-                rect.right_top() + egui::vec2(-1.0, 1.0),
-                egui::Align2::RIGHT_TOP,
-                "🔒",
-                egui::FontId::proportional(10.0),
-                ui.visuals().strong_text_color(),
-            );
-        }
-        // Note AN, FC9 (AN6): PGPatcher keeps the mesh's own texture in this member's slot: a grey padlock, not a status.
-        if pgp_locked {
-            ui.painter().text(
-                rect.left_top() + egui::vec2(1.0, 1.0),
-                egui::Align2::LEFT_TOP,
-                "🔒",
-                egui::FontId::proportional(10.0),
-                ui.visuals().weak_text_color(),
-            );
-        }
+        paint_locks(ui, rect, locked, pgp_locked);
     }
-    let mut hover = item.name.clone();
+    // built when the tooltip shows or a screen reader reads the node, not per frame; the AccessKit description says
+    // what the hover says (final wave Group 5: the file, its locks and the caller's note, such as a link's target)
+    let text = || {
+        let mut hover = item.name.clone();
+        if locked {
+            hover.push_str(" (slot pinned)");
+        }
+        if pgp_locked {
+            hover.push_str(" (kept by PGPatcher: the mesh's original texture is used)");
+        }
+        if let Some(n) = note {
+            hover.push('\n');
+            hover.push_str(&n());
+        }
+        hover.push('\n');
+        hover.push_str(MEMBER_HINT);
+        hover
+    };
+    ui.ctx()
+        .accesskit_node_builder(response.id, |b| b.set_description(text()));
+    // Note JW7: the chip can still be the drag target under +K. Give the click target its hover first.
+    if response.contains_pointer()
+        && ui
+            .ctx()
+            .viewport(|vp| vp.hits.click.is_some_and(|hit| hit.id != response.id))
+    {
+        return response;
+    }
+    response.on_hover_ui(|ui| {
+        ui.label(text());
+    })
+}
+
+/// The lock glyphs of a chip at `rect`, the one copy of their geometry (final wave Group 5 and ledger 92): the slot
+/// pin top right (F3a Task 8), PGPatcher's lock top left (Note AN, FC9 (AN6): a grey padlock, not a status). Each is a
+/// `LOCK_GLYPH` px glyph `LOCK_INSET` px in from its corner.
+pub(super) fn paint_locks(ui: &egui::Ui, rect: egui::Rect, locked: bool, pgp_locked: bool) {
     if locked {
-        hover.push_str(" (slot pinned)");
+        ui.painter().text(
+            rect.right_top() + egui::vec2(-LOCK_INSET, LOCK_INSET),
+            egui::Align2::RIGHT_TOP,
+            "🔒",
+            egui::FontId::proportional(LOCK_GLYPH),
+            ui.visuals().strong_text_color(),
+        );
     }
     if pgp_locked {
-        hover.push_str(" (kept by PGPatcher: the mesh's original texture is used)");
+        ui.painter().text(
+            rect.left_top() + egui::vec2(LOCK_INSET, LOCK_INSET),
+            egui::Align2::LEFT_TOP,
+            "🔒",
+            egui::FontId::proportional(LOCK_GLYPH),
+            ui.visuals().weak_text_color(),
+        );
     }
-    if let Some(n) = note {
-        hover.push('\n');
-        hover.push_str(n);
-    }
-    response.on_hover_text(hover)
 }
+
+/// A chip lock's glyph size and its inset from the chip's corner (`paint_locks`; `sets_column`'s link mark sits
+/// between the two lock cells).
+pub(super) const LOCK_GLYPH: f32 = 10.0;
+pub(super) const LOCK_INSET: f32 = 1.0;
 
 /// The export folder as a prefix of set keys: `<export folder>/`.
 pub fn export_prefix(model: &AppModel) -> String {

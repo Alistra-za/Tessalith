@@ -119,7 +119,7 @@ fn a_bc7_pin_on_a_skin_sk_resolves_to_bc4_on_open() {
     let (line, _) = m.encoding_note.clone().expect("an info note");
     assert!(line.contains("body_sk.png"), "{line}");
     assert!(line.contains("BC4"), "{line}");
-    assert!(m.prompts_unsaved(), "Save writes the fix");
+    assert!(m.unsaved(), "Save writes the fix");
     // No user step caused it, so its Info row offers no Undo: the rule would only fix it again.
     let rows = sdc_gui::model::bottom::problems(&m);
     let row = rows

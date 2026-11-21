@@ -299,7 +299,7 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
     // Allowed on the diffuse it is now (Note JG2), not on complex grass (BC7 linear only).
     m.set_format("plants/g.png", Format::Bc3, ColorTag::Unorm);
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let last = m.history.undo.last().cloned().expect("a step");
+    let mut last = m.history.undo.last().cloned().expect("a step");
     // Accepted from the scan's plan on: a High type accepted before it would be recorded, and a recorded type is the
     // project's, which the scan does not re-type (Note FC1, R1/R5): under accept High from the open this path cannot occur.
     m.accept = engine::policy::AcceptSuggestions::High;
@@ -310,14 +310,6 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
     let p = m.project.as_ref().unwrap();
     assert_eq!(p.file_value("plants/g.png", "format"), None);
     let n = m.history.undo.len();
-    // Note FC1: the re-type is then recorded in the project as its own automatic step.
-    // (Every file of the folder: this is the first plan that accepts High suggestions.) Note HR2: the GRAS shape has
-    // no alpha property, so the mesh's `remove` is recorded too and the step counts values.
-    let label = &m.history.undo[n - 1].label;
-    assert!(
-        label.starts_with("Set ") && label.ends_with(" values automatically"),
-        "{label}"
-    );
     assert_eq!(
         p.file_value("plants/g.png", "subtype"),
         Some(serde_json::json!("complex_grass"))
@@ -326,12 +318,28 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
         p.file_value("plants/g.png", "alpha.policy"),
         Some(serde_json::json!("remove"))
     );
-    assert_eq!(m.history.undo[n - 2].label, "Encoding follows type");
-    assert_eq!(
-        m.history.undo[n - 3],
-        last,
-        "the last step before the scan is unchanged"
-    );
+    assert_eq!(m.history.undo[n - 1].label, "Encoding follows type");
+    let writes = [
+        ("landscape/leaf.png", "subtype", "landscape_diffuse"),
+        ("landscape/odd.png", "subtype", "landscape_diffuse"),
+        ("landscape/rock01.png", "subtype", "landscape_diffuse"),
+        ("landscape/rock01_normal.png", "subtype", "pbr_normal"),
+        ("plants/g.png", "subtype", "complex_grass"),
+        ("plants/g.png", "alpha.policy", "remove"),
+    ]
+    .map(|(key, field, value)| sdc_gui::project::AutoWrite {
+        key: key.into(),
+        field,
+        value: serde_json::json!(value),
+        only_if: None,
+    });
+    for snapshot in [&mut last.before, &mut last.after] {
+        snapshot.sdc_toml = sdc_gui::project::apply_auto(&snapshot.sdc_toml, &writes);
+        snapshot
+            .project
+            .push_str("auto_normal = { \"landscape/rock01_normal.png\" = \"pbr_normal\" }\n");
+    }
+    assert_eq!(m.history.undo[n - 2], last);
 }
 
 /// Note FC1: with the scan database there at the first plan (accept High, as the app), the mesh vote's sub-type is

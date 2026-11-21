@@ -3,6 +3,49 @@
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, Target};
 
+pub(super) fn borrowed_line(data: &serde_json::Value, packed: bool) -> String {
+    let output = std::path::Path::new(data["output"].as_str().unwrap_or_default());
+    let name = output.file_name().unwrap_or_default().to_string_lossy();
+    let n = data["slot"].as_u64().unwrap_or_default();
+    let lender = data["lender"].as_str().unwrap_or_default();
+    let count = data["more"].as_array().map_or(0, Vec::len);
+    let more = if count == 0 {
+        String::new()
+    } else {
+        format!(" and {count} more")
+    };
+    let sources = data["causes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let source = c["source"].as_str().unwrap_or_default();
+            match (c["shared"] == true, c["set"].as_str()) {
+                (true, Some(owner)) => format!("{source}, which this set shares from {owner}"),
+                (true, None) => format!("{source}, which this set shares"),
+                (false, _) => source.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let how = if packed { "packed from" } else { "from" };
+    format!("Slot {n} uses {lender}'s file, but this set still writes its own {name}{more}, {how} {sources}.")
+}
+
+pub(crate) fn borrowed_detail(w: &engine::codes::Warning) -> String {
+    let mut detail = String::from("Remove the share or the own file, or drop the borrow. If a mesh or another mod uses the file, mark this row as intended.");
+    for path in w.data["more"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.as_str())
+    {
+        detail.push('\n');
+        detail.push_str(path);
+    }
+    detail
+}
+
 /// A mode's `sdc.toml` name (`target = "cs"`), as the header, the Settings tab and the unmatched-entries row (Note JI6)
 /// show it.
 pub fn target_name(t: Target) -> &'static str {
@@ -50,6 +93,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         DimTooLarge => "This texture is larger than the format allows — resize it",
         SetCompanionDds => "A companion file of this set is a DDS and can't be combined — use its original image",
         SetBakeRatio => "The maps of this set differ a lot in size — use matching sizes",
+        SetSlotBorrowedUnused => "This set borrows a slot and still writes its own file for it.",
         SugLowConfidence => "Tessalith isn't sure what this alpha means — choose what it means",
         SugContradiction => "The file name and the contents point to different types. Set the right one.",
         ValAlphaGuarantee => "The written alpha doesn't keep its guarantee — check the alpha settings",
@@ -72,14 +116,12 @@ pub fn code_sentence(code: Code) -> &'static str {
         PackDefaulted => "A packed channel had no input and got a default — add the missing map",
         PackSizeMismatch => "The packed maps have different aspect ratios — use maps of the same proportions",
         PackConflict => "A packed file collides with another output — remove one of them",
-        PackUnusedInput => "A packing input isn't used by this set — remove it or change the recipe",
-        PackRecipeConflict => "The packing recipe doesn't fit this set — change the recipe",
-        PackRecipeUnbuildable => "The packing recipe can't be built from this set — add the maps it needs",
+        PackUnusedInput => "A packing input isn't used by this set — remove it, or change the set's shader or the file's type",
+        PackRecipeConflict => "The two packed entries name different recipes — clear the recipe",
+        PackRecipeUnbuildable => "The written recipe can't be built from this set's maps — clear the recipe",
         ShaderUnavailable => "The chosen shader isn't available — pick another shader",
         ShaderExtraMap => "This set has a map its shader doesn't read — remove it or change the shader",
         ShaderMissingMap => "This set lacks a map its shader needs — add it or change the shader",
-        // Note JP3: an Info with a row, since the user acts on it.
-        ShaderNormalSpecular => "A PBR set uses a vanilla normal, whose alpha the shader doesn't read — switch it to PBR normal",
         GrassShape => "This grass texture has the wrong layout — use a grass atlas shape",
         GrassTopOpaque => "The tips of this grass texture are fully opaque — check its alpha",
         GrassNormals => "This grass texture's normals look wrong — check or regenerate them",
@@ -119,11 +161,10 @@ pub fn row_class(code: Code) -> RowClass {
     use RowClass::{Note, Problem};
     match code {
         // The Info codes, but the two the user acts on (CHK-GREEN-GUESS, DERIVE-NIF-SUGGEST).
-        // SHADER-NORMAL-SPECULAR is a note with a button (Note JP3).
         FmtHdrSource | CfgFileUnmatched | CfgFilterIgnored | DimResized | ResizeNoReference
         | SetMissingCompanion | SetEditStale | InDdsSkipped | InGreenUnstated | InAliasStale
         | OutKeptOlderEncode | OutKeptLowerTarget | PackSourceResized | ShaderAuto
-        | ShaderNormalSpecular | DeriveNotConverted | GenReplaced | GenAo => Note,
+        | DeriveNotConverted | GenReplaced | GenAo => Note,
         // The Warning codes whose output is valid as it is.
         DimNpot | EncWeightsIgnored | PackDefaulted | PackUnusedInput | ShaderExtraMap => Note,
         ChkGreenGuess | DeriveNifSuggest => Problem,
@@ -140,6 +181,7 @@ pub fn row_class(code: Code) -> RowClass {
         | DimFlowSmall
         | SetCompanionDds
         | SetBakeRatio
+        | SetSlotBorrowedUnused
         | SugContradiction
         | ValCoverage
         | ValMComplexMargin
@@ -195,24 +237,10 @@ pub fn note_sentence(w: &engine::codes::Warning) -> String {
         Code::ShaderExtraMap => member_and_shader(w).map(|(member, shader)| {
             format!("{member} isn't read by the {shader} shader. It is still converted, so nothing breaks.")
         }),
-        // Note JP3: `data.member` and `data.shader`, as SHADER-EXTRA-MAP's.
-        Code::ShaderNormalSpecular => member_and_shader(w).map(|(member, shader)| {
-            format!("{member} is a vanilla normal: the {shader} shader ignores the specular in its alpha. Use PBR normal to drop the alpha and bake any _rmaos in this set from it.")
-        }),
         Code::DimNpot | Code::EncWeightsIgnored => Some(code_sentence(w.code).to_string()),
         _ => None,
     };
     built.unwrap_or_else(|| w.message.clone())
-}
-
-/// Note JP3 (B3-11): SHADER-NORMAL-SPECULAR's sentence when the normal is a kept DDS, whose type cannot drop its
-/// alpha; the engine message on missing data.
-pub fn kept_normal_sentence(w: &engine::codes::Warning) -> String {
-    member_and_shader(w)
-        .map(|(member, shader)| {
-            format!("{member} is a kept DDS: the {shader} shader reads it as its normal and ignores the specular in its alpha.")
-        })
-        .unwrap_or_else(|| w.message.clone())
 }
 
 /// A shader warning's `data.member` and `data.shader`.
@@ -376,8 +404,8 @@ fn names_its_map(code: Code) -> bool {
             | Code::PackConflict
             | Code::PackUnusedInput
             | Code::ShaderExtraMap
+            | Code::SetSlotBorrowedUnused
             | Code::ShaderMissingMap
-            | Code::ShaderNormalSpecular
     )
 }
 

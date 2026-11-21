@@ -8,18 +8,19 @@ use crate::model::code_text::{
 };
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
-use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
+use crate::model::review::{
+    DiskState, JsonKind, JsonLine, ReviewWrites, NOT_CHOSEN_ROOT, NO_EXPORT_FOLDER,
+};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
 use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
+use std::sync::Arc;
 
 /// Note FI5: what the Also location reads while no export folder is chosen (the fallback is never shown as a path).
 const NOT_CHOSEN_YET: &str = "the export folder (not chosen yet)";
-/// Note FI5: what a JSON line's path starts with while no export folder is chosen.
-const NOT_CHOSEN_ROOT: &str = "‹export folder›";
 
 /// What a click on an undecided row asks for.
 pub enum RowPick {
@@ -242,7 +243,11 @@ enum Act {
     NifDiff(String),
     Export,
     Close,
+    OptOut(bool),
 }
+
+/// Review's footer tick; the Settings tab's box is "Export without review" (two inputs never share a name).
+const OPT_OUT_TEXT: &str = "Export without review next time";
 
 pub(super) fn plural(n: usize) -> &'static str {
     if n == 1 {
@@ -316,16 +321,150 @@ enum Footer<'a> {
     NifWaiting(&'a crate::model::meshes::NifReviewRow),
     NifSkipped(&'a crate::model::meshes::NifReviewRow),
     Written(String),
+    File(&'a Path, bool),
     Json(&'a JsonLine),
+    /// E7: the files besides the outputs the export saves or records (`AppModel::review_writes`).
+    Also(&'a Arc<ReviewWrites>),
+}
+
+#[cfg(test)]
+#[test]
+fn a_missing_footer_row_draws_an_empty_heading() {
+    let row = std::panic::catch_unwind(
+        || matches!(output_row(&ReviewWrites::default(), 0), Footer::Heading(text) if text.is_empty()),
+    );
+    assert!(
+        row.is_ok_and(|empty| empty),
+        "missing footer row must be harmless to draw"
+    );
+}
+
+/// Index the cached groups directly so scrolling to the end of a large project lays out only visible paths.
+fn output_row(w: &ReviewWrites, mut index: usize) -> Footer<'_> {
+    if !w.outputs.is_empty() {
+        if index == 0 {
+            return Footer::Heading("Will be written".into());
+        }
+        if let Some(o) = w.outputs.get(index - 1) {
+            return Footer::File(&o.path, o.marked);
+        }
+        index -= w.outputs.len() + 1;
+    }
+    for (name, paths) in [
+        ("Up to date", &w.current),
+        ("Kept", &w.kept),
+        ("Protected", &w.protected),
+    ] {
+        if paths.is_empty() {
+            continue;
+        }
+        if index == 0 {
+            return Footer::Heading(name.into());
+        }
+        if let Some(path) = paths.get(index - 1) {
+            return Footer::File(path, false);
+        }
+        index -= paths.len() + 1;
+    }
+    Footer::Heading(String::new())
+}
+
+/// E7 (ruling 3c-49): the width of each entry's text and of the `…`, measured once per list and font (kept in the
+/// context beside the list they were measured from), so a frame lays out no text to measure it.
+fn also_widths(ui: &egui::Ui, w: &Arc<ReviewWrites>, font: &egui::FontId) -> Arc<Vec<f32>> {
+    type Kept = (Arc<ReviewWrites>, egui::FontId, Arc<Vec<f32>>);
+    let id = ui.scope_id().with("also-updated-widths");
+    let kept: Option<Kept> = ui.data(|d| d.get_temp(id));
+    if let Some((from, f, widths)) = kept {
+        if Arc::ptr_eq(&from, w) && f == *font {
+            return widths;
+        }
+    }
+    let color = ui.visuals().text_color();
+    let width = |s: &str| {
+        ui.painter()
+            .layout_no_wrap(s.to_string(), font.clone(), color)
+            .size()
+            .x
+    };
+    let widths: Arc<Vec<f32>> = Arc::new(
+        w.labels
+            .iter()
+            .map(|l| width(&l.text))
+            .chain(std::iter::once(width("…")))
+            .collect(),
+    );
+    ui.data_mut(|d| d.insert_temp(id, (w.clone(), font.clone(), widths.clone())));
+    widths
+}
+
+/// E7: "Also updated:" and the files' names, each a label with its full path and what it is on hover. A line that
+/// does not fit is cut in the middle: names from both ends, then `…`, whose accessible name and hover hold all of them.
+/// The texts come with the list (`ReviewWrites::labels`), and their widths are measured once per list.
+fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>) {
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    ui.strong("Also updated:");
+    let list = &w.also_updated;
+    let labels = &w.labels;
+    let n = labels.len().min(list.len());
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let widths = also_widths(ui, w, &font);
+    let gap = ui.spacing().item_spacing.x;
+    let avail = ui.available_width();
+    let marker = widths[widths.len() - 1] + gap;
+    let (mut lo, mut hi, mut used) = (0, n, 0.0_f32);
+    let mut from_head = true;
+    while lo < hi {
+        // The other end is tried when this one does not fit: a short name there may still.
+        let fit = [from_head, !from_head].into_iter().find_map(|head| {
+            let i = if head { lo } else { hi - 1 };
+            let w_i = widths[i] + gap;
+            let reserve = if hi - lo == 1 { 0.0 } else { marker };
+            (used + w_i + reserve <= avail).then_some((head, w_i))
+        });
+        let Some((head, w_i)) = fit else {
+            break;
+        };
+        used += w_i;
+        if head {
+            lo += 1;
+        } else {
+            hi -= 1;
+        }
+        from_head = !head;
+    }
+    let one = |ui: &mut egui::Ui, i: usize| {
+        let l = &labels[i];
+        let r = ui.label(l.text.as_str());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &l.name));
+        r.on_hover_ui(|ui| {
+            ui.label(l.hover.as_str());
+            ui.weak(l.shown.as_str());
+        });
+    };
+    for i in 0..lo {
+        one(ui, i);
+    }
+    if lo < hi {
+        let r = ui.label("…");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &w.whole));
+        r.on_hover_ui(|ui| {
+            for l in labels.iter().take(n) {
+                ui.label(l.text.trim_end_matches(','));
+                ui.weak(format!("{} {}", l.hover, l.shown));
+            }
+        });
+    }
+    for i in hi..n {
+        one(ui, i);
+    }
 }
 
 /// Note FB10: under this window width the Review sections stack in one scroll area.
 const STACK_BELOW: f32 = 1200.0;
 
-/// A column: its heading, then `body` in a scroll area of its own.
-/// `key` names the scroll area, so a heading that carries a count keeps the column's scroll position.
-fn column(ui: &mut egui::Ui, key: &str, heading: &str, body: impl FnOnce(&mut egui::Ui)) {
-    ui.strong(heading);
+/// Each column scrolls independently. Its key stays the same as the heading's count changes.
+fn column(ui: &mut egui::Ui, key: &str, body: impl FnOnce(&mut egui::Ui)) {
     // ui-rules 3.2: a bar drawn without hover, so a column that overflows says so.
     ui.spacing_mut().scroll = crate::look::thin_scroll();
     egui::ScrollArea::vertical()
@@ -387,11 +526,8 @@ fn name_field(
     }
 }
 
-/// Review's "Also export as" column (Note CN, owner answers 5 and 6): the ticks, the location, the folder names, Keep
-/// metal brightness and the CM lines, the sets to skip, and the gate's Also reason (`gate`). It names what
-/// is written and why it cannot be yet, never that it will succeed (Task 11 M5). The recipe is in a set's Also export
-/// tab (Note JI2).
-fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut Option<Act>) {
+/// The Also settings under Options (Note CN, owner answers 5 and 6). The recipe link opens a set's Also export tab (JI2).
+fn also_section(ui: &mut egui::Ui, m: &AppModel, act: &mut Option<Act>) {
     let cfg = m.also_config();
     let (v, c) = m.also_ticks();
     let busy = m.export.running.is_some().then_some(also::EXPORT_RUNNING);
@@ -519,9 +655,6 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
     })
     .response
     .on_disabled_hover_text(off.as_deref().unwrap_or_default());
-    if let Some(why) = gate {
-        ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
-    }
     // Note JI2 (correction 6): the recipe is on a PBR set's Also export tab, so with no PBR set there is no link.
     if m.recipe_set().is_some()
         && ui
@@ -603,8 +736,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let nif_folder = m.export_folder_chosen();
     let folder_chosen = nif_folder.is_some();
     let json = m.review_json();
+    let writes = m.review_writes();
     let nif_rows = m.nif_review_rows();
-    // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
+    // Note CN85: Also settings are available in the cs mode or while a tick is on.
     // Note HF10: none for a scope, which Also never runs on.
     let also_on = (m.also_on() || m.target == Target::Cs) && m.export_scope().is_none();
     let also_err = if m.also_runs() {
@@ -617,6 +751,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         .filter(|r| r.blocked.as_deref().is_some_and(|b| b != NO_EXPORT_FOLDER))
         .collect();
     let mut act = None;
+    let also_blocked = also_err.is_some();
+    let mut options_open = review.options_open || (also_blocked && !review.also_blocked);
     // Note FC14: the footer's lists share one scroll area of at most a third of the tab, so the columns keep room.
     let footer_cap = ui.available_height() / 3.0;
     // The footer first, pinned to the bottom, so the columns scroll above it and it is never clipped.
@@ -656,19 +792,36 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             list.push(Footer::Written(m.written_text()));
             // Note FC5: the Keep/Overwrite question moved to Blockers.
             list.extend(json.iter().map(Footer::Json));
+            // E7: after the files of What will be written, the ones it saves and records besides.
+            if !writes.also_updated.is_empty() {
+                list.push(Footer::Also(&writes));
+            }
+            let paths = [writes.outputs.len(), writes.current.len(), writes.kept.len(), writes.protected.len()]
+                .into_iter().filter(|&n| n > 0).map(|n| n + 1).sum::<usize>();
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
+            let rows = list.len() + paths;
+            let height = footer_cap.max(3.0 * stride).min(rows as f32 * stride);
             ui.scope(|ui| {
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::vertical()
                     .id_salt("review-footer-lists")
-                    .max_height(footer_cap.max(3.0 * stride))
+                    .min_scrolled_height(height)
+                    .max_height(height)
                     .auto_shrink([false, true])
                     // Rule 9.2: only the rows on screen are laid out, each exactly `row_h` tall.
-                    .show_rows(ui, row_h, list.len(), |ui, range| {
-                        for row in &list[range] {
+                    .show_rows(ui, row_h, rows, |ui, range| {
+                        for index in range {
                             let size = egui::vec2(ui.available_width(), row_h);
                             let layout = egui::Layout::left_to_right(egui::Align::Center);
+                            let extra;
+                            let row = match list.get(index) {
+                                Some(row) => row,
+                                None => {
+                                    extra = output_row(&writes, index - list.len());
+                                    &extra
+                                }
+                            };
                             ui.allocate_ui_with_layout(size, layout, |ui| match row {
                                 Footer::Heading(t) => {
                                     ui.strong(t);
@@ -699,15 +852,38 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                     // Note JF1: with an Also tick the line is long; cut, it keeps its text on hover.
                                     ui.add(egui::Label::new(text).truncate());
                                 }
+                                Footer::File(path, marked) => {
+                                    let shown = (!folder_chosen).then(|| m.export_root()).and_then(|root| path.strip_prefix(root).ok())
+                                        .map_or_else(|| path.display().to_string(), |p| format!("{NOT_CHOSEN_ROOT}\\{}", p.display()));
+                                    let text = if *marked { format!("{shown} (depends on this export)") } else { shown };
+                                    ui.add(egui::Label::new(text).truncate());
+                                }
                                 Footer::Json(l) => {
                                     let fallback = (!folder_chosen).then(|| m.export_root());
-                                    ui.label(json_line_text(l, fallback.as_deref()));
+                                    ui.add(egui::Label::new(json_line_text(l, fallback.as_deref())).truncate());
+                                }
+                                Footer::Also(w) => {
+                                    also_updated_line(ui, w);
                                 }
                             });
                         }
                     });
             });
+            if m.reencode_all {
+                ui.label("Re-encode every output is on: every file Tessalith recorded is written again.");
+            }
             ui.horizontal(|ui| {
+                // Ruling 3c-43: with no project (a meshes-only Review) there is no key to set, so no box.
+                if m.project.is_some() {
+                    if let Some(on) = super::settings_tab::opt_out_checkbox(
+                        ui,
+                        m,
+                        OPT_OUT_TEXT,
+                        "For this project only. The header's Export then writes at once while nothing needs a look. Turn it off in Settings.",
+                    ) {
+                        act = Some(Act::OptOut(on));
+                    }
+                }
                 if ui.button("Close").clicked() {
                     act = Some(Act::Close);
                 }
@@ -742,7 +918,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         });
     // Note FB4: the missing export folder counts, because the gate enforces it; Note FC5: so does an unanswered
     // overwrite question.
+    let also_row = also_err
+        .as_deref()
+        .filter(|why| Some(*why) != toml_row.as_deref());
     let blockers = blocks.len()
+        + usize::from(also_row.is_some())
         + usize::from(!folder_chosen)
         + usize::from(preset_row.is_some())
         + usize::from(toml_row.is_some())
@@ -756,9 +936,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .any(|r| r.blocked.is_none() && r.foreign.is_some());
     let n_cols = if also_on { 3 } else { 2 };
     let heading = |i: usize| match i {
-        0 => ("Blockers", format!("Blockers ({blockers})")),
-        1 => ("Undecided", format!("Undecided ({})", undecided.len())),
-        _ => ("Also export as", "Also export as".to_string()),
+        0 => ("Blockers", Some(format!("Blockers ({blockers})"))),
+        1 => (
+            "Undecided",
+            Some(format!("Undecided ({})", undecided.len())),
+        ),
+        _ => ("Options", None),
     };
     // One body per column, drawn side by side or stacked (Note FB10).
     let mut body = |ui: &mut egui::Ui, i: usize| match i {
@@ -785,6 +968,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
             if let Some(why) = &toml_row {
                 ui.colored_label(RED, why);
+            }
+            if let Some(why) = also_row {
+                ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
             }
             if let Some((text, hover)) = &preset_row {
                 ui.horizontal_wrapped(|ui| {
@@ -870,7 +1056,30 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 act = Some(Act::AcceptAll);
             }
         }
-        _ => also_section(ui, m, also_err.as_deref(), &mut act),
+        _ => {
+            let mut text = String::from("Options");
+            if !options_open {
+                let ((vanilla, cm), n) = m.also_summary();
+                if cm {
+                    text.push_str(" · Also export as Vanilla and CM");
+                } else if vanilla {
+                    text.push_str(" · Also export as Vanilla");
+                }
+                if (vanilla || cm) && n > 0 {
+                    text.push_str(&format!(" · skipping {n} set{}", plural(n)));
+                }
+            }
+            let response = egui::CollapsingHeader::new(text)
+                .id_salt("review-options")
+                .open(Some(options_open))
+                .show_unindented(ui, |ui| {
+                    ui.strong("Also export as");
+                    also_section(ui, m, &mut act);
+                });
+            if response.header_response.clicked() {
+                options_open = !options_open;
+            }
+        }
     };
     // Note HF9: a scoped review says what it exports above the columns.
     if let Some(s) = m.export_scope() {
@@ -884,7 +1093,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for i in 0..n_cols {
-                    ui.strong(heading(i).1);
+                    if let Some(text) = heading(i).1 {
+                        ui.strong(text);
+                    }
                     body(ui, i);
                     ui.add_space(6.0);
                 }
@@ -895,10 +1106,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             ui.columns(n_cols, |cols| {
                 for (i, c) in cols.iter_mut().enumerate() {
                     let (key, text) = heading(i);
-                    column(c, key, &text, |ui| body(ui, i));
+                    if let Some(text) = text {
+                        c.strong(text);
+                    }
+                    column(c, key, |ui| body(ui, i));
                 }
             })
         });
+    }
+    if let Some(review) = &mut model.review {
+        review.options_open = options_open;
+        review.also_blocked = also_blocked;
     }
     match act {
         Some(Act::AlsoTick(t, on)) => model.set_also_tick(t, on),
@@ -913,33 +1131,41 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::ChoosePreset) => model.choose_preset = Some(ui.ctx().cumulative_pass_nr()),
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
         // Note JI2: the set's Also export tab, in 2D (the set editor is not drawn in 3D or over a preview).
-        Some(Act::Recipe) => {
-            if let Some(k) = model.recipe_set() {
+        Some(Act::Recipe) => super::navigate(ui.ctx(), model, |ctx, model| {
+            if let Some(target) = model.recipe_set() {
                 model.collapse();
-                model.select_set(&k);
-                super::set_editor::show_also_tab(ui.ctx());
+                model.select_target(target);
+                super::set_editor::show_also_tab(ctx);
                 if model.settings.set_view_3d {
                     model.settings.set_view_3d = false;
                     model.save_settings();
                 }
-                super::header::set_meshes_view(ui.ctx(), false);
+                super::header::set_meshes_view(ctx, false);
             }
-        }
-        Some(Act::GoTo(k)) => {
-            model.select_set(&k);
-            super::header::set_meshes_view(ui.ctx(), false);
+        }),
+        Some(Act::GoTo(k)) => super::navigate(ui.ctx(), model, move |ctx, m| {
+            m.select_set(&k);
+            super::header::set_meshes_view(ctx, false);
+        }),
+        Some(Act::Row(p @ RowPick::Select(_))) => {
+            super::navigate(ui.ctx(), model, move |_, m| apply(m, p))
         }
         Some(Act::Row(p)) => apply(model, p),
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::Json(overwrite)) => model.answer_review_json(overwrite),
         Some(Act::Nif(path, overwrite, sha)) => model.answer_review_nif(&path, overwrite, sha),
-        Some(Act::NifDiff(path)) => {
-            model.nif_diff_request = Some(path);
-            super::header::set_meshes_view(ui.ctx(), true);
+        Some(Act::NifDiff(path)) => super::navigate(ui.ctx(), model, move |ctx, m| {
+            m.nif_diff_request = Some(path);
+            super::header::set_meshes_view(ctx, true);
+        }),
+        // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal). Ruling
+        // 3c-38: the click carries what the button saw when it fired, in case it waits a frame.
+        Some(Act::Export) => {
+            let press = model.export_press();
+            super::after_commit(ui.ctx(), model, move |m| m.review_export_pressed(press));
         }
-        // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal).
-        Some(Act::Export) => super::after_commit(ui.ctx(), model, AppModel::export_from_review),
         Some(Act::Close) => model.close_review(),
+        Some(Act::OptOut(on)) => model.set_export_without_review(on),
         None => {}
     }
 }

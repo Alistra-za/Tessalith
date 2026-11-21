@@ -514,7 +514,7 @@ fn ctrl_s_saves_with_a_focused_problems_row() {
     idle(&mut m);
     m.save().unwrap();
     let text = problems(&m)[0].text.clone();
-    m.project.as_mut().unwrap().set_dirty(true);
+    m.set_field("a/x.png", "format", serde_json::json!("bc7"));
     let mut h = harness(m);
     h.run();
     h.query_all_by_label_contains(&text)

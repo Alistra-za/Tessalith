@@ -1,7 +1,7 @@
 //! The artist checks (v2, DECISIONS Note CL): one pure function per check turns the engine's cached check stats
 //! into `CHK-*` warnings, gated by the `[checks]` switches. Results live only in `AppModel`'s check maps: never in
 //! `TextureItem::warnings` or `SetView::set_warnings`, so they never change "ready" (owner answer 1).
-use super::sets::{SlotFill, SlotKind};
+use super::sets::{feature_slots, SlotFill, SlotKind};
 use super::AppModel;
 use crate::pgp::settings::{feature_on, Feature, Settings};
 use crate::settings::ChecksSettings;
@@ -272,12 +272,17 @@ impl AppModel {
 
     /// Change the switches and save them; the next `poll` recomputes the results (no re-plan).
     pub fn set_checks(&mut self, c: ChecksSettings) {
+        let refresh = self.settings.checks.low_detail != c.low_detail;
         self.settings.checks = c;
+        if refresh {
+            self.invalidate_currency();
+            self.request_currency();
+        }
         self.save_settings();
     }
 
     /// Recompute the check maps when a plan landed, the sets document changed or a switch moved; then every
-    /// view-keyed cache rebuilds. Its key never includes `items_rev`, so its own `invalidate_views` cannot re-run it.
+    /// cache that reads the results sees the new rows. Its key omits `items_rev` so the refresh cannot re-run itself.
     pub(super) fn refresh_checks(&mut self) -> bool {
         let doc = self
             .sets_doc
@@ -297,13 +302,13 @@ impl AppModel {
             let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
             let resolved = super::auto_flags::resolved_for(
                 v.json,
-                &v.slots,
+                feature_slots(v),
                 &v.settings,
                 &super::auto_flags::hint(self, v),
             );
             neutral.insert(v.key.as_str(), height_neutral(shader, &resolved));
             if matches!(shader, Some(Shader::Landscape | Shader::PbrLandscape))
-                && filled(&v.slots, SlotKind::Height)
+                && filled(feature_slots(v), SlotKind::Height)
             {
                 // The texture-set block's displacementScale is already overlaid into the set's settings.
                 let s = resolved

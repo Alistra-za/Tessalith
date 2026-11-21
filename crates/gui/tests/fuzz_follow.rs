@@ -1133,9 +1133,9 @@ fn an_explicit_advanced_skin_that_writes_nothing_splits_gui_and_cli() {
 }
 
 /// Fuzz-27: in a set not read as PBR (Glow), an explicit PBR pick retypes the untouched recorded `normal` to
-/// `pbr_normal`, so B3's SHADER-NORMAL-SPECULAR note does not show; leaving PBR reverts it.
+/// `pbr_normal`; leaving PBR reverts it.
 #[test]
-fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
+fn an_explicit_pbr_pick_retypes_an_untouched_normal() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -1143,27 +1143,29 @@ fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
         "",
         AcceptSuggestions::High,
     );
-    let normal_note = |m: &AppModel| {
-        bottom::problems(m)
-            .iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular))
-    };
     assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
     assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
-    assert!(!normal_note(&m));
     m.set_shader("m/rock01", Some(Shader::Pbr));
     idle(&mut m);
     assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
-    assert!(auto_pbr(&m).contains(NORMAL));
-    assert!(!normal_note(&m), "{:?}", bottom::problems(&m));
+    assert_eq!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .auto_normal()
+            .get(NORMAL)
+            .map(String::as_str),
+        Some("pbr_normal")
+    );
+    assert!(!auto_pbr(&m).contains(NORMAL));
     m.set_shader("m/rock01", Some(Shader::Default));
     idle(&mut m);
     assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
     assert!(!auto_pbr(&m).contains(NORMAL));
 }
 
-/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes, as B3-11's
-/// `use_pbr_normal_refusal` says), and its key never joins `auto_pbr`.
+/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes), and its key never joins `auto_pbr`.
 #[test]
 fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
     let d = tempfile::tempdir().unwrap();
@@ -1340,9 +1342,15 @@ fn a_hand_set_fuzz_role_keeps_the_recorded_skin_albedo() {
     assert!(m.fuzz_recorded_skin(DIFFUSE), "before the share");
     use sdc_gui::model::sets::{DropChoice, DropOutcome};
     let out = m.drop_choice("m/aaa01_mask.png", "m/rock01", DropChoice::Share);
-    if matches!(out, DropOutcome::AskReplace { .. }) {
-        m.drop_replace("m/aaa01_mask.png", "m/rock01", DropChoice::Share)
-            .unwrap();
+    if let DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(
+            "m/aaa01_mask.png",
+            "m/rock01",
+            DropChoice::Share,
+            kind,
+            &existing,
+        )
+        .unwrap();
     }
     idle(&mut m);
     assert!(
@@ -1488,8 +1496,8 @@ fn a_borrowers_view_does_not_decide_the_lenders_file() {
         AcceptSuggestions::None,
     );
     let out = m.drop_choice(DIFFUSE, "m/aaa01", DropChoice::Share);
-    if matches!(out, DropOutcome::AskReplace { .. }) {
-        m.drop_replace(DIFFUSE, "m/aaa01", DropChoice::Share)
+    if let DropOutcome::AskReplace { kind, existing } = out {
+        m.drop_replace(DIFFUSE, "m/aaa01", DropChoice::Share, kind, &existing)
             .unwrap();
     }
     idle(&mut m);
@@ -1902,10 +1910,10 @@ fn an_export_queued_at_open_runs_on_the_switched_plan() {
     );
 }
 
-/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and B3 offers
-/// **Use PBR normal** on it.
+/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and no SHADER row
+/// names it.
 #[test]
-fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
+fn the_switch_leaves_a_recorded_normal() {
     let d = tempfile::tempdir().unwrap();
     let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n[files.\"m/rock01_n.png\"]\nsubtype = \"normal\"\n";
     let mut m = open_with(
@@ -1924,9 +1932,7 @@ fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
     );
     let rows = problems(&m);
     assert!(
-        rows.iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular)
-                && r.fix == Some(Fix::UsePbrNormal(NORMAL.into()))),
+        !rows.iter().any(|r| r.code == Some(Code::ShaderExtraMap) || r.code == Some(Code::ShaderMissingMap)),
         "{rows:?}"
     );
 }
@@ -2036,8 +2042,7 @@ fn the_switch_alone_asks_nothing() {
         );
         assert!(m.fuzz_note_for_test().is_some(), "{accept:?}");
         assert!(m.is_dirty(), "{accept:?}");
-        assert!(!m.prompts_unsaved(), "{accept:?}");
-        assert!(m.only_automatic_unsaved(), "{accept:?}");
+        assert!(!m.unsaved(), "{accept:?}");
         assert!(
             !sdc_gui::ui::header::window_title(&m).ends_with('●'),
             "{accept:?}"
@@ -2045,6 +2050,47 @@ fn the_switch_alone_asks_nothing() {
         assert!(m.recovery_snapshot().is_empty(), "{accept:?}");
         assert_eq!(asks(&mut m, d.path()), [false; 3], "{accept:?}");
     }
+}
+
+#[test]
+fn cube_faces_join_the_fuzz_switch_without_a_user_edit() {
+    let d = tempfile::tempdir().unwrap();
+    let cubes = d.path().join("textures/cubemaps");
+    std::fs::create_dir_all(&cubes).unwrap();
+    let faces = ["px", "nx", "py", "ny", "pz", "nz"];
+    for face in faces {
+        rgb(&cubes, &format!("env_{face}.png"));
+    }
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    assert!(m.fuzz_note_for_test().is_some());
+    assert_eq!(m.history.undo.len(), 1);
+    for face in faces {
+        let key = format!("textures/cubemaps/env_{face}.png");
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(&key, "subtype"),
+            Some(json!("cubemap")),
+            "{key}"
+        );
+    }
+    assert!(!m.unsaved(), "the joined six-face recording is automatic");
+    assert!(m.request_close());
+    m.undo();
+    idle(&mut m);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/cubemaps/env_nz.png", "subtype"),
+        Some(json!("cubemap"))
+    );
+    assert!(!m.request_close(), "Undo of the switch wrote a subtype");
+    m.redo();
+    assert!(m.unsaved(), "Redo of the switch wrote a subtype");
 }
 
 /// Fix round 1, I1: a user edit after the switch asks, in all three places.
@@ -2060,7 +2106,7 @@ fn a_user_edit_after_the_switch_asks() {
         );
         user_edit(&mut m);
         idle(&mut m);
-        assert!(m.prompts_unsaved(), "{accept:?}");
+        assert!(m.unsaved(), "{accept:?}");
         assert!(!m.request_close(), "{accept:?}");
         m.dialog = None;
         assert!(!m.request_open(d.path().to_path_buf()), "{accept:?}");
@@ -2070,7 +2116,7 @@ fn a_user_edit_after_the_switch_asks() {
     }
 }
 
-/// Fix round 1, I1: a later automatic recording in its own step, after a clean switch, still asks nothing.
+/// Fix round 1, I1: a later automatic recording, after a clean switch, still asks nothing.
 #[test]
 fn a_later_recording_after_the_switch_asks_nothing() {
     let d = tempfile::tempdir().unwrap();
@@ -2085,14 +2131,56 @@ fn a_later_recording_after_the_switch_asks_nothing() {
     m.replan();
     idle(&mut m);
     assert!(subtype(&m, "m/stone01.png").is_some(), "recorded");
-    assert!(m.history.pushes > pushes, "a step of its own");
-    assert!(!m.prompts_unsaved());
+    assert_eq!(m.history.pushes, pushes, "recording adds no step");
+    assert!(!m.unsaved());
 }
 
-/// Fix round 1, I1: Undo of an unsaved switch leaves the saved text, so nothing is unsaved; Undo of a saved switch
-/// leaves a change the user made, so it asks.
 #[test]
-fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
+fn picking_a_new_normal_after_undoing_the_fuzz_switch_prompts() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    let mut sets = sdc_gui::sets_doc::SetsDoc::open(root);
+    sets.set_export_folder(&root.join("export"));
+    sets.save(false).unwrap();
+    let mut m = open_with(
+        root,
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    assert!(m.fuzz_note_for_test().is_some());
+    check_close(&mut m, (false, false), (false, false));
+    m.undo();
+    idle(&mut m);
+    check_close(&mut m, (true, false), (true, false));
+    let key = "m/stone_n.png";
+    ImageBuffer::from_fn(64, 64, |x, _| {
+        Rgb([if x % 2 == 0 { 204u8 } else { 51 }, 128, 230])
+    })
+    .save(root.join(key))
+    .unwrap();
+    m.replan();
+    idle(&mut m);
+    assert_eq!(m.untouched_normal(key), Some(Subtype::Normal));
+    check_close(&mut m, (true, false), (true, true));
+    m.decide(key, Answer::Subtype(Subtype::Normal));
+    idle(&mut m);
+    check_close(&mut m, (true, false), (true, true));
+    m.save().unwrap();
+    check_close(&mut m, (false, false), (false, false));
+    m.open_folder(root.to_owned());
+    idle(&mut m);
+    check_close(&mut m, (false, false), (false, false));
+    rgb(&root.join("m"), "stone_rmaos.png");
+    m.replan();
+    idle(&mut m);
+    assert_eq!(subtype(&m, key), Some(json!("normal")));
+    assert!(!m.sets_doc.as_ref().unwrap().auto_normal().contains_key(key));
+    check_close(&mut m, (false, false), (false, false));
+}
+
+#[test]
+fn undoing_the_switch_before_save_returns_to_disk() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2102,7 +2190,25 @@ fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
     );
     m.undo();
     idle(&mut m);
-    assert!(!m.is_dirty() && !m.prompts_unsaved());
+    assert!(m.unsaved(), "Undo restored the subtype read on open");
+    assert!(!m.needs_write());
+    let doc = m.project.as_ref().unwrap();
+    assert_eq!(
+        m.recovery_snapshot(),
+        [(doc.path().to_owned(), OLD_SKIN.to_owned())]
+    );
+    assert!(!m.request_close());
+    m.dialog = None;
+    let other = tempfile::tempdir().unwrap();
+    assert!(!m.request_open(other.path().to_path_buf()));
+    m.dialog = None;
+    m.save().unwrap();
+    assert!(m.request_open(other.path().to_path_buf()));
+    idle(&mut m);
+}
+
+#[test]
+fn a_user_dirty_undo_after_save_writes_through_the_stamp_check() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2113,7 +2219,23 @@ fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
     m.save().unwrap();
     m.undo();
     idle(&mut m);
-    assert!(m.prompts_unsaved());
+    assert!(m.unsaved());
+    let path = m.project.as_ref().unwrap().path().to_owned();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
+    assert!(m.unsaved());
+    assert!(!path.exists());
+    m.resolve_external_change(sdc_gui::model::DocKind::SdcToml, true);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), OLD_SKIN);
+    assert!(!m.unsaved());
+    m.redo();
+    idle(&mut m);
+    assert!(m.unsaved());
+    let redone = m.project.as_ref().unwrap().text();
+    assert_ne!(redone, OLD_SKIN);
+    m.save().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), redone);
+    assert!(!m.unsaved());
 }
 
 /// Fix round 1, I1: between the switch and its row, the switch alone asks nothing.
@@ -2124,7 +2246,7 @@ fn the_window_before_the_switch_row_asks_nothing() {
         let mut m = old_unsettled(d.path(), accept);
         until_switch_pending(&mut m);
         assert!(m.is_dirty(), "{accept:?}");
-        assert!(!m.prompts_unsaved(), "{accept:?}");
+        assert!(!m.unsaved(), "{accept:?}");
         assert!(m.request_close(), "{accept:?}");
         idle(&mut m);
     }
@@ -2147,17 +2269,9 @@ fn a_user_edit_before_the_switch_row_takes_no_undo_from_it() {
             .find(|r| r.text == text)
             .expect("the switch row is listed");
         assert_eq!(row.fix, None, "{accept:?}: {rows:?}");
-        assert!(m.prompts_unsaved(), "{accept:?}");
-        // The normal Undo takes back the user's edit only (under High the recording's own step is on top of it).
-        let undos = if accept == AcceptSuggestions::High {
-            2
-        } else {
-            1
-        };
-        for _ in 0..undos {
-            m.undo();
-            idle(&mut m);
-        }
+        assert!(m.unsaved(), "{accept:?}");
+        m.undo();
+        idle(&mut m);
         assert_eq!(
             m.project
                 .as_ref()
@@ -2428,4 +2542,72 @@ fn a_mirror_borrowers_fuzz_slot_is_not_shown_filled() {
         ),
         "{borrower:?}"
     );
+}
+
+/// F16 (Note JQ53, N-41), a pin of existing behaviour: a kept `x_f.dds` beside the fuzz map is the set's `_f`. The GUI
+/// never writes there (it refuses an export folder that is or holds the opened one, and a CS PBR set goes under
+/// `textures\pbr\`), so `has_f` counts it, no `pbr_fuzz` is written and the map is listed unused; `sdc convert` into
+/// the same export folder plans the same.
+#[test]
+fn a_kept_f_beside_the_fuzz_map_is_the_sets_f_in_the_gui_and_the_cli() {
+    const WHY: &str = "x_fuzz.png: x_f.dds is the set's PBR fuzz texture (_f); not converted";
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/test");
+    std::fs::create_dir_all(&t).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(t.join("x.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(t.join("x_n.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+        .save(t.join("x_fuzz.png"))
+        .unwrap();
+    bc1_dds(&t.join("x_f.dds"));
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.set_shader("test/x", Some(Shader::Pbr));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let map = m.item("test/x_fuzz.png").expect("the map's item");
+    assert!(map.job.is_none(), "{:?}", map.job);
+    assert!(
+        matches!(&map.status, sdc_gui::model::items::ItemStatus::Skipped(why) if why == WHY),
+        "{:?}",
+        map.status
+    );
+    assert_eq!(
+        subtype(&m, "test/x_fuzz.png"),
+        None,
+        "has_f wrote no pbr_fuzz"
+    );
+    // `sdc convert` into the same export folder, on the saved text.
+    assert!(m.save().is_ok(), "the text sdc convert reads");
+    let mut r = engine::api::BatchRequest::new(
+        vec![d.path().join("textures")],
+        d.path().join("export"),
+        engine::config::Target::Cs,
+    );
+    r.recursive = true;
+    r.accept = AcceptSuggestions::High;
+    let rep =
+        engine::events::Reporter::new(std::sync::Arc::new(engine::events::VecSink::default()), "t");
+    let cli = engine::api::Engine::new()
+        .unwrap()
+        .plan(r, &rep, &engine::api::CancelToken::default())
+        .unwrap();
+    let map = cli
+        .jobs
+        .iter()
+        .find(|j| j.input.ends_with("x_fuzz.png"))
+        .expect("the CLI's job for the map");
+    assert!(
+        map.warnings
+            .iter()
+            .any(|w| w.code == Code::PackUnusedInput && w.message == WHY),
+        "{:?}",
+        map.warnings
+    );
+    assert!(cli
+        .jobs
+        .iter()
+        .all(|j| j.profile.subtype != Subtype::PbrFuzz));
 }

@@ -86,7 +86,15 @@ const BL: &[&str] = &["b", "bl"];
 static PBR: ShaderSpec = ShaderSpec {
     required: &[
         role("albedo", &[Subtype::PbrAlbedo]),
-        role("_n", &[Subtype::PbrNormal]),
+        // Note JS4 (N-8): a plain tangent-space normal is the set's _n too.
+        role(
+            "_n",
+            &[
+                Subtype::PbrNormal,
+                Subtype::Normal,
+                Subtype::LandscapeNormal,
+            ],
+        ),
         role("_rmaos", &[Subtype::Rmaos]),
     ],
     optional: &[
@@ -101,7 +109,15 @@ static PBR: ShaderSpec = ShaderSpec {
 static PBR_GRASS: ShaderSpec = ShaderSpec {
     required: &[
         role("albedo", &[Subtype::PbrAlbedo]),
-        role("_n", &[Subtype::PbrNormal]),
+        // Note JS4 (N-8): a plain tangent-space normal is the set's _n too.
+        role(
+            "_n",
+            &[
+                Subtype::PbrNormal,
+                Subtype::Normal,
+                Subtype::LandscapeNormal,
+            ],
+        ),
         role("_rmaos", &[Subtype::Rmaos]),
     ],
     optional: &[role("subsurface _s", &[Subtype::PbrSubsurface])],
@@ -351,6 +367,12 @@ impl Shader {
         matches!(self, Shader::Pbr | Shader::PbrLandscape | Shader::PbrGrass)
     }
 
+    /// Note JS1: a shader whose sets drop a normal's alpha and bake from any tangent-space normal: the PBR family and
+    /// Advanced Skin.
+    pub fn is_pbr_or_advanced_skin(self) -> bool {
+        self.is_pbr_family() || self == Shader::AdvancedSkin
+    }
+
     /// True for the shaders that change their members' default settings.
     pub fn has_member_defaults(self) -> bool {
         matches!(
@@ -584,6 +606,14 @@ pub struct ShaderPick {
     pub provenance: ShaderOrigin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wanted: Option<Shader>,
+}
+
+impl ShaderPick {
+    /// Note JS2 (N-7): a picked or automatic PBR-family or Advanced Skin shader can bake a plain normal.
+    /// Advanced Skin excludes landscape normals. Derived picks use the legacy bake rule.
+    pub fn bakes_any_tangent(&self) -> bool {
+        self.provenance != ShaderOrigin::Derived && self.shader.is_pbr_or_advanced_skin()
+    }
 }
 
 pub struct PickInput<'a> {
@@ -873,13 +903,7 @@ pub fn assign<'s>(spec: &'s ShaderSpec, members: &[MemberMap]) -> Vec<Option<&'s
 }
 
 /// SHADER-EXTRA-MAP per unused member (data `{"member", "shader"}`) and SHADER-MISSING-MAP per required role no
-/// member fills (data `{"map", "shader"}`), members first, then roles in table order, then at most one
-/// SHADER-NORMAL-SPECULAR (data `{"member", "shader", "map"}`).
-///
-/// Note JP1: on `pbr` and `pbr_grass` the first unused vanilla `normal` / `landscape_normal` answers an unfilled `_n`
-/// with that Info in place of its EXTRA and the `_n` MISSING. The role table is not widened to take it, because a
-/// filled `_n` would add Also outputs and a bake (B3-4, B3-6). The message ends with the kept-DDS clause because
-/// `MemberMap` cannot tell a kept DDS from a converted source (B3-14).
+/// member fills (data `{"map", "shader"}`), members first, then roles in table order.
 pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> Vec<Warning> {
     // TA29: a derived set's members were replaced by derived jobs, so its maps are not the shader's.
     if pick.provenance == ShaderOrigin::Derived {
@@ -896,20 +920,11 @@ pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> V
     let spec = pick.shader.spec_for(target);
     let filled = assign(spec, members);
     let unfilled = |r: &MapRole| !filled.iter().flatten().any(|f| std::ptr::eq(*f, r));
-    let answers_n = (matches!(pick.shader, Shader::Pbr | Shader::PbrGrass)
-        && spec.required.iter().any(|r| r.label == "_n" && unfilled(r)))
-    .then(|| {
-        members.iter().zip(&filled).position(|(m, r)| {
-            r.is_none() && matches!(m.subtype, Some(Subtype::Normal | Subtype::LandscapeNormal))
-        })
-    })
-    .flatten();
     let extra = members
         .iter()
         .zip(&filled)
-        .enumerate()
-        .filter(|&(i, (_, r))| r.is_none() && Some(i) != answers_n)
-        .map(|(_, (m, _))| {
+        .filter(|(_, r)| r.is_none())
+        .map(|(m, _)| {
             Warning::new(
                 Code::ShaderExtraMap,
                 format!(
@@ -919,34 +934,17 @@ pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> V
             )
             .with_data(serde_json::json!({"member": m.name, "shader": id}))
         });
-    let missing = spec
-        .required
-        .iter()
-        .filter(|r| unfilled(r) && !(answers_n.is_some() && r.label == "_n"))
-        .map(|r| {
-            Warning::new(
-                Code::ShaderMissingMap,
-                format!(
-                    "the {id} shader needs {}; none is in the set (nothing is generated)",
-                    r.label
-                ),
-            )
-            .with_data(serde_json::json!({"map": r.label, "shader": id}))
-        });
-    let specular = answers_n.map(|i| {
-        let m = &members[i];
+    let missing = spec.required.iter().filter(|r| unfilled(r)).map(|r| {
         Warning::new(
-            Code::ShaderNormalSpecular,
+            Code::ShaderMissingMap,
             format!(
-                "{} is a vanilla normal: the {id} shader reads it as _n but ignores any specular in its alpha; set its \
-                 sub-type to pbr_normal to drop the alpha and let a _rmaos in the set be variance-baked from it (a DDS kept \
-                 as it is keeps its alpha)",
-                m.name
+                "the {id} shader needs {}; none is in the set (nothing is generated)",
+                r.label
             ),
         )
-        .with_data(serde_json::json!({"member": m.name, "shader": id, "map": "_n"}))
+        .with_data(serde_json::json!({"map": r.label, "shader": id}))
     });
-    extra.chain(missing).chain(specular).collect()
+    extra.chain(missing).collect()
 }
 
 /// SHADER-AUTO for an `auto:` pick (data `{"shader", "rule"}`); SHADER-UNAVAILABLE for a fallback (data
@@ -1666,11 +1664,10 @@ mod tests {
         }
     }
 
-    /// B3-1, B3-7 (Note JP1): an own vanilla normal answers pbr's and pbr_grass's `_n` with one Info, in place of
-    /// SHADER-EXTRA-MAP and SHADER-MISSING-MAP, whether the shader was picked or automatic.
+    /// N-8 (Note JS4): pbr's and pbr_grass's `_n` take a plain `normal` or `landscape_normal`; nothing is raised,
+    /// picked or automatic.
     #[test]
-    fn a_vanilla_normal_answers_pbr_n_with_an_info() {
-        use crate::codes::{Code::*, Severity};
+    fn a_plain_normal_fills_pbr_n_and_raises_nothing() {
         for p in [
             pick_of(Shader::Pbr, ShaderOrigin::Set),
             pick_of(Shader::Pbr, ShaderOrigin::Auto(AutoRule::Pbr)),
@@ -1679,33 +1676,12 @@ mod tests {
         ] {
             for st in [Subtype::Normal, Subtype::LandscapeNormal] {
                 let w = check_maps(&p, Target::Cs, &pbr_set(st));
-                assert_eq!(
-                    codes(&w),
-                    vec![ShaderNormalSpecular],
-                    "{:?} {st:?}",
-                    p.shader
-                );
-                assert_eq!(w[0].severity, Severity::Info);
-                assert_eq!(
-                    w[0].data,
-                    serde_json::json!({"member": "x_n.dds", "shader": p.shader.id(), "map": "_n"})
-                );
-                assert!(w[0].message.contains("variance-baked"), "{}", w[0].message);
-                assert!(
-                    w[0].message.contains("set its sub-type to pbr_normal"),
-                    "{}",
-                    w[0].message
-                );
-                assert!(
-                    w[0].message.contains("a DDS kept as it is keeps its alpha"),
-                    "{}",
-                    w[0].message
-                );
+                assert!(w.is_empty(), "{:?} {st:?}: {w:?}", p.shader);
             }
         }
     }
 
-    /// B3-7 (Note JP1): `msn`, a detail normal and a coat normal are not a tangent-space `_n`; nothing changes.
+    /// B3-7 (Note JS4): `msn`, a detail normal and a coat normal are not a tangent-space `_n`; nothing changes.
     #[test]
     fn msn_coat_and_detail_normals_still_miss_pbr_n() {
         use crate::codes::Code::*;
@@ -1729,11 +1705,9 @@ mod tests {
         );
     }
 
-    /// B3-7 (Note JP1): a `pbr_normal` fills `_n`, so a vanilla normal beside it keeps its EXTRA and there is no Info,
-    /// in either member order.
+    /// N-8 (Note JS4): both fill _n, as on PBR Landscape (N-21).
     #[test]
-    fn a_pbr_normal_beside_a_vanilla_one_keeps_the_extra() {
-        use crate::codes::Code::*;
+    fn a_pbr_normal_beside_a_plain_one_raises_nothing() {
         let p = pick_of(Shader::Pbr, ShaderOrigin::Set);
         // `MemberMap` is not `Clone`: each order builds its own members.
         let set = |plain_first: bool| {
@@ -1752,16 +1726,13 @@ mod tests {
             ]
         };
         for plain_first in [false, true] {
-            let w = check_maps(&p, Target::Cs, &set(plain_first));
-            assert_eq!(codes(&w), vec![ShaderExtraMap]);
-            assert_eq!(w[0].data["member"], "x_normal.dds");
+            assert!(check_maps(&p, Target::Cs, &set(plain_first)).is_empty());
         }
     }
 
-    /// B3-7 (Note JP1): of two vanilla normals the first in member order answers `_n`; the second keeps its EXTRA.
+    /// N-8 (Note JS4): two plain normals both fill _n.
     #[test]
-    fn two_vanilla_normals_the_first_answers_n() {
-        use crate::codes::Code::*;
+    fn two_plain_normals_both_fill_n() {
         let p = pick_of(Shader::PbrGrass, ShaderOrigin::Set);
         let ms = [
             m("g.dds", None, Some(Subtype::PbrAlbedo)),
@@ -1773,17 +1744,13 @@ mod tests {
             ),
             m("g_rmaos.dds", Some("rmaos"), Some(Subtype::Rmaos)),
         ];
-        let w = check_maps(&p, Target::Cs, &ms);
-        assert_eq!(codes(&w), vec![ShaderExtraMap, ShaderNormalSpecular]);
-        assert_eq!(w[0].data["member"], "g_normal.dds");
-        assert_eq!(w[1].data["member"], "g_n.dds");
+        assert!(check_maps(&p, Target::Cs, &ms).is_empty());
     }
 
-    /// B3-7 (Note JP1, Note BM): PBR Landscape takes a vanilla normal as its `_n` and says nothing; Default (what a
+    /// B3-7 (Note JS4, Note BM): PBR Landscape takes a vanilla normal as its `_n` and says nothing; Default (what a
     /// `pbr` request falls back to on vanilla) and a derived pick are untouched.
     #[test]
-    fn pbr_landscape_default_and_derived_raise_no_info() {
-        use crate::codes::Code::*;
+    fn pbr_landscape_default_and_derived_raise_nothing() {
         let land = [
             m("x.dds", None, Some(Subtype::LandscapeDiffuse)),
             m("x_n.dds", Some("n"), Some(Subtype::Normal)),
@@ -1803,10 +1770,30 @@ mod tests {
             provenance: ShaderOrigin::Fallback,
             wanted: Some(Shader::Pbr),
         };
-        assert!(!codes(&check_maps(&fallback, Target::Vanilla, &vanilla))
-            .contains(&ShaderNormalSpecular));
+        assert!(check_maps(&fallback, Target::Vanilla, &vanilla).is_empty());
         let derived = pick_of(Shader::Pbr, ShaderOrigin::Derived);
         assert!(check_maps(&derived, Target::Cs, &pbr_set(Subtype::Normal)).is_empty());
+    }
+
+    /// N-7 (Note JS2): a plain normal bakes under a PBR-set shader, picked or automatic, never derived (the Vanilla
+    /// derive's kept-landscape pick, api.rs:2286-2293).
+    #[test]
+    fn a_derived_pick_never_bakes_a_plain_normal() {
+        assert!(pick_of(
+            Shader::PbrLandscape,
+            ShaderOrigin::Auto(AutoRule::PbrLandscape)
+        )
+        .bakes_any_tangent());
+        assert!(pick_of(Shader::AdvancedSkin, ShaderOrigin::Set).bakes_any_tangent());
+        assert!(
+            pick_of(Shader::PbrGrass, ShaderOrigin::Auto(AutoRule::PbrGrass)).bakes_any_tangent()
+        );
+        assert!(!pick_of(Shader::PbrLandscape, ShaderOrigin::Derived).bakes_any_tangent());
+        assert!(!pick_of(Shader::Default, ShaderOrigin::Set).bakes_any_tangent());
+        assert!(
+            !pick_of(Shader::Landscape, ShaderOrigin::Auto(AutoRule::Landscape))
+                .bakes_any_tangent()
+        );
     }
 
     #[test]

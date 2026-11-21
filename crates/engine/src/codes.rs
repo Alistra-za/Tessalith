@@ -22,7 +22,6 @@
 //! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
 //! and FMT-RGB8-ALPHA (a 24-bit RGB output for a texture that keeps its alpha, DECISIONS Note FM38).
 //! and OUT-KEPT-OLDER-ENCODE / OUT-KEPT-LOWER-TARGET (outputs `if-changed` kept, counted per run, DECISIONS Note JA).
-//! and SHADER-NORMAL-SPECULAR (a pbr or pbr_grass set's own vanilla normal read as its `_n`, DECISIONS Note JP).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +105,8 @@ codes! {
     // Never raised since Note HD2; kept so an `allow` list naming it still loads.
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
     SetEditStale = "SET-EDIT-STALE" => Info,
+    // The set still writes its own file for a slot supplied by another set.
+    SetSlotBorrowedUnused = "SET-SLOT-BORROWED-UNUSED" => Warning,
     SugLowConfidence = "SUG-LOW-CONFIDENCE" => Blocking,
     SugContradiction = "SUG-CONTRADICTION" => Warning,
     ValAlphaGuarantee = "VAL-ALPHA-GUARANTEE" => Error,
@@ -145,8 +146,6 @@ codes! {
     ShaderUnavailable = "SHADER-UNAVAILABLE" => Warning,
     ShaderExtraMap = "SHADER-EXTRA-MAP" => Warning,
     ShaderMissingMap = "SHADER-MISSING-MAP" => Warning,
-    // Note JP1 (B3): a pbr or pbr_grass set's own vanilla normal answers its `_n`; the alpha is unread.
-    ShaderNormalSpecular = "SHADER-NORMAL-SPECULAR" => Info,
     GrassShape = "GRASS-SHAPE" => Error,
     GrassTopOpaque = "GRASS-TOP-OPAQUE" => Warning,
     GrassNormals = "GRASS-NORMALS" => Warning,
@@ -262,11 +261,6 @@ mod tests {
     #[test]
     fn codes_count() {
         assert_eq!(Code::ALL.len(), 94);
-        assert_eq!(Code::ShaderNormalSpecular.severity(), Severity::Info);
-        assert_eq!(
-            Code::parse("SHADER-NORMAL-SPECULAR"),
-            Some(Code::ShaderNormalSpecular)
-        );
         assert_eq!(Code::OutKeptOlderEncode.severity(), Severity::Info);
         assert_eq!(Code::OutKeptLowerTarget.severity(), Severity::Info);
         assert_eq!(

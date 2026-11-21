@@ -29,6 +29,8 @@ pub struct BottomPanel {
     pub open: bool,
     pub tab: BottomTab,
     pub filter: Option<ProblemsFilter>,
+    /// How the open set filter names its card, retained when switching between its checks and notes.
+    pub(crate) name_kind: NameKind,
 }
 
 /// Note HC4: a row its kind can hide. A block or a question never hides, and hiding never touches the Review gate,
@@ -97,6 +99,7 @@ impl AppModel {
             open: true,
             tab,
             filter: None,
+            name_kind: NameKind::Filter,
         };
         self.sync_messages_open();
     }
@@ -110,6 +113,7 @@ impl AppModel {
                 open: true,
                 tab,
                 filter: None,
+                name_kind: NameKind::Filter,
             };
         }
         self.sync_messages_open();
@@ -289,36 +293,53 @@ pub fn with_marked(mut open: Vec<String>, marked: Vec<String>) -> Vec<String> {
     open
 }
 
+// A mark stores its code verbatim; sets_doc::folded folds only the subject.
+fn has_mark_of(m: &AppModel, code: Code) -> bool {
+    use engine::codes::Severity;
+    matches!(code.severity(), Severity::Warning | Severity::Info)
+        && m.sets_doc
+            .as_ref()
+            .is_some_and(|doc| doc.intended_keys().iter().any(|k| k.code == code.as_str()))
+}
+
 /// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
 /// Final fix wave A6: only a code that can be marked (Warning or Info, as `markable`) reads one; a hand-written mark on
 /// an Error code is not one. A Note's warning reads no mark (Note JP6): its row has no Mark, so a mark stored while it
 /// was a Problem shows nowhere.
 pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
-    use engine::codes::Severity;
-    if !matches!(w.code.severity(), Severity::Warning | Severity::Info) {
-        return false;
-    }
+    has_mark_of(m, w.code) && marked_code(m, at, w)
+}
+
+fn borrowed_mark_key(at: &At, w: &engine::codes::Warning) -> IntendedKey {
+    intended_key(at, w.code.as_str(), &format!("slot {}", w.data["slot"]))
+}
+
+fn marked_code(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
         return false;
     };
-    // Tiles and cards ask every frame: only a warning whose code a mark names builds its key. This holds because a
-    // key's `code` is stored and compared verbatim: `sets_doc::folded` folds only the `subject`. A fold of the code
-    // there must fold it here too.
-    doc.intended_keys()
-        .iter()
-        .any(|k| k.code == w.code.as_str())
-        && class_at(m, at, w) == RowClass::Problem
-        && {
-            let text = warning_text(job_at(m, at), w);
-            let shown = code_text::shown_for(Some(w.code), &text);
-            doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
-        }
+    if w.code == Code::SetSlotBorrowedUnused {
+        return doc.is_intended(&borrowed_mark_key(at, w));
+    }
+    let job = if follows_job(w.code) {
+        job_at(m, at)
+    } else {
+        None
+    };
+    warning_class(job, w) == RowClass::Problem && {
+        let text = warning_text(job, w);
+        let shown = code_text::shown_for(Some(w.code), &text);
+        doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
+    }
 }
 
 /// Final fix wave A6: whether the last export's warning `w` on the file `job_key` is marked, read where its row is: on
 /// the texture's row when the one live item of that file has a warning of the same code (the File loop of
 /// `build_problems` leaves the warning to it), else on the File row.
 pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::Warning) -> bool {
+    if !has_mark_of(m, w.code) {
+        return false;
+    }
     let mut of = m.items.iter().filter(|i| i.job_key == job_key);
     let first = of.next();
     let live = first.filter(|_| of.next().is_none());
@@ -326,9 +347,18 @@ pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::War
         .filter(|i| i.status != ItemStatus::NeedsDecision)
         .and_then(|i| i.warnings.iter().find(|x| x.code == w.code).map(|x| (i, x)));
     match on_texture {
-        Some((i, x)) => marked(m, &At::Texture(i.key.clone()), x),
-        None => marked(m, &At::File(job_key.to_string()), w),
+        Some((i, x)) => marked_code(m, &At::Texture(i.key.clone()), x),
+        None => marked_code(m, &At::File(job_key.to_string()), w),
     }
+}
+
+/// Plan 3c Task 17a (F3): how many of a last-export row's warnings are not marked as intended
+/// (`export_warning_marked`): the Files row's "n warnings" and the Has warnings filter.
+pub fn open_export_warnings(m: &AppModel, r: &crate::model::export::Row) -> usize {
+    r.warnings
+        .iter()
+        .filter(|w| !export_warning_marked(m, &r.job_key, w))
+        .count()
 }
 
 /// Review E4: a row the Checks pill counts and its filter lists: a check row not marked as intended (a marked one is
@@ -368,8 +398,8 @@ pub enum Fix {
     /// P26, owner 2026-11-04: two exclusive features of a set (by id) are both on. The row offers one
     /// `TurnFeatureOff` button per feature, neither a default; the modder picks which one goes.
     FeatureClash(String, Feature, Feature),
-    /// P13: go to the set (by key) and focus the path field (a settings key) the blocker names.
-    FixPath(String, String),
+    /// P13: open the blocker's set by engine key or document id and focus its path field (a settings key).
+    FixPath(super::SetTarget, String),
     /// R-fills-2, Z11: undo the step that caused the row; only built while that step is the top of the history.
     UndoLast,
     /// Note GD1: open the NIF on this tab and field.
@@ -386,6 +416,11 @@ pub enum Fix {
     TagAsGrass(String),
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
     StraightAlpha(String),
+    /// Note JS7 (N-10): write `alpha.policy = "data"` for this shared normal.
+    KeepAlpha {
+        table: Result<String, String>,
+        name: String,
+    },
     /// Note FC10 (CV8): remove the stored empty `match{n}` of the set (by id).
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
@@ -403,8 +438,9 @@ pub enum Fix {
     ChangeShader(String),
     /// Review E10 (SUG-CONTRADICTION): the undecided rows' type picker, for this item.
     SetType(String),
-    /// Note JP3 (SHADER-NORMAL-SPECULAR): write subtype = "pbr_normal" for this item.
-    UsePbrNormal(String),
+    /// Owner A1 (PACK-RECIPE-CONFLICT, PACK-RECIPE-UNBUILDABLE, SHADER-EXTRA-MAP on a packed output): remove
+    /// `packing.recipe` from both packed keys of the set; the planned packed key names it.
+    ClearRecipe(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,6 +495,11 @@ impl Problem {
         matches!(self.level, Level::Info | Level::Queued) || self.intended
     }
 
+    /// Review E12: the NIF edit's contribution to the default Problems list, excluding its actionable notes.
+    pub(crate) fn is_nif_problem(&self) -> bool {
+        matches!(self.at, At::Nif(_)) && counts_as_ready_problem(self)
+    }
+
     /// Review E2 (controller ruling 5): a row of the default list. A note with a button stays; a row the user marked
     /// leaves it, fix or not.
     pub fn in_worklist(&self) -> bool {
@@ -510,7 +551,7 @@ pub fn cached_tab_counts(m: &AppModel) -> TabCounts {
     let all = problems(m);
     let hidden = m.hidden_kinds();
     if let Some((_, _, c)) = m
-        .views
+        .view_cache()
         .borrow()
         .tab_counts
         .as_ref()
@@ -521,7 +562,7 @@ pub fn cached_tab_counts(m: &AppModel) -> TabCounts {
     #[cfg(feature = "test-hooks")]
     m.tab_count_scans.set(m.tab_count_scans.get() + 1);
     let c = tab_counts(&all, &hidden);
-    m.views.borrow_mut().tab_counts = Some((all, hidden, c));
+    m.view_cache().borrow_mut().tab_counts = Some((all, hidden, c));
     c
 }
 
@@ -560,6 +601,15 @@ impl AppModel {
     pub fn open_problems(&mut self, f: Option<ProblemsFilter>) {
         self.show_tab(BottomTab::Problems);
         self.bottom.filter = f;
+    }
+
+    pub(crate) fn open_set_problems(&mut self, target: super::SetTarget) {
+        let (name, kind) = match target {
+            super::SetTarget::Key(k) => (k, NameKind::Key),
+            super::SetTarget::Id(id) => (id, NameKind::Id),
+        };
+        self.open_problems(Some(ProblemsFilter::Set(name)));
+        self.bottom.name_kind = kind;
     }
 
     /// Note FC3: the NIF edit's problems, handed over by `app.rs` each frame. Only a new snapshot rebuilds Problems.
@@ -602,6 +652,9 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
 pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
     (
         m.evidence_rev,
+        m.project
+            .as_ref()
+            .map_or(0, crate::project::ProjectDoc::rev),
         m.export.revision,
         m.export.running.is_some(),
         // Note FC3: an `Undo` fix is built only while its step is the top one.
@@ -628,7 +681,7 @@ pub struct Flagged {
 /// `set_ready_in` per card (Task 6).
 pub fn flagged(m: &AppModel) -> Arc<Flagged> {
     let all = problems(m);
-    if let Some(f) = &m.views.borrow().flagged {
+    if let Some(f) = &m.view_cache().borrow().flagged {
         return f.clone();
     }
     let mut f = Flagged::default();
@@ -646,7 +699,7 @@ pub fn flagged(m: &AppModel) -> Arc<Flagged> {
         };
     }
     let f = Arc::new(f);
-    m.views.borrow_mut().flagged = Some(f.clone());
+    m.view_cache().borrow_mut().flagged = Some(f.clone());
     f
 }
 
@@ -657,9 +710,7 @@ pub fn set_ready_in(f: &Flagged, v: &sets::SetView) -> bool {
         && !v.members.iter().any(|t| f.textures.contains(t))
 }
 
-/// Note JP5 (B3-16, B3-19): the name a set's Problems filter, its reasons, the card's hover and its badges' clicks use:
-/// its engine key, or for a set with no key (a created set with no file yet, or one whose every entry is missing) its
-/// id.
+/// Note JP5: an ordinary Problems filter names a set by its engine key or, for a key-less set, its document id.
 pub fn scope_key(v: &sets::SetView) -> &str {
     if v.key.is_empty() {
         &v.id
@@ -727,6 +778,12 @@ pub fn tab_count_scans(m: &AppModel) -> u64 {
 #[cfg(feature = "test-hooks")]
 pub fn reason_scans(m: &AppModel) -> u64 {
     m.reason_scans.get()
+}
+
+/// Every set lookup `scope_label` ran (final wave Group 7), not `cached_scope_label`'s cached answers.
+#[cfg(feature = "test-hooks")]
+pub fn scope_label_lookups(m: &AppModel) -> u64 {
+    m.scope_label_lookups.get()
 }
 
 /// `AppModel::export_files` counts that were not served from the cache.
@@ -925,6 +982,13 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::ChanNormalLength => Some(Fix::RebuildZ(k())),
                 Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
                 Code::SugContradiction => Some(Fix::SetType(k())),
+                // Owner A1-4: both rows sit on the planned packed key.
+                // Only where a recipe is written on the entries: a project or preset value is out of its reach.
+                Code::PackRecipeConflict | Code::PackRecipeUnbuildable
+                    if m.recipe_written(&i.key) =>
+                {
+                    Some(Fix::ClearRecipe(k()))
+                }
                 _ => None,
             };
             // A job-dependent sentence (A3) keeps the engine's message on the hover.
@@ -937,54 +1001,64 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
-    // Note JP3: SHADER-NORMAL-SPECULAR, an Info result, is a note row too: the user acts on it (Use PBR normal).
-    let set_row =
-        |w: &engine::codes::Warning| makes_a_row(w) || w.code == Code::ShaderNormalSpecular;
+    let unused = sets::borrowed_unused(m);
     for v in views.iter() {
-        for w in v.set_warnings.iter().filter(|w| set_row(w)) {
+        for w in sets::all_set_warnings(v, &unused).filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
+            if w.code == Code::SetSlotBorrowedUnused {
+                let target = sets::SlotKind::ALL
+                    .into_iter()
+                    .find(|k| Some(k.suffix()) == w.data["kind"].as_str())
+                    .map(SlotTarget::Slot);
+                out.push(Problem {
+                    target,
+                    mark: Some(borrowed_mark_key(&at, w)),
+                    detail: Some(code_text::borrowed_detail(w)),
+                    ..row(Level::Warning, at, w.message.clone(), Some(w.code))
+                });
+                continue;
+            }
             let shader = || Some(Fix::ChangeShader(v.id.clone()));
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.
             if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
-                let (fix, second_fix, target, text) = match w.code {
-                    Code::ShaderExtraMap => match extra_member(m, v, w) {
-                        Some(item) => (
-                            Some(Fix::RemoveMember {
-                                set_id: v.id.clone(),
-                                item: item.clone(),
-                            }),
-                            shader(),
-                            Some(SlotTarget::Item(item)),
-                            None,
-                        ),
-                        None => (shader(), None, None, None),
-                    },
-                    // Note JP3 (B3-11): a kept DDS's type cannot drop its alpha, so it gets no button and its own
-                    // sentence; a DDS encoded again (`reencode = true`) gets the button like any source image.
-                    Code::ShaderNormalSpecular => match extra_member(m, v, w) {
-                        Some(item) if m.item(&item).is_some_and(|i| i.kept_dds()) => (
-                            None,
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            Some(code_text::kept_normal_sentence(w)),
-                        ),
-                        Some(item) => (
-                            Some(Fix::UsePbrNormal(item.clone())),
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            None,
-                        ),
-                        None => (None, None, None, None),
-                    },
-                    _ => (None, None, None, None),
+                let (fix, second_fix, target) = match w.code {
+                    Code::ShaderExtraMap => {
+                        let member = w.data.get("member").and_then(|x| x.as_str()).unwrap_or("");
+                        // Owner A1-7: a packed output with a written recipe offers Clear recipe, then Change shader….
+                        if let Some(k) = extra_map_recipe_key(m, v, member) {
+                            (
+                                Some(Fix::ClearRecipe(k.clone())),
+                                shader(),
+                                Some(SlotTarget::Item(k)),
+                            )
+                        } else {
+                            match extra_member(m, v, w) {
+                                Some(item) => (
+                                    Some(Fix::RemoveMember {
+                                        set_id: v.id.clone(),
+                                        item: item.clone(),
+                                    }),
+                                    shader(),
+                                    Some(SlotTarget::Item(item)),
+                                ),
+                                // A packed output is skipped by `extra_member`: Change shader… alone, and Go to
+                                // set still outlines its row, whichever packed output it is (final wave Group 3).
+                                None => (
+                                    shader(),
+                                    None,
+                                    packed_member_key(m, v, member).map(SlotTarget::Item),
+                                ),
+                            }
+                        }
+                    }
+                    _ => (None, None, None),
                 };
                 out.push(Problem {
                     fix,
                     second_fix,
                     target,
-                    text: text.unwrap_or(p.text),
                     ..p
                 });
                 continue;
@@ -1170,7 +1244,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Rows only count once the export has ended: `revision` bumps on every engine event (R9).
     if m.export.running.is_none() {
         // K2: an engine CHK-* row is a check row and follows its switch. The switches are not in `ProblemsKey`:
-        // a switch change reaches this build through `refresh_checks`' `invalidate_views()`.
+        // a switch change reaches this build through `refresh_checks`' `rows_changed()`.
         let on = &m.settings.checks;
         // Note FC3 (CN67): the DERIVE result the user acts on is a Warning row that opens the report; the other
         // Info results stay on the row's hover (P11).
@@ -1257,7 +1331,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note FC1: what the plan decided on its own and the project now records, one row with every texture on hover.
     if let Some(a) = &m.auto_note {
         out.push(Problem {
-            fix: undo(a.step),
+            fix: a.step.and_then(undo),
             detail: Some(a.lines.join("\n")),
             ..row(Level::Info, At::Project, a.text.clone(), None)
         });
@@ -1325,6 +1399,25 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    for (k, table) in super::shared_alpha::rows(m, &views) {
+        let Some(i) = m.item(&k) else { continue };
+        out.push(Problem {
+            fix: Some(Fix::KeepAlpha {
+                table,
+                name: keep_alpha_name(&k),
+            }),
+            detail: Some(KEEP_ALPHA_HOVER.into()),
+            ..row(
+                Level::Info,
+                At::Texture(k),
+                format!(
+                    "{} is shared with a regular set, which reads its alpha as specular; its alpha is not kept",
+                    i.name
+                ),
+                None,
+            )
+        });
+    }
     // Note FC10 (CV8): a stored empty `match{n}` (n >= 2; `match1 = ""` turns the diffuse match off) matches nothing.
     for v in views.iter() {
         for n in 2..=8u8 {
@@ -1370,12 +1463,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         let at = || set_at(&v.key, &v.id);
         // `v.json` ignores the target (a PBR pick with a filled slot); `pgp_written` is the export's own test.
         if m.pgp_written(v) {
-            // A typed match that matches nothing drops the set's entry (`json_entries`), so the mesh keeps nothing.
-            let has_entry = !crate::pgp::prefix::matches_nothing(
-                &v.settings,
-                v.derived_match.as_deref().unwrap_or(""),
-            );
-            if let Some(path) = pbr_export::no_albedo_slot1(v).filter(|_| has_entry) {
+            // Ruling 3b-F9: the row promises what the written entry does, so it reads `writes_entry` (a typed match
+            // that matches nothing writes no entry, and the mesh keeps nothing).
+            if let Some(path) =
+                pbr_export::no_albedo_slot1(v).filter(|_| pbr_export::writes_entry(m, v))
+            {
                 out.push(row(
                     Level::Info,
                     at(),
@@ -1428,27 +1520,66 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out
 }
 
-/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's or SHADER-NORMAL-SPECULAR's `data.member` names.
+/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's `data.member` names.
 /// The engine writes the member's output file name (`engine::api` `shader_members`); a source file name is matched too.
+/// A packed output is skipped: it cannot leave its set (controller ruling, 2026-11-18).
 fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
     let name = w.data.get("member")?.as_str()?;
     v.members
         .iter()
         .find(|k| {
             m.item(k).is_some_and(|i| {
-                i.name == name
-                    || i.job
-                        .as_ref()
-                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name))
+                i.kind != items::ItemKind::Packed
+                    && (i.name == name
+                        || i.job
+                            .as_ref()
+                            .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name)))
             })
         })
         .cloned()
 }
 
+/// Owner A1-7: the key of `v`'s packed output (the Rmaos slot's own item) whose output file name is `member`, with
+/// no condition on the recipe.
+fn packed_output_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let Some(sets::SlotFill::Own { item: k }) = v.slots.get(&sets::SlotKind::Rmaos) else {
+        return None;
+    };
+    let named = m
+        .item(k)?
+        .job
+        .as_ref()?
+        .output
+        .file_name()
+        .is_some_and(|f| f == member);
+    named.then(|| k.clone())
+}
+
+/// The key of `v`'s packed member (any recipe: the RMAOS slot's, a complex `_m`, a parallax pack) whose output file
+/// name is `member`: the Go to set target of a SHADER-EXTRA-MAP row that `extra_member` skips (final wave Group 3).
+fn packed_member_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    v.members
+        .iter()
+        .find(|k| {
+            m.item(k).is_some_and(|i| {
+                i.kind == items::ItemKind::Packed
+                    && i.job
+                        .as_ref()
+                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == member))
+            })
+        })
+        .cloned()
+}
+
+/// Owner A1-7: [`packed_output_key`] when a recipe is written on either packed key of that set
+/// (`AppModel::recipe_written`, which is false off cs, so this is `None` there).
+fn extra_map_recipe_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let k = packed_output_key(m, v, member)?;
+    m.recipe_written(&k).then_some(k)
+}
+
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
 pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
-/// Note JP3: the button of a SHADER-NORMAL-SPECULAR row, and its undo step's label.
-pub const USE_PBR_NORMAL: &str = "Use PBR normal";
 /// Note HL6: an output the target mod already ships (it wins or loses by load order).
 pub const REPLACES_TARGET: &str = "Replaces {file} of the target mod in the load order";
 
@@ -1460,6 +1591,20 @@ pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal 
 pub const STRAIGHT_ALPHA_HOVER: &str = "OpenEXR stores colour multiplied by alpha, so Tessalith divides it back on \
      load. If this file's colour is not premultiplied (straight alpha), Straight alpha reads it as stored \
      (alpha.exr_straight = true).";
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    pub static KEEP_ALPHA_NAMES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn keep_alpha_name(key: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    KEEP_ALPHA_NAMES.set(KEEP_ALPHA_NAMES.get() + 1);
+    format!("Keep alpha for {key}")
+}
+
+/// Note JS7: the hover of a Keep alpha row.
+pub const KEEP_ALPHA_HOVER: &str =
+    "Write alpha.policy = \"data\" for this normal in sdc.toml, so the regular set's specular stays.";
 
 /// Note FC10 (T8): `(id, other)` of a CFG-PRESET-SKIPPED reason that is an alias clash.
 /// shortcut: parses the engine's message (`presets::check_aliases`); read a `data` field once the engine adds one.
@@ -1507,6 +1652,14 @@ fn unreadable_folder(message: &str) -> Option<PathBuf> {
 /// The list narrowed by `f`: a set keeps its own rows and its members' rows; `Undecided` keeps the Decide rows.
 /// `None` and `Set` list the worklist (`Problem::in_worklist`); `Notes` and `SetNotes` list every note.
 pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
+    filtered_by(m, f, NameKind::Filter)
+}
+
+pub(crate) fn filtered_by(
+    m: &AppModel,
+    f: Option<&ProblemsFilter>,
+    kind: NameKind,
+) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
@@ -1514,7 +1667,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         None => worklist(&all, &|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
         Some(ProblemsFilter::SetNotes(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| p.is_note() && in_set(p, &s))
                 .cloned()
@@ -1529,11 +1682,11 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             all.iter().filter(|p| counts_as_check(p)).cloned().collect()
         }
         Some(ProblemsFilter::Set(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             worklist(&all, &|p| in_set(p, &s))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| counts_as_check(p) && in_set(p, &s))
                 .cloned()
@@ -1554,8 +1707,13 @@ fn worklist(all: &[Problem], keep: &dyn Fn(&Problem) -> bool) -> Vec<Problem> {
 
 /// How many of the set's own rows and members' rows pass `keep`, without cloning them. `key` is a set's scope key
 /// (`scope_key`: its key, or a key-less set's id).
-pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) -> usize {
-    let s = scope(m, key);
+pub(crate) fn count_in_set(
+    m: &AppModel,
+    key: &str,
+    kind: NameKind,
+    keep: impl Fn(&Problem) -> bool,
+) -> usize {
+    let s = scope(m, key, kind);
     problems(m)
         .iter()
         .filter(|p| in_set(p, &s) && keep(p))
@@ -1566,7 +1724,7 @@ pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) ->
 /// set's member items.
 struct Scope {
     key: String,
-    id: String,
+    id: Option<String>,
     members: HashSet<String>,
 }
 
@@ -1574,7 +1732,7 @@ impl Scope {
     fn of(v: &sets::SetView) -> Self {
         Scope {
             key: v.key.clone(),
-            id: v.id.clone(),
+            id: Some(v.id.clone()),
             members: v.members.iter().cloned().collect(),
         }
     }
@@ -1582,26 +1740,135 @@ impl Scope {
 
 /// The view `s` names: the set with that key, else the key-less set with that id, else the set whose id matches it by
 /// fold (Note BF: a keyed set's id is folded, a key-less one keeps its typed case), so a filter opened on a key-less
-/// set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
-fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
-    if s.is_empty() {
+/// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
+/// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
+/// and has no key. The key wins. `None` for the empty string.
+fn view_of<'a>(
+    views: &'a [sets::SetView],
+    root: &Path,
+    s: &str,
+    kind: NameKind,
+) -> Option<&'a sets::SetView> {
+    view_lookup(views, root, s, kind).map(|(i, _)| &views[i])
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NameKind {
+    #[default]
+    Filter,
+    Key,
+    Id,
+}
+
+/// Returns the view index and whether the name matched a document id.
+fn view_lookup(
+    views: &[sets::SetView],
+    root: &Path,
+    s: &str,
+    kind: NameKind,
+) -> Option<(usize, bool)> {
+    if kind != NameKind::Id && s.is_empty() {
+        return None;
+    }
+    if kind != NameKind::Id {
+        if let Some(i) = views.iter().position(|v| v.key == s) {
+            return Some((i, false));
+        }
+    }
+    if kind != NameKind::Key {
+        let by_id = views
+            .iter()
+            .position(|v| v.key.is_empty() && v.id == s)
+            .or_else(|| views.iter().position(|v| engine::sets::same_id(&v.id, s)));
+        if let Some(i) = by_id {
+            return Some((i, true));
+        }
+    }
+    if kind == NameKind::Id {
         return None;
     }
     views
         .iter()
-        .find(|v| v.key == s)
-        .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
-        .or_else(|| views.iter().find(|v| engine::sets::same_id(&v.id, s)))
+        .position(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+        .map(|i| (i, false))
+}
+
+pub(super) fn landed_index(
+    views: &[sets::SetView],
+    root: &Path,
+    selected: &super::Selection,
+) -> Option<usize> {
+    use super::Selection;
+    let (s, kind) = match selected {
+        Selection::Set(k) => (k, NameKind::Key),
+        Selection::SetId(id) => (id, NameKind::Id),
+        _ => return None,
+    };
+    view_lookup(views, root, s, kind).map(|(i, _)| i)
+}
+
+impl AppModel {
+    /// Whether the open set filter's stored value names its set by id under the plan now in place (a key-less set's
+    /// id is typed by the user and may look like a key). Asked before a landing plan replaces the sets and the root,
+    /// so a root change leaves such a value alone. `false` with no set filter open.
+    pub(super) fn set_filter_names_an_id(&self) -> bool {
+        let Some(
+            ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
+        ) = &self.bottom.filter
+        else {
+            return false;
+        };
+        match self.bottom.name_kind {
+            NameKind::Id => true,
+            NameKind::Key => false,
+            NameKind::Filter => {
+                view_lookup(&sets::views(self), &self.sets_root(), k, NameKind::Filter)
+                    .is_some_and(|(_, by_id)| by_id)
+            }
+        }
+    }
+}
+
+/// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip
+/// (read through `cached_scope_label`); `s` itself when no set matches.
+fn scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
+    #[cfg(feature = "test-hooks")]
+    m.scope_label_lookups.set(m.scope_label_lookups.get() + 1);
+    let views = sets::views(m);
+    view_of(&views, &m.sets_root(), s, kind).map_or_else(|| s.to_string(), |v| v.id.clone())
+}
+
+/// `scope_label` for the Problems chip, which is drawn every frame (final wave Group 7, ledger 253): looked up once
+/// per set views build and stored key `s`. The views live in the same cache cell, which is emptied when they change.
+pub(crate) fn cached_scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
+    // Before the borrow: `views` writes the same cell.
+    let views = sets::views(m);
+    if let Some((.., l)) = m
+        .view_cache()
+        .borrow()
+        .scope_label
+        .as_ref()
+        .filter(|(v, k, n, _)| Arc::ptr_eq(v, &views) && k == s && *n == kind)
+    {
+        return l.clone();
+    }
+    let l = scope_label(m, s, kind);
+    m.view_cache().borrow_mut().scope_label = Some((views, s.to_string(), kind, l.clone()));
+    l
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
-fn scope(m: &AppModel, s: &str) -> Scope {
+fn scope(m: &AppModel, s: &str, kind: NameKind) -> Scope {
     let views = sets::views(m);
-    match view_of(&views, s) {
+    match view_of(&views, &m.sets_root(), s, kind) {
         Some(v) => Scope::of(v),
         None => Scope {
-            key: s.to_string(),
-            id: String::new(),
+            key: if kind == NameKind::Id {
+                String::new()
+            } else {
+                s.to_string()
+            },
+            id: None,
             members: HashSet::new(),
         },
     }
@@ -1612,7 +1879,7 @@ fn scope(m: &AppModel, s: &str) -> Scope {
 fn in_set(p: &Problem, s: &Scope) -> bool {
     match &p.at {
         At::Set { key, id } if s.key.is_empty() => {
-            !s.id.is_empty() && key.is_empty() && *id == s.id
+            key.is_empty() && s.id.as_deref() == Some(id.as_str())
         }
         At::Set { key, .. } => *key == s.key,
         At::Texture(t) => s.members.contains(t),
@@ -1641,41 +1908,39 @@ pub enum ReasonGo {
 /// whose slot the set editor draws a row for goes to that slot's **Assign…**; every other row goes to itself in
 /// Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
-    with_counted_rows(m, key, |v, rows| {
-        let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
-        rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
-    })
-    .unwrap_or_default()
+    with_counted_rows(m, key, reasons_for_view).unwrap_or_default()
 }
 
-/// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
-/// per `problems()` build, scope key `key` (see `scope_key`) and hidden kinds, as `cached_tab_counts`. The set views
-/// it reads live in the same cache cell, which is emptied when they change.
-pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
+fn reasons_for_view(v: &sets::SetView, rows: Vec<&Problem>) -> Vec<Reason> {
+    let drawn: Vec<_> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
+    rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
+}
+
+/// The status line's reasons, cached by problems, resolved view id and hidden kinds. Rebuilding the views clears it.
+pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
     let hidden = m.hidden_kinds();
     if let Some((.., r)) = m
-        .views
+        .view_cache()
         .borrow()
         .set_reasons
         .as_ref()
-        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == key && *h == hidden)
+        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == &v.id && *h == hidden)
     {
         return r.clone();
     }
     #[cfg(feature = "test-hooks")]
     m.reason_scans.set(m.reason_scans.get() + 1);
-    let r = Arc::new(set_reasons(m, key));
-    m.views.borrow_mut().set_reasons = Some((all, key.to_string(), hidden, r.clone()));
+    let r = Arc::new(with_view_rows(m, v, reasons_for_view).unwrap_or_default());
+    m.view_cache().borrow_mut().set_reasons = Some((all, v.id.clone(), hidden, r.clone()));
     r
 }
 
-/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key, `scope_key`:
-/// its key, or a key-less set's id), slot reasons' rows included: what "+k more in Problems" shows again.
-pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
+/// The hidden kinds among the resolved editor view's counted rows, including slot reasons.
+pub fn hidden_reason_kinds(m: &AppModel, v: &sets::SetView) -> Vec<Code> {
     let hidden = m.hidden_kinds();
-    with_counted_rows(m, key, |_, rows| {
+    with_view_rows(m, v, |_, rows| {
         rows.into_iter()
             .filter(|p| is_hidden(p, &hidden))
             .filter_map(|p| p.code)
@@ -1693,7 +1958,15 @@ fn with_counted_rows<T>(
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
     let views = sets::views(m);
-    let v = view_of(&views, key)?;
+    let v = view_of(&views, &m.sets_root(), key, NameKind::Filter)?;
+    with_view_rows(m, v, f)
+}
+
+fn with_view_rows<T>(
+    m: &AppModel,
+    v: &sets::SetView,
+    f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
+) -> Option<T> {
     if set_ready_in(&flagged(m), v) {
         return None;
     }

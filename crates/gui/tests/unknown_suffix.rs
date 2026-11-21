@@ -118,7 +118,7 @@ fn rock_bump_has_one_problems_row_and_no_card() {
     assert!(has_card(&m, "barrel"));
     // The status line and the Sets pills count the cards.
     assert!(
-        m.status_line.contains("3 textures, 1 set"),
+        m.status_line.contains("3 files → 3 textures · 1 set"),
         "{}",
         m.status_line
     );

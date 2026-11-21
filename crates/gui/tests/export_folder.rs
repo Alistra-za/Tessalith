@@ -6,12 +6,9 @@ use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::MeshesModel;
-use sdc_gui::model::picker::{PickerBackend, PickerSpec};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::{GuiSettings, MeshesSettings};
 use sdc_gui::ui::meshes::UndoTarget;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use support::*;
 
@@ -114,11 +111,16 @@ fn header_export_reads_review_until_clean() {
     idle(&mut m);
     assert_eq!(m.undecided(), 0);
     let n = m.export_files();
-    assert_eq!(
-        m.header_export_text(),
-        format!("Export {n} file{}", if n == 1 { "" } else { "s" })
-    );
+    let files = format!("{n} file{}", if n == 1 { "" } else { "s" });
+    // E3: a clean project still reads Review; only the project's opt-out turns the label into a write.
+    assert_eq!(m.header_export_text(), format!("Review {files}…"));
     assert!(m.export_is_clean());
+    // This fixture keeps warning rows (a 3 px diffuse, a landscape set with no `_n`), and any problem row keeps the
+    // label on Review even with the project's opt-out (export_shell.rs holds the row-free write-now label).
+    m.set_export_without_review(true);
+    assert!(m.has_problem_rows(), "guard: the fixture has problem rows");
+    assert_eq!(m.header_export_text(), format!("Review {files}…"));
+    m.set_export_without_review(false);
     // Note FC14 (final review, minor): a blocked NIF edit is skipped, never written, so it keeps the project clean;
     // one Review's Export would write does not.
     let nif = |blocked: Option<&str>| sdc_gui::model::meshes::NifReviewRow {
@@ -133,6 +135,11 @@ fn header_export_reads_review_until_clean() {
     assert!(m.export_is_clean());
     m.set_nif_review_rows(vec![nif(None)]);
     assert!(!m.export_is_clean());
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "a NIF edit Review's Export would write keeps the label on Review, opt-out or not: {}",
+        m.header_export_text()
+    );
 }
 
 fn nif_row(blocked: Option<&str>) -> sdc_gui::model::meshes::NifReviewRow {
@@ -169,7 +176,7 @@ fn the_header_counts_pending_nif_edits() {
     let mut m = decided_with_folder(d.path());
     m.set_nif_review_rows(vec![nif_row(None)]);
     let f = files(&m);
-    assert_eq!(m.header_export_text(), format!("Review {f} + 1 NIF edit"));
+    assert_eq!(m.header_export_text(), format!("Review {f} + 1 NIF edit…"));
     assert_eq!(m.review_button_text(), format!("Export {f} + 1 NIF edit"));
 }
 
@@ -183,7 +190,7 @@ fn the_export_button_does_not_count_a_blocked_nif_edit() {
         nif_row(None),
     ]);
     let f = files(&m);
-    assert_eq!(m.header_export_text(), format!("Review {f} + 2 NIF edits"));
+    assert_eq!(m.header_export_text(), format!("Review {f} + 2 NIF edits…"));
     assert_eq!(
         m.review_button_text(),
         format!("Export {f} + 1 NIF edit (skip 1 NIF edit)")
@@ -197,7 +204,9 @@ fn the_export_button_does_not_count_a_blocked_nif_edit() {
     );
 }
 
-/// Note FI7 (4a, round 2): a clean header click writes the files at once, so it names no NIF edit as written.
+/// Note FI7 (4a, round 2), E3: the header label counts every pending NIF edit (it reads Review) and its click
+/// opens Review; the model's `export_clicked` (the CA1 path the Review opt-out takes) writes the files at once and
+/// names no blocked NIF edit as written. The write-now label with a blocked row is in export_shell.rs.
 #[test]
 fn a_clean_header_export_names_no_blocked_nif_edit() {
     let d = tempfile::tempdir().unwrap();
@@ -207,8 +216,12 @@ fn a_clean_header_export_names_no_blocked_nif_edit() {
     let f = files(&m);
     assert_eq!(
         m.header_export_text(),
-        format!("Export {f} (skip 1 NIF edit)")
+        format!("Review {f} + 1 NIF edit…"),
+        "Review counts every pending NIF edit"
     );
+    m.header_export_clicked();
+    assert!(m.review.is_some() && m.export.running.is_none());
+    m.close_review();
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_none(), "{}", m.status_line);
@@ -244,6 +257,14 @@ fn the_header_says_the_folder_is_not_chosen() {
     h.run();
     h.get_by_role_and_label(Role::Button, "Export to: not chosen");
     assert_eq!(h.query_all_by_label("More export options").count(), 0);
+    h.get_by_label("Export to: not chosen").click();
+    h.run();
+    h.get_by_label("Open export folder (none chosen yet)")
+        .hover();
+    h.run();
+    h.get_by_label("No export folder chosen yet");
+    h.key_press(eframe::egui::Key::Escape);
+    h.run();
     // Once chosen it names the folder.
     let m = h.state_mut();
     m.set_export_folder(d.path().join("out"));
@@ -251,6 +272,15 @@ fn the_header_says_the_folder_is_not_chosen() {
     h.run();
     assert_eq!(h.query_all_by_label_contains("Export to:").count(), 1);
     assert_eq!(h.query_all_by_label("Export to: not chosen").count(), 0);
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    h.get_by_label("Open export folder (not created yet: export creates it)")
+        .hover();
+    h.run();
+    h.get_by_label(&format!(
+        "The export folder does not exist yet: {}. Export creates it.",
+        d.path().join("out").display()
+    ));
 }
 
 /// Note FI5 (A4, Important 7): with no project the `gui.toml` folder is not shown (it vanishes when one opens), so the
@@ -281,8 +311,7 @@ fn the_start_screen_shows_more_even_with_a_gui_toml_folder() {
 
 type UndoH = Harness<'static, (AppModel, MeshesModel, Option<String>)>;
 
-/// The header with the Undo target stubbed: `None` is the Textures history (`Undo`), `Some(step)` a NIF edit whose next
-/// undo step is `step` (`Undo NIF edit: {step}`).
+/// The Meshes header before and during a NIF edit. The Textures history is active until there is a NIF target.
 fn undo_harness(dir: &std::path::Path) -> UndoH {
     let mut meshes = MeshesModel::new(None, MeshesSettings::default());
     meshes.procs = sdc_gui::model::meshes::no_procs;
@@ -293,7 +322,7 @@ fn undo_harness(dir: &std::path::Path) -> UndoH {
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, (m, me, step): &mut (AppModel, MeshesModel, Option<String>)| {
-                sdc_gui::ui::header::set_meshes_view(ui.ctx(), step.is_some());
+                sdc_gui::ui::header::set_meshes_view(ui.ctx(), true);
                 let target = step.as_ref().map(|s| UndoTarget {
                     can_undo: true,
                     can_redo: false,
@@ -320,6 +349,22 @@ fn undo_text_does_not_move_the_header() {
         h.get_by_label("MO2…").rect(),
         header_undo(&h, "Undo").rect(),
     );
+    let style = h.ctx.global_style();
+    let font = eframe::egui::TextStyle::Button.resolve(&style);
+    let expected = h.ctx.fonts_mut(|f| {
+        ["Undo NIF edit", "Redo NIF edit"]
+            .iter()
+            .map(|label| {
+                f.layout_no_wrap((*label).into(), font.clone(), eframe::egui::Color32::WHITE)
+                    .size()
+                    .x
+            })
+            .fold(0.0, f32::max)
+    }) + 2.0 * style.spacing.button_padding.x;
+    assert!(
+        (undo.width() - expected).abs() < 0.5,
+        "{undo:?} vs {expected}"
+    );
     let long = "Add alpha to every shape";
     h.state_mut().2 = Some(long.to_string());
     h.run_steps(4);
@@ -331,20 +376,85 @@ fn undo_text_does_not_move_the_header() {
     );
     assert_eq!(b.rect(), undo, "the slot");
     assert_eq!(h.get_by_label("MO2…").rect().min.x, mo2.min.x);
-    // The text is cut in the slot; the whole step is on hover.
+    // Opening the edit kept the same Meshes slot. The hover names the step.
     b.hover();
     h.run();
     h.get_by_label_contains(&format!("Undo NIF edit: {long}"));
 }
 
-/// The picker backend that records where the dialog was asked to start.
-struct Recorder(std::sync::Mutex<Vec<Option<PathBuf>>>, PathBuf);
+#[test]
+fn the_export_picker_starts_in_the_last_export_folder_then_the_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_unchosen(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::create_dir(m.settings.export_folder.as_ref().unwrap()).unwrap();
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend.clone());
+    let start = |m: &mut AppModel| {
+        assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+        wait_picker(m);
+        specs.lock().unwrap().pop().unwrap().start
+    };
+    assert_eq!(start(&mut m).as_ref(), Some(&root));
+    let last = d.path().join("last");
+    std::fs::create_dir(&last).unwrap();
+    m.settings.last_export_folder = Some(last.clone());
+    assert_eq!(start(&mut m).as_ref(), Some(&last));
+    let chosen = d.path().join("chosen");
+    std::fs::create_dir(&chosen).unwrap();
+    choose_export(&mut m, chosen.clone());
+    assert_eq!(start(&mut m).as_ref(), Some(&chosen));
+    std::fs::remove_dir(chosen).unwrap();
+    assert_eq!(start(&mut m).as_ref(), Some(&last));
+    std::fs::remove_dir(last).unwrap();
+    assert_eq!(start(&mut m), Some(root));
 
-impl PickerBackend for Recorder {
-    fn pick(&self, spec: &PickerSpec) -> Option<PathBuf> {
-        self.0.lock().unwrap().push(spec.start.clone());
-        Some(self.1.clone())
+    let mut m = AppModel::new(m.settings.clone(), None, session());
+    m.picker.set_backend(backend);
+    for expected in [Some(d.path().to_owned()), None] {
+        assert_eq!(start(&mut m), expected);
+        m.settings.recent = vec![d.path().join("missing/project")];
     }
+}
+
+#[test]
+fn the_export_picker_sends_missing_start_candidates_to_the_worker_in_order() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_unchosen(d.path());
+    let root = m.root.clone().unwrap();
+    let chosen = d.path().join("missing-chosen");
+    let last = d.path().join("missing-last");
+    choose_export(&mut m, chosen.clone());
+    m.settings.last_export_folder = Some(last.clone());
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend);
+
+    assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+    wait_picker(&mut m);
+    let spec = specs.lock().unwrap().pop().unwrap();
+    assert_eq!(spec.start_candidates, [chosen, last, root.clone()]);
+    assert_eq!(spec.start, Some(root));
+}
+
+#[test]
+fn without_a_project_the_export_picker_passes_the_unchecked_recent_parent_to_the_worker() {
+    let d = tempfile::tempdir().unwrap();
+    let last = d.path().to_owned();
+    let recent_parent = d.path().join("missing");
+    let settings = GuiSettings {
+        last_export_folder: Some(last.clone()),
+        recent: vec![recent_parent.join("project")],
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend);
+
+    assert!(m.pick_export_folder(&eframe::egui::Context::default()));
+    wait_picker(&mut m);
+    let spec = specs.lock().unwrap().pop().unwrap();
+    assert_eq!(spec.start_candidates, [last.clone(), recent_parent]);
+    assert_eq!(spec.start, Some(last));
 }
 
 #[test]
@@ -352,8 +462,9 @@ fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fresh(d.path());
     let out = d.path().join("picked");
-    let rec = Arc::new(Recorder(Default::default(), out.clone()));
-    m.picker.set_backend(rec.clone());
+    let root = m.root.clone().unwrap();
+    let (backend, specs) = recording_picker(Some(out.clone()));
+    m.picker.set_backend(backend);
     m.open_review();
     let mut h = harness(m);
     h.run();
@@ -371,19 +482,12 @@ fn review_lists_the_blocker_and_its_choose_button_picks_the_folder() {
     );
     h.get_by_label("Choose the export folder…").click();
     h.run();
-    let end = std::time::Instant::now() + Duration::from_secs(10);
-    while h.state().picker.busy() {
-        assert!(std::time::Instant::now() < end, "the dialog never closed");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(h.state_mut().poll());
+    wait_picker(h.state_mut());
     idle(h.state_mut());
     assert_eq!(h.state().export_folder_chosen(), Some(out));
-    // The dialog opened where gui.toml last pointed.
-    assert_eq!(
-        rec.0.lock().unwrap().clone(),
-        vec![Some(d.path().join("other-mod"))]
-    );
+    let specs = specs.lock().unwrap();
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].start, Some(root));
     h.run();
     assert_eq!(h.query_all_by_label(NO_FOLDER).count(), 0);
     h.get_by_label("Blockers (0)");
@@ -429,6 +533,7 @@ fn no_sdc_out_path_is_shown_before_a_folder_is_chosen() {
     idle(&mut m);
     assert!(m.also_on() && m.export_folder_chosen().is_none());
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -465,9 +570,23 @@ fn no_sdc_out_path_is_shown_before_a_folder_is_chosen() {
     h.run();
     assert!(!all(&h).iter().any(|t| t.contains("sdc-out")));
     // The JSON line, if it is drawn (the footer scrolls): it is relative to the export folder.
+    // (Task 4: the "Also updated:" line's `generated.json` lives in the project folder, not the export folder; its
+    // `manifest.jsonl` is under the export folder and reads relative to it too.)
+    let also: Vec<String> = all(&h)
+        .into_iter()
+        .filter(|t| t.starts_with("manifest.jsonl ("))
+        .collect();
+    assert!(
+        !also.is_empty() && also.iter().all(|t| t.contains("(‹export folder›\\")),
+        "{also:?}"
+    );
     let json: Vec<String> = all(&h)
         .into_iter()
-        .filter(|t| t.contains(".json"))
+        .filter(|t| {
+            t.contains(".json")
+                && !t.starts_with("generated.json")
+                && !t.starts_with("manifest.jsonl")
+        })
         .collect();
     assert!(
         json.iter().all(|t| t.starts_with("‹export folder›\\")),
@@ -523,14 +642,14 @@ fn an_empty_project_is_not_clean() {
     idle(&mut m);
     assert_eq!(m.export_files(), 0);
     assert!(!m.export_is_clean());
-    assert_eq!(m.header_export_text(), "Review 0 files");
+    assert_eq!(m.header_export_text(), "Review 0 files…");
 }
 
-/// Final review M5: with no folder open the button is plain "Export", not "Review 0 files".
 #[test]
-fn no_folder_open_reads_plain_export() {
+fn no_folder_open_draws_no_export_button() {
     let m = AppModel::new(GuiSettings::default(), None, session());
     assert_eq!(m.header_export_text(), "Export");
+    assert_eq!(header_export_action(&harness(m)), None);
 }
 
 /// Note FI18 (3; HANDOFF 2026-11-01 owed item 3): with no folder open the header counts pending NIF edits as the
@@ -541,12 +660,12 @@ fn no_folder_open_counts_pending_nif_edits() {
     m.set_nif_review_rows(vec![]);
     assert_eq!(m.header_export_text(), "Export");
     m.set_nif_review_rows(vec![nif_row(None)]);
-    assert_eq!(m.header_export_text(), "Review 1 NIF edit");
+    assert_eq!(m.header_export_text(), "Review 1 NIF edit…");
     m.set_nif_review_rows(vec![
         nif_row(None),
         nif_row(Some("its NIF changed on disk")),
     ]);
-    assert_eq!(m.header_export_text(), "Review 2 NIF edits");
+    assert_eq!(m.header_export_text(), "Review 2 NIF edits…");
 }
 
 /// UI-D final review Minor 5: with no folder open, the disabled header `Review 1 NIF edit` says on hover where Review
@@ -561,7 +680,10 @@ fn the_disabled_no_project_review_button_says_where_review_opens() {
         s.interaction.show_tooltips_only_when_still = false;
     });
     h.run();
-    h.get_by_role_and_label(Role::Button, "Review 1 NIF edit")
+    assert_eq!(header_export_action(&h), None);
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Review 1 NIF edit…")
         .hover();
     h.run();
     h.get_by_label("Open Review from the NIF edit panel (Review…)");

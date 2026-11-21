@@ -4,6 +4,7 @@
 use super::export::Row;
 use super::AppModel;
 use std::ffi::OsString;
+use std::fs::FileType;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -53,6 +54,15 @@ pub fn spawn(req: &ShellRequest) {
     let _ = c.spawn();
 }
 
+pub struct ExportFolderState {
+    pub label: &'static str,
+    pub folder: Result<PathBuf, String>,
+}
+
+fn file_type(p: &Path) -> Option<FileType> {
+    p.metadata().ok().map(|m| m.file_type())
+}
+
 impl AppModel {
     /// The requests queued since the last call; the app starts Explorer for each.
     pub fn take_shell(&mut self) -> Vec<ShellRequest> {
@@ -60,29 +70,47 @@ impl AppModel {
     }
 
     /// The export folder, or why "Open export folder" is off: Explorer would show some other folder instead.
-    pub fn export_folder_state(&self) -> Result<PathBuf, String> {
-        self.export_folder_check(self.export_root().is_dir())
+    pub fn export_folder_state(&self) -> ExportFolderState {
+        self.export_folder_check(file_type)
     }
 
-    /// [`Self::export_folder_state`] with the stat result given (the drawer passes a cached one).
-    pub fn export_folder_check(&self, exists: bool) -> Result<PathBuf, String> {
-        if self.export_folder_chosen().is_none() {
-            return Err("No export folder chosen yet".into());
-        }
-        let p = self.export_root();
-        if exists {
-            Ok(p)
-        } else {
-            Err(format!(
-                "The export folder does not exist yet: {}. Export creates it.",
-                p.display()
-            ))
+    /// The drawer supplies its cached stat here; the Explorer command checks the path again.
+    pub fn export_folder_check(
+        &self,
+        stat: impl FnOnce(&Path) -> Option<FileType>,
+    ) -> ExportFolderState {
+        let Some(p) = self.export_folder_chosen() else {
+            return ExportFolderState {
+                label: "Open export folder (none chosen yet)",
+                folder: Err("No export folder chosen yet".into()),
+            };
+        };
+        match stat(&p) {
+            Some(kind) if kind.is_dir() => ExportFolderState {
+                label: "Open export folder",
+                folder: Ok(p),
+            },
+            Some(_) => ExportFolderState {
+                label: "Open export folder (a file uses this path)",
+                folder: Err(format!(
+                    "A file already exists at {}. Choose another export folder.",
+                    p.display()
+                )),
+            },
+            None => ExportFolderState {
+                label: "Open export folder (not created yet: export creates it)",
+                folder: Err(format!(
+                    "The export folder does not exist yet: {}. Export creates it.",
+                    p.display()
+                )),
+            },
         }
     }
 
     /// Open the export folder in Explorer; the reason when it cannot.
     pub fn open_export_folder(&mut self) -> Result<(), String> {
         self.export_folder_state()
+            .folder
             .map(|p| self.shell.push(ShellRequest::Open(p)))
     }
 
@@ -143,7 +171,7 @@ impl AppModel {
 /// Filesystem answers the drawer asks every frame, re-checked at most once per [`STAT_TTL`] (DECISIONS AG39).
 #[derive(Default)]
 pub struct StatCache {
-    map: std::collections::HashMap<PathBuf, (std::time::Instant, bool)>,
+    map: std::collections::HashMap<PathBuf, (std::time::Instant, Option<FileType>)>,
     /// How many real stats were made (tests).
     pub stats: u32,
 }
@@ -151,20 +179,20 @@ pub struct StatCache {
 pub const STAT_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl StatCache {
-    fn get(&mut self, p: &Path, now: std::time::Instant, dir: bool) -> bool {
+    pub(crate) fn file_type(&mut self, p: &Path, now: std::time::Instant) -> Option<FileType> {
         if let Some((at, v)) = self.map.get(p) {
             if now.saturating_duration_since(*at) < STAT_TTL {
                 return *v;
             }
         }
         self.stats += 1;
-        let v = if dir { p.is_dir() } else { p.is_file() };
+        let v = file_type(p);
         self.map.insert(p.to_path_buf(), (now, v));
         v
     }
 
     pub fn is_file(&mut self, p: &Path, now: std::time::Instant) -> bool {
-        self.get(p, now, false)
+        self.file_type(p, now).is_some_and(|kind| kind.is_file())
     }
 
     /// Forget every answer (the disk changed and the clock did not move).
@@ -173,6 +201,6 @@ impl StatCache {
     }
 
     pub fn is_dir(&mut self, p: &Path, now: std::time::Instant) -> bool {
-        self.get(p, now, true)
+        self.file_type(p, now).is_some_and(|kind| kind.is_dir())
     }
 }

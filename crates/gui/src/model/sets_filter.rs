@@ -249,10 +249,23 @@ impl AppModel {
 
     /// Note FC13 (CD13): the id of the one selected set when the filter hides it ("Go to set" leaves the filter on).
     pub fn selected_set_hidden_by_filter(&self) -> Option<String> {
-        let [key] = self.selected_sets().try_into().ok()?;
-        let views = sets::views(self);
-        let i = views.iter().position(|v| v.key == key)?;
-        (!self.visible_sets().contains(&i)).then(|| views[i].id.clone())
+        let active = self.resolved_selection();
+        self.hidden_set_index(&self.visible_sets())
+            .map(|i| active.views[i].id.clone())
+    }
+
+    pub(crate) fn hidden_set_index(&self, visible: &[usize]) -> Option<usize> {
+        if self.in_bulk()
+            || !matches!(
+                self.selection,
+                super::Selection::Set(_) | super::Selection::SetId(_)
+            )
+        {
+            return None;
+        }
+        self.resolved_selection()
+            .index
+            .filter(|i| visible.binary_search(i).is_err())
     }
 
     /// "Clear filter": the pills, the shader and the search.

@@ -48,8 +48,13 @@ fn fixture(dir: &std::path::Path) -> AppModel {
     idle(&mut m);
     m.remove_member(SET, "a/wall_p.png").unwrap();
     idle(&mut m);
-    m.drop_replace("a/brick_n.png", SET, sdc_gui::model::sets::DropChoice::Move)
-        .unwrap();
+    accept_drop(
+        &mut m,
+        "a/brick_n.png",
+        SET,
+        sdc_gui::model::sets::DropChoice::Move,
+    )
+    .unwrap();
     idle(&mut m);
     m.set_slot_lock(SET, 4, true).unwrap();
     idle(&mut m);

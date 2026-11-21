@@ -5,15 +5,16 @@ use super::fields::{
     hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
     EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
 };
+use super::items::TextureItem;
 use super::set_groups::GroupTarget;
 use super::sets::{
-    engine_inputs, game_path_in, locked_items, member_game_path, slot_gives, slot_of, SlotCommand,
-    SlotKind, NOTHING, SLOT_LOCKED,
+    locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
+    SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
 };
-use super::{AppModel, Dialog, Selection};
+use super::{AppModel, Dialog, Selection, SetTarget};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
-use engine::sets::same_id;
+use engine::sets::{fold_id, same_id};
 use serde_json::Value;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
@@ -84,9 +85,12 @@ impl AppModel {
 
     fn multi_in_effect(&self) -> bool {
         self.multi.keys.len() >= 2
-            && self
-                .active_of(self.multi.sets)
-                .is_some_and(|a| self.multi.keys.iter().any(|k| k == a))
+            && self.active_of(self.multi.sets).is_some_and(|a| {
+                #[cfg(feature = "test-hooks")]
+                self.bulk_membership_scans
+                    .set(self.bulk_membership_scans.get() + 1);
+                self.multi.keys.iter().any(|k| k == a)
+            })
     }
 
     fn selected(&self, sets: bool) -> Vec<String> {
@@ -144,13 +148,22 @@ impl AppModel {
         keys
     }
 
-    /// The keys of the sets the column shows, in display order (R17: the Sets filter applied).
-    pub(super) fn set_order(&self) -> Vec<String> {
+    /// Keyed sets in filtered display order. Ctrl+A and Shift ranges also skip folded groups (JV6).
+    pub(super) fn set_order(&self, skip_folded: bool) -> Vec<String> {
+        let mut folded = std::collections::HashSet::new();
+        if skip_folded && !self.settings.group_collapsed.is_empty() {
+            for group in self.sets_doc.iter().flat_map(|d| d.groups()) {
+                if self.group_collapsed(&group.name) {
+                    folded.extend(group.sets.iter().map(|id| fold_id(id)));
+                }
+            }
+        }
         let views = super::sets::views(self);
         self.visible_sets()
             .iter()
             .map(|&i| &views[i])
             .filter(|v| !v.key.is_empty())
+            .filter(|v| folded.is_empty() || !folded.contains(&fold_id(&v.id)))
             .map(|v| v.key.clone())
             .collect()
     }
@@ -164,9 +177,19 @@ impl AppModel {
     }
 
     /// F3a D1: the same over the Sets column, in its display order (search and filters applied, R17).
-    pub fn click_set(&mut self, key: &str, ctrl: bool, shift: bool) {
-        let order = self.set_order();
-        self.click(key, ctrl, shift, true, &order);
+    pub fn click_set(&mut self, target: impl Into<SetTarget>, ctrl: bool, shift: bool) {
+        match target.into() {
+            id @ SetTarget::Id(_) => self.go_to_target(id, None),
+            SetTarget::Key(key) if super::sets::has_card(self, &key) => {
+                if matches!(self.selection, Selection::SetId(_)) {
+                    self.go_to_target(SetTarget::Key(key), None);
+                } else {
+                    let order = self.set_order(shift);
+                    self.click(&key, ctrl, shift, true, &order);
+                }
+            }
+            SetTarget::Key(_) => {}
+        }
     }
 
     pub(super) fn click(
@@ -235,6 +258,11 @@ impl AppModel {
 
     /// `put_selection` for a new selection: the bulk panel starts over (All, no report).
     pub(super) fn set_selection(&mut self, keys: Vec<String>, active: Option<String>, sets: bool) {
+        if sets && keys.len() == 1 && active.as_deref() == keys.first().map(String::as_str) {
+            if let Some(key) = active {
+                return self.go_to_target(SetTarget::Key(key), None);
+            }
+        }
         self.put_selection(keys, active, sets);
         self.bulk = BulkState::default();
     }
@@ -243,9 +271,9 @@ impl AppModel {
     /// applied; K18). The active entry stays when it is among them; else the first becomes active. With nothing
     /// visible the selection is kept.
     pub fn select_all_visible(&mut self) {
-        let sets = matches!(self.selection, Selection::Set(_));
+        let sets = matches!(self.selection, Selection::Set(_) | Selection::SetId(_));
         let keys = if sets {
-            self.set_order()
+            self.set_order(true)
         } else {
             self.visible_keys()
         };
@@ -269,12 +297,12 @@ impl AppModel {
     /// F3a D1: "12 selected", or "12 selected (4 hidden by filter)", for the column of that kind while two or
     /// more are selected there.
     pub fn selection_summary(&self, sets: bool) -> Option<String> {
-        let keys = self.selected(sets);
-        if keys.len() < 2 {
+        if self.multi.sets != sets || !self.in_bulk() {
             return None;
         }
+        let keys = &self.multi.keys;
         let shown: std::collections::HashSet<String> = if sets {
-            self.set_order()
+            self.set_order(false)
         } else {
             self.shown_keys()
         }
@@ -1251,9 +1279,14 @@ impl AppModel {
         }
     }
 
-    pub fn right_click_set(&mut self, key: &str) {
-        if !self.is_selected(key, true) {
-            self.select_set(key);
+    pub fn right_click_set(&mut self, target: impl Into<SetTarget>) {
+        let target = target.into();
+        let selected = match &target {
+            SetTarget::Key(key) => self.is_selected(key, true),
+            SetTarget::Id(id) => matches!(&self.selection, Selection::SetId(s) if same_id(s, id)),
+        };
+        if !selected || !self.in_bulk() {
+            self.go_to_target(target, None);
         }
     }
 
@@ -1477,6 +1510,21 @@ impl AppModel {
         v
     }
 
+    /// Why `sdc-project.toml` takes no slot edit, when it does not.
+    fn slot_read_only_reason(&self) -> Option<String> {
+        self.sets_doc
+            .as_ref()
+            .and_then(|d| d.error())
+            .map(|e| format!("sdc-project.toml is read-only: {e}"))
+    }
+
+    /// Why a slot command on game slot `n` of `v` would be refused (read-only `sdc-project.toml`, a pinned slot), or
+    /// `None`. The slot menu disables its entries with it, and so do the row's **Unlink** and **Use this file**.
+    pub fn slot_command_off(&self, v: &super::sets::SetView, n: u8) -> Option<String> {
+        self.slot_read_only_reason()
+            .or_else(|| v.locks.contains(&n).then(|| SLOT_LOCKED.to_string()))
+    }
+
     /// F3a Task 8: the menu of slot card `kind` of set `set` (an id): the Slot commands window's commands, From
     /// another set (each other set's member of that kind that writes an output), then Lock or Unlock. A locked slot
     /// offers only Unlock.
@@ -1491,14 +1539,8 @@ impl AppModel {
         };
         let id = v.id.clone();
         let locked = v.locks.contains(&n);
-        let read_only = self
-            .sets_doc
-            .as_ref()
-            .and_then(|d| d.error())
-            .map(|e| format!("sdc-project.toml is read-only: {e}"));
-        let off = read_only
-            .clone()
-            .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
+        let read_only = self.slot_read_only_reason();
+        let off = self.slot_command_off(v, n);
         // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock. An empty
         // one takes a file from the set's folder or borrows another set's (Note JD), a borrowed one offers Clear (no
         // slot command clears it); then the source file and sdc's pin.
@@ -1687,8 +1729,7 @@ impl AppModel {
             n,
             cmd,
         };
-        let paths = engine_inputs(self).1;
-        let links: Vec<MenuEntry> = views
+        let members: Vec<(&super::sets::SetView, &String, &TextureItem)> = views
             .iter()
             .filter(|o| !same_id(&o.id, &id))
             .flat_map(|o| o.members.iter().map(move |k| (o, k)))
@@ -1696,16 +1737,37 @@ impl AppModel {
                 let it = self
                     .item(k)
                     .filter(|i| slot_of(i).and_then(SlotKind::slot_number) == Some(n))?;
-                Some(MenuEntry {
-                    action: MenuAction::SlotLink {
-                        set: id.clone(),
-                        n,
-                        item: k.clone(),
-                    },
-                    label: format!("{} — {}", o.id, it.name),
-                    // Listed but off when the game would find no file there.
-                    disabled: game_path_in(self, views, &paths, k).err(),
-                })
+                Some((o, k, it))
+            })
+            .collect();
+        // Ruling 3b-F21: a pick stores the path the settled plan writes. While the plan is not settled
+        // (`pick_waits`) every row is off with one reason and no member's path is read; else the folders are read once
+        // per menu (`output_roots`), never once per listed member. Ruling 3b-F24: the rows read the cached check, so
+        // an open menu does no project-wide work on a frame where nothing changed; the click checks again uncached.
+        let wait = (!members.is_empty())
+            .then(|| self.pick_waits_cached())
+            .flatten();
+        let roots = (!members.is_empty() && wait.is_none()).then(|| output_roots(self));
+        let links: Vec<MenuEntry> = members
+            .into_iter()
+            .map(|(o, k, it)| MenuEntry {
+                action: MenuAction::SlotLink {
+                    set: id.clone(),
+                    n,
+                    item: k.clone(),
+                },
+                label: format!("{} — {}", o.id, it.name),
+                // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
+                disabled: match &roots {
+                    Some(roots) => member_game_path_in(
+                        self,
+                        roots,
+                        it,
+                        super::sets::member_output_key(o, it).as_ref(),
+                    )
+                    .err(),
+                    None => wait.map(String::from),
+                },
             })
             .collect();
         let gives = slot_gives(self, &id, n);
@@ -1753,6 +1815,25 @@ impl AppModel {
         menu
     }
 
+    /// Review E1: the Messages line of a slot picked from another set, written for the menu and the Slot commands
+    /// dialog alike. Nothing is logged when `link_slots` did not resolve the new link to a set (no source, or no
+    /// view): the line names the set the file comes from.
+    fn log_slot_link(&mut self, set: &str, n: u8) {
+        let text = super::sets::views(self)
+            .iter()
+            .find(|v| v.id == set)
+            .and_then(|v| {
+                let l = v.linked.get(&n)?;
+                let from = l.from_short.as_deref()?;
+                let file = l.path.rsplit('\\').next().unwrap_or(&l.path);
+                let label = v.slot_label(l.row?, "");
+                Some(format!("{label} of {}: {file} (from set {from})", v.short))
+            });
+        if let Some(t) = text {
+            self.messages.log(super::messages::Severity::Info, t);
+        }
+    }
+
     /// Run a menu entry; a refused slot command comes back as its reason.
     pub fn run_menu(&mut self, a: MenuAction) -> Option<String> {
         match a {
@@ -1766,8 +1847,19 @@ impl AppModel {
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),
             MenuAction::SlotPath { .. } | MenuAction::FromAnotherSet => {}
             MenuAction::SlotLink { set, n, item } => {
+                // Ruling 3b-F21: the click checks again that the plan is settled and reads the settled path, so a row
+                // drawn before an edit stores nothing while that edit plans.
                 return match member_game_path(self, &item) {
-                    Ok(p) => self.set_slot_command(&set, n, SlotCommand::Path(p)).err(),
+                    Ok(p) => {
+                        // Final wave Group 4: re-picking the file the slot already names writes nothing (an equal
+                        // write is no step), so it logs nothing either.
+                        let pushes = self.history.pushes;
+                        let err = self.set_slot_command(&set, n, SlotCommand::Path(p)).err();
+                        if err.is_none() && self.history.pushes != pushes {
+                            self.log_slot_link(&set, n);
+                        }
+                        err
+                    }
                     Err(e) => Some(e),
                 };
             }

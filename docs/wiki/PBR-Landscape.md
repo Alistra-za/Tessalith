@@ -44,7 +44,7 @@ Every export writes `<diffuse>.csskin.json` beside the set's exported diffuse: t
 - **A set with no diffuse, or a borrowed one, writes no file** and gets an amber row. Community Shaders keys a material on the diffuse file, so only the set that exports the diffuse writes it. <!-- D:HB2 -->
 - **A texture a slot doesn't export is left out** of the file, with an amber row.
 - **A grey `_wet` isn't exported.** Community Shaders doesn't read grey height _wet maps anymore; use a normal with a mask in alpha. The set's other files still write (`SKIN-WET-GREY`). <!-- D:HB3 -->
-- **A borrowed `_n` isn't named in the file.** The game reads the normal the mesh names, so point the mesh at the host's `_n`. The `_rfaos` still bakes from the host's `_n`. <!-- D:HC7 -->
+- **A borrowed `_n` isn't named in the file.** The game reads the normal the mesh names, so point the mesh at the host's `_n`. An eligible `_rfaos` uses the host's `_n` for its [variance bake](Texture-Packing.md#variance-and-gloss-bake). <!-- D:HC7 -->
 - **IMPORTANT** An edited `.csskin.json` is always kept, and Export says so. Delete it to let Tessalith write it again. A file no skin set writes any more is left in place and listed in the export notes.
 
 ### Sharing maps between skin variants

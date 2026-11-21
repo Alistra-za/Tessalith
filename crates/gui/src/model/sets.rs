@@ -1,8 +1,8 @@
 //! The user's texture sets (M3b spec §3, §6.1): views for the Sets column and set editor, shared-slot ownership,
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
-use super::history::{sha256_of, CreatedFile};
+use super::history::CreatedFile;
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
+use super::txst_map::{fill_from_records, link_slots, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, is_path_key, output_rel,
@@ -22,6 +22,9 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+pub(crate) use super::borrowed_unused::all_set_warnings;
+pub use super::borrowed_unused::{borrowed_unused, WarningsBySet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SlotKind {
@@ -342,6 +345,10 @@ pub enum MatchFrom {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetView {
+    /// Note JW1: empty cells of the final linked row, in display order.
+    pub empty: Vec<SlotKind>,
+    /// Note JW1: the card description and last hover line, or an empty string for a full card.
+    pub empty_line: String,
     /// The engine key (`""` for a created set with no members yet).
     pub key: String,
     pub id: String,
@@ -393,8 +400,267 @@ pub struct SetView {
     pub locks: BTreeSet<u8>,
     /// The texture set record the set is mapped to (`SetEntry::txst`), for the card line and the menu.
     pub txst: Option<TxstMap>,
+    pub(crate) output_name: Option<String>,
+    pub(crate) cs_txst: Option<Box<super::cs_pbr::CsBlock>>,
+    pub(crate) cs_mato: Option<Box<super::cs_pbr::CsBlock>>,
+    pub(crate) shows_cm_card: bool,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
+    /// The id's last parts that tell it from every other set (see [`short_names`]). Set by `build_views`; a view
+    /// `splice_views` rebuilds keeps its old value.
+    pub short: String,
+    /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
+    /// that path. Only a set that writes a PGPatcher entry (`pbr_export::writes_entry`) has any (`link_slots`); set by
+    /// `build_views`.
+    pub linked: BTreeMap<u8, SlotLink>,
+    /// The fills the exported JSON's feature keys read (`feature_slots`): `slots` with the own and borrowed fills of
+    /// each game slot that holds a link from another set (a path, typed or picked, that resolves to a set's output)
+    /// or a clear (`slotN = ""`) left out, and each such link's file under the row it fills (`SlotLink::row`). `None`
+    /// when no link counts and no game slot is cleared over an own or borrowed file. Only a set that writes a PGPatcher
+    /// entry
+    /// (`pbr_export::writes_entry`) has any (`link_slots`); set by `build_views` and `splice_views`.
+    pub features: Option<BTreeMap<SlotKind, SlotFill>>,
+    /// The files this set's own members write (review E13): each own slot's planned output in slot order, then every
+    /// other member with a job in member order (a complex `_m` or a packed output that fills no slot, an own file a
+    /// borrow displaced, a second member of one kind), each path once. Each entry is the member's slot kind (`slot_of`;
+    /// `None` for an unslotted member), the item's key and its output path. Borrowed and linked slots are other sets'
+    /// files. Set at the end of `finish_view`, so both view builders give it.
+    pub outputs: Vec<(Option<SlotKind>, String, PathBuf)>,
+}
+
+/// A `slotN` path of a set's JSON entry, and what it names (review E1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotLink {
+    /// The `slotN` value as written (backslashes).
+    pub path: String,
+    /// The set whose output this path is (its id), when one writes it.
+    pub from: Option<String>,
+    /// That set's `short` name.
+    pub from_short: Option<String>,
+    /// The item key that writes it (any planned output of that set, `txst_map::written_outputs`).
+    pub item: Option<String>,
+    /// The source item's slot kind (`slot_of`), Z9's "exact slot kind": `None` when no set writes the path, and for an
+    /// output that fills no slot (a complex `_m`), which is a local file but counts for no feature (`set_features`).
+    pub kind: Option<SlotKind>,
+    /// The row this link fills: `kind`, or for a typed path `link_row_kind(v, n)`. `None` for game slot 5.
+    pub row: Option<SlotKind>,
+}
+
+/// The displayed occupant the user agreed to replace. Keep the full key or path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOccupant {
+    Own { item: String },
+    Borrowed { item: String, from: String },
+    Record { path: String },
+}
+
+impl BorrowOccupant {
+    fn from_shown(shown: SlotShown<'_>) -> Option<Self> {
+        match shown {
+            SlotShown::Own { item } => Some(Self::Own { item: item.into() }),
+            SlotShown::Borrowed { item, from } => Some(Self::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            }),
+            SlotShown::Record { path } => Some(Self::Record { path: path.into() }),
+            _ => None,
+        }
+    }
+
+    fn matches(&self, shown: &SlotShown<'_>) -> bool {
+        match (self, shown) {
+            (Self::Own { item }, SlotShown::Own { item: current }) => item == current,
+            (
+                Self::Borrowed { item, from },
+                SlotShown::Borrowed {
+                    item: current,
+                    from: owner,
+                },
+            ) => item == current && same_id(from, owner),
+            (Self::Record { path }, SlotShown::Record { path: current }) => path == current,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BorrowOutcome {
+    Joined,
+    AskReplace {
+        kind: SlotKind,
+        existing: BorrowOccupant,
+    },
+    Refused(String),
+}
+
+/// What the exported JSON carries for a kind's row, in the order `slots_of` writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotShown<'a> {
+    Linked(&'a SlotLink),
+    /// An own or borrowed file whose game slot holds a link for another kind (slot 7: a `_f` under a link to a
+    /// `_cnr`): the JSON's `slotN` is the link, so this file is not written there.
+    Replaced {
+        item: &'a str,
+        by: &'a SlotLink,
+    },
+    /// `slotN = ""` over a slot the set fills: the JSON leaves it empty.
+    Cleared {
+        item: &'a str,
+    },
+    Own {
+        item: &'a str,
+    },
+    Borrowed {
+        from: &'a str,
+        item: &'a str,
+    },
+    Record {
+        path: &'a str,
+    },
+    Empty,
+}
+
+impl SlotShown<'_> {
+    /// Whether the row counts as holding a texture.
+    pub fn is_filled(&self) -> bool {
+        matches!(
+            self,
+            SlotShown::Linked(_)
+                | SlotShown::Own { .. }
+                | SlotShown::Borrowed { .. }
+                | SlotShown::Record { .. }
+        )
+    }
+}
+
+/// The settings keys of the game slots, so a reader allocates none (`slot_shown` runs per row per frame).
+const SLOT_KEYS: [&str; LAST_GAME_SLOT as usize] = [
+    "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8",
+];
+
+/// The `slotN` value of game slot `n` (1..=8) when it is a string: `Some("")` is an explicit clear.
+pub(crate) fn slot_string(s: &Settings, n: u8) -> Option<&str> {
+    match s.get(*SLOT_KEYS.get(usize::from(n).checked_sub(1)?)?) {
+        Some(Value::String(p)) => Some(p),
+        _ => None,
+    }
+}
+
+/// Whether `s` holds a link: a non-empty string `slotN` for some game slot. A clear (`slotN = ""`) names no set.
+pub(crate) fn has_slot_link(s: &Settings) -> bool {
+    (1..=LAST_GAME_SLOT).any(|n| slot_string(s, n).is_some_and(|p| !p.is_empty()))
+}
+
+/// Whether `s` clears a game slot (`slotN = ""` for some N).
+pub(crate) fn has_slot_clear(s: &Settings) -> bool {
+    (1..=LAST_GAME_SLOT).any(|n| slot_string(s, n) == Some(""))
+}
+
+/// The fills that decide `v`'s PGPatcher feature keys and their blocks (review E1, Task 12). No allocation, so a
+/// per-frame reader can call it.
+pub fn feature_slots(v: &SetView) -> &BTreeMap<SlotKind, SlotFill> {
+    v.features.as_ref().unwrap_or(&v.slots)
+}
+
+/// One file or path the exported JSON names in `v`'s slots (review E1, Task 15a), in the three states Export checks:
+/// a local file (`Fill`, `Linked`), a typed path no set writes (`External`), or nothing (a cleared slot has no item).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonFile<'a> {
+    /// An own or borrowed file the JSON keeps: no `slotN` overrides its game slot (or it has none, 9 and 10).
+    Fill(SlotKind, &'a SlotFill),
+    /// A `slotN` that names a set's output: a local file, on the row the link fills.
+    Linked(u8, &'a SlotLink),
+    /// A `slotN` no set writes, on game slot `n`: it fills the slot, and there is no local file to check.
+    External(u8),
+}
+
+impl JsonFile<'_> {
+    /// Whether this fills `kind`'s row: a fill of that kind, a link on that row, or a typed path on its game slot.
+    pub fn fills(&self, kind: SlotKind) -> bool {
+        match self {
+            JsonFile::Fill(k, _) => *k == kind,
+            JsonFile::Linked(_, l) => l.row == Some(kind),
+            JsonFile::External(n) => kind.game_slot() == Some(*n),
+        }
+    }
+}
+
+/// What `v`'s exported JSON names, from the fields its feature keys read (`feature_slots`, `linked`), so Export checks
+/// the material it writes: the fills of `feature_slots` (a cleared slot's are already left out) except those on a game
+/// slot that holds a `slotN` link, then each link, as `Linked` when it names a set's output, else `External`. On a set
+/// that writes no entry (`linked` empty, `features` unset) these are its own and borrowed fills. No allocation.
+pub fn json_files(v: &SetView) -> impl Iterator<Item = JsonFile<'_>> {
+    let fills = feature_slots(v)
+        .iter()
+        .filter(|(k, f)| f.is_filled() && !k.game_slot().is_some_and(|n| v.linked.contains_key(&n)))
+        .map(|(k, f)| JsonFile::Fill(*k, f));
+    let links = v.linked.iter().map(|(n, l)| match l.from {
+        Some(_) => JsonFile::Linked(*n, l),
+        None => JsonFile::External(*n),
+    });
+    fills.chain(links)
+}
+
+/// Whether the JSON `v` writes keeps its own or borrowed fill of `kind` (ruling 3b-F8): a `JsonFile::Fill` of that
+/// kind, so no `slotN` link or clear overrides its game slot. The one answer to "slot string or fill" for Export's
+/// clash, `unresolved_slots` and the editor's conflict rows (`view_row`).
+pub fn json_keeps_fill(v: &SetView, kind: SlotKind) -> bool {
+    json_files(v).any(|f| matches!(f, JsonFile::Fill(k, _) if k == kind))
+}
+
+/// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
+/// a link first, then an own or borrowed file the link or an empty `slotN` overrides, then the file itself.
+pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
+    if let Some(l) = v.linked.values().find(|l| l.row == Some(kind)) {
+        return SlotShown::Linked(l);
+    }
+    let file = match v.slots.get(&kind) {
+        Some(SlotFill::Own { item }) => Some(SlotShown::Own { item }),
+        Some(SlotFill::Borrowed { from, item }) => Some(SlotShown::Borrowed { from, item }),
+        _ => None,
+    };
+    if let Some(file) = file {
+        let item = match &file {
+            SlotShown::Own { item } | SlotShown::Borrowed { item, .. } => *item,
+            _ => "",
+        };
+        if let Some(n) = kind.game_slot() {
+            if let Some(by) = v.linked.get(&n) {
+                return SlotShown::Replaced { item, by };
+            }
+            // A clear counts only on a set that writes an entry, where `link_slots` left the file out of `features`
+            // (Task 15a): elsewhere no JSON carries the `slotN`, and the file shows as itself.
+            if slot_string(&v.settings, n) == Some("")
+                && v.features.as_ref().is_some_and(|f| !f.contains_key(&kind))
+            {
+                return SlotShown::Cleared { item };
+            }
+        }
+        return file;
+    }
+    match kind.slot_number().and_then(|n| v.record_supplied.get(&n)) {
+        Some(path) => SlotShown::Record { path },
+        None => SlotShown::Empty,
+    }
+}
+
+/// A typed path's row: the kind the view already has on game slot `n`, else 1 Diffuse, 2 Normal, 3 Emissive,
+/// 4 Height, 6 Rmaos, 7 Coat, 8 Subsurface; `None` for 5.
+pub fn link_row_kind(v: &SetView, n: u8) -> Option<SlotKind> {
+    v.slots
+        .keys()
+        .find(|k| k.game_slot() == Some(n))
+        .copied()
+        .or(match n {
+            1 => Some(SlotKind::Diffuse),
+            2 => Some(SlotKind::Normal),
+            3 => Some(SlotKind::Emissive),
+            4 => Some(SlotKind::Height),
+            6 => Some(SlotKind::Rmaos),
+            7 => Some(SlotKind::Coat),
+            8 => Some(SlotKind::Subsurface),
+            _ => None,
+        })
 }
 
 /// The joined tails a set's member names carry past the base (Note GW1): `_detail_n` in a Landscape, PBR Landscape
@@ -409,6 +675,13 @@ pub enum Tails {
 }
 
 impl SetView {
+    pub(crate) fn cs_block(&self, kind: super::cs_pbr::Kind) -> Option<&super::cs_pbr::CsBlock> {
+        match kind {
+            super::cs_pbr::Kind::Txst => self.cs_txst.as_deref(),
+            super::cs_pbr::Kind::Mato => self.cs_mato.as_deref(),
+        }
+    }
+
     /// The tails this set's member names read (see [`Tails`]).
     pub fn tails(&self) -> Tails {
         if self.skin || self.shared {
@@ -467,6 +740,8 @@ impl SetView {
             filled: BTreeMap::new(),
             fill_off: BTreeMap::new(),
             record_supplied: BTreeMap::new(),
+            empty: vec![],
+            empty_line: String::new(),
             rfaos: false,
             created: false,
             missing: vec![],
@@ -481,7 +756,15 @@ impl SetView {
             set_warnings: vec![],
             locks: BTreeSet::new(),
             txst: None,
+            output_name: None,
+            cs_txst: None,
+            cs_mato: None,
+            shows_cm_card: false,
             recipes: vec![],
+            short: String::new(),
+            linked: BTreeMap::new(),
+            features: None,
+            outputs: vec![],
         }
     }
 
@@ -500,6 +783,18 @@ impl SetView {
             self.slot_text(slot)
         } else {
             slot_label(slot, key)
+        }
+    }
+
+    /// The title of the editor's row for `slot` filled by `item`: `card_title` (a `_coat` reads "Coat colour +
+    /// strength", complex grass its own), and the Rmaos slot reads `slot_text`. The Output files lines use it too, so
+    /// a file has one name in both places (final wave Group 2).
+    pub fn row_title(&self, slot: SlotKind, item: Option<&str>) -> &'static str {
+        match item {
+            Some(item) if slot != SlotKind::Rmaos => {
+                card_title(slot, item, self.shader.as_ref().map(|p| p.shader))
+            }
+            _ => self.slot_label(slot, ""),
         }
     }
 
@@ -723,11 +1018,77 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
         .collect()
 }
 
-/// The slot rows the set editor draws for `v`, in order: its `slot_row` cards (a shared set's own kinds only), less the
-/// skin `_wet` and `_detail_n` cards outside an Advanced skin set. Review E4's status line sends a missing map to its
-/// row's **Assign…** only when the row is here.
+/// A chip's letter (A3): the slot's suffix in capitals, "D" for the diffuse.
+pub fn chip_letter(v: &SetView, k: SlotKind) -> String {
+    match k.suffix() {
+        "" => "D".to_string(),
+        _ if k == SlotKind::Rmaos => v.slot_text(k).to_string(),
+        s => s.to_uppercase(),
+    }
+}
+
+/// Note JW1: resolve the empty slots once, after links and record fills, for each rebuilt card.
+fn finish_empty(views: &mut [SetView]) {
+    for v in views {
+        for cell in view_row(v) {
+            if matches!(slot_shown(v, cell.kind), SlotShown::Empty) {
+                v.empty_line
+                    .push_str(if v.empty.is_empty() { "Empty: " } else { ", " });
+                v.empty_line.push_str(&chip_letter(v, cell.kind));
+                v.empty.push(cell.kind);
+            }
+        }
+    }
+}
+
+/// `v`'s slot cards as the exported JSON reads them (review E1): `shared_cells(slot_row(…))`, where a card that holds
+/// a link takes the link's kind. `slot_row` keeps the first kind of a shared card when neither is filled, so a link
+/// to the other kind (a `_f` on slot 7) would read empty.
+pub fn view_row(v: &SetView) -> Vec<SlotCell> {
+    let mut cells = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    // Ruling 3b-F8: a conflict is what Export's clash reads, both fills kept by the JSON (a clear or a link leaves one
+    // path on the slot, so none). Ruling 3b-F14: the read allocates nothing (`json_files` is an iterator over the view)
+    // and runs only for a card whose raw slots clash, so a frame without a clash does no new work.
+    for c in &mut cells {
+        c.clash = c
+            .clash
+            .filter(|k| json_keeps_fill(v, c.kind) && json_keeps_fill(v, *k));
+    }
+    if v.linked.is_empty() {
+        return cells;
+    }
+    // The shader's usable kinds are built once, and only when a link replaces a cell.
+    let mut usable: Option<Option<BTreeSet<SlotKind>>> = None;
+    // shortcut: a link on a game slot with no cell (a typed path with no shader pick and no own file there) shows on
+    // no row; only the Slot commands dialog lists it. Upgrade when the editor should draw an extra row for it.
+    for c in &mut cells {
+        let Some(k) = c
+            .kind
+            .game_slot()
+            .and_then(|n| v.linked.get(&n))
+            .and_then(|l| l.row)
+            .filter(|k| c.kind.shares_card(*k))
+        else {
+            continue;
+        };
+        *c = SlotCell {
+            kind: k,
+            fill: v.slots.get(&k).cloned().unwrap_or(SlotFill::Empty),
+            usable: usable
+                .get_or_insert_with(|| v.shader.as_ref().map(|p| usable_slots(p.shader)))
+                .as_ref()
+                .is_none_or(|u| u.contains(&k)),
+            clash: None,
+        };
+    }
+    cells
+}
+
+/// The slot rows the set editor draws for `v`, in order: its [`view_row`] cards, less the skin `_wet` and
+/// `_detail_n` cards outside an Advanced skin set. Review E4's status line sends a missing map to its row's
+/// **Assign…** only when the row is here.
 pub fn editor_cells(v: &SetView) -> Vec<SlotCell> {
-    shared_cells(v, slot_row(v.shader.as_ref(), &v.slots))
+    view_row(v)
         .into_iter()
         .filter(|c| {
             v.skin || v.shared || !matches!(c.kind, SlotKind::SkinWet | SlotKind::SkinDetail)
@@ -899,12 +1260,31 @@ fn mirrored_stem(read: &str) -> String {
 
 /// Every set, in display order (audit 7, DECISIONS Note Y7): built once per change of its inputs.
 pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
-    super::cached(
+    if let Some(views) = m.warm_views() {
+        return views;
+    }
+    let views = super::cached(
         m,
         |c| c.views.clone(),
         |c, v| c.views = Some(v),
         || Arc::new(build_views(m)),
-    )
+    );
+    m.view_cache().borrow_mut().root_inputs = Some((
+        m.project.as_ref().map(|p| (p.rev(), p.read_only())),
+        m.sets_doc.as_ref().map(|d| d.read_only()),
+        m.settings.export_folder.clone(),
+    ));
+    views
+}
+
+/// Document-only cards have no plan warnings. Seed their resolved view to exercise coded Problems rows.
+#[cfg(feature = "test-hooks")]
+pub fn inject_view_warnings(m: &mut AppModel, id: &str, warnings: Vec<Warning>) {
+    m.invalidate_views();
+    views(m);
+    let mut cache = m.view_cache().borrow_mut();
+    let views = Arc::make_mut(cache.views.as_mut().unwrap());
+    views.iter_mut().find(|v| v.id == id).unwrap().set_warnings = warnings;
 }
 
 #[cfg(test)]
@@ -920,11 +1300,94 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
     (*views(m)).clone()
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Full model checks for drop choices on this test thread.
+    pub static DROP_PRECHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+
+    /// Test probe: how many times the plan's output paths were built on this thread (ruling 3b-F14).
+    static ENGINE_INPUT_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: how many times the export inputs were built on this thread.
+#[cfg(feature = "test-hooks")]
+pub fn engine_input_builds() -> u64 {
+    ENGINE_INPUT_BUILDS.with(std::cell::Cell::get)
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Test probe (ruling 3b-F21): the reads of the export configuration (`also_config`, a clone) and of the export
+    /// folder (`export_root`) on this thread, the two values the output folder is made of.
+    static ROOT_READS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// Count one read of the export configuration (`config`) or of the export folder.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_root_read(config: bool) {
+    ROOT_READS.with(|c| {
+        let (cfg, folder) = c.get();
+        c.set(if config {
+            (cfg + 1, folder)
+        } else {
+            (cfg, folder + 1)
+        });
+    });
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Test probe (ruling 3b-F24): how many times the From another set settled check (`settled_wait`) ran.
+    static SETTLED_CHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Count one run of the settled check.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_settled_check() {
+    SETTLED_CHECKS.with(|c| c.set(c.get() + 1));
+}
+
+/// Tests: how many times the settled check behind the From another set rows and click ran on this thread.
+#[cfg(feature = "test-hooks")]
+pub fn settled_check_builds() -> u64 {
+    SETTLED_CHECKS.with(std::cell::Cell::get)
+}
+
+/// Tests: (export configuration reads, export folder reads) on this thread so far.
+#[cfg(feature = "test-hooks")]
+pub fn root_reads() -> (u64, u64) {
+    ROOT_READS.with(std::cell::Cell::get)
+}
+
+/// The two folders a job's output is read under, the output folder first, then the export folder. Ruling 3b-F21: one
+/// read of the export configuration and one of the export folder make both; called once per index build or menu
+/// call, never per member.
+pub(crate) fn output_roots(m: &AppModel) -> [PathBuf; 2] {
+    let export = m.export_root();
+    [m.output_root_in(&export), export]
+}
+
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
 #[cfg(feature = "test-hooks")]
 pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Whole member searches for an item's slot lock on this thread.
+    pub static LOCK_SEARCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `view_reads`' value: slot, sub-type, waiting, game path, job key, the settled job's output.
+pub(crate) type ViewReads<'a> = (
+    Option<SlotKind>,
+    Option<Subtype>,
+    bool,
+    Option<&'a str>,
+    &'a str,
+    Option<&'a std::ffi::OsStr>,
+);
 
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
 /// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
@@ -933,15 +1396,18 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JH1). The keys are
 /// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
 /// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
+/// `link_slots` reads the output path to find the set a `slotN` link names: `job_key`, and the settled job's output
+/// (`projected_slot`, ruling 3b-F45), whose spelling can change while the folded job key stays (a mapping
+/// removed between two spellings of one folder), so a moved output rebuilds the views and no link is carried.
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
-pub(crate) fn view_reads(
-    i: &TextureItem,
-) -> (Option<SlotKind>, Option<Subtype>, bool, Option<&str>) {
+pub(crate) fn view_reads(i: &TextureItem) -> ViewReads<'_> {
     (
         slot_of(i),
         i.job.as_ref().map(|j| j.profile.subtype),
         i.waiting,
         i.job.as_ref().map(|j| j.game_path.as_str()),
+        i.job_key.as_str(),
+        i.job.as_ref().map(|j| j.output.as_os_str()),
     )
 }
 
@@ -1015,12 +1481,76 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     for v in &mut views {
         finish_view(m, v);
     }
+    let ids: Vec<&str> = views.iter().map(|v| v.id.as_str()).collect();
+    let shorts = short_names(&ids);
+    for (v, s) in views.iter_mut().zip(shorts) {
+        v.short = s;
+    }
+    // Review E1: after `finish_view` (`exports_json` reads `json`) and the short names (a link names its source's).
+    link_slots(m, &mut views);
+    finish_empty(&mut views);
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
         v.owns = owns_of(v, &owners);
     }
     views
+}
+
+/// A short display name per set id, in the order of `ids`: the last `k` parts, `k` the smallest value from
+/// `min(2, parts)` up for which no other id has the same last `k` parts (compared folded, as `same_id` does, Note
+/// BF). Parts are split as `fold_id` splits them (at `/` or `\`, the ends trimmed; final wave Group 8, ledger 19),
+/// and a short keeps the id's own separators. Ids equal after folding keep the whole id.
+pub fn short_names(ids: &[&str]) -> Vec<String> {
+    const SEP: [char; 2] = ['/', '\\'];
+    let parts: Vec<Vec<&str>> = ids
+        .iter()
+        .map(|id| id.trim_matches(SEP).split(SEP).collect())
+        .collect();
+    let folded: Vec<Vec<String>> = parts
+        .iter()
+        .map(|p| p.iter().map(|s| fold_id(s)).collect())
+        .collect();
+    let mut k: Vec<usize> = parts.iter().map(|p| p.len().min(2)).collect();
+    let mut done = vec![false; ids.len()];
+    let deepest = parts.iter().map(Vec::len).max().unwrap_or(0);
+    for round in 1..=deepest {
+        if !k.iter().zip(&done).any(|(&ki, &d)| !d && ki == round) {
+            continue;
+        }
+        let mut count: HashMap<&[String], usize> = HashMap::new();
+        for f in &folded {
+            *count
+                .entry(&f[f.len().saturating_sub(round)..])
+                .or_default() += 1;
+        }
+        for i in 0..ids.len() {
+            if done[i] || k[i] != round {
+                continue;
+            }
+            let f = &folded[i];
+            if count[&f[f.len().saturating_sub(round)..]] == 1 || round >= f.len() {
+                done[i] = true;
+            } else {
+                k[i] += 1;
+            }
+        }
+    }
+    ids.iter()
+        .zip(&parts)
+        .zip(&k)
+        .map(|((id, p), &k)| {
+            if k >= p.len() {
+                return id.to_string();
+            }
+            // k < p.len(), so the trimmed id has at least k separators.
+            let t = id.trim_matches(SEP);
+            t.rmatch_indices(SEP)
+                .nth(k - 1)
+                .map_or(t, |(i, _)| &t[i + 1..])
+                .to_string()
+        })
+        .collect()
 }
 
 /// Note HF1: the set has a member and every one that is not a packed output is in no set (a packed output follows
@@ -1055,6 +1585,8 @@ fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> 
 
 /// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).
 pub(crate) fn has_card(m: &AppModel, key: &str) -> bool {
+    #[cfg(feature = "test-hooks")]
+    super::count_identity_work();
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     m.sets
         .iter()
@@ -1098,15 +1630,24 @@ fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     v.shader = s.shader.clone();
     v.set_warnings = s.warnings.clone();
     v.recipes = s.recipes.clone();
-    for mk in &s.members {
+    v.slots = own_fills(m, &s.members);
+    drop_supplied_missing_maps(m, &mut v);
+    v
+}
+
+/// A set's own slot fills, before any borrow: each slot takes the first member whose resolved sub-type fills it
+/// (`slot_of`). The set resolver lends these (`build_views`' `own_slots`), and the shared-alpha follow-on reads the
+/// same fills (Note JS7, N8-b).
+pub(super) fn own_fills(m: &AppModel, members: &[String]) -> BTreeMap<SlotKind, SlotFill> {
+    let mut slots = BTreeMap::new();
+    for mk in members {
         if let Some(slot) = m.item(mk).and_then(slot_of) {
-            v.slots
+            slots
                 .entry(slot)
                 .or_insert(SlotFill::Own { item: mk.clone() });
         }
     }
-    drop_supplied_missing_maps(m, &mut v);
-    v
+    slots
 }
 
 /// The lighting-shader slot (1-based, as `SlotKind::slot_number`) a required map of `Shader::spec` goes in, from
@@ -1121,6 +1662,18 @@ pub fn map_slot(label: &str) -> Option<u8> {
         "_i" => Some(7),
         _ => None,
     }
+}
+
+/// `map_slot`, and slot 1 for the diffuse-like roles (`albedo`, `diffuse`, `skin_albedo`, `complex_grass`): a link on
+/// slot 1 answers a missing diffuse as a link on slot 2 answers a missing normal.
+pub(crate) fn linked_map_slot(label: &str) -> Option<u8> {
+    map_slot(label).or_else(|| {
+        matches!(
+            label,
+            "albedo" | "diffuse" | "skin_albedo" | "complex_grass"
+        )
+        .then_some(1)
+    })
 }
 
 /// The slot number of the map a `SHADER-MISSING-MAP` names (`map_slot`); `None` for any other warning. A number, not
@@ -1193,6 +1746,14 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
         .retain(|w| !missing_map_slot(w).is_some_and(|n| bits & (1 << (n - 1)) != 0));
 }
 
+/// The own file a numbered borrow reads, including the first kind when two kinds share a number.
+fn own_in_slot(slots: BTreeMap<SlotKind, SlotFill>, n: u8) -> Option<(SlotKind, String)> {
+    slots.into_iter().find_map(|(k, f)| match f {
+        SlotFill::Own { item } if k.slot_number() == Some(n) => Some((k, item)),
+        _ => None,
+    })
+}
+
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
 /// for no such set); `lender_borrow` gives set `id`'s own `borrow.slot<n>` line (Note JN1: a chain is followed).
 fn entry_view(
@@ -1207,6 +1768,10 @@ fn entry_view(
     v.shader_choice = e.shader;
     v.locks = e.lock.clone();
     v.txst = e.txst.clone();
+    v.output_name.clone_from(&e.output_name);
+    v.cs_txst = e.cs_txst.clone().map(Box::new);
+    v.cs_mato = e.cs_mato.clone().map(Box::new);
+    v.shows_cm_card = e.cm.is_some();
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
@@ -1239,11 +1804,7 @@ fn entry_view(
             let Some(src) = own(&cur) else {
                 break Err(hops > 0);
             };
-            let found = src.into_iter().find_map(|(k, f)| match f {
-                SlotFill::Own { item } if k.slot_number() == Some(*slot) => Some((k, item)),
-                _ => None,
-            });
-            if let Some(found) = found {
+            if let Some(found) = own_in_slot(src, *slot) {
                 break Ok(found);
             }
             match lender_borrow(&cur, *slot) {
@@ -1339,6 +1900,39 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
     }
+    // Output files shows the plan's exact spelling, which view_reads compares even for equivalent paths.
+    v.outputs.clear();
+    for (kind, fill) in &v.slots {
+        let SlotFill::Own { item } = fill else {
+            continue;
+        };
+        let Some(out) = m.item(item).and_then(|i| i.job.as_ref()).map(|j| &j.output) else {
+            continue;
+        };
+        if !v.outputs.iter().any(|(_, _, p)| p == out) {
+            v.outputs.push((Some(*kind), item.clone(), out.clone()));
+        }
+    }
+    // Then every other member that converts, in member order (final wave Group 2): one that fills no slot
+    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind.
+    for key in &v.members {
+        let Some(i) = m.item(key) else {
+            continue;
+        };
+        let Some(job) = i.job.as_ref() else {
+            continue;
+        };
+        v.shows_cm_card |= super::cm_json::is_cm_member(v, job.profile.subtype);
+        let out = &job.output;
+        if !v.outputs.iter().any(|(_, _, p)| p == out) {
+            v.outputs.push((slot_of(i), key.clone(), out.clone()));
+        }
+    }
+}
+
+/// The files the set's own slots write (`SetView::outputs`).
+pub fn set_outputs(v: &SetView) -> &[(Option<SlotKind>, String, PathBuf)] {
+    &v.outputs
 }
 
 /// The slots of `v` whose output it owns while another set also uses it.
@@ -1371,8 +1965,15 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         shown == card_hidden(m, &entries, &root, s)
     });
     // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
-    // project with many mapped sets shows it in a profile.
-    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
+    // project with many mapped sets shows it in a profile. A project with a linked slot (a non-empty string `slotN`)
+    // rebuilds every view too: a link reads another set's output path, and the splice does not know which sets it
+    // reads; upgrade when a splice can name the sets a link reads.
+    if card_moves
+        || scope.len() > 32
+        || entries
+            .iter()
+            .any(|e| e.txst.is_some() || has_slot_link(&e.settings))
+    {
         *views = build_views(m);
         return;
     }
@@ -1424,8 +2025,13 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
+        v.short = old.short.clone();
         rebuilt.push(v);
     }
+    // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
+    // with one rebuilt every view above), so the link index is not built.
+    link_slots(m, &mut rebuilt);
+    finish_empty(&mut rebuilt);
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {
@@ -1510,6 +2116,11 @@ pub(super) fn recipe_suffix(i: &TextureItem) -> Option<String> {
 
 /// The engine inputs of the current documents and plan (spec §2.1, DECISIONS P1–P2).
 pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    plan_outputs(m, &views(m), None)
+}
+
+/// Membership edits in the order the engine applies them.
+fn membership_edits(m: &AppModel) -> Vec<SetEdit> {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut edits = vec![];
     for e in entries.iter().filter(|e| e.created) {
@@ -1549,11 +2160,22 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             });
         }
     }
+    edits
+}
+
+/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
+pub(super) fn plan_outputs(
+    m: &AppModel,
+    views: &[SetView],
+    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
+) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    #[cfg(feature = "test-hooks")]
+    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
+    let edits = membership_edits(m);
     let mut paths = BTreeMap::new();
-    let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
-    let mut named = output_name_paths(m, &views);
-    let record = record_paths(m, &views);
+    let mut named = output_name_paths(m, views);
+    let record = super::txst_map::record_outputs(m, views);
     if m.target != Target::Cs && record.is_empty() {
         paths.extend(named);
         return (edits, paths);
@@ -1562,10 +2184,10 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     // key *before* the duplicate checks, so a name a record replaced reserves nothing. The checks below then run on
     // final paths, on every target, and a record path that loses one leaves its file on its default path.
     let cs = m.target == Target::Cs;
-    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(k, _)| k.clone()).collect();
+    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(_, k, _, _)| k.clone()).collect();
     named.retain(|(k, _)| !rec_keys.contains(k));
     let mut candidates = if cs {
-        output_candidates(m, &views)
+        output_candidates(m, views)
     } else {
         vec![]
     };
@@ -1577,7 +2199,9 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     explicit.extend(named.iter().map(|(c, _)| c));
     explicit.extend(rec_keys.iter());
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
-    let owners = packed_owners(&views);
+    let owners = packed_owners(views);
+    // Ruling 3b-F21: the folders once per build, not per item (`export_key_in`).
+    let prefix = m.plan_prefix();
     let mirrored: BTreeSet<String> = m
         .items
         .iter()
@@ -1588,11 +2212,11 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
         // Note HQ6: explicit paths are under the export folder, job keys under the plan's output root.
-        .map(|it| m.export_key(&it.job_key))
+        .map(|it| super::export_key_in(&prefix, &it.job_key))
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
-    for (_, key, rel) in named.chain(candidates) {
+    for (owner, key, rel) in named.chain(candidates) {
         if !cs {
             // Off cs an output name takes no checks, as before records existed; it only reserves its path.
             seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase());
@@ -1607,13 +2231,21 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         // both as IN-DUPLICATE, the sets would stop being PBR sets, the paths would vanish, and the two-pass planning
         // would flip between two plans.)
         if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+            if !owner.is_empty() {
+                if let Some(game) = game_paths.as_deref_mut() {
+                    game.insert(key.clone(), rel.clone());
+                }
+            }
             paths.insert(key, rel);
         }
     }
     // Record paths last: they take the same checks on every target.
-    for (key, rel) in record {
+    for (_, key, rel, game_path) in record {
         let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
         if !mirrored.contains(&low) && seen.insert(low) {
+            if let Some(game) = game_paths.as_deref_mut() {
+                game.insert(key.clone(), PathBuf::from(game_path.to_ascii_lowercase()));
+            }
             paths.insert(key, rel);
         }
     }
@@ -1632,6 +2264,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
         .any(|e| e.output_name.is_some())
         .then(|| DefaultOutputs::new(m))
         .flatten();
+    // Ruling 3b-F21: the folders once per pass, not per member (`export_rel_in`).
+    let mut prefix = None;
     for e in entries.iter() {
         let Some(name) = e.output_name.as_deref() else {
             continue;
@@ -1669,7 +2303,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             } else {
                 OutputKey::File(item.key.clone())
             };
-            out.push((k, m.export_rel(&rel)));
+            let prefix = prefix.get_or_insert_with(|| m.plan_prefix());
+            out.push((k, super::export_rel_in(prefix, &rel)));
         }
     }
     out
@@ -1989,7 +2624,7 @@ pub(crate) mod linear {
         let mut paths = BTreeMap::new();
         let views = views(m);
         let mut named = output_name_paths(m, &views);
-        let record = record_paths(m, &views);
+        let record = super::super::txst_map::record_paths(m, &views);
         let cs = m.target == Target::Cs;
         if !cs && record.is_empty() {
             paths.extend(named);
@@ -2095,10 +2730,60 @@ pub enum DropChoice {
     Duplicate,
 }
 
+impl DropChoice {
+    pub(crate) fn offered(kind: Option<ItemKind>) -> &'static [Self] {
+        if kind == Some(ItemKind::Helper) {
+            &[Self::Move, Self::Share]
+        } else {
+            &[Self::Move, Self::Share, Self::Duplicate]
+        }
+    }
+
+    /// Item-only refusals for slot drops. A raw helper shared as a file bypasses the slot.
+    pub(crate) fn slot_refusal(
+        self,
+        kind: Option<ItemKind>,
+        slot: Option<SlotKind>,
+    ) -> Option<&'static str> {
+        match self {
+            Self::Move if kind == Some(ItemKind::Packed) => Some(PACKED_MOVE),
+            Self::Duplicate if kind == Some(ItemKind::Packed) => Some(PACKED_DUPLICATE),
+            Self::Duplicate if kind == Some(ItemKind::Helper) => Some(HELPER_DUPLICATE),
+            Self::Share if slot.is_none() && kind == Some(ItemKind::Helper) =>
+                Some("Only a raw helper can be shared as a file."),
+            Self::Share if slot.is_none() =>
+                Some("only a finished texture can be shared; duplicate the source to use it in two sets"),
+            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
+            Self::Share if slot.is_some_and(|s| s.slot_number().is_none()) =>
+                Some("Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"),
+            _ => None,
+        }
+    }
+}
+
+/// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
+pub(crate) fn is_shareable_helper(item: &TextureItem) -> bool {
+    item.kind == ItemKind::Helper
+        && item
+            .helper
+            .as_ref()
+            .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
+}
+
+/// Note JW6: the edit or confirmation that follows a successful drop precheck.
+enum DropPlan {
+    ShareHelper(SetView),
+    Slot {
+        target: SetView,
+        slot: Option<SlotKind>,
+        existing: Option<SlotFill>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropOutcome {
     Joined,
-    AskReplace { existing: String },
+    AskReplace { kind: SlotKind, existing: SlotFill },
     AskChoice { from: String },
     Refused(String),
 }
@@ -2108,11 +2793,21 @@ pub enum SlotCommand {
     FromSet,
     Path(String),
     Clear,
+    /// The editor row's **Unlink** and **Use this file** (ruling 3b-W1): removes the stored `slotN` (a link, a typed
+    /// path or `""`) and nothing else, so what is under it (an own or shared file, a record's, or nothing) fills the
+    /// slot again. A borrow line stays, and no set sharing through this one is retargeted.
+    RemoveSlotKey,
 }
 
 pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
+/// Note JW5: why a helper is never duplicated (a helper is shared as the file itself, Note HH5).
+pub const HELPER_DUPLICATE: &str = "a helper cannot be duplicated; share it instead";
 const PACKED_MOVE: &str =
     "a packed map follows its raw maps; move those, or share the finished map";
+const PACKED_DUPLICATE: &str =
+    "A packed map cannot be duplicated. Share its finished output or move its raw maps.";
+const SHARED_SOURCE_CHANGED: &str = "The shared source changed. Drag the chip again.";
+const DESTINATION_SLOT_CHANGED: &str = "The destination slot changed. Drag the chip again.";
 /// The `missing` line of an `[[sets]]` entry whose files have all gone.
 const NO_FILES_LEFT: &str = "no texture of this set is left in the folder";
 
@@ -2125,7 +2820,7 @@ fn replans(key: &str) -> bool {
 pub const SLOT_LOCKED: &str = "slot locked";
 
 /// Why `slot` of `v` takes no change: it is locked (F3a Task 8).
-fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
+pub(super) fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     match slot.and_then(SlotKind::slot_number) {
         Some(n) if v.locks.contains(&n) => {
             Err(format!("slot {n} of {} is locked; unlock it first", v.id))
@@ -2235,9 +2930,16 @@ pub fn pinned_files(m: &AppModel) -> BTreeSet<String> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static LOCK_MAP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The items filling a locked slot of any set (F3a Task 8), with the reason bulk edits skip them: "slot locked" in
 /// the set that owns the texture, else "slot locked in <set>" for a set borrowing it. The own lock wins.
 pub fn locked_items(m: &AppModel) -> BTreeMap<String, String> {
+    #[cfg(test)]
+    LOCK_MAP_BUILDS.set(LOCK_MAP_BUILDS.get() + 1);
     let mut out = BTreeMap::new();
     for v in views(m).iter() {
         for (k, f) in &v.slots {
@@ -2287,35 +2989,82 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
 /// Why a member outside a `textures` folder cannot be linked (F3a Task 8).
 pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 
+/// Ruling 3b-F21: why a From another set row is off while a plan or a scan-database read runs (`AppModel::pick_waits`).
+pub const PICK_PLANNING: &str = "Planning: pick a file once the plan has finished";
+/// Ruling 3b-F25: why a From another set row is off when no plan runs but the plan on screen is out of date or failed
+/// (`AppModel::pick_waits`). A proposed string, for the owner to word.
+pub const PICK_PLAN_AGAIN: &str =
+    "The plan must run again first: pick a file once a new plan has finished";
+
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
-/// backslashes, `.dds`), from the current documents: its planned output path when it has one (a PBR output under
-/// `textures\pbr\`, as the automatic slot paths, DECISIONS P11), else its game path (`textures\…`). A member with no
-/// `textures` folder above it has none.
+/// backslashes, `.dds`): the game path of its settled job (`projected_slot`). Ruling 3b-F21: only on a settled
+/// plan (`AppModel::pick_waits` says why not), and never a path a pending edit asks for. A member whose output is under
+/// no `textures` folder has none.
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
-    let paths = engine_inputs(m).1;
-    game_path_in(m, &views(m), &paths, item)
+    if let Some(why) = m.pick_waits() {
+        return Err(why.into());
+    }
+    let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
+    let key = item_output_key(&views(m), it);
+    member_game_path_in(m, &output_roots(m), it, key.as_ref())
 }
 
-/// `member_game_path` over views and output paths already built (the slot menu builds them once).
-pub(crate) fn game_path_in(
+/// `member_game_path` over the folders the caller read once per call (`output_roots`, rulings 3b-F14 and 3b-F21),
+/// on a settled plan. A member outside the plan's game locations keeps its disabled reason.
+pub(crate) fn member_game_path_in(
     m: &AppModel,
-    views: &[SetView],
-    paths: &BTreeMap<OutputKey, PathBuf>,
-    item: &str,
+    roots: &[PathBuf; 2],
+    it: &TextureItem,
+    key: Option<&OutputKey>,
 ) -> Result<String, String> {
-    let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
-    let job = it
-        .job
-        .as_ref()
-        .ok_or_else(|| format!("{} writes no output", it.name))?;
-    if let Some(p) = item_output_key(views, it).and_then(|k| paths.get(&k)) {
-        return Ok(p.to_string_lossy().replace('/', "\\"));
+    if !writes_own_output(it) || it.job_key.is_empty() {
+        return Err(format!("{} writes no output", it.name));
     }
-    // `game_path` starts at the last `textures` folder, else it is the path under the opened folder.
-    if !job.game_path.starts_with("textures/") {
-        return Err(NO_GAME_PATH.into());
+    projected_slot(m, roots, it, key).ok_or_else(|| NO_GAME_PATH.into())
+}
+
+/// F45: the landed plan supplies the game directory. Engine renames affect only the final filename.
+pub(crate) fn projected_slot(
+    m: &AppModel,
+    roots: &[PathBuf; 2],
+    it: &TextureItem,
+    key: Option<&OutputKey>,
+) -> Option<String> {
+    let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
+    if it.job_key.is_empty() {
+        return None;
     }
-    Ok(written_game_path(job).replace('/', "\\"))
+    projected_job_slot(m, roots, &job.output, &job.game_path, key)
+}
+
+pub(super) fn projected_job_slot(
+    m: &AppModel,
+    roots: &[PathBuf; 2],
+    output: &Path,
+    game_path: &str,
+    key: Option<&OutputKey>,
+) -> Option<String> {
+    if !roots.iter().any(|root| output.starts_with(root)) {
+        return None;
+    }
+    let game = key
+        .and_then(|k| m.slot_paths.get(k))
+        .map(PathBuf::as_path)
+        .unwrap_or_else(|| Path::new(game_path));
+    let mut path: PathBuf = game
+        .components()
+        .filter(|c| *c != std::path::Component::CurDir)
+        .collect();
+    if !path
+        .components()
+        .next()?
+        .as_os_str()
+        .eq_ignore_ascii_case("textures")
+    {
+        return None;
+    }
+    path.set_file_name(output.file_name()?);
+    Some(path.to_string_lossy().replace('/', "\\"))
 }
 
 /// The game path a member's export writes (wave 2 #4, Note R9): the folder of `game_path` and the file name of
@@ -2327,6 +3076,20 @@ pub(crate) fn written_game_path(job: &engine::policy::ResolvedJob) -> String {
         Some((dir, _)) => format!("{dir}/{name}"),
         None => name.into_owned(),
     }
+}
+
+/// Sharing adds no member to keep an automatic set alive after Replace.
+fn share_keeps_member(target: &SetView, existing: Option<&SlotFill>) -> Result<(), String> {
+    if matches!(existing, Some(SlotFill::Own { .. }))
+        && target.members.len() == 1
+        && !target.created
+    {
+        return Err(format!(
+            "{} would have no texture of its own left; move another texture in first",
+            target.id
+        ));
+    }
+    Ok(())
 }
 
 /// Empty `slot` of set `id` in the document: its own occupant leaves the set, a borrow is dropped. Part of a replace.
@@ -2427,6 +3190,8 @@ impl AppModel {
 
     /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
     pub(crate) fn set_key_of_item(&self, item: &str) -> Option<String> {
+        #[cfg(feature = "test-hooks")]
+        super::count_identity_work();
         self.set_of_item(item).map(|v| v.key)
     }
 
@@ -2538,7 +3303,9 @@ impl AppModel {
 
     /// Why `item` cannot leave its set: it fills a locked slot there (F3a Task 8).
     pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
-        // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JP3).
+        #[cfg(feature = "test-hooks")]
+        LOCK_SEARCHES.with(|c| c.set(c.get() + 1));
+        // Borrowed from the cached views, not cloned: this runs per drawn row per frame.
         let views = views(self);
         let Some(v) = view_with_member(&views, item) else {
             return Ok(());
@@ -2570,10 +3337,7 @@ impl AppModel {
             .iter()
             .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
             .and_then(|(k, _)| k.slot_number())?;
-        let first = own.into_iter().find_map(|(k, f)| match f {
-            SlotFill::Own { item } if k.slot_number() == Some(n) => Some(item),
-            _ => None,
-        })?;
+        let (_, first) = own_in_slot(own, n)?;
         (first == item).then_some((v.id, n))
     }
 
@@ -2835,7 +3599,10 @@ impl AppModel {
             return DropOutcome::Refused(why);
         }
         // Note HH5: a no-set helper can be shared, so it asks too; every other no-set texture moves.
-        if from.is_none() && self.is_no_set(item) && self.is_shareable_helper(item) {
+        if from.is_none()
+            && self.is_no_set(item)
+            && self.item(item).is_some_and(is_shareable_helper)
+        {
             return DropOutcome::AskChoice {
                 from: "no set".into(),
             };
@@ -2912,44 +3679,222 @@ impl AppModel {
         }
     }
 
+    /// Note JW4: share the source of a displayed borrow. An effective slot command explains its refusal on the card's status line.
+    pub fn drop_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+    ) -> Result<BorrowOutcome, String> {
+        self.share_borrow(item, from, set, None)
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    /// Recheck the source, commands and displayed occupant before accepting Replace.
+    pub fn replace_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        kind: SlotKind,
+        existing: &BorrowOccupant,
+    ) -> Result<(), String> {
+        self.share_borrow(item, from, set, Some((kind, existing)))
+            .and_then(|out| match out {
+                BorrowOutcome::Joined => Ok(()),
+                BorrowOutcome::Refused(why) => Err(why),
+                BorrowOutcome::AskReplace { .. } => unreachable!("the occupant was confirmed"),
+            })
+            .inspect_err(|why| self.status_line.clone_from(why))
+    }
+
+    fn share_borrow(
+        &mut self,
+        item: &str,
+        from: &str,
+        set: &str,
+        confirmed: Option<(SlotKind, &BorrowOccupant)>,
+    ) -> Result<BorrowOutcome, String> {
+        if !self.sets_editable() {
+            return Ok(BorrowOutcome::Refused(READ_ONLY.into()));
+        }
+        if self.pick_waits().is_some() || membership_edits(self) != self.landed_membership {
+            return Err(SHARED_SOURCE_CHANGED.into());
+        }
+        let target = match self.drop_target(set) {
+            Ok(target) => target,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        let source = self
+            .item(item)
+            .and_then(|it| Some((it, slot_of(it)?, self.lent_slot(item)?.0)));
+        let Some((it, kind, owner)) = source.filter(|(_, _, owner)| same_id(owner, from)) else {
+            return Ok(BorrowOutcome::Refused(SHARED_SOURCE_CHANGED.into()));
+        };
+        if let Some(why) = self.borrow_command_refusal(&target, kind, item, &owner) {
+            return Err(why);
+        }
+        let shown = slot_shown(&target, kind);
+        if confirmed
+            .is_some_and(|(approved, existing)| approved != kind || !existing.matches(&shown))
+        {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        }
+        let set = &target.id;
+        let name = &it.name;
+        if same_id(set, &owner) {
+            self.status_line = format!("Nothing to share: {name} is already in {set}.");
+            return Ok(BorrowOutcome::Joined);
+        }
+        if matches!(shown, SlotShown::Borrowed {item: current, from} if current == item && same_id(from, &owner))
+        {
+            self.status_line = format!("{set} already shares {name} from {owner}.");
+            return Ok(BorrowOutcome::Joined);
+        }
+        if let Some(why) = slot_conflict(&target.slots.keys().copied().collect::<Vec<_>>(), kind) {
+            return Ok(BorrowOutcome::Refused(why));
+        }
+        let raw = match self.occupant(&target, Some(kind), None) {
+            Ok(raw) => raw,
+            Err(why) => return Ok(BorrowOutcome::Refused(why)),
+        };
+        if confirmed.is_none() {
+            if let Some(existing) = BorrowOccupant::from_shown(shown) {
+                if let Err(why) = self
+                    .choice_allowed(item, &target, Some(kind), DropChoice::Share)
+                    .and_then(|()| share_keeps_member(&target, raw.as_ref()))
+                {
+                    return Ok(BorrowOutcome::Refused(why));
+                }
+                return Ok(BorrowOutcome::AskReplace { kind, existing });
+            }
+        }
+        Ok(
+            match self.apply_choice(item, &target, Some(kind), DropChoice::Share, raw) {
+                Ok(()) => BorrowOutcome::Joined,
+                Err(why) => BorrowOutcome::Refused(why),
+            },
+        )
+    }
+
+    /// Note JW4: the membership edit can turn on an otherwise dormant slot command, e.g. by lending an albedo.
+    fn borrow_command_refusal(
+        &self,
+        target: &SetView,
+        kind: SlotKind,
+        item: &str,
+        from: &str,
+    ) -> Option<String> {
+        let n = kind.game_slot()?;
+        let path = slot_string(&target.settings, n)?;
+        let reason = |v: &SetView| {
+            let row = v.linked.get(&n).and_then(|l| l.row).unwrap_or(kind);
+            let slot = v.slot_text(row);
+            let set = &target.id;
+            if path.is_empty() {
+                format!("{set}'s {slot} is cleared: use Use this file or Unlink first.")
+            } else {
+                format!("{set}'s {slot} is linked to {path}: Unlink it first.")
+            }
+        };
+        if super::pbr_export::writes_entry(self, target) {
+            return Some(reason(target));
+        }
+        let mut result = target.clone();
+        if let Some(SlotFill::Own { item }) = result.slots.insert(
+            kind,
+            SlotFill::Borrowed {
+                item: item.into(),
+                from: from.into(),
+            },
+        ) {
+            result.members.retain(|key| key != &item);
+        }
+        finish_view(self, &mut result);
+        if !super::pbr_export::writes_entry(self, &result) {
+            return None;
+        }
+        if path.is_empty() {
+            return Some(reason(&result));
+        }
+        // Resolve the projected link against every lender's outputs, in normal display order.
+        let mut all = set_views(self);
+        let i = all.iter().position(|v| same_id(&v.id, &target.id))?;
+        all[i] = result;
+        link_slots(self, &mut all);
+        Some(reason(&all[i]))
+    }
+
+    /// Note JW6: why the dialog cannot offer this answer. A choice that would ask Replace is usable.
+    pub fn choice_refused(&self, item: &str, set: &str, choice: DropChoice) -> Option<String> {
+        self.drop_precheck(item, set, choice, None).err()
+    }
+
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set
     /// already fills asks to replace first (spec §3.1); answer that with `drop_replace` and the same choice.
     pub fn drop_choice(&mut self, item: &str, set: &str, choice: DropChoice) -> DropOutcome {
-        if !self.sets_editable() {
-            return DropOutcome::Refused(READ_ONLY.into());
-        }
-        let target = match self.drop_target(set) {
-            Ok(t) => t,
+        let result = match self.drop_precheck(item, set, choice, None) {
             Err(e) => return DropOutcome::Refused(e),
+            Ok(DropPlan::ShareHelper(target)) => self.share_helper(item, &target),
+            Ok(DropPlan::Slot {
+                slot: Some(kind),
+                existing: Some(existing),
+                ..
+            }) => return DropOutcome::AskReplace { kind, existing },
+            Ok(DropPlan::Slot { target, slot, .. }) => {
+                self.apply_choice(item, &target, slot, choice, None)
+            }
         };
-        if choice == DropChoice::Share && self.is_shareable_helper(item) {
-            return match self.share_helper(item, &target) {
-                Ok(()) => DropOutcome::Joined,
-                Err(e) => DropOutcome::Refused(e),
-            };
+        match result {
+            Ok(()) => DropOutcome::Joined,
+            Err(e) => DropOutcome::Refused(e),
         }
+    }
+
+    /// Note JW6: the dialog and the edit check the same destination before any write.
+    fn drop_precheck(
+        &self,
+        item: &str,
+        set: &str,
+        choice: DropChoice,
+        approved: Option<(SlotKind, &SlotFill)>,
+    ) -> Result<DropPlan, String> {
+        #[cfg(feature = "test-hooks")]
+        DROP_PRECHECKS.with(|n| n.set(n.get() + 1));
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let target = self.drop_target(set).map_err(|why| {
+            if approved.is_some() {
+                DESTINATION_SLOT_CHANGED.into()
+            } else {
+                why
+            }
+        })?;
         let slot = self.item(item).and_then(slot_of);
+        if approved
+            .is_some_and(|(kind, old)| slot != Some(kind) || target.slots.get(&kind) != Some(old))
+        {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        }
+        if choice == DropChoice::Share && self.item(item).is_some_and(is_shareable_helper) {
+            self.share_helper_check(item, &target)?;
+            return Ok(DropPlan::ShareHelper(target));
+        }
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
             .then_some(from.as_deref())
             .flatten();
-        match self.occupant(&target, slot, share_from) {
-            Err(e) => return DropOutcome::Refused(e),
-            Ok(Some(
-                SlotFill::Own { item: existing } | SlotFill::Borrowed { item: existing, .. },
-            )) => {
-                // Checked first so a refusal (a packed map, a raw map to share) is not asked about.
-                if let Err(e) = self.choice_allowed(item, &target, slot, choice) {
-                    return DropOutcome::Refused(e);
-                }
-                return DropOutcome::AskReplace { existing };
-            }
-            Ok(_) => {}
+        let existing = self.occupant(&target, slot, share_from)?;
+        self.choice_allowed(item, &target, slot, choice)?;
+        if choice == DropChoice::Share {
+            share_keeps_member(&target, existing.as_ref())?;
         }
-        match self.apply_choice(item, &target, slot, choice, None) {
-            Ok(()) => DropOutcome::Joined,
-            Err(e) => DropOutcome::Refused(e),
-        }
+        Ok(DropPlan::Slot {
+            target,
+            slot,
+            existing,
+        })
     }
 
     /// The answer to `AskReplace` for `choice`: the occupant leaves (it becomes a set of its own, or the borrow is
@@ -2959,32 +3904,42 @@ impl AppModel {
         item: &str,
         set: &str,
         choice: DropChoice,
+        kind: SlotKind,
+        approved: &SlotFill,
     ) -> Result<(), String> {
-        if !self.sets_editable() {
-            return Err(READ_ONLY.into());
+        if let Some(wait) = self.pick_waits() {
+            self.status_line = if wait == PICK_PLANNING {
+                "Tessalith is still planning. Try again in a moment."
+            } else {
+                "The plan must run again first."
+            }
+            .into();
+            return Err(self.status_line.clone());
         }
-        let target = self.drop_target(set)?;
-        let slot = self.item(item).and_then(slot_of);
-        let from = self.set_of_item(item).map(|f| f.id);
-        let share_from = (choice == DropChoice::Share)
-            .then_some(from.as_deref())
-            .flatten();
-        let existing = self.occupant(&target, slot, share_from)?;
-        self.apply_choice(item, &target, slot, choice, existing)
+        if !approved.is_filled() {
+            return Err(self
+                .choice_refused(item, set, choice)
+                .unwrap_or_else(|| DESTINATION_SLOT_CHANGED.into()));
+        }
+        let DropPlan::Slot {
+            target,
+            slot,
+            existing: Some(existing),
+        } = self.drop_precheck(item, set, choice, Some((kind, approved)))?
+        else {
+            return Err(DESTINATION_SLOT_CHANGED.into());
+        };
+        self.apply_choice(item, &target, slot, choice, Some(existing))
     }
 
-    /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
-    pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
-        self.item(item).is_some_and(|i| {
-            i.kind == ItemKind::Helper
-                && i.helper
-                    .as_ref()
-                    .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
-        })
+    /// Note JW5: the answers the drop dialog offers for `item`, in order: Move, Share, and Duplicate unless the
+    /// item is a helper (`ItemKind::Helper`).
+    pub fn drop_choices(&self, item: &str) -> Vec<DropChoice> {
+        DropChoice::offered(self.item(item).map(|i| i.kind)).to_vec()
     }
 
-    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
-    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+    /// Note HH5: true for the helper's own set, where there is no share line to write.
+    fn share_helper_check(&self, item: &str, target: &SetView) -> Result<bool, String> {
         // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
         // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
         // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
@@ -2994,7 +3949,7 @@ impl AppModel {
             None => self.is_no_set(item) && same_id(&automatic, &target.id),
         };
         if own {
-            return Ok(());
+            return Ok(true);
         }
         // The engine has nothing to read it into (a share into a memberless set is stale).
         if target.members.is_empty() {
@@ -3002,6 +3957,14 @@ impl AppModel {
                 "{} has no texture of its own; move one in first",
                 target.id
             ));
+        }
+        Ok(false)
+    }
+
+    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
+    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+        if self.share_helper_check(item, target)? {
+            return Ok(());
         }
         let name = self.item(item).map_or(item.to_string(), |i| i.name.clone());
         let (id, file) = (target.id.clone(), item.to_string());
@@ -3042,13 +4005,10 @@ impl AppModel {
         if choice == DropChoice::Move {
             self.leaves_locked(item)?;
         }
+        if let Some(why) = choice.slot_refusal(self.item(item).map(|i| i.kind), slot) {
+            return Err(why.into());
+        }
         match choice {
-            DropChoice::Move if self.is_packed(item) => Err(PACKED_MOVE.into()),
-            // A borrow is a PGPatcher slot (`borrow.slotN`): the XPMF maps have none.
-            DropChoice::Share if slot.is_some_and(|s| s.slot_number().is_none()) => Err(
-                "Projected noise and Detail normal can't be shared between sets; duplicate the texture instead"
-                    .into(),
-            ),
             // Final review M4: only a skin set shows (and can clear) cards 9 and 10, and only its JSON reads them.
             DropChoice::Share
                 if matches!(slot, Some(SlotKind::SkinWet | SlotKind::SkinDetail))
@@ -3059,15 +4019,11 @@ impl AppModel {
                     target.id
                 ))
             }
-            DropChoice::Share if slot.is_none() => Err(
-                "only a finished texture can be shared; duplicate the source to use it in two sets"
-                    .into(),
-            ),
             DropChoice::Share if self.set_of_item(item).is_none() => {
                 Err("the texture is in no set".into())
             }
-            DropChoice::Duplicate if self.is_packed(item) => {
-                Err("a packed map cannot be duplicated; duplicate its raw maps".into())
+            DropChoice::Share if self.lent_slot(item).is_none() => {
+                Err(SHARED_SOURCE_CHANGED.into())
             }
             _ => Ok(()),
         }
@@ -3105,15 +4061,7 @@ impl AppModel {
                 Ok(())
             }
             DropChoice::Share => {
-                // Sharing adds no member: a set whose only texture leaves would vanish from the engine's sets.
-                if matches!(&existing, Some(SlotFill::Own { .. }))
-                    && target.members.len() == 1
-                    && !target.created
-                {
-                    return Err(format!(
-                        "{id} would have no texture of its own left; move another texture in first"
-                    ));
-                }
+                share_keeps_member(target, existing.as_ref())?;
                 let fid = self.set_of_item(item).map(|f| f.id).unwrap_or_default();
                 let n = slot.and_then(SlotKind::slot_number).unwrap_or_default();
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {
@@ -3176,7 +4124,7 @@ impl AppModel {
             return Err(READ_ONLY.into());
         }
         if self.is_packed(item) {
-            return Err("a packed map cannot be duplicated; duplicate its raw maps".into());
+            return Err(PACKED_DUPLICATE.into());
         }
         let src = self
             .item(item)
@@ -3227,11 +4175,9 @@ impl AppModel {
             .strip_prefix(&root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .map_err(|_| "the copy would be outside the folder".to_string())?;
-        std::fs::copy(&src, &dst).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
-        let Some(sha256) = sha256_of(&dst) else {
-            let _ = std::fs::remove_file(&dst);
-            return Err("could not read the copy".into());
-        };
+        let sha256 = std::fs::File::open(&src)
+            .and_then(|input| super::write_copy(input, &dst))
+            .map_err(|e| format!("could not copy {}: {e}", src.display()))?;
         let id = set.to_string();
         let before = self.sets_doc.as_ref().map(|d| d.text());
         self.edit_docs(&format!("Duplicate into {id}"), None, true, move |_, s| {
@@ -3483,7 +4429,7 @@ impl AppModel {
         let handed = h.clone();
         // Final review B-M7: the `pbr_fuzz` an explicit PBR pick wrote on the fuzz map, and its `auto_pbr` key, go
         // with it in this step: the pick was this set's (a value changed since is the user's and stays).
-        let fuzz_step = is_fuzz_member(item);
+        let fuzz_step = is_fuzz_member(item) && super::shared_alpha::safe_subtype_write(self)(item);
         self.edit_docs(&format!("Remove from {i}"), None, true, move |p, s| {
             let mut auto = s.auto_pbr();
             if fuzz_step && auto.contains(&it) {
@@ -3651,12 +4597,19 @@ impl AppModel {
             return;
         }
         let id = set.to_string();
-        let retype = self.untouched_for_shader(set, shader);
+        // Note JS6: the pick's writes for the set's tangent-space normals are resolved once (`normal_plan`), so each key
+        // gets one final value; R5's other entries stand.
+        let super::normal_follow::NormalPlan {
+            retype,
+            writes: normals,
+            off_auto_pbr,
+            marker_off,
+        } = self.normal_plan(set, shader, self.untouched_for_shader(set, shader));
         // Note FC1 R5: a sub-type the plan recorded on its own and nobody changed takes the chosen shader's type in
         // this step (the CLI never reads the set's shader, so `sdc.toml` must name it). Back to Auto it goes, and the
         // next settled plan records what the plan picks then.
-        for (k, _, _) in &retype {
-            self.history.auto_written.remove(&(k.clone(), "subtype"));
+        for k in &marker_off {
+            self.history.normal_followed.remove(k);
         }
         // Fuzz-9: a value the PBR step clears in this pick was its own, never the user's.
         let step_cleared: HashSet<String> = retype
@@ -3684,9 +4637,17 @@ impl AppModel {
                     auto.push(k.clone());
                 }
             }
+            for (k, st) in &normals {
+                match st {
+                    Some(st) => p.set_file_value(k, "subtype", &serde_json::json!(st)),
+                    None => p.clear_file_value(k, "subtype"),
+                }
+            }
+            auto.retain(|a| !off_auto_pbr.contains(a));
             if auto != before {
                 d.set_auto_pbr(&auto);
             }
+            super::normal_follow::relist(p, d, &normals);
         };
         let Some((item, was, on)) = self.skin_follow(set, shader) else {
             self.edit_docs("Shader", None, true, pick);
@@ -3730,6 +4691,9 @@ impl AppModel {
         // Note DU6-DU7: the shader and the diffuse's sub-type (with Note DQ's recipe follow) are one step.
         self.batch_edit("Shader", |m| {
             m.edit_docs("Shader", None, true, pick);
+            if !super::shared_alpha::safe_subtype_write(m)(&item) {
+                return;
+            }
             if on {
                 m.edit_subtype("Shader", &item, Some(Subtype::SkinAlbedo));
             } else {
@@ -3775,15 +4739,18 @@ impl AppModel {
         let Some(v) = views.iter().find(|v| same_id(&v.id, set)) else {
             return vec![];
         };
-        let now = v.shader.as_ref().map(|p| p.shader);
-        let chosen = v
-            .shader
-            .as_ref()
-            .is_some_and(|p| matches!(p.provenance, engine::shader::ShaderOrigin::Set));
+        let chosen = super::normal_follow::explicit_pick(v);
         // Auto while already on Auto changes nothing.
-        if shader.is_none() && !chosen {
+        if shader.is_none() && chosen.is_none() {
             return vec![];
         }
+        // Between picks the plan can still describe a shader the user has already left.
+        let now = chosen.or_else(|| {
+            v.shader
+                .as_ref()
+                .filter(|p| p.provenance != engine::shader::ShaderOrigin::Set)
+                .map(|p| p.shader)
+        });
         let held = |k: &String| {
             self.project
                 .as_ref()
@@ -3806,6 +4773,10 @@ impl AppModel {
         // Fuzz-9: only a set holding a fuzz map takes the PBR step; one with its own `_f` keeps the fuzz map
         // untyped (Fuzz-4 lists it unused).
         let has_fuzz = v.members.iter().any(fuzz_map);
+        // F16 (Note JQ53): a kept `_f` counts, a kept DDS too, so no `pbr_fuzz` is written. The GUI refuses an export folder
+        // that is or holds the opened folder (HQ3, HQ5) and writes a CS PBR set under `textures\pbr\` (P14), so a kept
+        // `x_f.dds` here is hand-made or an in-place `sdc convert`'s; the map is listed unused, as `sdc convert` into the
+        // same export folder does. Pinned by `fuzz_follow::a_kept_f_beside_the_fuzz_map_is_the_sets_f_in_the_gui_and_the_cli`.
         let has_f = v.members.iter().any(|k| {
             engine::group::split_suffix_with(&stem(k), &self.suffix_aliases)
                 .suffix
@@ -3821,7 +4792,7 @@ impl AppModel {
         // Its way back: Auto after a chosen vanilla shader clears the untouched vanilla types `vanilla_pick` (or the
         // recorder under that shader) wrote, so the next settled plan records what Auto reads (FC1 R5's Auto rule);
         // the generic arm below keeps a value equal to the vanilla plan's pick.
-        let vanilla_back = has_fuzz && chosen && shader.is_none() && now.is_some_and(vanilla);
+        let vanilla_back = has_fuzz && shader.is_none() && chosen.is_some_and(vanilla);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -3845,8 +4816,7 @@ impl AppModel {
         // `has_fuzz` too (re-review t6-r1 N2): a pick that wrote only `pbr_normal`/`pbr_emissive` (diffuse pinned or
         // borrowed, fuzz map kept or hand-roled) lists no such value, while the set still holds its fuzz map.
         let leaves_pbr = (has_fuzz || step_wrote)
-            && chosen
-            && now.is_some_and(Shader::is_pbr_family)
+            && chosen.is_some_and(Shader::is_pbr_family)
             && !shader.is_some_and(Shader::is_pbr_family);
         // Ruling R1: a member in a locked slot keeps its type (the pin guards its encoding), as in `pbr_follow` and
         // DW1.
@@ -3900,8 +4870,7 @@ impl AppModel {
                     return Some((k.clone(), None, false));
                 }
                 // Fuzz-9, Fuzz-27: `member_subtype` maps no `diffuse`, `normal` or `glow` under a PBR-family shader,
-                // so the untouched members take their PBR counterpart here (an untouched `normal` bypasses B3's
-                // Use PBR normal: the pick is the user's act, and leaving it reverts the type).
+                // so the untouched members take their PBR counterpart here (the pick is the user's act, and leaving it reverts the type).
                 if pbr_pick && !locked.contains_key(k) {
                     if let Some(st) =
                         held_type(k).and_then(|st| pbr_member_type(st, diffuse_slot(k)))
@@ -4004,6 +4973,8 @@ impl AppModel {
 
     /// F3b: set `set`'s `output_name`, if it has one (on a CS PBR set it is ignored; the set editor says so).
     pub fn output_name_of(&self, set: &str) -> Option<String> {
+        #[cfg(feature = "test-hooks")]
+        super::count_identity_work();
         let entries = self.sets_doc.as_ref()?.entries();
         entry_of(&entries, set)?.output_name.clone()
     }
@@ -4051,6 +5022,13 @@ impl AppModel {
         self.batch_edit(&label, |m| {
             m.set_json_value(set, key, Some(Value::Bool(false)))
         });
+    }
+
+    /// A Match on this click (`matchN` of set `set`) as a step of its own (final wave Group 4): a discrete toggle never
+    /// merges with the edit before it, as `set_json_value` does per set and key for typing, so one Undo takes back one
+    /// click.
+    pub fn toggle_match(&mut self, set: &str, key: &str, v: Option<Value>) {
+        self.batch_edit(&format!("Change {key}"), |m| m.set_json_value(set, key, v));
     }
 
     /// A JSON value of set `set`. Material values do not plan; match fields do (P7).
@@ -4124,8 +5102,10 @@ impl AppModel {
             );
             return Ok(());
         }
+        // Removing a slot key can uncover a record-derived normal used by the engine.
+        let replan = matches!(cmd, SlotCommand::RemoveSlotKey);
         let v = match cmd {
-            SlotCommand::FromSet => None,
+            SlotCommand::FromSet | SlotCommand::RemoveSlotKey => None,
             SlotCommand::Clear => Some(Value::from("")),
             SlotCommand::Path(p) => {
                 let p = strip_lead(&p);
@@ -4137,7 +5117,7 @@ impl AppModel {
             }
         };
         let id = set.to_string();
-        self.edit_docs(&format!("Change {key}"), None, false, move |_, d| {
+        self.edit_docs(&format!("Change {key}"), None, replan, move |_, d| {
             d.set_value(&id, &key, v)
         });
         Ok(())
@@ -4346,7 +5326,7 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
 /// Whether `item` writes an output of its own: it has a job and is neither a raw packing source nor a helper. A
 /// record-only slot (`_s` backlight, env mask, cubemap) has no `slot_of` but writes a file like any other, so the
 /// output key must not depend on the slot.
-fn writes_own_output(item: &TextureItem) -> bool {
+pub(crate) fn writes_own_output(item: &TextureItem) -> bool {
     item.job.is_some()
         && !matches!(item.status, ItemStatus::PackedInto(_))
         && item.kind != ItemKind::Helper
@@ -4359,28 +5339,31 @@ pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKe
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
-    let suffix = recipe_suffix(item)?;
-    let set = views
-        .iter()
-        .find(|v| {
-            v.slots
-                .values()
-                .any(|f| matches!(f, SlotFill::Own { item: i } if *i == item.key))
-        })?
-        .id
-        .clone();
-    Some(OutputKey::Packed { set, suffix })
+    // Ruling 3b-F6: the producing set is the one the packed output is a member of, also when a borrow holds the slot
+    // its card would fill.
+    let set = views.iter().find(|v| v.members.contains(&item.key))?;
+    member_output_key(set, item)
 }
 
-/// Item key → the id of the first view, in display order, holding it as its own: the set `item_output_key` names for
-/// a packed output, built once for a loop over every item.
+/// The member's source set is already known in the picker and the slot index.
+pub(super) fn member_output_key(set: &SetView, item: &TextureItem) -> Option<OutputKey> {
+    if item.kind == ItemKind::Packed {
+        Some(OutputKey::Packed {
+            set: set.id.clone(),
+            suffix: recipe_suffix(item)?,
+        })
+    } else {
+        Some(OutputKey::File(item.key.clone()))
+    }
+}
+
+/// Item key → the id of the first view, in display order, it is a member of: the set `item_output_key` names for a
+/// packed output, built once for a loop over every item.
 pub(crate) fn packed_owners(views: &[SetView]) -> HashMap<&str, &str> {
     let mut out = HashMap::new();
     for v in views {
-        for f in v.slots.values() {
-            if let SlotFill::Own { item } = f {
-                out.entry(item.as_str()).or_insert(v.id.as_str());
-            }
+        for item in &v.members {
+            out.entry(item.as_str()).or_insert(v.id.as_str());
         }
     }
     out

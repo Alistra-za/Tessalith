@@ -2,7 +2,7 @@
 use crate::model::heatmap::HeatImage;
 use crate::model::preview::{PreviewOut, SourceState};
 use crate::model::viewport3d::Look;
-use crate::model::AppModel;
+use crate::model::{AppModel, CentreTab};
 use crate::render::{PreviewRenderer, Slot};
 use eframe::{egui, egui_wgpu};
 use engine::session::SourcePreview;
@@ -46,8 +46,11 @@ pub struct SdcApp {
     pub state: crate::ui::State,
     /// The GPU state, `None` when eframe found no usable adapter (the preview is then off).
     pub render_state: Option<egui_wgpu::RenderState>,
+    sent_cap: Option<(u32, f32)>,
     uploaded: Uploaded,
     was_focused: bool,
+    /// The NIF editor keeps its own buffer while a shell question owns keyboard focus.
+    paused_mesh_focus: Option<(u64, egui::Id)>,
     /// Waits out 2 s after the layout changed before `gui.toml` is written (AG19).
     layout_save: crate::layout::SaveDebounce,
     /// What the layout looked like last frame; `None` before the first.
@@ -87,8 +90,10 @@ impl SdcApp {
                 ..crate::ui::State::default()
             },
             render_state: None,
+            sent_cap: None,
             uploaded: Uploaded::default(),
             was_focused: true,
+            paused_mesh_focus: None,
             layout_save: Default::default(),
             layout_probe: None,
             #[cfg(feature = "test-hooks")]
@@ -99,7 +104,7 @@ impl SdcApp {
     /// Puts the saved panel widths and the Textures | Meshes view into egui, and the OS's reduced-motion setting
     /// (`ui::motion`), before the first frame.
     pub fn restore_ctx(&self, ctx: &egui::Context) {
-        crate::layout::restore_ctx(ctx, &self.model.settings.layout);
+        crate::layout::restore_ctx(ctx, &self.model.settings.layout, self.model.root.is_some());
         crate::ui::motion::install(ctx);
     }
 
@@ -176,11 +181,13 @@ impl SdcApp {
             model.palette_pick(&crate::model::nav::Pick::Texture(k));
         }
         if let Some(t) = model.show_in_meshes.take() {
+            model.centre_over_meshes = false;
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
+            model.centre_over_meshes = false;
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_nif_tab(&path, tab, field);
         }
@@ -197,8 +204,31 @@ impl SdcApp {
             self.render_state = Some(rs.clone());
         } else {
             self.model.gpu_available = false;
+            self.model.gpu_max_dim = 0;
         }
         self
+    }
+
+    fn update_surface_cap(&mut self, ctx: &egui::Context) {
+        let limit = self.model.gpu_max_dim;
+        let ppp = ctx.pixels_per_point();
+        if limit == 0 || self.sent_cap == Some((limit, ppp)) {
+            return;
+        }
+        let cap = crate::layout::surface_cap(limit, ppp);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MaxInnerSize(cap));
+        self.sent_cap = Some((limit, ppp));
+        let size = ctx.input(|i| i.viewport_rect().size());
+        if size.x > cap.x || size.y > cap.y {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(cap));
+            self.model.messages.log(
+                crate::model::messages::Severity::Info,
+                format!(
+                    "Window limited to {}×{}: the graphics card's largest surface.",
+                    cap.x, cap.y
+                ),
+            );
+        }
     }
 
     /// Puts what the model shows on the GPU, when it changed since the last frame.
@@ -281,6 +311,46 @@ impl SdcApp {
     fn focus_regained(&mut self) {
         self.model.check_sources();
     }
+
+    fn draw_meshes(&mut self, ui: &mut egui::Ui) {
+        use crate::model::Dialog;
+        let ctx = ui.ctx();
+        let asking = matches!(
+            self.model.dialog,
+            Some(
+                Dialog::CloseUnsaved
+                    | Dialog::ReloadUnsaved
+                    | Dialog::OpenUnsaved(_)
+                    | Dialog::ExportRunning(_)
+            )
+        );
+        let session = self.meshes.edit.as_ref().map(|e| e.session);
+        if let Some((held_session, field)) = self.paused_mesh_focus {
+            if session == Some(held_session) {
+                if asking || ctx.memory(|m| m.top_modal_layer().is_some()) {
+                    if self.model.dialog.is_none() {
+                        ctx.request_repaint();
+                    }
+                    return;
+                }
+                ctx.memory_mut(|m| m.request_focus(field));
+            }
+            self.paused_mesh_focus = None;
+        }
+        if asking {
+            let field = ctx.memory(|m| m.focused()).filter(|&id| {
+                ctx.read_response(id)
+                    .zip(crate::ui::panel_ids::panel_rect(ctx, "meshes-edit"))
+                    .is_some_and(|(r, panel)| panel.contains(r.rect.center()))
+            });
+            if let Some(held) = session.zip(field) {
+                // Drawing the slot behind a modal delivers lost_focus and starts its autosave.
+                self.paused_mesh_focus = Some(held);
+                return;
+            }
+        }
+        crate::ui::meshes::show(ui, &mut self.meshes);
+    }
 }
 
 impl eframe::App for SdcApp {
@@ -294,6 +364,7 @@ impl eframe::App for SdcApp {
             });
         }
         let ctx = ui.ctx().clone();
+        self.update_surface_cap(&ctx);
         self.model.poll();
         let now = std::time::Instant::now();
         self.model.tick(now);
@@ -380,6 +451,7 @@ impl eframe::App for SdcApp {
             self.model.nif_export_result(r);
         }
         if let Some(path) = self.model.nif_diff_request.take() {
+            self.model.centre_over_meshes = false;
             self.meshes.show_nif_diff(&path);
         }
         self.model
@@ -416,21 +488,38 @@ impl eframe::App for SdcApp {
             crate::ui::actions::keys(&ctx, &mut self.model, self.state.drops.pending.is_some());
             // C7: the one header in both views (MO2… framed with Mode), then the bottom panel (R7), then the view.
             crate::ui::header::draw(ui, &mut self.model, Some(&mut self.meshes));
+            crate::ui::new_project_line(ui, &mut self.model);
+            if self.model.root.is_none() {
+                crate::ui::no_project_banner(ui, &mut self.model);
+            } else {
+                ui.skip_ahead_auto_ids(1);
+            }
+            if self.model.centre_over_meshes {
+                crate::ui::scan_feedback(ui, &mut self.meshes);
+            }
             crate::ui::record_centre_rect(ui);
-            let nif_preview = self.meshes.selected_nif.is_some();
+            let nif_preview = !self.model.centre_over_meshes && self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
-            crate::ui::meshes::show(ui, &mut self.meshes);
+            if self.model.centre_over_meshes {
+                crate::ui::centre_over_meshes(ui, &mut self.model, &mut self.state);
+            } else {
+                self.draw_meshes(ui);
+            }
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
-            // Export to ▾ and the palette open the PGPatcher JSON editor in this view too (K4). Note FB7: a popped-out
-            // view shows here; one opened docked switches to the Textures view, whose centre column holds it.
+            // Consume reveals after popped tools too: their Show and Fix path actions target Textures.
             crate::ui::centre_tabs::popped(&ctx, &mut self.model);
             if std::mem::take(&mut self.model.reveal_centre) {
-                crate::ui::header::set_meshes_view(&ctx, false);
+                self.model.centre_over_meshes = self.model.centre_front() != CentreTab::Selection;
+                if !self.model.centre_over_meshes {
+                    crate::ui::header::set_meshes_view(&ctx, false);
+                }
                 ctx.request_repaint();
             }
         } else {
+            self.model.centre_over_meshes = false;
+            self.paused_mesh_focus = None;
             crate::ui::draw_with_scan(ui, &mut self.model, &mut self.state, Some(&mut self.meshes));
         }
         // A "Open in Textures" click of this frame.

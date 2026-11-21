@@ -37,6 +37,7 @@ impl std::fmt::Display for SaveError {
 
 /// The state both project files share (REPORT #15): the document, its disk stamp, unsaved-edit flag, load error and
 /// revision. `ProjectDoc` and `SetsDoc` wrap it; every edit ends with `touch()`, so `rev` names the edited document.
+#[derive(Default)]
 pub(crate) struct TomlFile {
     pub(crate) path: PathBuf,
     pub(crate) doc: DocumentMut,
@@ -44,6 +45,11 @@ pub(crate) struct TomlFile {
     pub(crate) dirty: bool,
     /// The text last loaded or saved: `restore` compares with it, so an Undo back to it is clean (Note FB3).
     pub(crate) saved_text: String,
+    /// The saved text with subsequent automatic decisions applied. Undo compares against it for the title and prompts.
+    pub(crate) baseline_text: String,
+    /// The other automatic baseline while the undoable fuzz switch is on the history stack.
+    before_switch: Option<String>,
+    pub(crate) user_dirty: bool,
     pub(crate) error: Option<String>,
     /// Changes with every edit, restore and reload, from one counter for every document (DECISIONS Note Y7).
     pub(crate) rev: u64,
@@ -53,12 +59,7 @@ impl TomlFile {
     pub(crate) fn open(path: PathBuf) -> TomlFile {
         let mut f = TomlFile {
             path,
-            doc: DocumentMut::new(),
-            disk: None,
-            dirty: false,
-            saved_text: String::new(),
-            error: None,
-            rev: 0,
+            ..Default::default()
         };
         f.reload();
         f
@@ -79,12 +80,16 @@ impl TomlFile {
             },
         }
         self.saved_text = self.doc.to_string();
+        self.baseline_text.clone_from(&self.saved_text);
+        self.before_switch = None;
+        self.user_dirty = false;
         self.rev = crate::sets_doc::next_rev();
     }
 
     /// An unsaved edit, made just before.
     pub(crate) fn touch(&mut self) {
         self.dirty = true;
+        self.update_user_dirty(&self.text());
         self.rev = crate::sets_doc::next_rev();
     }
 
@@ -105,9 +110,21 @@ impl TomlFile {
         }
         if let Ok(doc) = text.parse::<DocumentMut>() {
             self.doc = doc;
-            self.touch();
-            self.dirty = self.doc.to_string() != self.saved_text;
+            self.rev = crate::sets_doc::next_rev();
+            self.reconcile(&self.text());
         }
+    }
+
+    pub(crate) fn reconcile(&mut self, text: &str) {
+        self.dirty = text != self.saved_text;
+        self.update_user_dirty(text);
+    }
+
+    pub(crate) fn update_user_dirty(&mut self, text: &str) {
+        self.user_dirty = self.dirty
+            && text != self.baseline_text
+            && text != self.saved_text
+            && self.before_switch.as_deref() != Some(text);
     }
 
     pub(crate) fn changed_on_disk(&self) -> bool {
@@ -132,18 +149,155 @@ impl TomlFile {
         }
         engine::dds::write_atomic(&self.path, text.as_bytes())
             .map_err(|e| write_error(&self.path, e))?;
+        self.baseline_text.clone_from(&text);
+        self.before_switch = None;
+        self.user_dirty = false;
         self.saved_text = text;
         self.disk = SourceStamp::of(&self.path);
         Ok(())
     }
 }
 
+/// A planner decision may fill an absent field or replace a particular previously recorded value.
+#[derive(Clone)]
+pub struct AutoWrite {
+    pub key: String,
+    pub field: &'static str,
+    pub value: Json,
+    pub only_if: Option<Json>,
+}
+
+/// Use the live editor's key matching, dotted fields and comment preservation on a history snapshot.
+pub fn apply_auto(text: &str, writes: &[AutoWrite]) -> String {
+    let Some(mut project) = ProjectDoc::from_snapshot(text) else {
+        return text.to_owned();
+    };
+    project.apply_writes(writes);
+    project.text()
+}
+
+/// The editor's spelling of a batch of new file entries. For simple snapshots the editor appends
+/// these same bytes, so Undo can receive them without rebuilding thousands of unrelated tables.
+pub(crate) struct NewFileEntries {
+    names: Vec<String>,
+    tables: String,
+}
+
+impl NewFileEntries {
+    pub(crate) fn new(writes: &[AutoWrite]) -> Option<Self> {
+        if writes.is_empty()
+            || writes
+                .iter()
+                .any(|w| w.only_if.is_some() || w.value.is_null())
+        {
+            return None;
+        }
+        let mut names: Vec<_> = writes
+            .iter()
+            .map(|w| {
+                // Match find_key's order: a following extension can affect Unicode lowercasing.
+                let lower = w.key.to_lowercase();
+                without_ext(&lower).map(str::to_owned).unwrap_or(lower)
+            })
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let tables = apply_auto("", writes);
+        (!tables.is_empty()).then_some(Self { names, tables })
+    }
+
+    pub(crate) fn can_append(&self, text: &str) -> bool {
+        if text.is_empty() {
+            return true;
+        }
+        let folded = text.to_lowercase();
+        !self.names.iter().any(|key| folded.contains(key)) && files_append_at_end(text)
+    }
+
+    pub(crate) fn appended(&self, text: &str) -> Option<String> {
+        if !self.can_append(text) {
+            return None;
+        }
+        let mut out = String::new();
+        if !text.is_empty() {
+            out.reserve_exact(text.len() + self.tables.len() + 2);
+            out.push_str(text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        out.push_str(&self.tables);
+        Some(out)
+    }
+}
+
+/// History contains valid TOML. In this layout all file sections are flat, consecutive and last.
+/// Other layouts, escaped keys, and trailing decorations require the editor's placement rules.
+fn files_append_at_end(text: &str) -> bool {
+    let body = text.strip_suffix('\n').unwrap_or(text);
+    if body.is_empty()
+        || body.ends_with('\n')
+        || body.as_bytes().contains(&b'\r')
+        || body.as_bytes().contains(&b'\\')
+        || body.contains('{')
+        || body.contains("\"\"\"")
+        || body.contains("'''")
+    {
+        return false;
+    }
+    let bare = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    };
+    let mut in_section = false;
+    let mut in_files = false;
+    for line in body.split('\n') {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(key) = line
+            .strip_prefix("[files.\"")
+            .and_then(|s| s.strip_suffix("\"]"))
+        {
+            if key.contains('"') {
+                return false;
+            }
+            in_files = true;
+            in_section = true;
+        } else if let Some(table) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if in_files || table == "files" || !bare(table) {
+                return false;
+            }
+            in_section = true;
+        } else {
+            let Some((field, _)) = line.split_once('=') else {
+                return false;
+            };
+            let field = field.trim_end();
+            // The editor groups dotted fields even when another assignment separates them.
+            if !bare(field) || (!in_section && field == "files") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SKIPPED_IDS_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub struct ProjectDoc {
     f: TomlFile,
+    /// Last type or alpha edit since Save. A command records whether this changed during its step.
+    pub(crate) type_alpha_edit: Option<u64>,
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
     stash: Option<(DocumentMut, bool)>,
     /// `[export]` as last parsed, by `rev` (Note CN: Review and `view_key` read it every frame).
-    export_cache: std::cell::RefCell<Option<(u64, ExportConfig)>>,
+    export_cache: std::cell::RefCell<(Option<u64>, ExportConfig)>,
 }
 
 /// `v` without the fields equal to `d`'s, recursively; an object left empty goes too. A field that `written` (the
@@ -243,11 +397,22 @@ pub(crate) fn set_value(t: &mut dyn TableLike, key: &str, mut v: Value) {
 /// engine matches `[files]` keys that way, so a GUI write must reuse a hand-written `Landscape/Rock01_N.png` or
 /// `Landscape/Rock01_N` rather than add a twin).
 pub(crate) fn find_key(t: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(t, key, || {})
+}
+
+/// `find_key` over `[files]`: each pass that compares every key counts as a walk (tests, Note JS7 N8-s).
+fn find_file_key(files: &dyn TableLike, key: &str) -> Option<String> {
+    find_key_walking(files, key, walked)
+}
+
+/// `find_key`, calling `walk` before each pass over every key of `t`.
+fn find_key_walking(t: &dyn TableLike, key: &str, walk: fn()) -> Option<String> {
     if t.contains_key(key) {
         return Some(key.to_owned());
     }
     let lower = key.to_lowercase();
     let by = |want: &str| {
+        walk();
         t.iter()
             .map(|(k, _)| k)
             .find(|k| k.to_lowercase() == want)
@@ -258,10 +423,29 @@ pub(crate) fn find_key(t: &dyn TableLike, key: &str) -> Option<String> {
 }
 
 impl ProjectDoc {
+    pub(crate) fn from_snapshot(text: &str) -> Option<Self> {
+        Some(Self {
+            f: TomlFile {
+                doc: text.parse().ok()?,
+                ..Default::default()
+            },
+            stash: None,
+            type_alpha_edit: None,
+            export_cache: Default::default(),
+        })
+    }
+
+    pub(crate) fn baseline(&self) -> &str {
+        &self.f.baseline_text
+    }
+    pub(crate) fn saved_text(&self) -> &str {
+        &self.f.saved_text
+    }
     pub fn open(root: &Path) -> ProjectDoc {
         let mut d = ProjectDoc {
             f: TomlFile::open(root.join("sdc.toml")),
             stash: None,
+            type_alpha_edit: None,
             export_cache: Default::default(),
         };
         d.check();
@@ -271,6 +455,7 @@ impl ProjectDoc {
     /// Re-read the file, dropping unsaved edits.
     pub fn reload(&mut self) {
         self.stash = None;
+        self.type_alpha_edit = None;
         self.f.reload();
         self.check();
     }
@@ -281,6 +466,11 @@ impl ProjectDoc {
             .as_ref()
             .filter(|(_, dirty)| *dirty)
             .map(|(doc, _)| doc.to_string())
+    }
+
+    /// `stashed_edits().is_some()` without building the text.
+    pub fn has_stashed_edits(&self) -> bool {
+        self.stash.as_ref().is_some_and(|(_, dirty)| *dirty)
     }
 
     /// `set_error` holds the document (Note FC12: undoing the rejected step puts it back first, with `unblame`).
@@ -320,7 +510,10 @@ impl ProjectDoc {
     pub fn set_error(&mut self, message: &str) {
         self.f.error = Some(format!("{}: {message}", self.f.path.display()));
         let doc = std::mem::take(&mut self.f.doc);
-        self.stash = Some((doc, std::mem::take(&mut self.f.dirty)));
+        self.stash = Some((
+            doc,
+            std::mem::take(&mut self.f.dirty) || self.type_alpha_edit.is_some(),
+        ));
         self.f.rev = crate::sets_doc::next_rev();
     }
 
@@ -333,7 +526,74 @@ impl ProjectDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
+        self.update_user_dirty();
     }
+
+    fn update_user_dirty(&mut self) {
+        if !self.blamed() {
+            self.f.update_user_dirty(&self.text());
+        }
+    }
+    pub fn user_dirty(&self) -> bool {
+        (self.f.user_dirty || self.type_alpha_edit.is_some()) && !self.blamed()
+    }
+
+    pub(crate) fn stashed_user_edit(&self) -> bool {
+        (self.f.user_dirty || self.type_alpha_edit.is_some()) && self.blamed()
+    }
+
+    pub(crate) fn mark_type_alpha_edit(&mut self) {
+        self.type_alpha_edit = Some(crate::sets_doc::next_rev());
+    }
+
+    fn touch_field(&mut self, field: &str) {
+        self.touch();
+        if matches!(field, "subtype" | "alpha.policy") {
+            self.mark_type_alpha_edit();
+        }
+    }
+
+    fn apply_writes(&mut self, writes: &[AutoWrite]) -> bool {
+        let mut changed = false;
+        for w in writes {
+            if self.file_value(&w.key, w.field) == w.only_if {
+                changed |= if w.value.is_null() {
+                    self.remove_field(&w.key, w.field)
+                } else {
+                    self.write_field(&w.key, w.field, &w.value, true)
+                };
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn touch_auto(&mut self, writes: &[AutoWrite], baseline: &[AutoWrite]) {
+        if let Some(before) = &mut self.f.before_switch {
+            *before = apply_auto(before, baseline);
+        }
+        self.record_baseline(writes, baseline);
+    }
+
+    pub(crate) fn touch_switch(&mut self, writes: &[AutoWrite]) {
+        self.f
+            .before_switch
+            .get_or_insert_with(|| self.f.baseline_text.clone());
+        self.record_baseline(writes, writes);
+    }
+
+    fn record_baseline(&mut self, writes: &[AutoWrite], baseline: &[AutoWrite]) {
+        self.f.baseline_text = apply_auto(&self.f.baseline_text, baseline);
+        self.record_writes(writes);
+    }
+
+    pub(crate) fn record_writes(&mut self, writes: &[AutoWrite]) {
+        if self.apply_writes(writes) {
+            self.touch();
+        } else {
+            self.update_user_dirty();
+        }
+    }
+
     pub fn rev(&self) -> u64 {
         self.f.rev
     }
@@ -354,16 +614,61 @@ impl ProjectDoc {
 
     /// [`Self::text`] for an undo step: while a blame holds the document, the stashed text it stands for.
     pub fn snapshot_text(&self) -> String {
-        match &self.stash {
-            Some((doc, _)) => doc.to_string(),
-            None => self.f.text(),
-        }
+        self.snapshot_doc().to_string()
+    }
+
+    fn snapshot_doc(&self) -> &DocumentMut {
+        self.stash.as_ref().map_or(&self.f.doc, |(doc, _)| doc)
     }
 
     /// Replace the document with `text` (an undo or redo). It is an unsaved change. A read-only document is left
     /// alone: its edits never happened.
     pub fn restore(&mut self, text: &str) {
         self.f.restore(text);
+    }
+
+    /// Crash recovery marks only the type and alpha values it restores differently from disk.
+    pub(crate) fn restore_recovery(&mut self, text: &str) -> bool {
+        fn values(doc: &DocumentMut) -> BTreeMap<&str, (Option<&str>, Option<&str>)> {
+            doc.get("files")
+                .and_then(Item::as_table_like)
+                .into_iter()
+                .flat_map(TableLike::iter)
+                .filter_map(|(key, entry)| {
+                    let subtype = entry.get("subtype").and_then(Item::as_str);
+                    let alpha = entry
+                        .get("alpha")
+                        .and_then(|a| a.get("policy"))
+                        .and_then(Item::as_str);
+                    (subtype.is_some() || alpha.is_some()).then_some((key, (subtype, alpha)))
+                })
+                .collect()
+        }
+
+        let old = self.text();
+        self.restore(text);
+        if self.text() == old {
+            return false;
+        }
+        let saved = self
+            .saved_text()
+            .parse()
+            .expect("serialized files document");
+        if values(&self.f.doc) != values(&saved) {
+            self.mark_type_alpha_edit();
+        }
+        true
+    }
+
+    pub(crate) fn restore_snapshot(&mut self, text: &str) {
+        if self.read_only() {
+            return;
+        }
+        if self.text() == text {
+            self.f.reconcile(text);
+        } else {
+            self.restore(text);
+        }
     }
 
     /// The document as the engine parses it (version and removed-key checks included, Note FM10).
@@ -411,15 +716,26 @@ impl ProjectDoc {
         self.f.doc.get("files")?.as_table_like()
     }
 
+    /// The existing table a picker edit to `key` would write.
+    pub(crate) fn file_table_key(&self, key: &str) -> Option<String> {
+        find_file_key(self.files()?, key)
+    }
+
     /// The entry for `key`, matched the way the engine matches (case-insensitively), as a table or inline table.
     fn entry(&self, key: &str) -> Option<&dyn TableLike> {
         let files = self.files()?;
-        files.get(&find_key(files, key)?)?.as_table_like()
+        files.get(&find_file_key(files, key)?)?.as_table_like()
     }
 
     /// The entry for `key`, created as `[files."<key>"]` when no spelling of it exists yet. `None` when `[files]`
     /// or the entry is not a table.
     fn entry_mut(&mut self, key: &str) -> Option<&mut dyn TableLike> {
+        self.entry_mut_as(key, true)
+    }
+
+    /// `entry_mut`, with `key` matched as the engine matches it (`resolve`) or taken byte for byte: the table spelled
+    /// `key`, created under that spelling when absent, with no walk over the keys (N8-s).
+    fn entry_mut_as(&mut self, key: &str, resolve: bool) -> Option<&mut dyn TableLike> {
         // Note FC1: a file of comments only holds them as the document's trailing text, which toml_edit writes after
         // a table added here; they go in front of the new entry instead, so the user's first line stays first.
         let mut lead = None;
@@ -442,7 +758,8 @@ impl ProjectDoc {
             t.set_implicit(true);
             Item::Table(t)
         })?;
-        let name = find_key(files, key).unwrap_or_else(|| key.to_owned());
+        let found = resolve.then(|| find_file_key(files, key)).flatten();
+        let name = found.unwrap_or_else(|| key.to_owned());
         sub_table(files, &name, || {
             let mut t = Table::new();
             if let Some(l) = lead {
@@ -462,12 +779,14 @@ impl ProjectDoc {
         else {
             return false;
         };
-        let Some(name) = find_key(files, key) else {
+        let Some(name) = find_file_key(files, key) else {
             return false;
         };
         let Some(gone) = files.remove(&name) else {
             return false;
         };
+        let removed_type_alpha = gone.get("subtype").is_some()
+            || gone.get("alpha").and_then(|a| a.get("policy")).is_some();
         // Note FC1: the comments `entry_mut` put in front of the only entry go back to the document's trailing text.
         let lead = gone
             .as_table()
@@ -484,26 +803,52 @@ impl ProjectDoc {
                 self.f.doc.set_trailing(lead + &rest);
             }
         }
+        if removed_type_alpha {
+            self.mark_type_alpha_edit();
+        }
         true
     }
 
     pub fn file_value(&self, key: &str, field: &str) -> Option<Json> {
-        let mut item: &Item = self.entry(key)?.get(field.split('.').next()?)?;
-        for part in field.split('.').skip(1) {
-            item = item.get(part)?;
-        }
-        toml_to_json(item)
+        field_value(self.entry(key)?, field)
+    }
+
+    /// For a disabled Problems fix, show the setting the user wrote even while the engine rejects the document.
+    pub(crate) fn snapshot_file_value(&self, key: &str, field: &str) -> Option<Json> {
+        let files = self.snapshot_doc().get("files")?.as_table_like()?;
+        let entry = files.get(&find_file_key(files, key)?)?.as_table_like()?;
+        field_value(entry, field)
     }
 
     pub fn set_file_value(&mut self, key: &str, field: &str, value: &Json) {
-        if self.read_only() {
-            return;
+        self.write_file_value(key, field, value, true);
+    }
+
+    /// Note JS7 (N8-s): write `field` into the `[files]` table spelled byte for byte `key`, created under that spelling
+    /// when absent: no case, Unicode or extension-less lookup, so no walk over the keys (`set_file_value` resolves the
+    /// key as the engine matches it). For a caller that has already chosen the table, as the shared-alpha step does
+    /// from its index.
+    pub fn set_exact_file_value(&mut self, key: &str, field: &str, value: &Json) {
+        self.write_file_value(key, field, value, false);
+    }
+
+    fn write_file_value(&mut self, key: &str, field: &str, value: &Json, resolve: bool) {
+        if self.write_field(key, field, value, resolve) {
+            self.touch_field(field);
         }
-        let Some(v) = json_to_toml(value) else { return };
+    }
+
+    fn write_field(&mut self, key: &str, field: &str, value: &Json, resolve: bool) -> bool {
+        if self.read_only() {
+            return false;
+        }
+        let Some(v) = json_to_toml(value) else {
+            return false;
+        };
         let parts: Vec<&str> = field.split('.').collect();
         let (last, path) = parts.split_last().expect("split yields one part at least");
         let written = (|| {
-            let mut t = self.entry_mut(key)?;
+            let mut t = self.entry_mut_as(key, resolve)?;
             for part in path {
                 t = sub_table(t, part, dotted_table)?;
             }
@@ -511,40 +856,80 @@ impl ProjectDoc {
             Some(())
         })();
         if written.is_some() {
-            self.touch();
-        } else if self.entry(key).is_some_and(|t| t.is_empty()) {
-            // A field path ran into a non-table: do not leave the entry we just created behind.
+            return true;
+        }
+        // A field path ran into a non-table: do not leave the entry we just created behind.
+        let left = if resolve {
+            self.entry(key)
+        } else {
+            self.files()
+                .and_then(|f| f.get(key))
+                .and_then(Item::as_table_like)
+        };
+        if left.is_some_and(|t| t.is_empty()) {
             self.drop_entry(key);
         }
+        false
     }
 
     pub fn clear_file_value(&mut self, key: &str, field: &str) {
-        if self.read_only() || self.entry(key).is_none() {
-            return;
+        if self.remove_field(key, field) {
+            self.touch_field(field);
         }
-        fn remove(t: &mut dyn TableLike, parts: &[&str]) -> bool {
-            if parts.len() == 1 {
-                return t.remove(parts[0]).is_some();
-            }
-            let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
-                return false;
-            };
-            let hit = remove(sub, &parts[1..]);
-            if sub.is_empty() {
-                t.remove(parts[0]);
-            }
-            hit
+    }
+
+    fn remove_field(&mut self, key: &str, field: &str) -> bool {
+        if self.read_only() || self.entry(key).is_none() {
+            return false;
         }
         let parts: Vec<&str> = field.split('.').collect();
-        if self
+        let removed = self
             .entry_mut(key)
-            .is_some_and(|entry| remove(entry, &parts))
-        {
-            self.touch();
-        }
+            .is_some_and(|entry| remove_field(entry, &parts));
         if self.entry(key).is_some_and(|t| t.is_empty()) {
-            self.remove_file_entry(key);
+            return self.drop_entry(key);
         }
+        removed
+    }
+
+    /// Note JS7 (N8-k): remove `field` from the `[files]` table spelled byte for byte `key`, and only while it holds
+    /// `want`: the check and the removal are one operation on that one table, with no case, Unicode or extension-less
+    /// fallback (`clear_file_value` resolves the key as the engine matches it). The table goes when that leaves it
+    /// empty. True when it removed the value.
+    pub fn clear_exact_file_value(&mut self, key: &str, field: &str, want: &Json) -> bool {
+        if self.read_only() {
+            return false;
+        }
+        let parts: Vec<&str> = field.split('.').collect();
+        let Some(entry) = self
+            .f
+            .doc
+            .get_mut("files")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|files| files.get_mut(key))
+            .and_then(Item::as_table_like_mut)
+        else {
+            return false;
+        };
+        let mut item = entry.get(parts[0]);
+        for part in &parts[1..] {
+            item = item.and_then(|i| i.get(part));
+        }
+        if item.and_then(toml_to_json).as_ref() != Some(want) || !remove_field(entry, &parts) {
+            return false;
+        }
+        let empty = entry.is_empty();
+        // `drop_entry` takes the exact spelling first, so this is the table just emptied.
+        if empty {
+            self.drop_entry(key);
+        }
+        self.touch_field(field);
+        true
+    }
+
+    /// The `[files]` table spelled byte for byte `key`, as text (N8-k's read-back of the tables a clear must leave).
+    pub fn exact_file_entry_text(&self, key: &str) -> Option<String> {
+        self.files()?.get(key).map(|i| i.to_string())
     }
 
     /// Every value in `key`'s entry by its dotted field name (`cubemap.yaw`), as `file_value` reads it.
@@ -678,6 +1063,7 @@ impl ProjectDoc {
     }
 
     pub fn file_keys(&self) -> Vec<String> {
+        walked();
         self.files()
             .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
             .unwrap_or_default()
@@ -699,19 +1085,24 @@ impl ProjectDoc {
 
     /// `[export]` (Track A, TA9), the default when absent or unparsable. Cached by `rev`.
     pub fn export_config(&self) -> ExportConfig {
+        self.with_export_config(|c| {
+            #[cfg(test)]
+            SKIPPED_IDS_COPIED.with(|n| n.set(n.get() + c.skip.len()));
+            c.clone()
+        })
+    }
+
+    pub(crate) fn with_export_config<T>(&self, read: impl FnOnce(&ExportConfig) -> T) -> T {
         let rev = self.rev();
-        if let Some((r, c)) = &*self.export_cache.borrow() {
-            if *r == rev {
-                return c.clone();
-            }
+        if self.export_cache.borrow().0 != Some(rev) {
+            let config = self
+                .config()
+                .ok()
+                .and_then(|c| c.export)
+                .unwrap_or_default();
+            *self.export_cache.borrow_mut() = (Some(rev), config);
         }
-        let c = self
-            .config()
-            .ok()
-            .and_then(|c| c.export)
-            .unwrap_or_default();
-        *self.export_cache.borrow_mut() = Some((rev, c.clone()));
-        c
+        read(&self.export_cache.borrow().1)
     }
 
     /// Write `[export]` as `cfg`: only the fields that differ from the default, so a tick does not freeze today's
@@ -774,7 +1165,9 @@ impl ProjectDoc {
 
     /// Write the document (atomically: a temporary file, then rename).
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
-        self.f.save(force)
+        self.f.save(force)?;
+        self.type_alpha_edit = None;
+        Ok(())
     }
 
     /// Note FP7 (T38): write the unsaved edits a blame stashed (the engine may still reject them: the file then opens
@@ -784,9 +1177,53 @@ impl ProjectDoc {
             return Ok(false);
         };
         self.f.write_text(doc.to_string(), false)?;
+        self.type_alpha_edit = None;
         *dirty = false;
         Ok(true)
     }
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static KEY_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests (Note JS7, N8-o, N8-s): how many times this thread has walked a document's `[files]` keys: a `file_keys` call,
+/// or a `[files]` key lookup's pass that missed the exact spelling and compared every key. `[inputs]` lookups are not
+/// counted.
+#[cfg(feature = "test-hooks")]
+pub fn key_walks() -> usize {
+    KEY_WALKS.with(std::cell::Cell::get)
+}
+
+/// Count one walk of the `[files]` keys (tests only; nothing in a build without `test-hooks`).
+fn walked() {
+    #[cfg(feature = "test-hooks")]
+    KEY_WALKS.with(|c| c.set(c.get() + 1));
+}
+
+fn field_value(entry: &dyn TableLike, field: &str) -> Option<Json> {
+    let mut parts = field.split('.');
+    let mut item = entry.get(parts.next()?)?;
+    for part in parts {
+        item = item.get(part)?;
+    }
+    toml_to_json(item)
+}
+
+/// Remove the dotted field `parts` from table `t`, and each sub-table that leaves empty; true when it was there.
+fn remove_field(t: &mut dyn TableLike, parts: &[&str]) -> bool {
+    if parts.len() == 1 {
+        return t.remove(parts[0]).is_some();
+    }
+    let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
+        return false;
+    };
+    let hit = remove_field(sub, &parts[1..]);
+    if sub.is_empty() {
+        t.remove(parts[0]);
+    }
+    hit
 }
 
 /// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.

@@ -279,10 +279,14 @@ fn the_set_editor_adds_a_match_to_a_renamed_set() {
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     let mut h = h;
     h.run();
-    let toggle = || h.query_all_by_label("Match on this").nth(1).unwrap();
+    let toggle = || {
+        h.query_all_by_label_contains("Match on this")
+            .nth(1)
+            .unwrap()
+    };
     toggle().scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .click();

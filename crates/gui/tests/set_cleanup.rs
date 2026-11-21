@@ -614,9 +614,9 @@ fn an_existing_advanced_skin_set_opens_with_rfaos() {
     let mut h = harness(m);
     settle(&mut h);
     assert!(
-        h.query_all_by_role(egui::accesskit::Role::ComboBox)
-            .any(|n| n.value().as_deref() == Some("RFAOS (skin) (auto)")),
-        "the packed card shows RFAOS"
+        h.query_all_by_label("RFAOS")
+            .any(|n| !support::in_sets_column(&h, n.rect())),
+        "the packed row's title reads RFAOS"
     );
     // DU6 does not apply again: choosing Advanced Skin once more writes no sub-type.
     h.state_mut().set_shader(SET, Some(Shader::AdvancedSkin));

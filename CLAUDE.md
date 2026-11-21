@@ -10,7 +10,7 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 | `sdc-gui` | crates/gui | egui + wgpu GUI (`tessalith.exe`); kittest tests |
 | `sdc` | crates/cli | CLI (`sdc.exe`) |
 | `bcenc` | crates/bcenc | rgbcx's block encoders in Rust (BC1, BC3, BC4, BC5), which the engine encodes those formats with; no dependencies; `encoders-sys` is its test reference (Note HY) |
-| `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed. rgbcx is the reference for `bcenc`'s tests; the engine no longer calls its block encoders |
+| `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed. rgbcx is the reference for `bcenc`'s tests; the engine does not call rgbcx's block encoders |
 | `modscan`, `vfs`, `esp`, `nif`, `render3d`, `pgpsim` | crates/… | MO2 scan store, BSA reading, plugin/NIF parsing, 3D preview, PGPatcher simulation |
 
 A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim`. It works on `nif/*` branches; the owner merges `nif/main` into `main`. Change those crates only when the task says so. Record what you changed in a DECISIONS note and in a line for the NIF team's handoff file (see CLAUDE.local.md).
@@ -25,7 +25,7 @@ During a plan: `cargo fmt --all --check`, `cargo clippy --workspace --all-target
 - **`cargo test -p engine -p sdc --test encode_versions`** pins encoder inputs and built-in profile hashes; a change it accepts rewrites `crates/engine/tests/encode_versions/*.json`. Commit that diff with the change.
 - **Capture test output to a file** and read the `test result:` lines. Never pipe it through `head`: truncated output has been mistaken for a pass.
 - **On Windows, set `CARGO_BUILD_JOBS=4`** when several builds run at once. Otherwise linking fails with os error 1450 ("insufficient system resources"). That error is not a code failure.
-- **Release exes land in `target\x86_64-pc-windows-msvc\release\`**, because `.cargo/config` sets the target triple, not in `target\release\`. An `sdc-gui.exe` there is stale; the GUI is `tessalith.exe`.
+- **Release exes land in `target\x86_64-pc-windows-msvc\release\`**, because `.cargo/config.toml` sets the target triple, not in `target\release\`. An `sdc-gui.exe` there is stale; the GUI is `tessalith.exe`.
 
 ## Disk
 Build folders fill the drive fast: one reaches 50–170 GB.

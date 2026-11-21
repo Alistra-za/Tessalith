@@ -23,6 +23,19 @@ fn tab_buttons(ui: &mut egui::Ui, model: &mut AppModel) {
     for (tab, text) in tabs(model) {
         let on = model.bottom.open && model.bottom.tab == tab;
         let mut r = ui.selectable_label(on, text);
+        if tab == BottomTab::Problems
+            && !model.nif_problems.is_empty()
+            && r.enabled()
+            && egui::Tooltip::should_show_tooltip(&r, false)
+        {
+            let n = problems::nif_problem_count(ui, model);
+            if n > 0 {
+                egui::Tooltip::for_widget(&r).show(|ui| {
+                    let verb = if n == 1 { "comes" } else { "come" };
+                    ui.label(format!("{n} of these {verb} from the NIF you are editing."));
+                });
+            }
+        }
         if tab == BottomTab::Messages {
             r = r.on_hover_text(format!(
                 "Notes and results of this session ({})",
@@ -45,6 +58,14 @@ pub fn draw(
     drawer: &mut drawer::DrawerState,
     nif_preview: bool,
 ) {
+    if !super::edit_controls_visible(ui.ctx(), model) {
+        if model.messages.is_open() {
+            model.collapse_bottom();
+        }
+        problems::forget_focus(ui.ctx());
+        ui.skip_ahead_auto_ids(1);
+        return;
+    }
     // Another folder or a new export: the cached file checks belong to another run.
     if drawer.epoch != model.drawer_epoch {
         drawer.stats.clear();

@@ -249,14 +249,12 @@ pub static ACTIONS: &[Action] = &[
         AppModel::is_dirty,
     ),
     when(
-        a("export", "Export", Global, &[], |m, _| m.export_clicked()),
+        a("export", "Export", Global, &[], |m, _| m.header_export_clicked()),
         AppModel::can_export,
     ),
     when(
         a("undo", "Undo", Global, &[ctrl(Key::Z)], |m, ctx| {
-            if !super::meshes::request_undo(ctx, true) {
-                m.undo();
-            }
+            history_step(ctx, m, true);
         }),
         AppModel::can_undo,
     ),
@@ -267,9 +265,7 @@ pub static ACTIONS: &[Action] = &[
             Global,
             &[ctrl(Key::Y), ctrl_shift(Key::Z)],
             |m, ctx| {
-                if !super::meshes::request_undo(ctx, false) {
-                    m.redo();
-                }
+                history_step(ctx, m, false);
             },
         ),
         AppModel::can_redo,
@@ -279,9 +275,12 @@ pub static ACTIONS: &[Action] = &[
         "Switch between the Textures and Meshes views",
         Global,
         &[],
-        |_, ctx| {
+        |m, ctx| {
             let meshes = super::header::meshes_view_active(ctx);
-            super::header::set_meshes_view(ctx, !meshes);
+            super::navigate(ctx, m, move |ctx, m| {
+                m.centre_over_meshes = false;
+                super::header::set_meshes_view(ctx, !meshes);
+            });
         },
     ),
     a(
@@ -306,7 +305,7 @@ pub static ACTIONS: &[Action] = &[
             &[],
             |m, _| m.open_json_editor(),
         ),
-        |m| m.target == engine::config::Target::Cs && m.root.is_some() && m.sets_doc.is_some(),
+        |m| super::header::shows_json_editor(m).is_ok(),
     ),
     a("presets", "Open the preset creator", Global, &[], |m, _| {
         m.open_presets()
@@ -314,7 +313,7 @@ pub static ACTIONS: &[Action] = &[
     // Textures grid
     a(
         "select-all",
-        "Select every visible texture (every set when a set is active)",
+        "Select visible tiles or, from a set, matching sets with their own files outside folded groups",
         Grid,
         &[ctrl(Key::A)],
         |m, _| m.select_all_visible(),
@@ -501,7 +500,8 @@ pub static ACTIONS: &[Action] = &[
         |m, _| {
             use crate::model::rename::RenameMode;
             // Note HJ1: no PGPatcher PBR set in the selection → Inputs.
-            let sets = !m.selected_sets().is_empty() && !m.rename_keys(RenameMode::Outputs).is_empty();
+            let sets = matches!(m.selection, crate::model::Selection::Set(_) | crate::model::Selection::SetId(_))
+    && !m.rename_keys(RenameMode::Outputs).is_empty();
             m.open_rename(if sets {
                 RenameMode::Outputs
             } else {
@@ -584,9 +584,30 @@ pub fn keys_text(id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Whether action `a` can run now. A20: Undo / Redo follow the NIF history while a NIF edit is open.
+pub(super) fn nif_history(
+    ctx: &egui::Context,
+    model: &AppModel,
+) -> Option<super::meshes::UndoTarget> {
+    if model.centre_over_meshes {
+        return None;
+    }
+    super::meshes::undo_target(ctx)
+}
+
+pub(super) fn history_step(ctx: &egui::Context, model: &mut AppModel, undo: bool) {
+    if !model.centre_over_meshes && super::meshes::request_undo(ctx, undo) {
+        return;
+    }
+    if undo {
+        model.undo();
+    } else {
+        model.redo();
+    }
+}
+
+/// Whether action `a` can run now. A20: Undo / Redo follow the NIF history while its editor is visible.
 fn enabled(a: &Action, model: &AppModel, ctx: &egui::Context) -> bool {
-    match (a.id, super::meshes::undo_target(ctx)) {
+    match (a.id, nif_history(ctx, model)) {
         ("undo", Some(t)) => t.can_undo,
         ("redo", Some(t)) => t.can_redo,
         _ => (a.enabled)(model),
@@ -631,9 +652,25 @@ pub(crate) fn focused_at_start(ctx: &egui::Context) -> bool {
 
 /// Run action `id` (the palette's pick).
 pub fn run(id: &str, model: &mut AppModel, ctx: &egui::Context) {
-    if let Some(f) = action(id).and_then(|a| a.run) {
-        f(model, ctx);
+    if let Some(a) = action(id) {
+        dispatch(a, model, ctx);
     }
+}
+
+fn messages_block(ctx: &egui::Context, model: &AppModel) -> Option<&'static str> {
+    (!super::edit_controls_visible(ctx, model))
+        .then_some("Open a texture folder or edit a NIF in Meshes to see Messages.")
+}
+
+fn dispatch(a: &Action, model: &mut AppModel, ctx: &egui::Context) -> Option<&'static str> {
+    if a.id == "messages" {
+        if let Some(why) = messages_block(ctx, model) {
+            model.status_line = why.into();
+            return None;
+        }
+    }
+    (a.run?)(model, ctx);
+    Some(a.id)
 }
 
 /// The keys of this frame. Called first thing in the frame, before any widget has seen the input: Ctrl+K must not
@@ -670,7 +707,7 @@ pub fn keys(ctx: &egui::Context, model: &mut AppModel, set_modal: bool) -> Optio
             .any(|s| ctx.input_mut(|i| i.consume_key(s.mods, s.key)))
         {
             super::after_commit(ctx, model, |m| {
-                if m.is_dirty() {
+                if m.unsaved() {
                     // A failed save raises its own dialog.
                     let _ = m.save();
                 }
@@ -701,8 +738,7 @@ pub fn keys(ctx: &egui::Context, model: &mut AppModel, set_modal: bool) -> Optio
     if !on {
         return None;
     }
-    (a.run?)(model, ctx);
-    Some(a.id)
+    dispatch(a, model, ctx)
 }
 
 /// Keeps every enabled pair, and a disabled pair only when an enabled one shares its key (it eats the key, trace #7)
@@ -781,6 +817,7 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
     };
     let meshes = super::header::meshes_view_active(ctx);
     let offered = palette_actions(model, meshes, ctx);
+    let messages_block = messages_block(ctx, model);
     let mut chosen = None;
     let k = super::dialogs::modal_keys(ctx, "palette", true, false, |ui| {
         ui.set_min_width(420.0);
@@ -846,7 +883,13 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
                 for i in range {
                     let h = &hits[i];
                     let text = format!("{}   {}", h.label, h.detail);
-                    let r = ui.selectable_label(active && i == p.sel, text);
+                    let selected = active && i == p.sel;
+                    let r = match (h.pick == Pick::Action("messages"), messages_block) {
+                        (true, Some(why)) => ui
+                            .add_enabled(false, egui::Button::selectable(selected, text))
+                            .on_disabled_hover_text(why),
+                        _ => ui.selectable_label(selected, text),
+                    };
                     if active && i == p.sel && (up || down) {
                         r.scroll_to_me(None);
                     }
@@ -858,7 +901,8 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
         if enter && active {
             chosen = chosen
                 .take()
-                .or_else(|| hits.get(p.sel).map(|h| h.pick.clone()));
+                .or_else(|| hits.get(p.sel).map(|h| h.pick.clone()))
+                .filter(|pick| *pick != Pick::Action("messages") || messages_block.is_none());
         }
     });
     if k.cancel {
@@ -874,8 +918,10 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
         Pick::Action(id) => run(id, model, ctx),
         _ => {
             // A texture or a set is picked in the Textures view.
-            super::header::set_meshes_view(ctx, false);
-            model.palette_pick(&pick);
+            super::navigate(ctx, model, move |ctx, m| {
+                super::header::set_meshes_view(ctx, false);
+                m.palette_pick(&pick);
+            });
         }
     }
 }
@@ -888,9 +934,13 @@ pub fn markdown_table() -> String {
             .iter()
             .filter(|a| a.area == area && !a.keys.is_empty())
         {
+            let (area, detail) = if a.id == "dialog-enter" {
+                ("[Dialogs](GUI-Guide.md#dialogs)", ". In the [set-drop dialog](GUI-Sets-Column.md#moving-textures-between-sets), an unfocused Enter uses an available remembered answer. A focused answer button takes Enter itself. Replace still needs a click.")
+            } else {
+                (area.title(), "")
+            };
             s.push_str(&format!(
-                "| {} | {} | {} |\n",
-                area.title(),
+                "| {area} | {} | {}{detail} |\n",
                 keys_text(a.id),
                 a.label
             ));

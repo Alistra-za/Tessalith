@@ -46,11 +46,11 @@ fn combo_text(n: &egui_kittest::Node<'_>) -> Option<String> {
     a.value().or(a.label()).map(|v| v.to_string())
 }
 
-/// The header's Preset combo shows `default (…)` or a preset id; the Settings tab's is named "Preset (this project): …".
+/// The header's Preset combo tags the default; the Settings tab's is named "Preset (this project): …".
 fn header_preset_text(h: &H) -> String {
     h.query_all_by_role(Role::ComboBox)
         .filter_map(|n| combo_text(&n))
-        .find(|v| v.starts_with("default ("))
+        .find(|v| v.ends_with(" · default"))
         .expect("the header's Preset combo")
 }
 
@@ -145,6 +145,94 @@ fn the_settings_tab_holds_exactly_four_groups() {
     }
 }
 
+fn settle(h: &mut H) {
+    assert!(h.state_mut().wait_idle(Duration::from_secs(120)));
+    h.run();
+}
+
+#[test]
+fn settings_turns_the_opt_out_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    settle(&mut h);
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(h.state().export_without_review());
+    // Off again, then the header's Export opens Review first and writes nothing.
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+    let label = header_export_label(&h);
+    h.get_by_label(&label).click();
+    settle(&mut h);
+    assert!(h.state().review.is_some(), "Review opened");
+    assert!(h.state().export.running.is_none());
+    let out = h.state().export_root();
+    assert!(
+        !out.exists() || std::fs::read_dir(&out).unwrap().next().is_none(),
+        "nothing written under {out:?}"
+    );
+}
+
+// Minor: a project document that takes no edit draws the box off with its own reason.
+#[test]
+fn settings_opt_out_is_off_for_a_read_only_project_document() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(&bad));
+    assert!(m.sets_doc.as_ref().unwrap().read_only(), "guard");
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let name = "Export without review";
+    assert!(h
+        .get_by_role_and_label(Role::CheckBox, name)
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_role_and_label(Role::CheckBox, name).hover();
+    h.run_steps(8);
+    h.get_by_label_contains("sdc-project.toml is read-only");
+    h.get_by_role_and_label(Role::CheckBox, name).click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}
+
+// Ruling 3c-13: the setter refuses while the folder's open can be cancelled, so the box is drawn off with the reason.
+#[test]
+fn settings_opt_out_is_off_while_the_open_can_be_cancelled() {
+    let a = tempfile::tempdir().unwrap();
+    let od = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(a.path());
+    m.open_folder(support::mod_folder(od.path()));
+    assert!(m.can_cancel_open(), "guard: the open is in flight");
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let name = "Export without review";
+    assert!(h
+        .get_by_role_and_label(Role::CheckBox, name)
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_role_and_label(Role::CheckBox, name).hover();
+    h.run_steps(8);
+    h.get_by_label("Export without review can be set once the folder has finished opening.");
+    h.get_by_role_and_label(Role::CheckBox, name).click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}
+
 #[test]
 fn no_project_open_shows_no_project_controls() {
     let mut m = AppModel::placeholder(GuiSettings::default());
@@ -152,6 +240,7 @@ fn no_project_open_shows_no_project_controls() {
     let h = harness(m, 1280.0);
     h.get_by_label(PROJECT_HEADING);
     h.get_by_label("No project open");
+    assert!(h.query_by_label("Export without review").is_none());
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h.query_by_label_contains("Preset (this project)").is_none());
     assert!(h.query_by_label("Choose export folder").is_none());
@@ -417,7 +506,7 @@ fn the_settings_tab_sets_the_project_mode() {
     assert!(!h.state_mut().presets_model().dirty());
     h.get_by_label(&mode_name("vanilla"));
     let want = format!(
-        "default ({})",
+        "{} · default",
         engine::presets::default_preset_for(Target::Vanilla)
     );
     assert_eq!(header_preset_text(&h), want);

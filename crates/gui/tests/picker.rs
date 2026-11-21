@@ -4,7 +4,9 @@ mod support;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::{MeshesModel, ScanTarget};
-use sdc_gui::model::picker::{Picker, PickerBackend, PickerPurpose, PickerSpec, BUSY_HOVER};
+use sdc_gui::model::picker::{
+    Picker, PickerBackend, PickerKind, PickerPurpose, PickerSpec, BUSY_HOVER,
+};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::{GuiSettings, MeshesSettings};
 use std::path::PathBuf;
@@ -69,6 +71,168 @@ use eframe::egui;
 
 fn model() -> AppModel {
     AppModel::placeholder(GuiSettings::default())
+}
+
+fn harness(model: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_step_dt(0.25)
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(sdc_gui::ui::draw, model)
+}
+
+fn settle(h: &mut Harness<'static, AppModel>) {
+    assert!(h.state_mut().wait_idle(Duration::from_secs(120)));
+    h.run();
+}
+
+#[test]
+fn also_location_save_report_and_target_mod_start_in_the_project() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let root = m.root.clone().unwrap();
+    let target = d.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    m.set_target_mod(Some(target)).unwrap();
+    let (backend, specs) = recording_picker(None);
+    m.picker.set_backend(backend);
+    m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
+    let mut h = harness(m);
+    // Stacked Review puts the Also chooser below the blocker and undecided rows.
+    h.set_size(egui::vec2(1100.0, 900.0));
+    settle(&mut h);
+    let chooser = "Choose where the Also folders go…";
+    h.get_by_role_and_label(Role::Button, chooser)
+        .scroll_to_me();
+    h.run();
+    let footer = support::panel(&h.ctx, "review-footer");
+    assert!(
+        h.query_by_role_and_label(Role::Button, chooser)
+            .is_some_and(|n| n.rect().bottom() <= footer.top()),
+        "the Also folder chooser must be visible above the Review footer"
+    );
+    h.get_by_role_and_label(Role::Button, chooser).click();
+    h.run();
+    wait_picker(h.state_mut());
+    h.state_mut().close_review();
+    h.state_mut()
+        .show_tab(sdc_gui::model::bottom::BottomTab::Files);
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Save report…")
+        .click();
+    h.run();
+    wait_picker(h.state_mut());
+    h.state_mut().collapse_bottom();
+    h.run();
+    h.query_all_by_label("landscape/rock01")
+        .next()
+        .expect("the set card")
+        .click_secondary();
+    h.run();
+    h.get_by_label("Map to target…").click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Choose…").click();
+    h.run();
+    wait_picker(h.state_mut());
+
+    let specs = specs.lock().unwrap();
+    let [also, report, target] = specs.as_slice() else {
+        panic!("{specs:?}")
+    };
+    for folder in [also, target] {
+        assert!(matches!(folder.kind, PickerKind::Folder));
+        assert_eq!(folder.start.as_ref(), Some(&root));
+    }
+    let PickerKind::Save {
+        file_name,
+        filters,
+        dir,
+    } = &report.kind
+    else {
+        panic!("{report:?}")
+    };
+    assert_eq!(dir.as_ref(), Some(&root));
+    assert_eq!(*file_name, "sdc-report.jsonl");
+    assert_eq!(
+        *filters,
+        &[("JSON Lines", &["jsonl"][..]), ("Markdown", &["md"][..])]
+    );
+}
+
+#[test]
+fn picking_an_export_folder_records_it_as_the_last_one() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_unchosen(d.path());
+    let settings = d.path().join("gui.toml");
+    m.settings_path = Some(settings.clone());
+    let out = d.path().join("picked");
+    std::fs::create_dir(&out).unwrap();
+    let ctx = egui::Context::default();
+    let pick = |m: &mut AppModel, answer| {
+        m.picker.set_backend(recording_picker(answer).0);
+        assert!(m.pick_export_folder(&ctx));
+        wait_picker(m);
+    };
+    pick(&mut m, Some(out.clone()));
+    assert_eq!(m.export_folder_chosen().as_ref(), Some(&out));
+    assert_eq!(m.settings.last_export_folder.as_ref(), Some(&out));
+    assert_eq!(
+        GuiSettings::load(&settings).0.last_export_folder.as_ref(),
+        Some(&out)
+    );
+    choose_export(&mut m, d.path().join("programmatic"));
+    pick(&mut m, None);
+    assert_eq!(m.settings.last_export_folder.as_ref(), Some(&out));
+    assert_eq!(
+        m.export_folder_chosen(),
+        Some(d.path().join("programmatic"))
+    );
+
+    let mut m = AppModel::new(GuiSettings::default(), Some(settings.clone()), session());
+    pick(&mut m, Some(out.clone()));
+    let (saved, error) = GuiSettings::load(&settings);
+    assert_eq!(error, None);
+    assert_eq!(saved.export_folder.as_ref(), Some(&out));
+    assert_eq!(saved.last_export_folder, Some(out));
+}
+
+#[test]
+fn reselecting_the_last_export_folder_keeps_the_pick_and_unrelated_disk_edits() {
+    let d = tempfile::tempdir().unwrap();
+    let settings = d.path().join("gui.toml");
+    let picked = d.path().join("picked");
+    let other = d.path().join("other-instance-destination");
+    std::fs::create_dir(&picked).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    let original = GuiSettings {
+        last_export_folder: Some(picked.clone()),
+        ..GuiSettings::default()
+    };
+    original.save(&settings).unwrap();
+    let mut m = AppModel::new(original.clone(), Some(settings.clone()), session());
+    GuiSettings {
+        last_export_folder: Some(other),
+        analysis_cache_mb: Some(913),
+        ..original
+    }
+    .save(&settings)
+    .unwrap();
+
+    m.picker
+        .set_backend(recording_picker(Some(picked.clone())).0);
+    assert!(m.pick_export_folder(&egui::Context::default()));
+    wait_picker(&mut m);
+
+    let (saved, error) = GuiSettings::load(&settings);
+    assert_eq!(error, None);
+    for state in [&m.settings, &saved] {
+        assert_eq!(state.last_export_folder.as_ref(), Some(&picked));
+        assert_eq!(state.analysis_cache_mb, Some(913));
+    }
 }
 
 #[test]
@@ -189,6 +353,8 @@ fn an_open_folder_pick_is_never_stale_but_an_export_folder_pick_is() {
     assert!(m.wait_idle(Duration::from_secs(60)));
 
     // An export folder picked for a folder that is gone is still dropped.
+    let last = d.path().join("previous");
+    m.settings.last_export_folder = Some(last.clone());
     let (f, tx) = fake();
     m.picker.set_backend(f);
     assert!(m.pick(
@@ -199,10 +365,13 @@ fn an_open_folder_pick_is_never_stale_but_an_export_folder_pick_is() {
     m.open_folder(b.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
     let before = m.settings.export_folder.clone();
+    let chosen_before = m.export_folder_chosen();
     tx.send(Some(d.path().join("elsewhere"))).unwrap();
     wait_closed(&m.picker);
     m.poll();
     assert_eq!(m.settings.export_folder, before);
+    assert_eq!(m.export_folder_chosen(), chosen_before);
+    assert_eq!(m.settings.last_export_folder, Some(last));
     assert!(m.status_line.contains("Picker result ignored"));
     assert!(m
         .messages
@@ -265,8 +434,11 @@ fn the_export_folder_cannot_change_while_an_export_runs() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(&d.path().join("a"));
     m.export.running = Some(Default::default());
+    let last = d.path().join("previous");
+    m.settings.last_export_folder = Some(last.clone());
     // A dialog opened before the export started lands during it: dropped.
     let before = m.settings.export_folder.clone();
+    let chosen_before = m.export_folder_chosen();
     ask(
         &m.picker,
         PickerPurpose::ExportFolder,
@@ -275,14 +447,11 @@ fn the_export_folder_cannot_change_while_an_export_runs() {
     );
     m.poll();
     assert_eq!(m.settings.export_folder, before);
+    assert_eq!(m.export_folder_chosen(), chosen_before);
+    assert_eq!(m.settings.last_export_folder, Some(last));
     assert!(m.status_line.contains("an export is running"));
     // Export to ▾'s Choose export folder… is off, with the reason (K7).
-    let mut h = egui_kittest::Harness::builder()
-        .with_context_setup(|ctx| {
-            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-        })
-        .with_size(egui::vec2(1400.0, 900.0))
-        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    let mut h = harness(m);
     h.run_steps(2);
     h.get_by_label_contains("Export to: ").click();
     h.run_steps(2);

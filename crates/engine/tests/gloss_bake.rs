@@ -191,6 +191,90 @@ fn opting_in_lowers_gloss_where_the_normal_is_bumpy_and_keeps_it_where_flat() {
 }
 
 #[test]
+fn keep_gloss_bakes_only_angular_variance() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "wall_m.png", material(8, 8));
+    put(
+        d.path(),
+        "wall_n.png",
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(8, 8, |x, _| {
+            Rgb([
+                if x < 4 {
+                    128
+                } else if x % 2 == 0 {
+                    146
+                } else {
+                    109
+                },
+                128,
+                189,
+            ])
+        })),
+    );
+    let written = |base, mode| {
+        let mut req = request(
+            d.path(),
+            Target::Vanilla,
+            &[
+                CM,
+                mode,
+                "format=rgba8",
+                "color.tag=unorm",
+                &format!("file:**/wall_n.png.mips.normal_base={base}"),
+            ],
+            &[],
+        );
+        req.output_root = d.path().join(format!("{base}-{}", mode == OPT_IN));
+        req.on_existing = OnExisting::IfChanged;
+        let p = plan(req.clone());
+        assert_eq!(
+            job(&p, "wall_n.png").provenance.get("mips.normal"),
+            Some(&Provenance::User)
+        );
+        let m = job(&p, "wall_m.png");
+        assert_eq!(m.bake.is_some(), mode == OPT_IN);
+        let path = m.output.clone();
+        let rep = Reporter::new(Arc::new(NullSink), "gloss");
+        let run = |p| {
+            Engine::new()
+                .unwrap()
+                .run(p, &rep, &CancelToken::default())
+                .unwrap()
+        };
+        assert_eq!(run(p).converted, 2);
+        assert_eq!(run(plan(req)).up_to_date, 2);
+        let f = engine::dds::read_dds(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(f.format, engine::config::Format::Rgba8.pixel_format(false));
+        [0, 1, 2].map(|level: usize| {
+            let (w, h, r) = &f.levels[level];
+            let engine::decode::Decoded::Ldr(px) =
+                engine::decode::decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap()
+            else {
+                panic!("expected RGBA8");
+            };
+            px
+        })
+    };
+    let plain = written("keep", OPT_OUT);
+    let unit = written("renormalize", OPT_IN);
+    let kept = written("keep", OPT_IN);
+    for level in 0..=2 {
+        let width = 8 >> level;
+        for (i, px) in kept[level].iter().enumerate() {
+            let off = &plain[level][i];
+            let reference = &unit[level][i];
+            assert_eq!((px[0], px[2], px[3]), (off[0], off[2], off[3]));
+            if level == 0 || i % width < width / 2 {
+                assert_eq!(px, off, "mip {level} texel {i}");
+            } else {
+                assert!(reference[1] < off[1]);
+                assert_eq!(px, reference, "mip {level} texel {i}");
+            }
+        }
+    }
+}
+
+#[test]
 fn the_normal_itself_is_unchanged_by_the_opt_in() {
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     wall_set(a.path(), |_| true);
@@ -282,4 +366,41 @@ fn a_pbr_set_still_bakes_roughness_only() {
     {
         assert!(j.bake.is_none(), "{} bakes", j.input.display());
     }
+}
+
+/// N-12 (Note JS2): the bake's own `renormalize_bake` (provenance `set`) on a plain normal in a baking cs set never
+/// opts the set's complex `_m` into CL40's gloss bake.
+#[test]
+fn the_bakes_own_renormalize_bake_never_opts_into_the_gloss_bake() {
+    let d = tempfile::tempdir().unwrap();
+    wall_set(d.path(), |_| true);
+    put(
+        d.path(),
+        "wall_rmaos.png",
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 64, |x, _| {
+            Rgb([(x * 4) as u8, 0, 255])
+        })),
+    );
+    let p = plan(request(
+        d.path(),
+        Target::Cs,
+        &[
+            CM,
+            "file:**/wall_n.png.subtype=normal",
+            "file:**/wall_rmaos.png.subtype=rmaos",
+        ],
+        &[],
+    ));
+    assert_eq!(
+        job(&p, "wall_m.png").profile.subtype,
+        Subtype::ComplexMaterial
+    );
+    assert!(
+        job(&p, "wall_rmaos.png").bake.is_some(),
+        "the set bakes from the plain normal"
+    );
+    assert!(
+        job(&p, "wall_m.png").bake.is_none(),
+        "no gloss bake without the user's opt-in"
+    );
 }

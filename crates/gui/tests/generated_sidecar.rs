@@ -108,4 +108,13 @@ fn the_sidecar_wins_and_reconcile_is_quiet() {
         saved.contains("\"side\"") && !saved.contains("\"hand\""),
         "{saved}"
     );
+
+    // A files-only Save must also persist a quiet sidecar difference.
+    std::fs::write(&toml, saved.replace("\"side\"", "\"hand\"")).unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    m.set_alpha("landscape/rock01.png", engine::config::AlphaPolicy::Blend);
+    assert!(!m.sets_doc.as_ref().unwrap().is_dirty());
+    m.save().unwrap();
+    assert_eq!(std::fs::read_to_string(&toml).unwrap(), saved);
 }

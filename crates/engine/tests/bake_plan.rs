@@ -303,16 +303,28 @@ fn a_lone_n_or_a_lone_rmaos_in_a_pbr_set_is_set_missing_companion_info() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
     rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 64);
-    let (p, _) = plan(req(d.path(), &[]));
-    for (tail, needle) in [
-        ("iron_n.png", "renormalised only"),
-        ("steel_rmaos.png", "without the variance bake"),
+    for (setting, base) in [
+        (
+            "file:**/iron_n.png.mips.normal_base=renormalize",
+            NormalBase::Renormalize,
+        ),
+        ("file:**/iron_n.png.mips.normal_base=keep", NormalBase::Keep),
     ] {
-        let j = job(&p, tail);
-        assert_eq!(set_codes(j), vec![Code::SetMissingCompanion], "{tail}");
-        let w = &j.warnings[j.warnings.len() - 1];
-        assert_eq!(w.severity, Severity::Info);
-        assert!(w.message.contains(needle), "{tail}: {}", w.message);
+        let (p, _) = plan(req(d.path(), &[setting]));
+        assert_eq!(job(&p, "iron_n.png").profile.mips.normal_base, base);
+        for (tail, needle) in [
+            (
+                "iron_n.png",
+                "no _rmaos or _rfaos in this set, so there is no roughness bake",
+            ),
+            ("steel_rmaos.png", "without the variance bake"),
+        ] {
+            let j = job(&p, tail);
+            assert_eq!(set_codes(j), vec![Code::SetMissingCompanion], "{tail}");
+            let w = &j.warnings[j.warnings.len() - 1];
+            assert_eq!(w.severity, Severity::Info);
+            assert!(w.message.contains(needle), "{tail}: {}", w.message);
+        }
     }
 }
 
@@ -350,6 +362,14 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
             .find(|w| w.code == Code::SetCompanionDds)
             .unwrap();
         assert_eq!(w.severity, Severity::Warning);
+        if tail == "iron_n.png" {
+            assert!(
+                w.message
+                    .contains("no roughness bake. Supply the original image"),
+                "{}",
+                w.message
+            );
+        }
         assert!(
             w.data["companion"].as_str().unwrap().ends_with(".dds"),
             "{tail}: {}",
@@ -357,6 +377,28 @@ fn a_dds_companion_is_set_companion_dds_in_both_directions() {
         );
     }
     assert!(job(&p, "steel_rmaos.png").bake.is_none());
+}
+
+#[test]
+fn a_dds_roughness_outside_the_batch_explains_the_missing_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    fake_dds(d.path(), "textures/pbr/iron_rmaos.dds");
+    let mut r = req(d.path(), &["file:**/iron_n.png.mips.normal_base=keep"]);
+    r.inputs = vec![d.path().join("in/textures/pbr/iron_n.png")];
+    let (p, _) = plan(r);
+    let w = job(&p, "iron_n.png")
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::SetCompanionDds)
+        .unwrap();
+    assert!(w.message.contains("not in this batch"), "{}", w.message);
+    assert!(
+        w.message
+            .contains("no roughness bake. Supply the original image"),
+        "{}",
+        w.message
+    );
 }
 
 /// Review Focus 2: converting one file of a set leaves the other on disk.
@@ -412,7 +454,7 @@ fn an_explicit_renormalize_on_the_n_opts_out() {
     assert!(!bake_flag(&ev, "textures/pbr/iron"));
 }
 
-/// M3b spec §3.3 (v1 instruction): a shared roughness renormalises only, and its borrower reports nothing missing.
+/// A shared roughness skips the bake, and its borrower reports nothing missing (DECISIONS R7).
 #[test]
 fn a_shared_roughness_is_never_baked_and_reports_nothing() {
     let d = tempfile::tempdir().unwrap();
@@ -522,7 +564,7 @@ fn a_shared_roughness_never_bakes_even_with_a_borrowed_n() {
     assert!(s.bake.is_none());
     assert!(set_codes(s).is_empty(), "{:?}", s.warnings);
     assert!(!bake_flag(&ev, "textures/pbr/steel"));
-    // The lent `_n` renormalises only, silently: its borrower's roughness is shared (R7).
+    // The lent `_n` supplies no bake and raises no warning because its borrower's roughness is shared (R7).
     let n = job(&p, "iron_n.png");
     assert_eq!(n.profile.mips.normal, NormalMips::Renormalize);
     assert!(set_codes(n).is_empty(), "{:?}", n.warnings);
@@ -660,7 +702,7 @@ fn an_advanced_skin_rfaos_bakes_from_its_n() {
 }
 
 /// The owner's question (Note HC7): an Advanced skin `_rfaos` bakes from a borrowed `_n` like any roughness member, and
-/// that `_n` is the only normal planned. A vanilla `_n` lent to it is no `pbr_normal`, so it does not bake, and says so.
+/// that `_n` is the only normal planned. A plain `_n` lent to it bakes it too (Note JS2).
 #[test]
 fn a_skin_rfaos_bakes_from_a_borrowed_n_with_one_normal_planned() {
     let d = tempfile::tempdir().unwrap();
@@ -689,24 +731,27 @@ fn a_skin_rfaos_bakes_from_a_borrowed_n_with_one_normal_planned() {
     assert!(normals[0].input.ends_with("a_n.png"));
 }
 
+/// N-7 (Note JS2): a plain `normal` lent to an Advanced Skin set bakes its `_rfaos`; the borrower's shader decides.
 #[test]
-fn a_vanilla_n_lent_to_a_skin_rfaos_does_not_bake_and_says_so() {
+fn a_vanilla_n_lent_to_a_skin_rfaos_bakes_it() {
     let d = tempfile::tempdir().unwrap();
     rough(d.path(), "textures/armor/x.png", 64, 64);
     normal(d.path(), "textures/armor/x_n.png", 64, 64);
     rough(d.path(), "textures/actors/skin/b_rfaos.png", 64, 64);
     let mut r = req(d.path(), &[]);
     borrow(&mut r, &[("textures/actors/skin/b", "textures/armor/x")]);
-    let (p, _) = plan(r);
+    let (p, ev) = plan(r);
     assert_eq!(job(&p, "x_n.png").profile.subtype, Subtype::Normal);
     let b = job(&p, "b_rfaos.png");
-    assert!(b.bake.is_none());
-    assert_eq!(set_codes(b), vec![Code::SetMissingCompanion]);
     assert!(
-        b.warnings.last().unwrap().message.contains("no usable"),
+        b.bake
+            .as_ref()
+            .is_some_and(|k| k.normal.ends_with("x_n.png")),
         "{:?}",
         b.warnings
     );
+    assert!(set_codes(b).is_empty(), "{:?}", b.warnings);
+    assert!(bake_flag(&ev, "skin/b"));
 }
 
 /// A borrowed Normal slot whose owner set has no usable `_n` says so, instead of "no _n in this PBR set".
@@ -818,10 +863,10 @@ fn a_member_with_no_mips_does_not_bake() {
     assert!(!bake_flag(&ev, "textures/pbr/iron"));
 }
 
-/// B3-4 pin (Note JP1): an own plain `normal` in a PBR set plans as today. It keeps its alpha and its `_n.dds` name,
-/// it does not bake the set's `_rmaos`, and the `_rmaos` says why.
+/// N-7 (Note JS2): an own plain `normal` in a PBR set keeps its alpha and its `_n.dds` name, and the set's `_rmaos`
+/// bakes from it; the `_n` records the bake with provenance `set`.
 #[test]
-fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_does_not_bake() {
+fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_bakes() {
     let d = tempfile::tempdir().unwrap();
     normal_with_alpha(d.path(), "textures/pbr/iron_n.png", 64, 64, 40);
     rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
@@ -830,21 +875,163 @@ fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_does_not_bake() {
     assert_eq!(n.profile.subtype, Subtype::Normal);
     assert_eq!(n.profile.alpha.policy, AlphaPolicy::Data);
     assert!(n.output.ends_with("iron_n.dds"), "{}", n.output.display());
+    assert_eq!(n.profile.mips.normal, NormalMips::RenormalizeBake);
+    assert_eq!(
+        n.provenance.get("mips.normal"),
+        Some(&engine::presets::Provenance::Set)
+    );
     let r = job(&p, "iron_rmaos.png");
-    assert!(r.bake.is_none(), "a plain normal never bakes");
-    assert_eq!(set_codes(r), vec![Code::SetMissingCompanion]);
+    assert!(r
+        .bake
+        .as_ref()
+        .is_some_and(|b| b.normal.ends_with("iron_n.png")));
+    assert!(set_codes(r).is_empty(), "{:?}", r.warnings);
+    assert!(bake_flag(&ev, "textures/pbr/iron"));
+}
+
+/// N-7: a `landscape_normal` in an automatic PBR Landscape set bakes its `_rmaos`.
+#[test]
+fn a_landscape_normal_in_a_pbr_landscape_set_bakes() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/landscape/rock_n.png", 64, 64);
+    rough(d.path(), "textures/landscape/rock_rmaos.png", 64, 64);
+    let (p, ev) = plan(req(d.path(), &[]));
+    assert_eq!(
+        job(&p, "rock_n.png").profile.subtype,
+        Subtype::LandscapeNormal
+    );
+    assert!(job(&p, "rock_rmaos.png").bake.is_some());
+    assert!(bake_flag(&ev, "landscape/rock"));
+}
+
+#[test]
+fn advanced_skin_reports_its_landscape_normal_as_extra_and_leaves_roughness_unbaked() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "skin/body_n.png", 64, 64);
+    rough(d.path(), "skin/body_rfaos.png", 64, 64);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.'skin/body_n.png']\nsubtype = 'landscape_normal'\n",
+    )
+    .unwrap();
+    let mut r = req(d.path(), &[]);
+    r.set_shaders
+        .insert("skin/body".into(), engine::shader::Shader::AdvancedSkin);
+    let (p, ev) = plan(r);
+    let n = job(&p, "body_n.png");
+    assert_eq!(n.profile.subtype, Subtype::LandscapeNormal);
+    let member = job(&p, "body_rfaos.png");
+    assert_eq!(member.profile.subtype, Subtype::SkinRfaos);
+    assert_eq!(
+        member.profile.mips.levels,
+        MipLevels::Keyword(MipKeyword::Full)
+    );
+    assert!(matches!(member.status, engine::policy::JobStatus::Ready));
+    assert!(ev.iter().any(|e| matches!(&e.kind, EventKind::SetResolved {warnings, ..}
+        if warnings.iter().any(|w| w.code == Code::ShaderExtraMap && w.data["member"] == "body_n.dds"))));
+    assert!(
+        member.bake.is_none(),
+        "Advanced Skin must not bake from its EXTRA landscape normal"
+    );
+    assert!(!bake_flag(&ev, "skin/body"));
+}
+
+#[test]
+fn advanced_skin_cannot_bake_from_a_lent_landscape_normal() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "pbr/rock_n.png", 64, 64);
+    rough(d.path(), "pbr/rock_rmaos.png", 64, 64);
+    rough(d.path(), "skin/body_rfaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/rock_n.png.subtype=landscape_normal"]);
+    borrow(&mut r, &[("skin/body", "pbr/rock")]);
+    let (p, _) = plan(r);
+    assert!(job(&p, "rock_rmaos.png")
+        .bake
+        .as_ref()
+        .is_some_and(|b| b.normal.ends_with("rock_n.png")));
+    let skin = job(&p, "body_rfaos.png");
+    assert_eq!(
+        skin.shader.as_ref().unwrap().shader,
+        engine::shader::Shader::AdvancedSkin
+    );
+    assert!(skin.bake.is_none(), "the borrowing shader decides");
+    assert!(codes(skin).contains(&Code::SetMissingCompanion));
+}
+
+/// N-7, N-15: under an explicit regular shader a plain `normal` does not bake, and the `_rmaos` says why.
+#[test]
+fn a_plain_normal_under_a_regular_shader_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/iron_n.png.subtype=normal"]);
+    r.set_shaders = [(
+        "textures/pbr/iron".to_string(),
+        engine::shader::Shader::Default,
+    )]
+    .into();
+    let (p, _) = plan(r);
+    let r = job(&p, "iron_rmaos.png");
+    assert!(r.bake.is_none());
     assert!(
         r.warnings
             .iter()
             .any(|w| w.code == Code::SetMissingCompanion
-                && w.message.contains("was given another sub-type")),
+                && w.message
+                    .contains("its type does not bake under this shader")),
         "{:?}",
         r.warnings
     );
-    assert!(!bake_flag(&ev, "textures/pbr/iron"));
 }
 
-/// B3-4 pin (Note JP1): the written `iron_n.dds` keeps the source's alpha.
+/// N-7, N-15 (Note JS2): a regular borrower of a PBR owner's plain normal does not bake, and its `_rmaos` says why in
+/// the reworded `missing_borrowed_normal`; the owner bakes from its own plain normal.
+#[test]
+fn a_regular_borrower_of_a_plain_normal_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    rough(d.path(), "textures/armor/steel_rmaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/iron_n.png.subtype=normal"]);
+    borrow(&mut r, &[("textures/armor/steel", "textures/pbr/iron")]);
+    r.set_shaders = [(
+        "textures/armor/steel".to_string(),
+        engine::shader::Shader::Default,
+    )]
+    .into();
+    let (p, _) = plan(r);
+    assert!(job(&p, "iron_rmaos.png").bake.is_some(), "the owner bakes");
+    let s = job(&p, "steel_rmaos.png");
+    assert!(s.bake.is_none());
+    let w = s.warnings.last().unwrap();
+    assert_eq!(w.code, Code::SetMissingCompanion);
+    assert!(
+        w.message.starts_with("the set's borrowed _n (")
+            && w.message.ends_with(
+                "iron_n.png) has no usable normal job: the roughness is written without the variance bake"
+            ),
+        "{}",
+        w.message
+    );
+}
+
+/// N-22 (Note JS2): a plain normal in a PBR set with no roughness member gets the SET-MISSING-COMPANION Info a
+/// `pbr_normal` already gets (an Info: no Problems row).
+#[test]
+fn a_plain_normal_with_no_roughness_in_a_pbr_set_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    let (p, _) = plan(req(d.path(), &["file:**/iron_n.png.subtype=normal"]));
+    let n = job(&p, "iron_n.png");
+    assert_eq!(
+        set_codes(n),
+        vec![Code::SetMissingCompanion],
+        "{:?}",
+        n.warnings
+    );
+}
+
+/// B3-4 pin (Note JS1): the written `iron_n.dds` keeps the source's alpha.
 #[test]
 fn an_own_plain_normal_in_a_pbr_set_is_written_with_its_alpha() {
     let d = tempfile::tempdir().unwrap();
@@ -873,4 +1060,88 @@ fn an_own_plain_normal_in_a_pbr_set_is_written_with_its_alpha() {
         px.iter().all(|t| t[3].abs_diff(40) <= 2),
         "the alpha is kept"
     );
+}
+
+/// N-10 pin (Note JS7): a `[files]` `alpha.policy = "data"` beats the Analysis layer's `remove` on an RGB `pbr_normal`
+/// (policy.rs `layered_profile_with`: the Analysis remove at l.736-750, `[files]` from l.834), and the set still bakes.
+#[test]
+fn a_files_data_beats_the_analysis_remove_on_a_pbr_normal() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.\"textures/pbr/iron_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    let (p, _) = plan(req(d.path(), &[]));
+    let n = job(&p, "iron_n.png");
+    assert_eq!(n.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(n.profile.alpha.policy, AlphaPolicy::Data);
+    assert_eq!(
+        n.provenance.get("alpha.policy"),
+        Some(&engine::presets::Provenance::ProjectFile)
+    );
+    assert!(job(&p, "iron_rmaos.png").bake.is_some());
+}
+
+/// An `_n` like `normal`, with a specular that changes per texel.
+fn normal_with_varying_alpha(dir: &Path, rel: &str) {
+    let p = dir.join("in").join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgba([
+            if x % 2 == 0 { 204u8 } else { 51 },
+            128,
+            230,
+            (x * 3 + y) as u8,
+        ])
+    })
+    .save(p)
+    .unwrap();
+}
+
+/// N-17 pin (DECISIONS P25, policy.rs:1983-2002): a `pbr_normal`'s varying alpha is dropped with no LOSS-ALPHA-DATA,
+/// planned and run.
+#[test]
+fn a_pbr_normals_varying_alpha_is_dropped_without_a_message() {
+    let d = tempfile::tempdir().unwrap();
+    normal_with_varying_alpha(d.path(), "textures/pbr/iron_n.png");
+    normal_with_varying_alpha(d.path(), "textures/pbr/control_n.png");
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let e = Engine::new().unwrap();
+    let p = e
+        .plan(
+            req(d.path(), &["file:**/control_n.png.subtype=normal"]),
+            &rep,
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let n = job(&p, "iron_n.png");
+    assert_eq!(n.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(n.profile.alpha.policy, AlphaPolicy::Remove);
+    assert!(!codes(n).contains(&Code::LossAlphaData), "{:?}", n.warnings);
+    e.run(p, &rep, &CancelToken::default()).unwrap();
+    let ev = format!("{:?}", sink.take());
+    assert!(
+        !ev.contains("LossAlphaData"),
+        "no LOSS-ALPHA-DATA in the run's events"
+    );
+    let written = |name: &str| {
+        let bytes = std::fs::read(d.path().join("out/textures/pbr").join(name)).unwrap();
+        let f = engine::dds::read_dds(&bytes).unwrap();
+        let (w, h, r) = f.levels[0].clone();
+        let engine::decode::Decoded::Ldr(px) =
+            engine::decode::decode_level(f.format, w, h, &f.data[r]).unwrap()
+        else {
+            panic!("LDR expected")
+        };
+        px
+    };
+    let control = written("control_n.dds");
+    assert!(control[0][3].abs_diff(0) <= 2 && control.last().unwrap()[3].abs_diff(252) <= 2);
+    // BC7 Remove permits 254 when exact_opaque is off.
+    assert!(written("iron_n.dds").iter().all(|p| p[3] >= 254));
 }

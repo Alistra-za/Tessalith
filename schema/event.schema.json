@@ -140,7 +140,7 @@
           ]
         },
         "normal": {
-          "description": "The set's `pbr_normal` source.",
+          "description": "The set's tangent-space `_n` source (Note JS2: `pbr_normal`, else under a PBR-set shader `normal` or `landscape_normal`).",
           "type": "string"
         },
         "normal_profile": {
@@ -386,6 +386,7 @@
         "SET-COMPANION-DDS",
         "SET-BAKE-RATIO",
         "SET-EDIT-STALE",
+        "SET-SLOT-BORROWED-UNUSED",
         "SUG-LOW-CONFIDENCE",
         "SUG-CONTRADICTION",
         "VAL-ALPHA-GUARANTEE",
@@ -421,7 +422,6 @@
         "SHADER-UNAVAILABLE",
         "SHADER-EXTRA-MAP",
         "SHADER-MISSING-MAP",
-        "SHADER-NORMAL-SPECULAR",
         "GRASS-SHAPE",
         "GRASS-TOP-OPAQUE",
         "GRASS-NORMALS",
@@ -1262,7 +1262,7 @@
         "normal_base": {
           "$ref": "#/$defs/NormalBase",
           "default": "renormalize",
-          "description": "Mip 0 of a normal map (spec §5.4, DECISIONS R1): `renormalize` (default) stores every base vector at unit\nlength; `keep` stores the source as authored. Read only for the Normal category."
+          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors.\nAdvanced Skin detail normals and tangent-space normal outputs in formats that drop Z always start from unit length.\nFor other normal maps, `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,\nup to what XYZ can hold. Other normal maps renormalize lower mips."
         }
       },
       "required": [
@@ -2209,7 +2209,7 @@
           "description": "M6 (DECISIONS Note S): the set's shader and why it was chosen."
         },
         "warnings": {
-          "description": "SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP / SHADER-NORMAL-SPECULAR for the set.",
+          "description": "SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP for the set.",
           "items": {
             "$ref": "#/$defs/Warning"
           },

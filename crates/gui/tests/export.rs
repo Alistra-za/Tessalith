@@ -304,14 +304,15 @@ fn rows_stay_keyed_after_a_packed_source_drop() {
     assert_eq!(x.rows.len(), 2, "no duplicate row from a stale index");
 }
 
-/// Audit 08c-4: the export notes (JSON not written, kept files, copies) are in the Markdown report.
+/// Audit 08c-4, ruling 3c-10: the export notes (JSON not written, kept files, copies) are in the Markdown report,
+/// under the Files tab's heading.
 #[test]
 fn the_markdown_report_lists_the_export_notes() {
     let mut x = ExportModel::default();
     x.notes = vec!["PGPatcher JSON not written: the export failed".into()];
     let md = x.to_markdown();
     assert!(
-        md.contains("## Notes\n\n- PGPatcher JSON not written: the export failed\n"),
+        md.contains("## Export details\n\n- PGPatcher JSON not written: the export failed\n"),
         "{md}"
     );
 }
@@ -484,7 +485,7 @@ fn a_failed_plain_export_leaves_no_row_queued() {
     assert!(open.is_empty(), "still open: {open:?}");
 }
 
-// ---- Notes JA11, JA12: Export to ▾'s Re-encode every output item and the kept counts ----
+// ---- Notes JA11, JA12: Tools ▾'s Re-encode every output item and the kept counts ----
 
 fn ui_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
     let mut h = egui_kittest::Harness::builder()
@@ -526,15 +527,32 @@ fn a_kept_note_is_not_carried_into_the_next_export() {
         })
         .collect();
     std::fs::write(&manifest, text).unwrap();
+    m.open_review();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let writes = m.review_writes();
+    assert_eq!(writes.kept.len(), 1);
+    assert!(writes.kept[0].is_file());
+    assert_eq!(writes.current.len() + writes.kept.len(), m.export_files());
+    assert!(m.written_text().ends_with(" · Kept (1)"));
+    m.close_review();
     let s = export_and_wait(&mut m);
     assert_eq!(s.kept_older_encode, 1, "{s:?}");
+    assert_eq!(m.export.result.as_ref().unwrap().primary.kept, 1);
+    assert_eq!(
+        m.export
+            .rows
+            .iter()
+            .filter(|r| r.state.label() == "kept")
+            .count(),
+        1
+    );
     assert!(m
         .export
         .notes
         .iter()
         .any(|n| n.starts_with("1 kept from an older encode version")));
     // The next export encodes it again, keeps nothing, and starts with no notes.
-    m.reencode_all = true;
+    m.set_reencode_all(true);
     let s = export_and_wait(&mut m);
     assert_eq!(s.kept_older_encode, 0, "{s:?}");
     assert!(
@@ -582,7 +600,10 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
     assert!(leaf.exists(), "{}", leaf.display());
     std::fs::write(&leaf, b"not written by Tessalith").unwrap();
 
-    // Tick the item as a user does: open Export to ▾, then click it by its label.
+    // Tick the item as a user does: open Tools ▾, then click it by its label.
+    m.open_review();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(!m.written_text().contains("checking which changed"));
     let mut h = ui_harness(m);
     let item = |h: &egui_kittest::Harness<'static, AppModel>| {
         h.get_by_role_and_label(
@@ -592,7 +613,7 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
         .accesskit_node()
         .toggled()
     };
-    h.get_by_label_contains("Export to: ").click();
+    h.get_by_label("Tools").click();
     h.run();
     h.get_by_role_and_label(
         eframe::egui::accesskit::Role::CheckBox,
@@ -601,8 +622,11 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
     .click();
     h.run();
     assert!(h.state().reencode_all);
-    // The menu (CloseOnClickOutside) stays open after the tick, and the item reads ticked: the tick is a click inside
-    // the menu, which CloseOnClickOutside never closed, on egui 0.36.2 or 0.37.
+    assert!(
+        h.state().written_text().contains("checking which changed"),
+        "the tick requests a new currency preview"
+    );
+    // The menu stays open and shows the new value.
     assert_eq!(
         item(&h),
         Some(eframe::egui::accesskit::Toggled::True),
@@ -642,9 +666,10 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
 #[test]
 fn the_export_summary_shows_kept_counts() {
     use egui_kittest::kittest::Queryable;
-    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode them again";
+    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Tools) to encode them again";
     // A zero count is not named.
-    const LOWER_ONLY: &str = "1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode it again";
+    const LOWER_ONLY: &str =
+        "1 kept at a higher quality target: tick Re-encode every output (Tools) to encode it again";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     // Nothing kept: no line.
@@ -687,7 +712,7 @@ fn the_export_summary_shows_kept_counts() {
     };
     assert!(sdc_gui::model::export::kept_note(&both)
         .unwrap()
-        .ends_with("(Export to ▾) to encode again"));
+        .ends_with("(Tools) to encode again"));
     // GUI words: the line never names the CLI flag.
     assert!(!m.export.notes.iter().any(|n| n.contains("--ev")));
     // The Files tab shows it.

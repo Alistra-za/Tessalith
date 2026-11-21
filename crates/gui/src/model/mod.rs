@@ -2,6 +2,7 @@
 pub mod also;
 pub mod auto_flags;
 mod auto_record;
+mod borrowed_unused;
 pub mod bottom;
 pub mod bulk;
 pub mod checks;
@@ -29,6 +30,7 @@ pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
 pub mod pbr_export;
@@ -45,6 +47,7 @@ pub mod set_groups;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
+mod shared_alpha;
 pub mod shell;
 pub mod skin;
 pub mod target_mod;
@@ -75,6 +78,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Ruling 3c-13: why "Export without review" changes nothing while a folder's open can be cancelled; the status note
+/// of `set_export_without_review` and the hover of the two controls that draw it.
+pub const EXPORT_WITHOUT_REVIEW_WAIT: &str =
+    "Export without review can be set once the folder has finished opening.";
+
 /// Note FC11 (supersedes P21's note): a hash recorded while `sdc-project.toml` is read-only.
 pub const SIDECAR_ONLY: &str =
     "hash recorded in _sdc/generated.json only: sdc-project.toml is read-only";
@@ -92,7 +100,7 @@ const UNDO_NOTE_FOR: Duration = Duration::from_secs(5);
 
 /// Whether a warning makes a Problems row (a problem or a note): Warning, Error or Blocking severity. Info lines
 /// stay in the texture's own warnings list only, except the few that `build_problems` names (CHK-GREEN-GUESS,
-/// DERIVE-NIF-SUGGEST, SHADER-NORMAL-SPECULAR).
+/// DERIVE-NIF-SUGGEST).
 pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
     use engine::codes::Severity;
     matches!(
@@ -152,6 +160,171 @@ pub enum Selection {
     None,
     Item(String),
     Set(String),
+    SetId(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetTarget {
+    Key(String),
+    Id(String),
+}
+
+impl From<&str> for SetTarget {
+    fn from(k: &str) -> Self {
+        Self::Key(k.to_owned())
+    }
+}
+impl From<&String> for SetTarget {
+    fn from(k: &String) -> Self {
+        Self::from(k.as_str())
+    }
+}
+
+impl SetTarget {
+    pub fn of(key: &str, id: &str) -> Self {
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        if key.is_empty() {
+            Self::Id(id.into())
+        } else {
+            Self::Key(key.into())
+        }
+    }
+
+    pub fn view(v: &sets::SetView) -> Self {
+        Self::of(&v.key, &v.id)
+    }
+
+    pub fn selection(self) -> Selection {
+        match self {
+            Self::Key(k) => Selection::Set(k),
+            Self::Id(id) => Selection::SetId(id),
+        }
+    }
+
+    pub fn matches(&self, v: &sets::SetView) -> bool {
+        match self {
+            Self::Key(k) => !k.is_empty() && v.key == *k,
+            Self::Id(id) => engine::sets::same_id(&v.id, id),
+        }
+    }
+}
+
+impl Selection {
+    // Owned snapshot for a resolution miss or an action that outlives the frame.
+    pub fn set_target(&self) -> Option<SetTarget> {
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        match self {
+            Self::Set(k) => Some(SetTarget::Key(k.clone())),
+            Self::SetId(id) => Some(SetTarget::Id(id.clone())),
+            Self::None | Self::Item(_) => None,
+        }
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static IDENTITY_WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_identity_work() {
+    IDENTITY_WORK.with(|c| c.set(c.get() + 1));
+}
+
+#[cfg(feature = "test-hooks")]
+pub fn identity_work() -> u64 {
+    IDENTITY_WORK.with(std::cell::Cell::get)
+}
+
+pub struct ResolvedSelection {
+    pub selection: Selection,
+    pub target: Option<SetTarget>,
+    pub views: Arc<Vec<sets::SetView>>,
+    pub index: Option<usize>,
+}
+
+impl ResolvedSelection {
+    pub fn view(&self) -> Option<&sets::SetView> {
+        self.index.map(|i| &self.views[i])
+    }
+}
+
+impl AppModel {
+    fn build_resolution(
+        &self,
+        views: Arc<Vec<sets::SetView>>,
+        index: Option<usize>,
+    ) -> Arc<ResolvedSelection> {
+        #[cfg(feature = "test-hooks")]
+        self.selection_builds.set(self.selection_builds.get() + 1);
+        let v = index.map(|i| &views[i]);
+        let target = match &self.selection {
+            Selection::Item(_) => v.map(SetTarget::view),
+            selected => selected.set_target(),
+        };
+        Arc::new(ResolvedSelection {
+            selection: self.selection.clone(),
+            target,
+            views,
+            index,
+        })
+    }
+
+    pub fn resolved_selection(&self) -> Arc<ResolvedSelection> {
+        let views = sets::views(self);
+        if let Some(hit) = self
+            .view_cache()
+            .borrow()
+            .active
+            .as_ref()
+            .filter(|hit| Arc::ptr_eq(&hit.views, &views) && hit.selection == self.selection)
+        {
+            return Arc::clone(hit);
+        }
+        #[cfg(feature = "test-hooks")]
+        count_identity_work();
+        let index = match &self.selection {
+            Selection::Set(k) => views.iter().position(|v| !k.is_empty() && v.key == *k),
+            Selection::SetId(id) => views.iter().position(|v| engine::sets::same_id(&v.id, id)),
+            Selection::Item(k) => views.iter().position(|v| v.members.iter().any(|m| m == k)),
+            Selection::None => None,
+        };
+        let hit = self.build_resolution(views, index);
+        self.view_cache().borrow_mut().active = Some(hit.clone());
+        hit
+    }
+}
+
+impl AppModel {
+    fn view_cache(&self) -> &std::cell::RefCell<ViewCache> {
+        if self.whole_view.get() {
+            &self.whole_views
+        } else {
+            &self.views
+        }
+    }
+
+    pub(super) fn warm_views(&self) -> Option<Arc<Vec<sets::SetView>>> {
+        let cache = self.view_cache().borrow();
+        let k = cache.key.as_ref()?;
+        let (project, sets_read_only, fallback) = cache.root_inputs.as_ref()?;
+        let current = *project == self.project.as_ref().map(|p| (p.rev(), p.read_only()))
+            && *sets_read_only == self.sets_doc.as_ref().map(|d| d.read_only())
+            && fallback.as_deref() == self.settings.export_folder.as_deref()
+            && k.items == self.items_rev
+            && k.inputs == self.inputs_rev
+            && k.doc == self.sets_doc.as_ref().map_or(0, |d| d.rev())
+            && k.root.as_deref() == self.root.as_deref()
+            && k.target == self.target
+            && k.scan_db.as_deref() == self.scan_db.as_deref()
+            && k.scan == self.scan_stamp
+            && k.known_rev == self.known_rev
+            && k.target_mod_rev == self.target_mod_rev
+            && k.scope == self.view_scope_rev();
+        current.then(|| cache.views.clone()).flatten()
+    }
 }
 
 pub use auto_record::FUZZ_SWITCH_HOVER;
@@ -196,7 +369,7 @@ pub enum Dialog {
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
     Rename(rename::RenameDialog),
-    /// Export to ▾: Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
+    /// Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
     MakeMarker,
     Error(String),
 }
@@ -205,7 +378,8 @@ pub enum Dialog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Continue {
     /// R3: Review's Export: the guards and the Review gate again, then the export (undecided textures skipped).
-    Review,
+    /// Ruling 3c-35: `scope_rev` is the scope the user confirmed it for; a different one when it runs drops it.
+    Review { scope_rev: u64 },
 }
 
 /// What was asked while an export ran: it happens when the export has ended.
@@ -259,6 +433,20 @@ impl EngineInputs {
     }
 }
 
+/// `AppModel::export_rel` under `prefix` (`plan_prefix`), read once by a caller that loops over items, so the
+/// folders are not read per item (ruling 3b-F21).
+pub(crate) fn export_rel_in(prefix: &Path, rel: &Path) -> PathBuf {
+    // `/`-separated, as the explicit paths it joins.
+    PathBuf::from(prefix.join(rel).to_string_lossy().replace('\\', "/"))
+}
+
+/// `AppModel::export_key` under `prefix` (`export_rel_in`).
+pub(crate) fn export_key_in(prefix: &Path, rel: &str) -> String {
+    export_rel_in(prefix, Path::new(rel))
+        .to_string_lossy()
+        .to_lowercase()
+}
+
 fn read_only_banner(error: &str) -> String {
     // A list of removed keys (ruling FR-a) keeps one key per line; the sentence goes under it.
     let sep = if error.contains('\n') { "\n" } else { " — " };
@@ -267,8 +455,8 @@ fn read_only_banner(error: &str) -> String {
     )
 }
 
-/// `(evidence_rev, export.revision, export running, history.pushes, scan_stamp)`.
-type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
+/// `(evidence_rev, project.rev(), export.revision, export running, history.pushes, scan_stamp)`.
+type ProblemsKey = (u64, u64, u64, bool, u64, cs_pbr::Stamp);
 
 /// `ViewCache::set_reasons`: (the `problems` build, the set key, the hidden kinds, the reasons).
 pub(crate) type CachedReasons = (
@@ -278,18 +466,22 @@ pub(crate) type CachedReasons = (
     Arc<Vec<bottom::Reason>>,
 );
 
+type RootInputs = (Option<(u64, bool)>, Option<bool>, Option<PathBuf>);
+
 /// The cached set views, export blocks and delete-section hits, valid for `key` only.
 #[derive(Default)]
 pub(crate) struct ViewCache {
     pub key: Option<ViewKey>,
     pub views: Option<Arc<Vec<sets::SetView>>>,
+    active: Option<Arc<ResolvedSelection>>,
+    root_inputs: Option<RootInputs>,
     /// Note HF1: the set keys whose files are all in no set.
     pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
     /// Note HF9: the set keys of the excluded groups.
     pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
-    /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
+    /// Keyed by `ProblemsKey` inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,
     /// Review E2: `bottom::cached_tab_counts`, keyed on the `problems` build it counted (held, so its address is never
     /// reused) and the hidden kinds.
@@ -301,6 +493,8 @@ pub(crate) struct ViewCache {
     /// Final fix wave R2: `bottom::cached_set_reasons`, keyed on the `problems` build it read (held), the set key and
     /// the hidden kinds.
     pub set_reasons: Option<CachedReasons>,
+    /// Final wave Group 7: `bottom::cached_scope_label`, keyed on the views it read (held) and the filter's stored key.
+    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, bottom::NameKind, String)>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -311,6 +505,8 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
     /// `cs_skin_json::skin_json_plan`'s plan.
     pub cs_skin: Option<Arc<cs_skin_json::Plan>>,
+    written_entries: Option<(u64, Arc<BTreeMap<String, pbr_export::WrittenEntry>>)>,
+    borrowed_unused: Option<(u64, Arc<sets::WarningsBySet>)>,
 }
 
 /// The replies `poll` drops as stale, counted for tests (backlog L54).
@@ -319,6 +515,7 @@ pub enum StaleKind {
     Plan,
     Source,
     Encode,
+    Currency,
 }
 
 /// Get-or-build one slot of the view cache under the current view key (backlog L9). `get` reads the slot from a cache
@@ -332,7 +529,7 @@ pub(crate) fn cached<T: Clone>(
 ) -> T {
     let key = m.view_key();
     {
-        let c = m.views.borrow();
+        let c = m.view_cache().borrow();
         if c.key.as_ref() == Some(&key) {
             if let Some(v) = get(&c) {
                 return v;
@@ -340,7 +537,7 @@ pub(crate) fn cached<T: Clone>(
         }
     }
     let v = build();
-    let mut c = m.views.borrow_mut();
+    let mut c = m.view_cache().borrow_mut();
     if c.key.as_ref() != Some(&key) {
         *c = ViewCache {
             key: Some(key),
@@ -371,11 +568,80 @@ pub(crate) struct ViewKey {
     scope: u64,
 }
 
+/// Ruling 3b-F24: everything the From another set rows' settled check (`AppModel::settled_wait`) reads, so a cached
+/// answer is reused only while none of it changed. `ViewKey` alone misses the mesh evidence and `sdc.toml`.
+#[derive(Clone, PartialEq)]
+pub(crate) struct PickKey {
+    /// The views and what they read: the items (a landed plan), `inputs_rev` (the stored last inputs), the
+    /// sets-document revision, the root, the output folder, the target, the scan and the export scope.
+    view: ViewKey,
+    /// The plan generation, bumped by every `replan`.
+    generation: u64,
+    /// `sdc.toml`'s revision (`ProjectDoc::rev`; a new project has another): `[files]` pins and aliases, `[export]`.
+    project: Option<u64>,
+    /// `evidence_rev`: the Tree_Anim and known-path scan evidence.
+    evidence: u64,
+    /// `mesh_rev`: the mesh votes, mesh alpha and grass diffuses the plan request carries.
+    mesh: u64,
+    /// `plan_failed`.
+    plan_failed: bool,
+}
+
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
+/// Ruling 3c-38: what an Export button saw when it fired (`AppModel::export_press`). A click the UI defers a frame
+/// (`ui::after_commit`) carries it into the model call, which drops the click when the scope moved meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportPress {
+    /// `AppModel::scope_rev` at the press.
+    scope_rev: u64,
+}
+
+/// E3: the whole project's keyed header terms and the keys they were read under.
+type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
+
+/// E3 (rulings 3c-26, 3c-30): what a waiting whole-project click was made against. When its plan lands, any of these
+/// that moved sends it to Review instead of writing: a safe answer for a change no clear site knows about. An input
+/// that moves none of these starts a plan the click waits for, or is read fresh by the gate.
+#[derive(Debug, Clone, PartialEq)]
+struct ArmedWrite {
+    /// Every change of scope bumps it (`set_scope`), Export set then Close included.
+    scope_rev: u64,
+    /// Where the write would go: `output_root()` and the chosen export folder.
+    destination: (PathBuf, Option<PathBuf>),
+    /// Rulings 3c-33 and 3c-40: where `output_root()` resolves on disk. The same path through a retargeted junction is
+    /// another destination. Read once at the click, once at landing.
+    resolved: Option<PathBuf>,
+    /// The target mod's revision: its path is what the overlap blocker reads.
+    target_mod_rev: u64,
+    /// Re-encode all (`reencode_all`, the header's tick): it changes what the write does with existing outputs and
+    /// moves nothing else.
+    reencode_all: bool,
+    /// The click already waited through its own source replan (`write_gate`): it never plans again.
+    replanned: bool,
+}
+
+impl ArmedWrite {
+    /// Two failed resolutions cannot confirm the destination, even when all recorded fields agree.
+    fn matches_click(&self, other: &Self) -> bool {
+        self.resolved.is_some() && self == other
+    }
+}
+
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AutomaticStep {
+    FuzzSwitch,
+    Recovery,
+}
+
+enum FilesSave {
+    Live,
+    Stashed,
+}
 
 pub struct AppModel {
     /// The file pickers (Task 6); one dialog at a time, shared with the sub-models.
@@ -445,6 +711,9 @@ pub struct AppModel {
     pub mesh_tree_anim: std::collections::BTreeMap<String, bool>,
     /// Bumped whenever `mesh_tree_anim` or `known` is replaced (DECISIONS AG109); part of `json_key`.
     pub evidence_rev: u64,
+    /// Ruling 3b-F24: bumped when a scan-database read replaces `mesh_votes`, `mesh_alpha`, `gras_diffuses` or
+    /// `gras_all_diffuses` with other values (`put_mesh_evidence`); part of `PickKey`.
+    mesh_rev: u64,
     /// Complex grass design §5: the GRAS diffuses of the scan (`engine::grass::path_key` keys), read with the mesh
     /// evidence; sent as `BatchRequest::gras_diffuses`.
     pub gras_diffuses: std::collections::BTreeSet<String>,
@@ -481,9 +750,10 @@ pub struct AppModel {
     /// Note JI1: the Settings tab is open (a centre tab, or its own window when popped out, as Presets).
     pub settings_tab_open: bool,
     pub settings_tab_popped: bool,
-    /// Note FB7: a view was opened docked this frame; the Meshes view, which has no centre column, switches to
-    /// Textures to show it.
+    /// Reveal the front centre tab in the main window, including a Selection requested by a popped tool.
     pub reveal_centre: bool,
+    /// A docked tool currently covers the Meshes list.
+    pub centre_over_meshes: bool,
     /// Note AM: the presets folder as last scanned, and the creator's draft; made on first use (`presets_model`).
     pub presets: Option<presets::PresetsModel>,
     /// What the plan accepts (M6 Track E spec §2, DECISIONS Note U3): High suggestions, as the app runs. The M3-era test
@@ -491,17 +761,26 @@ pub struct AppModel {
     pub accept: AcceptSuggestions,
     pub session: Option<Arc<Session>>,
     pub root: Option<PathBuf>,
+    /// Neither document existed at open, and the project has yet to complete a Save.
+    pub never_saved: bool,
     pub project: Option<ProjectDoc>,
     pub sets_doc: Option<crate::sets_doc::SetsDoc>,
     pub history: history::History,
     pub target: Target,
     pub items: Vec<TextureItem>,
+    input_count: usize,
     pub sets: Vec<SetItem>,
+    pub producers: BTreeMap<String, Vec<items::Producer>>,
     /// The export folder `sets` were planned with (audit 08c-3): set ids strip it, also while a re-plan for a new
     /// export folder runs. `None` before the first plan.
     sets_root: Option<PathBuf>,
-    /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
+    /// Game paths selected by PBR prefixes and TXST mappings. Only a successful full plan installs its paths.
+    slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
+    pending_slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
+    /// Advances on item changes and on checks-only updates to Problems rows.
     items_rev: u64,
+    /// The last `items_rev` from an item or set invalidation.
+    item_content_rev: u64,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
     game_paths: (u64, Vec<String>),
     /// Note FI1: skipped DDS inputs' tile images by path, with the stamp they were decoded at; cleared on open and
@@ -521,9 +800,35 @@ pub struct AppModel {
     /// `TextureItem::key` to its index in `items` (audit 7).
     item_index: std::collections::HashMap<String, usize>,
     /// The cached set views and export blocks (DECISIONS Note Y7).
-    pub(crate) views: std::cell::RefCell<ViewCache>,
+    views: std::cell::RefCell<ViewCache>,
+    whole_views: std::cell::RefCell<ViewCache>,
+    /// Ruling 3b-F24: the From another set rows' settled check (`settled_wait`) and the key it was computed under.
+    pick_cache: std::cell::RefCell<Option<(PickKey, Option<&'static str>)>>,
     /// K3: `review_json` for a view key, and when it was read; cleared with `review`.
-    review_json_cache: std::cell::RefCell<Option<(ViewKey, Instant, Vec<review::JsonLine>)>>,
+    review_json_cache: std::cell::RefCell<Option<review::JsonCache>>,
+    /// E7: `review_writes` for its key, and when it was built; the footer draws from the `Arc`.
+    review_writes_cache: std::cell::RefCell<Option<review::WritesCache>>,
+    currency: review::Currency,
+    /// E7 (test hook): the list Review showed when it opened (`open_review` takes it; `start_export_pass` takes
+    /// `review`, so it cannot live there).
+    #[cfg(feature = "test-hooks")]
+    review_writes_open: std::cell::RefCell<Option<Arc<review::ReviewWrites>>>,
+    /// E7 (test hook): how many times `review_writes` built its list.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_builds: std::cell::Cell<u64>,
+    /// E7 (test hook, ruling 3c-49): how many file-system queries `review_writes` made (a cache hit makes none).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_fs: std::cell::Cell<u64>,
+    /// E7 (test hook, ruling 3c-58): how many times `review_writes` read a borrowed copy's source.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_src_reads: std::cell::Cell<u64>,
+    /// E7 (test hook): set while `review_writes` runs, so `output_root()` (which `view_key()` calls) counts itself in
+    /// `review_writes_fs` wherever it is called from.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_probe: std::cell::Cell<bool>,
+    /// E7 (ruling 3c-49): moves whenever `set_nif_review_rows` hands over rows that differ (a path, a block, a foreign
+    /// file or an answer), so `review_writes`' key compares a number, not the rows.
+    nif_rows_rev: u64,
     /// The rename dialog's last plan, for drawing only (Note FA).
     rename_cache: std::cell::RefCell<Option<rename::PlanCache>>,
     pub unmatched_keys: Vec<String>,
@@ -531,6 +836,9 @@ pub struct AppModel {
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
     batch: bool,
+    /// Note JS7 (N-33, N-37, N8-h): the fuzz switch and crash restore skip the shared-alpha follow-on
+    /// and unlisting. History distinguishes the automatic subtype switch from a recovery of other fields.
+    automatic_step: Option<AutomaticStep>,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
     pub multi: bulk::MultiSelection,
@@ -570,17 +878,35 @@ pub struct AppModel {
     #[cfg(feature = "test-hooks")]
     pub(crate) reason_scans: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
+    pub selection_builds: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub doc_block_reads: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub bulk_membership_scans: std::cell::Cell<u64>,
+    /// Final wave Group 7: the set lookups `bottom::scope_label` ran (see `bottom::scope_label_lookups`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) scope_label_lookups: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
+    /// E3 (ruling 3c-28): evaluations of the write-now rule (`writes_rule`); see `review::rule_reads`.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) rule_reads: std::cell::Cell<u64>,
+    /// E3 (ruling 3c-36): refreshes of the header's whole-project drawing cache; see `review::whole_disk_reads`.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) whole_disk_reads: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
     #[cfg(feature = "test-hooks")]
-    pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
+    pub(crate) stale_drops: std::cell::Cell<[u32; 4]>,
     /// Task 5: set cards laid out (`sets_column::pill` calls); see `sets_filter::set_cards_drawn`.
     #[cfg(feature = "test-hooks")]
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
     /// Item 22: per-item DDS sizes by plan revision.
     pub sizes: out_size::SizeCache,
-    /// A note kept in front of the status line until the next Export click (an Export cancelled by an edit, AF4).
+    /// A note in front of the counts: the step after open, or an Export cancelled by an edit (AF4).
     pub status_note: Option<String>,
+    next_step_pending: bool,
+    /// The sentence to retire on a replan or a change to Export without review.
+    shown_next_step: Option<String>,
     /// "Undid: <label>" / "Redid: <label>" in front of the status line until the next edit (item 2).
     undo_note: Option<String>,
     /// When the note was set, and whether a plan has shown it: it goes with the next plan after that, or after 5 s.
@@ -608,7 +934,7 @@ pub struct AppModel {
     pub last_recipe: rename::Recipe,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
-    /// Note JA11: **Re-encode every output** in the Export to ▾ menu. Off at start and never saved: the next export
+    /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
     /// encodes every output that has a record again (`OnExisting::Reencode`), and clears it as it starts (JA12).
     pub reencode_all: bool,
     pub preview: preview::PreviewModel,
@@ -643,8 +969,7 @@ pub struct AppModel {
     /// Note FC1 (AM14): `Choose preset…` was clicked on this pass (`ctx.cumulative_pass_nr`); the header opens its
     /// Preset menu if it draws within two passes, and drops a stale request.
     pub choose_preset: Option<u64>,
-    /// Note FC1: the last automatic recording: its row text, its lines (the row's hover) and the `history.pushes`
-    /// it left.
+    /// The most recent automatic recording, shown under Notes.
     pub(crate) auto_note: Option<auto_record::AutoNote>,
     /// Fuzz-8: the settled plan after an open clears a `skin_albedo` recorded only because of a fuzz map. On by
     /// default; tests of `fuzz_recorded_skin` alone turn it off.
@@ -654,11 +979,30 @@ pub struct AppModel {
     /// Fuzz-8: the switch was tried in this open (it runs once per open).
     fuzz_switch_checked: bool,
     /// Fuzz-8: the switch's Problems row, with Undo while its step is on top.
-    pub(crate) fuzz_note: Option<auto_record::AutoNote>,
+    pub(crate) fuzz_note: Option<auto_record::FuzzNote>,
     /// Note FC1 (AM14): `preset` names no installed preset; computed once per plan request.
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
     export_after_plan: bool,
+    /// E3: a WHOLE-PROJECT click (the header's Export, the "export" action) waits for the plan in flight, with what it
+    /// was made against (ruling 3c-26); no scoped click ever sets it (3c-25). `settle_queued` runs it through
+    /// `write_gate` when the plan settles, which compares it before anything else.
+    armed: Option<ArmedWrite>,
+    /// E3: `writes_without_review()` as the last settled plan answered it, held while a plan is pending.
+    settled_writes_now: bool,
+    /// E3: `export_files()` as the last settled plan counted it; the held write-now label shows it.
+    settled_export_files: usize,
+    /// E3: depth of the worker-result handlers that can start the next plan of a chain (a landed plan's tail
+    /// re-plans): inside one the pending state is continuous, so the held pair is not taken again.
+    landing: u8,
+    /// E3 (ruling 3c-14): set while the whole-project header answer is computed, so `export_scope()` reads `None` and
+    /// view lookups use the separate whole-project cache.
+    whole_view: std::cell::Cell<bool>,
+    /// E3: the whole project's keyed header terms while a scope is set (`review::WholeTerms`).
+    whole_cache: std::cell::RefCell<Option<WholeAnswer>>,
+    /// E3 (ruling 3c-28): the whole project's filesystem-derived header terms while a scope is set, re-read once per
+    /// `REVIEW_JSON_TTL` (`review::WholeDisk`). Drawing only.
+    whole_disk: std::cell::RefCell<Option<review::WholeDisk>>,
     /// Review's Export was clicked while a plan or scan read was in flight: the export continues when it lands.
     continue_after_plan: Option<Continue>,
     /// The user chose to cancel the running export and then close or open: done when the export has ended.
@@ -717,6 +1061,8 @@ pub struct AppModel {
     close_ready: bool,
     /// The engine inputs the latest plan was requested with (DECISIONS P1: two-pass planning).
     last_inputs: Option<EngineInputs>,
+    /// Membership edits applied to the sets on screen. A newer request can still be in flight.
+    landed_membership: Vec<engine::sets::SetEdit>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
     /// A cleanup waiting for the plan that shows its new defaults (the note is written then).
@@ -736,6 +1082,9 @@ pub struct AppModel {
     votes_read: Option<VoteInputs>,
     generation: u64,
     planning: Option<CancelToken>,
+    /// Ruling 3b-F21: the last full plan failed for good (no retry runs), so the items are still the plan before it;
+    /// set by `plan_failed`, cleared when the next plan starts. A From another set pick waits (`pick_waits`).
+    plan_failed: bool,
     /// Fast re-plan (R2 §5): bumped by every `replan`; its partial and its full plan carry this value.
     pub edit_seq: u64,
     /// The `edit_seq` of the newest partial or full plan that landed: an older partial is dropped.
@@ -757,6 +1106,15 @@ pub struct AppModel {
     /// them in the order it wants.
     #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    #[cfg(feature = "test-hooks")]
+    pub before_export_worker: Option<fn(&AppModel)>,
+    /// Tests: runs once, right after the write gate's source walk and before its eligibility read (`set_after_walk`).
+    #[cfg(feature = "test-hooks")]
+    after_walk: Option<Box<dyn FnOnce()>>,
+    /// Tests (Note JS7, N8-i): the shared-alpha follow-on's file writes fail, as a `[files]` entry that is not a table
+    /// would make them.
+    #[cfg(feature = "test-hooks")]
+    pub fail_shared_alpha_write: bool,
     #[cfg(feature = "test-hooks")]
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
@@ -823,6 +1181,7 @@ impl AppModel {
             mesh_alpha: Default::default(),
             mesh_tree_anim: Default::default(),
             evidence_rev: 0,
+            mesh_rev: 0,
             gras_diffuses: Default::default(),
             gras_all_diffuses: Default::default(),
             known: Default::default(),
@@ -841,16 +1200,20 @@ impl AppModel {
             settings_tab_open: false,
             settings_tab_popped: false,
             reveal_centre: false,
+            centre_over_meshes: false,
             presets: None,
             accept: AcceptSuggestions::High,
             session: None,
             root: None,
+            never_saved: false,
             project: None,
             sets_doc: None,
             history: history::History::default(),
             target: Target::Cs,
             items: vec![],
+            input_count: 0,
             items_rev: 0,
+            item_content_rev: 0,
             game_paths: (0, vec![]),
             dds_thumbs: Default::default(),
             dds_thumbs_asked: Default::default(),
@@ -861,13 +1224,32 @@ impl AppModel {
             inputs_rev: 0,
             item_index: Default::default(),
             views: Default::default(),
+            whole_views: Default::default(),
+            pick_cache: Default::default(),
             review_json_cache: Default::default(),
+            review_writes_cache: Default::default(),
+            currency: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_open: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_fs: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_src_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_probe: Default::default(),
+            nif_rows_rev: 0,
             rename_cache: Default::default(),
             sets: vec![],
+            producers: BTreeMap::new(),
             sets_root: None,
+            slot_paths: BTreeMap::new(),
+            pending_slot_paths: BTreeMap::new(),
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
+            automatic_step: None,
             selection: Selection::None,
             multi: Default::default(),
             bulk: Default::default(),
@@ -895,13 +1277,27 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             reason_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
+            selection_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            doc_block_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            bulk_membership_scans: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            scope_label_lookups: Default::default(),
+            #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            rule_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            whole_disk_reads: Default::default(),
             #[cfg(feature = "test-hooks")]
             stale_drops: Default::default(),
             #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
             status_note: None,
+            next_step_pending: false,
+            shown_next_step: None,
             undo_note: None,
             undo_note_at: None,
             dropped_fills: Default::default(),
@@ -923,6 +1319,13 @@ impl AppModel {
             gpu_max_dim: 16384,
             gpu_available: true,
             export_after_plan: false,
+            armed: None,
+            settled_writes_now: false,
+            settled_export_files: 0,
+            landing: 0,
+            whole_view: std::cell::Cell::new(false),
+            whole_cache: std::cell::RefCell::new(None),
+            whole_disk: std::cell::RefCell::new(None),
             continue_after_plan: None,
             after_export: None,
             pending_json: None,
@@ -968,6 +1371,7 @@ impl AppModel {
             fuzz_note: None,
             missing_preset_id: None,
             last_inputs: None,
+            landed_membership: Vec::new(),
             auto_replans: 0,
             type_pending: None,
             type_base: None,
@@ -979,6 +1383,7 @@ impl AppModel {
             votes_read: None,
             generation: 0,
             planning: None,
+            plan_failed: false,
             edit_seq: 0,
             applied_seq: 0,
             dirty_keys: Default::default(),
@@ -990,6 +1395,12 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
             #[cfg(feature = "test-hooks")]
+            before_export_worker: None,
+            #[cfg(feature = "test-hooks")]
+            after_walk: None,
+            #[cfg(feature = "test-hooks")]
+            fail_shared_alpha_write: false,
+            #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
             opening: None,
@@ -1000,6 +1411,7 @@ impl AppModel {
     }
 
     pub fn open_folder(&mut self, root: PathBuf) {
+        self.next_step_pending = true;
         self.open_cancelled = false;
         // Whatever was pending for the previous folder no longer applies (spec §8).
         self.after_export = None;
@@ -1022,8 +1434,12 @@ impl AppModel {
         self.close_review();
         // An export waiting for a plan of the previous folder no longer applies.
         self.export_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         self.last_inputs = None;
+        self.landed_membership.clear();
+        self.slot_paths.clear();
+        self.pending_slot_paths.clear();
         self.inputs_rev += 1;
         self.auto_replans = 0;
         self.reset_type_follow();
@@ -1051,7 +1467,20 @@ impl AppModel {
         self.dropped_fills.clear();
         self.scan_db_error = None;
         let same_folder = self.root.as_ref() == Some(&root);
+        // A Problems filter on a set names a set of this folder: another folder's sets are other sets (final wave
+        // Group 3). A cancelled open goes back to the previous folder without it.
+        if !same_folder {
+            use bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
+            if matches!(
+                self.bottom.filter,
+                Some(Set(_) | SetNotes(_) | SetChecks(_))
+            ) {
+                self.bottom.filter = None;
+            }
+        }
         self.ignored_by_plan = false;
+        self.never_saved =
+            !root.join("sdc.toml").exists() && !root.join("sdc-project.toml").exists();
         let project = ProjectDoc::open(&root);
         self.project = Some(project);
         self.sets_doc = Some(crate::sets_doc::SetsDoc::open(&root));
@@ -1072,9 +1501,11 @@ impl AppModel {
             self.opening = Some((previous, recent, kept.0, kept.1));
         }
         self.items.clear();
+        self.input_count = 0;
         self.check_state.plans_applied += 1;
         self.invalidate_views();
         self.sets.clear();
+        self.producers.clear();
         self.sets_root = None;
         self.also_written = None;
         self.unmatched_keys.clear();
@@ -1091,6 +1522,8 @@ impl AppModel {
         self.refresh_banner(); // a read-only document's held recovery file
         self.refresh_target_mod();
         self.replan();
+        // E3: a new folder has no settled answer; the label reads Review until its plan settles.
+        (self.settled_writes_now, self.settled_export_files) = (false, 0);
     }
 
     pub fn save_settings(&mut self) {
@@ -1139,13 +1572,7 @@ impl AppModel {
     /// Note HQ1: `rel`, a path under the output root the sets were planned with, as a path under the export folder
     /// (a game path once it starts at `textures`).
     pub fn export_rel(&self, rel: &Path) -> PathBuf {
-        // `/`-separated, as the explicit paths it joins.
-        PathBuf::from(
-            self.plan_prefix()
-                .join(rel)
-                .to_string_lossy()
-                .replace('\\', "/"),
-        )
+        export_rel_in(&self.plan_prefix(), rel)
     }
 
     /// The folders between the export folder and the plan's output root (Note HQ1); empty while the export folder
@@ -1159,9 +1586,7 @@ impl AppModel {
 
     /// A plan path (a `job_key`) as an explicit-path key: under the export folder, `/`, lower case (Note HQ6).
     pub fn export_key(&self, rel: &str) -> String {
-        self.export_rel(Path::new(rel))
-            .to_string_lossy()
-            .to_lowercase()
+        export_key_in(&self.plan_prefix(), rel)
     }
 
     /// The export folder the user chose for this project (Note FB1): with a usable project document (loaded, not
@@ -1169,21 +1594,73 @@ impl AppModel {
     /// inherited. Without one (no folder open, or an `sdc-project.toml` that does not parse) the pick lives in
     /// `gui.toml` (Note BV6), so that is the choice.
     pub fn export_folder_chosen(&self) -> Option<PathBuf> {
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
         match self.sets_doc.as_ref().filter(|d| !d.read_only()) {
-            Some(d) => d.export_folder(),
-            None => self.settings.export_folder.clone(),
+            Some(d) => d.export_folder_ref(),
+            None => self.settings.export_folder.as_deref(),
+        }
+    }
+
+    /// This project's "Export without review" choice (`[project] export_without_review`); off without a usable project.
+    pub fn export_without_review(&self) -> bool {
+        self.sets_doc
+            .as_ref()
+            .filter(|d| !d.read_only())
+            .is_some_and(|d| d.export_without_review())
+    }
+
+    /// Saved in `sdc-project.toml` at once, or with the next Save when it holds unsaved edits (those are the user's to
+    /// save, Note BD2), as `set_export_folder` does. Not an undo step: it is a preference.
+    /// While the folder's open can still be cancelled it changes nothing: Cancel goes back to the previous folder
+    /// without a question (AG92, FC12), so a tick taken now could vanish unasked (ruling 3c-13).
+    pub fn set_export_without_review(&mut self, on: bool) {
+        if self.can_cancel_open() {
+            self.status_line = EXPORT_WITHOUT_REVIEW_WAIT.into();
+            return;
+        }
+        let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
+            return;
+        };
+        if d.export_without_review() == on {
+            return;
+        }
+        let was_dirty = d.is_dirty();
+        d.set_export_without_review(on);
+        if was_dirty {
+            self.status_line = "Export without review is set; it is saved with your other changes at the next Save."
+                .into();
+        } else if let Err(e) = d.save(false) {
+            self.save_failed(DocKind::Project, &e);
+        }
+        if self
+            .take_shown_next_step()
+            .is_some_and(|step| self.status_line.contains(&step))
+        {
+            self.counts_status();
         }
     }
 
     /// Where an export would write: the chosen folder, else `<root>/sdc-out` (only a place to name; Review blocks the
     /// export until a folder is chosen, Note FB1).
     pub fn export_root(&self) -> PathBuf {
+        #[cfg(feature = "test-hooks")]
+        sets::count_root_read(false);
         self.export_folder_chosen()
             .unwrap_or_else(|| self.root.clone().unwrap_or_default().join("sdc-out"))
     }
 
     /// What the next plan uses: the folder, recursive, High suggestions accepted (Note U3), the in-memory `sdc.toml` (DECISIONS N4).
     pub fn request(&self) -> Option<BatchRequest> {
+        self.request_with_paths(None)
+    }
+
+    fn request_with_paths(
+        &self,
+        game: Option<&mut BTreeMap<engine::sets::OutputKey, PathBuf>>,
+    ) -> Option<BatchRequest> {
         let root = self.root.clone()?;
         let project = self.project.as_ref()?;
         let mut req = BatchRequest::new(vec![root], self.output_root(), Target::Cs);
@@ -1207,7 +1684,7 @@ impl AppModel {
         });
         req.user_config = self.user_config.clone();
         req.user_presets = self.user_presets.clone();
-        let (edits, paths) = sets::engine_inputs(self);
+        let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
         req.shared_roughness = sets::shared_roughness(self);
@@ -1242,6 +1719,7 @@ impl AppModel {
             after_plan && self.votes_pending.is_none() && self.votes_read.as_ref() == Some(&inputs);
         self.votes_inputs = Some(inputs);
         let after_plan = after_plan || self.votes_pending.is_some_and(|(_, a)| a);
+        self.hold_on_pending();
         self.votes_gen += 1;
         let generation = self.votes_gen;
         self.votes_pending = Some((generation, after_plan));
@@ -1347,14 +1825,8 @@ impl AppModel {
         let changed = match result {
             Ok(e) => {
                 self.scan_db_error = None;
-                let changed = e.votes != self.mesh_votes
-                    || e.alpha != self.mesh_alpha
-                    || e.gras != self.gras_diffuses
-                    || e.gras_all != self.gras_all_diffuses;
-                (self.mesh_votes, self.mesh_alpha, self.gras_diffuses) = (e.votes, e.alpha, e.gras);
-                self.gras_all_diffuses = e.gras_all;
                 self.set_tree_anim(e.tree_anim);
-                changed
+                self.put_mesh_evidence(e.votes, e.alpha, e.gras, e.gras_all)
             }
             Err(e) => {
                 self.scan_db_warning(format!(
@@ -1373,20 +1845,40 @@ impl AppModel {
             self.replan();
         } else {
             // DECISIONS AF4: an Export (the header's or Review's) clicked during this scan-finished read starts now,
-            // never on a later plan. Both are taken together, as in `finish_plan`; the export the user clicked wins.
-            let (clicked, continued) = (
-                std::mem::take(&mut self.export_after_plan),
-                self.continue_after_plan.take(),
-            );
+            // never on a later plan. E3: this branch re-planned nothing and handed nothing over, so the read it ends
+            // is the settle.
+            self.deliver_queued(true);
+        }
+    }
+
+    /// What waited for a landing (`export_after_plan`, Review's `Continue`, the armed write) is delivered here, from
+    /// the plan that really settles (`finish_plan`) or the scan-finished read that changed nothing (`votes_landed`;
+    /// `read`). All three are taken together, so a leftover one cannot fire on a later, unrelated plan. Ruling 3c-37
+    /// (audit 08f-1): an open dialog drops them all with one warning. Otherwise the export the user clicked wins, then
+    /// Review's, and the armed write goes through `write_gate` (`settle_queued`) once nothing is pending.
+    fn deliver_queued(&mut self, read: bool) {
+        if !self.full_plan_pending() && !self.plan_failed {
+            self.expand_scope_hosts();
+        }
+        let (clicked, continued) = (
+            std::mem::take(&mut self.export_after_plan),
+            self.continue_after_plan.take(),
+        );
+        let queued = clicked || continued.is_some() || self.armed.is_some();
+        if queued && self.dialog_drops_click() {
+            self.disarm_write();
+        } else {
             match continued {
-                _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
-                    self.queued_export_dropped()
-                }
+                // Note HF10: through `export_go`; the scope stays.
                 _ if clicked => self.export_go(),
                 // A plan may still be in flight, or sources changed: the same front half as Review's Export.
-                Some(_) => self.continue_review(),
+                Some(how) if read => self.continue_review(how),
+                Some(how) => self.run_continue(how),
                 None => {}
             }
+        }
+        if !self.full_plan_pending() {
+            self.settle_queued();
         }
     }
 
@@ -1398,18 +1890,26 @@ impl AppModel {
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
     /// partial plan first (`send_partial`).
     fn replan_with(&mut self, files_edit: bool) {
+        self.take_shown_next_step();
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
-        let (Some(session), Some(req), Some(root)) =
-            (self.session.clone(), self.request(), self.root.clone())
-        else {
+        let mut slot_paths = BTreeMap::new();
+        let (Some(session), Some(req), Some(root)) = (
+            self.session.clone(),
+            self.request_with_paths(Some(&mut slot_paths)),
+            self.root.clone(),
+        ) else {
             return;
         };
+        self.hold_on_pending();
         if let Some(c) = self.planning.take() {
             c.cancel();
         }
+        self.plan_failed = false;
+        self.pending_slot_paths = slot_paths;
         self.generation += 1;
+        self.invalidate_currency();
         self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
         let (last, blame) = self.replan_pushes;
@@ -1530,6 +2030,21 @@ impl AppModel {
         std::mem::take(&mut self.held)
     }
 
+    /// Tests: run `f` once, between the write gate's source walk and its eligibility read (a slow walk during which
+    /// the world changes, made certain).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_after_walk(&mut self, f: impl FnOnce() + 'static) {
+        self.after_walk = Some(Box::new(f));
+    }
+
+    /// The write gate's test seam: see `set_after_walk`.
+    fn walked(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        if let Some(f) = self.after_walk.take() {
+            f();
+        }
+    }
+
     /// Tests: handle one parked message now, without opening the channel (a message arriving meanwhile stays parked).
     #[cfg(feature = "test-hooks")]
     pub fn handle_held(&mut self, msg: WorkerMsg) {
@@ -1568,8 +2083,6 @@ impl AppModel {
                 // so the re-read files are where the history left them. Note FC14: unless the re-open restored crash
                 // edits as a step; then its history is the one that matches the documents (and the toast's Undo).
                 if self.history.undo.is_empty() {
-                    // Note FP3 (T36): the re-read documents lost the automatic types the old history marked written.
-                    history.auto_written.clear();
                     history.pushes = history.pushes.max(self.history.pushes);
                     self.history = history;
                 }
@@ -1582,12 +2095,18 @@ impl AppModel {
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
+                self.disarm_write();
                 self.continue_after_plan = None;
                 self.close_review();
                 self.refresh_banner();
                 self.status_line.clear();
                 self.open_cancelled = true;
             }
+        }
+        self.next_step_pending = false;
+        // E3: the previous project's plan state is back; its answer is the settled one.
+        if !self.full_plan_pending() {
+            self.hold_settled();
         }
     }
 
@@ -1616,7 +2135,10 @@ impl AppModel {
     }
 
     pub fn busy(&self) -> bool {
-        self.full_plan_pending() || self.non_plan_busy()
+        self.full_plan_pending()
+            || self.non_plan_busy()
+            || !self.currency.workers.is_empty()
+            || self.currency.pending.is_some()
     }
 
     /// The work `busy()` and `edit_busy()` share besides the plan: an export, the preview.
@@ -1675,12 +2197,17 @@ impl AppModel {
         let mut thumbs_landed = false;
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
+            if let WorkerMsg::Currency { request, .. } = &msg {
+                self.currency.workers.remove(request);
+            }
             match msg {
                 WorkerMsg::DdsThumb { path, stamp, thumb } => {
                     thumbs_landed |= self.dds_thumb_landed(path, stamp, thumb)
                 }
                 #[cfg(feature = "test-hooks")]
-                msg @ (WorkerMsg::Partial { .. } | WorkerMsg::Planned { .. })
+                msg @ (WorkerMsg::Partial { .. }
+                | WorkerMsg::Planned { .. }
+                | WorkerMsg::Currency { .. })
                     if self.hold_plan_results =>
                 {
                     self.held.push(msg)
@@ -1694,6 +2221,7 @@ impl AppModel {
         }
         // Note HF10: a queued scoped export that was dropped or cancelled above takes its scope with it.
         self.end_idle_scope();
+        self.request_currency();
         // Last, so a plan that landed above is checked in this poll (K1).
         changed |= self.refresh_checks();
         changed
@@ -1734,6 +2262,31 @@ impl AppModel {
 
     fn handle(&mut self, msg: WorkerMsg) {
         match msg {
+            WorkerMsg::Currency {
+                generation,
+                request,
+                result,
+            } => {
+                if generation == self.generation
+                    && request == self.currency.revision
+                    && self.review.is_some()
+                    && self.currency.pending.take().is_some()
+                {
+                    if let (false, Ok(verdicts)) = (self.currency.reconciled, &result) {
+                        let reviewed: BTreeSet<_> =
+                            self.primary_items().map(|i| &i.job_key).collect();
+                        if !reviewed.into_iter().eq(verdicts.keys()) {
+                            self.replan();
+                            self.currency.reconciled = true;
+                            return;
+                        }
+                    }
+                    self.currency.verdicts = result.ok();
+                    self.currency.revision += 1;
+                } else {
+                    self.note_stale_drop(StaleKind::Currency);
+                }
+            }
             WorkerMsg::PlanProgress {
                 generation,
                 done,
@@ -1753,19 +2306,28 @@ impl AppModel {
                 // The full plan always wins: no partial of its edit or an older one applies after it.
                 self.applied_seq = self.plan_sig.0;
                 self.partial_pending = false;
+                self.landing += 1;
                 match result {
                     Ok(view) => {
                         // Note FC14: the edit planned fine; a later failure is not its fault.
                         self.replan_pushes.1 = None;
                         self.landed_sig = Some(self.plan_sig.1);
+                        if let Some(inputs) = &self.last_inputs {
+                            self.landed_membership.clone_from(&inputs.set_edits);
+                        }
                         self.apply_plan(view)
                     }
                     Err(f) => self.plan_failed(f),
                 }
+                self.landing -= 1;
             }
             WorkerMsg::Planned { .. } => self.note_stale_drop(StaleKind::Plan),
             WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
-            WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
+            WorkerMsg::MeshVotes { generation, result } => {
+                self.landing += 1;
+                self.votes_landed(generation, result);
+                self.landing -= 1;
+            }
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
             WorkerMsg::OriginalTextures {
                 generation,
@@ -1804,7 +2366,9 @@ impl AppModel {
     /// out-of-range value), ignore `sdc.toml` as for a parse error (spec §7.4): read-only, banner, and plan the
     /// folder again without it. Any other failure (or a config error with `sdc.toml` already ignored) is a dialog.
     fn plan_failed(&mut self, f: PlanFailure) {
+        self.next_step_pending = false;
         self.export_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         // An error naming the user config is not the project's fault; ignoring `sdc.toml` would not help.
         let from_user_config = self
@@ -1848,6 +2412,7 @@ impl AppModel {
                 }
             }
         }
+        self.plan_failed = true;
         self.status_line = format!("Planning failed: {}", f.message);
         self.raise_error(f.message);
     }
@@ -1903,6 +2468,11 @@ impl AppModel {
             self.export.drop_unstarted();
         }
         self.export.end_unfinished(cancelled, why.as_deref());
+        let primary = self.export.primary_outcomes(cancelled);
+        self.export
+            .result
+            .get_or_insert_with(Default::default)
+            .primary = primary;
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
         }
@@ -1918,12 +2488,18 @@ impl AppModel {
                 } else {
                     messages::Severity::Info
                 };
-                self.messages.notify(sev, export_finished_text(&summary));
+                if let Some(result) = &self.export.result {
+                    self.messages.notify(sev, export_finished_text(result));
+                }
                 self.export.notes.extend(export::kept_note(&summary));
                 completed = summary.cancelled.is_empty();
                 self.export.summary = Some(summary);
             }
             Err(e) => {
+                if let Some(result) = &self.export.result {
+                    self.messages
+                        .log(messages::Severity::Error, export::result_line(result));
+                }
                 self.messages
                     .log(messages::Severity::Error, format!("Export failed: {e}"));
                 self.export.error = Some(e.clone());
@@ -2027,26 +2603,254 @@ impl AppModel {
 
     /// An export waits for a plan to land (Export clicked while planning, or a Continue after a re-plan).
     pub fn export_queued(&self) -> bool {
-        self.export_after_plan || self.continue_after_plan.is_some()
+        self.export_after_plan || self.armed.is_some() || self.continue_after_plan.is_some()
     }
 
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
     /// are flagged and the plan is made again first, so the export starts from fresh plans (M3a spec §7).
     pub fn export_clicked(&mut self) {
+        // Ruling 3c-37: before the scope is cleared.
+        if self.dialog_drops_click() {
+            return;
+        }
         // Note HF9: a plain Export is the whole project, whatever Review was opened for.
         self.set_scope(None);
         self.export_go();
     }
 
+    /// E3: the header's Export (and the palette's): the whole project, then `export_decided`. A click run at once.
+    pub fn header_export_clicked(&mut self) {
+        self.header_export_pressed(self.export_press());
+    }
+
+    /// `header_export_clicked` for the press `press` (ruling 3c-38: the header's button can wait a frame).
+    pub fn header_export_pressed(&mut self, press: ExportPress) {
+        // Rulings 3c-32, 3c-37, 3c-38: before the scope of an open scoped Review is cleared.
+        if self.press_refused(press) {
+            return;
+        }
+        self.set_scope(None);
+        self.export_decided();
+    }
+
+    /// Ruling 3c-38: what an Export button saw when it fired, read by the UI at the press.
+    pub fn export_press(&self) -> ExportPress {
+        ExportPress {
+            scope_rev: self.scope_rev,
+        }
+    }
+
+    /// Rulings 3c-37 and 3c-38, the entry check of a press: an open dialog drops it (`dialog_drops_click`), and so does
+    /// a scope that moved since the button fired (a click the UI deferred a frame, Note FC8, while a plan landed and
+    /// re-keyed it): a confirmation is for what was on screen at the press. True when it dropped the click.
+    fn press_refused(&mut self, press: ExportPress) -> bool {
+        if self.dialog_drops_click() {
+            return true;
+        }
+        if press.scope_rev != self.scope_rev {
+            self.scope_moved_dropped();
+            return true;
+        }
+        false
+    }
+
+    /// A failed replan leaves the previous jobs on screen. Both Export buttons need a successful plan.
+    fn refuse_failed_export_plan(&mut self) -> bool {
+        if self.root.is_some() && self.plan_failed {
+            self.dialog = Some(Dialog::Error(
+                "The last plan failed. Reopen the folder to plan it again before exporting.".into(),
+            ));
+            return true;
+        }
+        false
+    }
+
+    /// Rulings 3c-35 and 3c-38: an Export confirmed for one scope meets another; nothing starts.
+    fn scope_moved_dropped(&mut self) {
+        let note = "Export not started: what Review exports changed while the plan was running. \
+                    Check Review and press Export again.";
+        self.status_line = note.into();
+        self.messages.notify(messages::Severity::Warning, note);
+    }
+
+    /// E3 (rulings 3c-27, 3c-32, 3c-37): an Export click that meets an open dialog (a click deferred a frame for a
+    /// focused field, Note FC8, runs before `actions::keys`' modal guard) is dropped with the warning, before anything
+    /// is armed, queued or opened and before any scope changes. True when it dropped the click. The first step of
+    /// every function that can arm, queue or start a texture export: `header_export_clicked`, `export_sets`,
+    /// `export_from_review`, `export_clicked` and `export_go`, `export_decided`, `write_gate`, and `deliver_queued`
+    /// for what waited for a landing.
+    pub(super) fn dialog_drops_click(&mut self) -> bool {
+        if self.dialog.is_none() {
+            return false;
+        }
+        self.queued_export_dropped();
+        true
+    }
+
+    /// E3, the one rule: nothing is written that the user was not shown. While a plan is in flight a whole-project
+    /// click that the label showed as "now" (`settled_writes_now`) waits for the plan; every other click opens Review
+    /// at once (a scoped click always, and its Export queues as usual). With no plan in flight the click goes through
+    /// `write_gate`. Runs under the scope as it is (Export set / group keeps theirs).
+    pub(super) fn export_decided(&mut self) {
+        // Ruling 3c-32: the first step of every dispatch, pending or settled.
+        if self.dialog_drops_click() {
+            return;
+        }
+        self.status_note = None;
+        if self.root.is_none() || self.refuse_failed_export_plan() {
+            return;
+        }
+        // Ruling 3c-25: what the click is is decided here, never inferred from the scope when a plan lands. Only a
+        // whole-project click may wait for a write; a scoped one opens its scoped Review instead.
+        let whole = self.export_scope().is_none();
+        if self.full_plan_pending() {
+            if whole && self.settled_writes_now {
+                self.arm();
+            } else {
+                self.open_review();
+            }
+            return;
+        }
+        self.expand_scope_hosts();
+        self.write_gate(false);
+    }
+
+    /// E3, rulings 3c-23, 3c-26, 3c-27 and 3c-29: the one gate to a write that skips Review, for the click that
+    /// settled at once (`export_decided`) and for the click that waited (`settle_queued`, `waited`). Nothing earlier is
+    /// passed in, and the armed click is taken on entry, so every exit leaves nothing armed. The order is fixed:
+    /// - an open dialog drops the click, waiting or not;
+    /// - a waiting click compares what it was made against (`ArmedWrite`), and finds no scope set and no Review open,
+    ///   or opens Review;
+    /// - the source walk: a changed source plans again with a whole-project click armed (with what it was made
+    ///   against at the click, ruling 3c-39), or opens the scoped Review.
+    ///   A click that already waited through its own replan never writes on a second change and the gate requests no
+    ///   further plan for it: it opens Review. A plan `check_sources` itself starts because `sdc.toml` changed on disk
+    ///   is the reload's own plan, not the gate's;
+    /// - ONE fresh eligibility read (and, for a waiting click, the label's count), then the write or Review.
+    fn write_gate(&mut self, waited: bool) {
+        let armed = self.armed.take();
+        // Ruling 3c-27: first for every click, the waiting one included.
+        if self.dialog_drops_click() {
+            return;
+        }
+        if waited {
+            let made_for = armed.as_ref().is_some_and(|a| {
+                let now = self.armed_now(a.replanned);
+                a.matches_click(&now)
+            });
+            if !made_for || self.export_scope().is_some() || self.review.is_some() {
+                self.open_review();
+                return;
+            }
+        }
+        if !self.export_without_review() {
+            self.open_review();
+            return;
+        }
+        // Ruling 3c-39: what the click was made against is read once, at the click: the armed value of a click that
+        // waited, or, for one settled at once, now, before the walk. A re-arm keeps it and sets only `replanned`, so
+        // the destination confirmed at the click is the only one a later landing can match.
+        let made_for = match armed {
+            Some(a) if waited => a,
+            _ => self.armed_now(false),
+        };
+        let replanned = made_for.replanned;
+        let changed = self.check_sources() > 0 && self.session.is_some();
+        self.walked();
+        if changed {
+            if replanned || self.export_scope().is_some() {
+                self.open_review();
+            } else {
+                self.armed = Some(ArmedWrite {
+                    replanned: true,
+                    ..made_for
+                });
+                self.replan();
+            }
+            return;
+        }
+        // Ruling 3c-18: the JSON state is read fresh, here and nowhere before.
+        if self.writes_without_review_fresh()
+            && (!waited || self.export_files() == self.settled_export_files)
+        {
+            self.write_now();
+        } else {
+            self.open_review();
+        }
+    }
+
+    /// E3 (ruling 3c-26): what a click made now is made against.
+    fn armed_now(&self, replanned: bool) -> ArmedWrite {
+        let output = self.output_root();
+        ArmedWrite {
+            scope_rev: self.scope_rev,
+            resolved: target_mod::resolve_destination(&output),
+            destination: (output, self.export_folder_chosen()),
+            target_mod_rev: self.target_mod_rev,
+            reencode_all: self.reencode_all,
+            replanned,
+        }
+    }
+
+    /// E3: a whole-project click waits for the plan in flight (`settle_queued` takes it to `write_gate`).
+    fn arm(&mut self) {
+        self.armed = Some(self.armed_now(false));
+    }
+
+    /// A waiting whole-project write is cancelled where the user is told (a project change, a failed plan, a closed
+    /// folder, AF4). Safety does not rest on these sites: `write_gate` compares the armed click when it lands.
+    fn disarm_write(&mut self) {
+        self.armed = None;
+    }
+
+    /// E3: the guards that stop any export (an error dialog, blocks listed in Review), then the write.
+    fn write_now(&mut self) {
+        if self.export_stopped() {
+            return;
+        }
+        self.start_export_pass();
+    }
+
+    /// E3: the answer of the last settled plan, kept while a plan is pending so the header label never flips
+    /// under the user's eyes. Written together: the label's count belongs to the answer.
+    fn hold_settled(&mut self) {
+        // The count is read only when the label can use it (a write-now answer): the default, opted-in-never project
+        // pays nothing per plan.
+        // Whole-project, whatever scope an open Review has (ruling 3c-14: the header's answer is never a scope's).
+        (self.settled_writes_now, self.settled_export_files) = self.whole_writes_now();
+    }
+
+    /// E3: `hold_settled` at a settled-to-pending transition, never inside a landing worker result (a landed
+    /// plan's tail starts the next plan of the same chain: the pending state never ended).
+    fn hold_on_pending(&mut self) {
+        if !self.full_plan_pending() && self.landing == 0 {
+            self.hold_settled();
+        }
+    }
+
+    /// E3: a waiting whole-project click settles with the plan that really settles, through the one gate
+    /// (`write_gate`); then the settled answer is held again, unless the gate started the next plan.
+    fn settle_queued(&mut self) {
+        if self.armed.is_some() {
+            self.write_gate(true);
+        }
+        if !self.full_plan_pending() {
+            self.hold_settled();
+        }
+    }
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
     fn export_go(&mut self) {
+        // Ruling 3c-37.
+        if self.dialog_drops_click() {
+            return;
+        }
         self.status_note = None;
-        if self.root.is_none() {
+        if self.root.is_none() || self.refuse_failed_export_plan() {
             return;
         }
         // A plan is in flight (just opened, or an edit): the items on screen are the previous plan's, so the checks
         // wait for the plan that lands (spec §2.6: the button is never silently disabled).
-        if self.planning.is_some() || self.votes_pending.is_some() {
+        if self.full_plan_pending() {
             self.export_after_plan = true;
             return;
         }
@@ -2055,6 +2859,7 @@ impl AppModel {
             self.replan();
             return;
         }
+        self.expand_scope_hosts();
         self.export_checks();
     }
 
@@ -2110,13 +2915,70 @@ impl AppModel {
         self.start_export_pass();
     }
 
-    /// True (with an error dialog) when the plan on screen is not the one for these sets.
-    fn plan_unsettled(&mut self) -> bool {
-        if !self
-            .last_inputs
+    /// The plan on screen is not the one for these sets: the inputs the latest plan was requested with differ from
+    /// the ones the model would send now. Export refuses then (`plan_unsettled`) and a member pick waits
+    /// (`pick_waits`).
+    fn inputs_unsettled(&self) -> bool {
+        self.last_inputs
             .as_ref()
             .is_some_and(|l| *l != EngineInputs::of(self))
-        {
+    }
+
+    /// Ruling 3b-F21: why a From another set pick may not store a member's path now, or `None`. It waits on what Export
+    /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
+    /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
+    /// plan failed for good (`plan_failed`), as Export does: the items are then the plan before it. A running
+    /// plan or read reads "Planning…" (`PICK_PLANNING`); the other two say the plan must run again (`PICK_PLAN_AGAIN`,
+    /// ruling 3b-F25). Uncached: the click re-checks with it (`member_game_path`); the menu rows read
+    /// `pick_waits_cached`.
+    pub fn pick_waits(&self) -> Option<&'static str> {
+        if self.full_plan_pending() {
+            return Some(sets::PICK_PLANNING);
+        }
+        self.settled_wait()
+    }
+
+    /// `pick_waits` once no plan or scan read is out: a failed plan, or the inputs comparison (it builds
+    /// `EngineInputs`). Ruling 3b-F25: both say the plan must run again, as no plan is running to wait for.
+    fn settled_wait(&self) -> Option<&'static str> {
+        #[cfg(feature = "test-hooks")]
+        sets::count_settled_check();
+        (self.plan_failed || self.inputs_unsettled()).then_some(sets::PICK_PLAN_AGAIN)
+    }
+
+    /// Ruling 3b-F24: `pick_waits` for the From another set rows, drawn every frame a slot menu is open. A running plan
+    /// or scan read is checked live; the rest (`settled_wait`) is computed once per `PickKey`, so a frame where nothing
+    /// changed builds no `EngineInputs`, scans no set and clones no evidence.
+    pub fn pick_waits_cached(&self) -> Option<&'static str> {
+        if self.full_plan_pending() {
+            return Some(sets::PICK_PLANNING);
+        }
+        let key = self.pick_key();
+        if let Some((k, wait)) = &*self.pick_cache.borrow() {
+            if *k == key {
+                return *wait;
+            }
+        }
+        let wait = self.settled_wait();
+        *self.pick_cache.borrow_mut() = Some((key, wait));
+        wait
+    }
+
+    /// Ruling 3b-F24: the key of `pick_waits_cached` (`PickKey` lists what each field covers).
+    fn pick_key(&self) -> PickKey {
+        PickKey {
+            view: self.view_key(),
+            generation: self.generation,
+            project: self.project.as_ref().map(ProjectDoc::rev),
+            evidence: self.evidence_rev,
+            mesh: self.mesh_rev,
+            plan_failed: self.plan_failed,
+        }
+    }
+
+    /// True (with an error dialog) when the plan on screen is not the one for these sets.
+    fn plan_unsettled(&mut self) -> bool {
+        if !self.inputs_unsettled() {
             return false;
         }
         let mut msg = String::from(
@@ -2203,12 +3065,13 @@ impl AppModel {
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
     fn replan_changed(&mut self, files_edit: bool) {
-        let cancel = self.export_after_plan
+        let cancel = (self.export_after_plan || self.armed.is_some())
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
         self.replan_with(files_edit);
         if cancel {
             self.export_after_plan = false;
+            self.disarm_write();
             self.status_note = Some(
                 "Export cancelled: the project changed while scan results were loading — click Export again."
                     .into(),
@@ -2228,45 +3091,66 @@ impl AppModel {
             return true;
         }
         let before = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        let previous_type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit);
         let dirty = (
             self.project.as_ref().is_some_and(ProjectDoc::is_dirty),
             self.sets_doc
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty),
         );
+        // JS7: the outer user batch owns the follow-on. Its starting facts and listed values share one index (N8-o).
+        let (start, held) = self
+            .project
+            .as_ref()
+            .zip(self.sets_doc.as_ref())
+            .filter(|_| self.automatic_step.is_none())
+            .map(|(p, s)| {
+                let listed = !s.auto_data().is_empty();
+                if self.target != engine::config::Target::Cs && !listed {
+                    return (None, None);
+                }
+                let pre = shared_alpha::Tables::of(p);
+                (
+                    shared_alpha::before(self, &pre),
+                    listed.then(|| shared_alpha::listed_without_data(&pre, s)),
+                )
+            })
+            .unwrap_or_default();
         self.batch = true;
         f(self);
         self.batch = false;
-        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
-        if after == before {
-            // Trace #28: writes that changed nothing leave the documents as clean as they were.
-            if let Some(p) = self.project.as_mut() {
-                p.set_dirty(dirty.0);
-            }
-            if let Some(s) = self.sets_doc.as_mut() {
-                s.set_dirty(dirty.1);
-            }
-            return false;
+        let mut post = None;
+        if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_mut(), self.sets_doc.as_mut())
+        {
+            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), s);
         }
-        self.drop_undo_note();
-        let files_edit = before.project == after.project;
-        self.history.push(history::Command {
-            label: label.into(),
-            before,
-            after,
-            merge: None,
-            created_file: None,
-        });
-        self.auto_replans = 0;
+        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        // N8-d: equal text leaves any leftover data for the next user edit, even if a setter moved a revision.
+        if let (Some(b), Some(p)) = (
+            start.as_ref().filter(|_| after != before),
+            self.project.as_ref(),
+        ) {
+            let post = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &post);
+        }
+        let Some(files_edit) = self.record_step(label, None, before, dirty, previous_type_alpha)
+        else {
+            return false;
+        };
         self.replan_after_edit(files_edit);
         true
     }
 
     fn run_continue(&mut self, how: Continue) {
         match how {
-            Continue::Review => {
+            Continue::Review { scope_rev } => {
                 // K4: Review closed (another folder, Reload) drops its queued export.
                 if self.review.is_none() {
+                    return;
+                }
+                // Ruling 3c-35: confirmed for one scope; the header's Review (or Export set) changed it meanwhile.
+                if scope_rev != self.scope_rev {
+                    self.scope_moved_dropped();
                     return;
                 }
                 // Note GH8: no project means no texture run (`start_export_pass` needs one): the NIF export is due now,
@@ -2325,9 +3209,11 @@ impl AppModel {
         // A hand edit of a clean `sdc.toml` is simply taken (nothing to lose): the next plan reads it. With unsaved
         // edits the save dialog still asks (audit 2026-10-14 finding 3). Automatic types alone are recorded again
         // (Note FI4).
-        let hand_edited = self.project.as_ref().is_some_and(|p| {
-            (!p.is_dirty() || self.only_automatic_unsaved()) && p.changed_on_disk()
-        });
+        let hand_edited = !self.unsaved()
+            && self
+                .project
+                .as_ref()
+                .is_some_and(ProjectDoc::changed_on_disk);
         if hand_edited {
             if let Some(p) = self.project.as_mut() {
                 p.reload();
@@ -2385,21 +3271,9 @@ impl AppModel {
         self.replan();
     }
 
-    /// Save first (the CLI command and the next session read `sdc.toml`), then run the export on a worker.
-    fn start_export_pass(&mut self) {
-        if self.export.running.is_some() {
-            return;
-        }
-        if self.save().is_err() {
-            return;
-        }
-        let (Some(session), Some(mut req)) = (self.session.clone(), self.request()) else {
-            return;
-        };
-        self.nif_export_queued = false;
-        // Note JA11: the item re-encodes what has a record and keeps a file without one; `ev` stays `Off`. JA12: it
-        // is one-shot, cleared as the pass starts, so a tick hidden in the closed menu never carries over.
-        req.on_existing = if std::mem::take(&mut self.reencode_all) {
+    fn export_request(&self) -> Option<BatchRequest> {
+        let mut req = self.request()?;
+        req.on_existing = if self.reencode_all {
             engine::api::OnExisting::Reencode
         } else {
             engine::api::OnExisting::IfChanged
@@ -2410,6 +3284,20 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        Some(req)
+    }
+
+    /// Save first, then consume Re-encode once the pass has its request.
+    fn start_export_pass(&mut self) {
+        if self.export.running.is_some() || self.save().is_err() {
+            return;
+        }
+        self.expand_scope_hosts();
+        let (Some(session), Some(req)) = (self.session.clone(), self.export_request()) else {
+            return;
+        };
+        self.reencode_all = false;
+        self.nif_export_queued = false;
         let also = self.also_runs();
         self.also_error = None;
         self.also_phases.clear();
@@ -2426,6 +3314,7 @@ impl AppModel {
         self.pending_cs_skin = cs_skin_json::prepare(self);
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
+        self.invalidate_currency();
         self.review_json_cache.take();
         // Note HF9: the textures a partial or excluding run leaves out get no Files row.
         let outside_run = match req.write_only {
@@ -2438,6 +3327,10 @@ impl AppModel {
             None => Default::default(),
         };
         self.export = export::ExportModel {
+            primary_keys: self
+                .primary_items()
+                .map(|i| (i.job_key.clone(), None))
+                .collect(),
             pace: Some(export::Pace::new(Instant::now())),
             outside_run,
             ..Default::default()
@@ -2446,10 +3339,12 @@ impl AppModel {
         self.drawer_epoch += 1;
         let cancel = CancelToken::default();
         self.export.running = Some(cancel.clone());
+        #[cfg(feature = "test-hooks")]
+        if let Some(before) = self.before_export_worker.take() {
+            before(self);
+        }
         if also {
-            // P8: one `drawer_epoch` for the three phases (bumped above); progress is the rows, counted model-side.
-            // shortcut: the first phase's `BatchDone` stops the pace clock, so files/s and the ETA cover the PBR
-            // phase only; upgrade to an ETA across phases if users ask.
+            // One Files tab for the three phases, with progress measured against the PBR folder.
             let spec = self.also_spec();
             crate::worker::spawn_export_also(self.tx.clone(), session, req, spec, cancel);
         } else {
@@ -2571,7 +3466,7 @@ impl AppModel {
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = d.defer_record_save();
         let side = d.set_copy_shas(&shas);
         if d.read_only() {
             self.export.notes.push(sidecar_only_note(&side));
@@ -2600,7 +3495,7 @@ impl AppModel {
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = d.defer_record_save();
         // #43: one record per name; audit 08c-1: keyed by `record_key`, and kept when its file is gone.
         let mut shas = history::records_at(&d.pgp_json_shas(), &root);
         shas.insert(key.to_string(), sha.to_string());
@@ -2735,10 +3630,15 @@ impl AppModel {
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
+        // Resolve the filter under the old plan before moving its key to the new root.
+        let filter_names_an_id = self.set_filter_names_an_id();
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
+        let paths_changed = self.slot_paths != self.pending_slot_paths;
+        self.slot_paths = std::mem::take(&mut self.pending_slot_paths);
         self.target = view.target;
+        self.input_count = view.input_count;
         let old_items = std::mem::replace(&mut self.items, view.items);
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
@@ -2746,17 +3646,9 @@ impl AppModel {
         self.invalidate_views();
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
+        self.producers = self.project_producers(view.producers);
         self.rekey_scope(old_root.as_deref());
-        // Note JI2: a set key holds the output root, so an Also tick or a new export folder dropped the selected set
-        // (the Also export tab's own tick closed its editor). Rekey it as the scope is; a key not under the old root
-        // (a created set's empty key) is left as it is.
-        if let (Some(old), Selection::Set(k)) = (old_root.as_deref(), &self.selection) {
-            let new = self.sets_root();
-            let id = engine::sets::set_id(old, k);
-            if old != new.as_path() && id != *k {
-                self.selection = Selection::Set(engine::sets::set_key(&new, &id));
-            }
-        }
+        self.rekey_selected_and_filtered_sets(old_root.as_deref(), filter_names_an_id);
         // Note HQ6: after the output root lands, since the game paths are read under it.
         self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;
@@ -2768,7 +3660,9 @@ impl AppModel {
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
         // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (FL7).
         if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
-            self.carry_views(carried, &old_key, &scope, false);
+            if !paths_changed {
+                self.carry_views(carried, &old_key, &scope, false);
+            }
         }
         // Fast re-plan: this plan ran on every edit so far.
         self.dirty_keys.clear();
@@ -2780,16 +3674,28 @@ impl AppModel {
             *shown = true;
         }
         self.counts_status();
+        // If every selected key is pruned, the active set may still have a document card.
+        let active_set =
+            (self.multi.sets && !self.multi.keys.is_empty()).then(|| self.selection.clone());
         self.prune_selection();
+        if let (Selection::None, Some(active)) = (&self.selection, active_set) {
+            self.selection = active;
+        }
         // Keep the selection when its item or set still exists; else nothing.
-        let gone = match &self.selection {
-            Selection::Item(k) => self.item(k).is_none(),
-            // Note GY5: a set that lost its card is gone too.
-            Selection::Set(k) => !sets::has_card(self, k),
-            Selection::None => false,
-        };
-        if gone {
-            self.selection = Selection::None;
+        match &self.selection {
+            Selection::Item(k) if self.item(k).is_none() => self.selection = Selection::None,
+            Selection::Set(k) if sets::has_card(self, k) => {}
+            Selection::Set(_) | Selection::SetId(_) => {
+                let views = sets::views(self);
+                if let Some(i) = bottom::landed_index(&views, &self.sets_root(), &self.selection) {
+                    self.selection = SetTarget::view(&views[i]).selection();
+                    let active = self.build_resolution(views, Some(i));
+                    self.views.borrow_mut().active = Some(active);
+                } else {
+                    self.selection = Selection::None;
+                }
+            }
+            _ => {}
         }
         if let Some(k) = self.expanded.clone() {
             if self.item(&k).is_none() {
@@ -2811,9 +3717,43 @@ impl AppModel {
         self.refresh_mesh_votes(true);
     }
 
+    /// What to do first when this folder's opening plans have settled.
+    pub fn next_step_text(&self) -> Option<String> {
+        self.root.as_ref()?;
+        let undecided = self.with_whole_view(|| self.undecided());
+        if undecided > 0 {
+            let who = code_text::counted(undecided, "texture needs", "textures need");
+            return Some(format!("{who} a type: start with Undecided."));
+        }
+        let problems = self.with_whole_view(|| {
+            self.has_problem_rows()
+                .then(|| bottom::flagged(self).ready_rows)
+        });
+        if let Some(rows) = problems {
+            let rows = code_text::counted(rows, "problem", "problems");
+            return Some(format!("{rows} to look at: open Problems."));
+        }
+        if self.export_folder_ref().is_none() {
+            return Some("Next: choose where to export (Export to ▾).".into());
+        }
+        let answer = self.header_answer();
+        let tail = if answer.now {
+            "writes them."
+        } else {
+            "shows what will be written."
+        };
+        Some(format!("Ready: {} {tail}", self.export_text(&answer)))
+    }
+
+    fn take_shown_next_step(&mut self) -> Option<String> {
+        let shown = self.shown_next_step.take()?;
+        self.status_note.take_if(|note| *note == shown);
+        Some(shown)
+    }
+
     /// The counts (the undecided count is shown amber in the Textures column header), after any notes.
     fn counts_status(&mut self) {
-        self.status_line = self.counts_line();
+        self.status_line = self.status_line_counts();
         for n in [&self.status_note, &self.undo_note].into_iter().flatten() {
             self.status_line = format!("{n} {}", self.status_line);
         }
@@ -2823,8 +3763,12 @@ impl AppModel {
     /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
     /// `last_inputs`); the full plan lands behind it and replaces everything. It keeps the sub-types before the chain
     /// (`keep_type_base`), since the partial can be the first plan after an edit.
-    fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+    fn apply_partial(&mut self, mut view: PlanView, scope: &BTreeSet<String>) {
         self.keep_type_base();
+        self.producers.retain(|set, _| !scope.contains(set));
+        view.producers.retain(|set, _| scope.contains(set));
+        let producers = self.project_producers(view.producers);
+        self.producers.extend(producers);
         let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));
         let expanded_in_scope = self
             .expanded
@@ -2865,6 +3809,17 @@ impl AppModel {
         if expanded_in_scope {
             self.preview_after_plan();
         }
+    }
+
+    fn project_producers(
+        &self,
+        mut producers: BTreeMap<String, Vec<items::Producer>>,
+    ) -> BTreeMap<String, Vec<items::Producer>> {
+        let roots = sets::output_roots(self);
+        for p in producers.values_mut().flatten() {
+            p.project(self, &roots);
+        }
+        producers
     }
 
     /// Note FI1: a DDS tile with no image takes the cached one when its stamp matches; the rest are decoded on one
@@ -2955,22 +3910,13 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
-        // Both flags are taken together so a leftover one cannot fire on a later, unrelated plan; the export the
-        // user clicked wins.
-        let (clicked, continued) = (
-            std::mem::take(&mut self.export_after_plan),
-            self.continue_after_plan.take(),
-        );
-        match continued {
-            // Audit 08f-1 holds for Review's queued Export too: never over an open question.
-            _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
-                self.queued_export_dropped()
-            }
-            // Note HF10: through `export_go`, as the scan-finished read does; the scope stays.
-            _ if clicked => self.export_go(),
-            Some(how) => self.run_continue(how),
-            None => {}
+        if std::mem::take(&mut self.next_step_pending) {
+            self.status_note = self.next_step_text();
+            self.shown_next_step.clone_from(&self.status_note);
+            self.counts_status();
         }
+        // E3: this is the plan that really settles (every re-plan above returned early).
+        self.deliver_queued(false);
     }
 
     /// Audit 08f-1: an export queued behind a plan never starts over an open question (its answer could open
@@ -3009,14 +3955,17 @@ impl AppModel {
             .map(|n| (n.text.clone(), n.lines.clone()))
     }
 
-    /// The plan generation, bumped once per `replan` (tests: one plan per bulk apply).
-    #[cfg(feature = "test-hooks")]
+    /// The plan generation, bumped once per `replan`.
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
     pub fn items_rev(&self) -> u64 {
         self.items_rev
+    }
+
+    pub(crate) fn set_content_revisions(&self) -> (u64, u64) {
+        (self.item_content_rev, self.doc_rev())
     }
 
     /// Tests: bumped whenever `last_inputs` changes, and per landed full plan (the checks' count).
@@ -3068,6 +4017,7 @@ impl AppModel {
     /// Call after writing `items` or `sets` in place (tests); a plan does it itself.
     pub fn invalidate_views(&mut self) {
         self.items_rev += 1;
+        self.item_content_rev = self.items_rev;
         self.item_index = self
             .items
             .iter()
@@ -3096,6 +4046,9 @@ impl AppModel {
         if !same || carried.key.as_ref() != Some(old_key) {
             return;
         }
+        // Release the cache's other owners before moving the unchanged cards into the new plan.
+        drop(carried.active);
+        drop(carried.scope_label);
         let views = carried.views.map(|v| {
             let mut v = Arc::unwrap_or_clone(v);
             if !scope.is_empty() {
@@ -3122,7 +4075,7 @@ impl AppModel {
     pub(crate) fn rows_changed(&mut self) {
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
-        self.invalidate_views();
+        self.items_rev += 1;
         self.carry_views(carried, &old_key, &BTreeSet::new(), true);
     }
 
@@ -3141,18 +4094,14 @@ impl AppModel {
             return None;
         }
         let mut changed = BTreeSet::new();
-        // Note HG: a record fill reads other sets' output paths (`job_key`), so in a mapped project a moved output is
-        // a change of its set (`splice_views` then builds every view).
-        let mapped = self
-            .sets_doc
-            .as_ref()
-            .is_some_and(|d| d.entries().iter().any(|e| e.txst.is_some()));
+        // Note HG: a record fill and a `slotN` link read other sets' output paths; `view_reads` holds the job key and
+        // output, so a moved output is a change of its set (final wave Group 8, ledger 37 and 52).
         // Both lists are sorted the same way (`PlanView::build`), so a pairwise compare finds any key change.
         for (a, b) in old_items.iter().zip(&self.items) {
             if a.key != b.key || a.set_key != b.set_key {
                 return None;
             }
-            if sets::view_reads(a) != sets::view_reads(b) || (mapped && a.job_key != b.job_key) {
+            if sets::view_reads(a) != sets::view_reads(b) {
                 changed.extend(b.set_key.clone());
             }
         }
@@ -3168,6 +4117,41 @@ impl AppModel {
             }
         }
         Some(changed)
+    }
+
+    /// Replace the mesh evidence the plan request carries (the votes, the mesh alpha and the two grass sets); true when
+    /// any of it changed, which bumps `mesh_rev` (ruling 3b-F24: the From another set rows' cache key).
+    fn put_mesh_evidence(
+        &mut self,
+        votes: std::collections::BTreeMap<String, Vec<engine::shader::Shader>>,
+        alpha: std::collections::BTreeMap<String, Vec<engine::shader::MeshAlpha>>,
+        gras: std::collections::BTreeSet<String>,
+        gras_all: std::collections::BTreeSet<String>,
+    ) -> bool {
+        let changed = votes != self.mesh_votes
+            || alpha != self.mesh_alpha
+            || gras != self.gras_diffuses
+            || gras_all != self.gras_all_diffuses;
+        (self.mesh_votes, self.mesh_alpha) = (votes, alpha);
+        (self.gras_diffuses, self.gras_all_diffuses) = (gras, gras_all);
+        if changed {
+            self.mesh_rev += 1;
+        }
+        changed
+    }
+
+    /// Tests: replace the mesh votes as a scan-database read does (`put_mesh_evidence`), the rest kept.
+    #[cfg(feature = "test-hooks")]
+    pub fn put_mesh_votes(
+        &mut self,
+        votes: std::collections::BTreeMap<String, Vec<engine::shader::Shader>>,
+    ) -> bool {
+        let (alpha, gras, all) = (
+            self.mesh_alpha.clone(),
+            self.gras_diffuses.clone(),
+            self.gras_all_diffuses.clone(),
+        );
+        self.put_mesh_evidence(votes, alpha, gras, all)
     }
 
     /// Replace the Tree_Anim scan evidence; the JSON editor's cache sees it (DECISIONS AG109).
@@ -3214,7 +4198,8 @@ impl AppModel {
             scan: self.scan_stamp,
             known_rev: self.known_rev,
             target_mod_rev: self.target_mod_rev,
-            scope: self.scope_rev,
+            // E3: the whole-project header answer reads with the scope off, in caches of its own.
+            scope: self.view_scope_rev(),
         }
     }
 
@@ -3253,28 +4238,30 @@ impl AppModel {
 
     /// Select one set; any multi-selection ends (F3a D1).
     pub fn select_set(&mut self, key: &str) {
-        self.selection = Selection::Set(key.to_string());
-        self.reset_multi();
-        self.bulk = Default::default();
-        // Note FB7: also a click on the set already selected brings it to the front of the centre.
-        self.centre_tab = CentreTab::Selection;
-        // Review E10: as in `select_item`; `go_to_set` sets its own after this.
-        self.nav.reveal_slot = None;
+        self.go_to_set(key, None);
     }
 
-    /// Review E10: a Problems row's Go to set. Selects the set, and leaves `target` for the set editor to scroll to and
-    /// outline when it next draws the set (`ui::set_editor`); with no target, the same as `select_set`. The switch to
-    /// the Textures view is the caller's: the model has no egui context. An expanded texture preview closes first: it
-    /// fills the centre, so the set editor would not draw (final fix wave A2).
-    pub fn go_to_set(&mut self, key: &str, target: Option<nav::SlotTarget>) {
+    pub fn go_to_set(&mut self, key: &str, slot: Option<nav::SlotTarget>) {
+        self.go_to_target(SetTarget::Key(key.into()), slot);
+    }
+
+    pub fn select_target(&mut self, target: SetTarget) {
+        self.go_to_target(target, None);
+    }
+
+    pub fn go_to_target(&mut self, target: SetTarget, slot: Option<nav::SlotTarget>) {
         if self.expanded.is_some() {
             self.collapse();
         }
-        self.select_set(key);
-        self.nav.reveal_slot = target.map(|target| nav::RevealSlot {
-            set_key: key.to_string(),
-            target,
+        self.nav.reveal_slot = slot.map(|slot| nav::RevealSlot {
+            set: target.clone(),
+            target: slot,
         });
+        self.selection = target.selection();
+        self.reset_multi();
+        self.bulk = Default::default();
+        self.centre_tab = CentreTab::Selection;
+        self.reveal_centre = true;
     }
 
     pub fn expand(&mut self, key: &str) {
@@ -3331,30 +4318,120 @@ impl AppModel {
         // DT31: a six-file cube's faces must resolve alike (CUBE-FACES), so whatever an edit does to the item's own
         // entry (its +X face) is repeated on the other five face entries, inside the same step.
         let cubes = self.cube_face_keys();
-        let f = move |p: &mut ProjectDoc, s: &mut crate::sets_doc::SetsDoc| {
+        self.record_doc_edit(label, merge, replan, move |p, s| {
             let before: Vec<_> = cubes.iter().map(|(k, _)| p.entry_fields(k)).collect();
             f(p, s);
             for ((k, others), b) in cubes.iter().zip(&before) {
                 p.copy_entry_changes(k, b, others);
             }
-        };
+        });
+    }
+
+    fn record_doc_edit(
+        &mut self,
+        label: &str,
+        merge: Option<String>,
+        replan: bool,
+        f: impl FnOnce(&mut ProjectDoc, &mut crate::sets_doc::SetsDoc),
+    ) {
+        if self.project.is_none() || self.sets_doc.is_none() {
+            return;
+        }
+        // A batch records one step around all its writes (`batch_edit`): no snapshot per write, and the shared-alpha
+        // follow-on runs once at its end (Note JS7, Task 8b).
+        if self.batch {
+            let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
+                return;
+            };
+            return f(p, s);
+        }
+        // Note JS7 (N-33, N-37): a user's step that plans again runs the shared-alpha follow-on; its starting point is
+        // read before the step. An automatic step (the recorder, the fuzz switch) and a step that does not plan (JSON
+        // hash records, set groups, the crash restore) do not.
+        let user = self.automatic_step.is_none();
+        // N8-o: the `[files]` keys are walked at most once per document state: `pre` indexes the project document
+        // before the edit (for the starting point and the list reader), `post` after it (for the unlisting and the
+        // follow-on). Neither is built when no reader needs it.
+        let listed = user
+            && self
+                .sets_doc
+                .as_ref()
+                .is_some_and(|s| !s.auto_data().is_empty());
+        let follows = user && replan && self.target == engine::config::Target::Cs;
+        let pre = (listed || follows)
+            .then(|| self.project.as_ref().map(shared_alpha::Tables::of))
+            .flatten();
+        let start = pre
+            .as_ref()
+            .filter(|_| follows)
+            .and_then(|t| shared_alpha::before(self, t));
+        // A document edit without a plan can still change the preview's group filter or linked lenders.
+        let write_only = (!replan && self.review.is_some()).then(|| self.write_only());
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
-        // A batch records one step around all its writes (`batch_edit`): no snapshot per write.
-        if self.batch {
-            return f(p, s);
-        }
         let before = Self::snapshot_of(Some(p), Some(s));
+        let previous_type_alpha = p.type_alpha_edit;
         let dirty = (p.is_dirty(), s.is_dirty());
+        // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
+        let held = pre
+            .as_ref()
+            .filter(|_| listed)
+            .map(|t| shared_alpha::listed_without_data(t, s));
         f(p, s);
-        let after = Self::snapshot_of(Some(p), Some(s));
-        if after == before {
-            // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
-            p.set_dirty(dirty.0);
-            s.set_dirty(dirty.1);
-            return;
+        let mut post = None;
+        if let Some(h) = &held {
+            let t = post.insert(shared_alpha::Tables::of(p));
+            shared_alpha::unlist_user_data(h, t, s);
         }
+        // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
+        let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
+        // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
+        if let Some(b) = start.as_ref().filter(|_| changed) {
+            let t = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &t);
+        }
+        if let Some(files_edit) = self.record_step(label, merge, before, dirty, previous_type_alpha)
+        {
+            if replan {
+                self.replan_after_edit(files_edit);
+            } else if let Some(before) = write_only {
+                if self.export_scope.is_some() {
+                    self.expand_scope_hosts();
+                } else if self.write_only() != before {
+                    self.invalidate_currency();
+                }
+            }
+        }
+    }
+
+    fn record_step(
+        &mut self,
+        label: &str,
+        merge: Option<String>,
+        before: history::Snapshot,
+        dirty: (bool, bool),
+        previous_type_alpha: Option<u64>,
+    ) -> Option<bool> {
+        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        let changed = before != after;
+        if !changed {
+            // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
+            if let Some(p) = self.project.as_mut() {
+                p.set_dirty(dirty.0);
+            }
+            if let Some(s) = self.sets_doc.as_mut() {
+                s.set_dirty(dirty.1);
+            }
+        }
+        if !changed {
+            return None;
+        }
+        // The opening fuzz switch writes a subtype automatically. Replaying it is a user's write.
+        let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit)
+            != previous_type_alpha
+            || (self.automatic_step == Some(AutomaticStep::FuzzSwitch)
+                && before.sdc_toml != after.sdc_toml);
         self.drop_undo_note();
         let files_edit = before.project == after.project;
         self.history.push(history::Command {
@@ -3363,11 +4440,11 @@ impl AppModel {
             after,
             merge,
             created_file: None,
+            type_alpha,
+            normal_prunes: Default::default(),
         });
         self.auto_replans = 0;
-        if replan {
-            self.replan_after_edit(files_edit);
-        }
+        Some(files_edit)
     }
 
     /// Review E2: mark the row named `row` as intended (`on`) or take its mark off, as one undo step named for the
@@ -3459,10 +4536,20 @@ impl AppModel {
         self.edit_docs(label, None, true, |p, _| f(p));
     }
 
-    fn apply_snapshot(&mut self, s: &history::Snapshot) {
+    fn apply_snapshot(&mut self, command: &history::Command, redo: bool) {
+        let s = if redo {
+            &command.after
+        } else {
+            &command.before
+        };
         self.dropped_fills.clear();
-        // Note FC1: the row's Undo is for its own step; `pushes` does not move on an undo.
-        self.auto_note = None;
+        if self
+            .auto_note
+            .as_ref()
+            .is_some_and(|note| note.step.is_some())
+        {
+            self.auto_note = None;
+        }
         // Fuzz-8: likewise the switch's row, and a switch step still waiting for its recording no longer applies.
         self.fuzz_note = None;
         self.fuzz_switch = None;
@@ -3476,13 +4563,22 @@ impl AppModel {
         // Fast re-plan: a step that leaves the sets document as it is may send a partial (`replan` checks the rest).
         // Compared as the edit path compares its snapshots (Minor 3: no sets document on both sides is unchanged).
         let files_edit = Self::snapshot_of(None, self.sets_doc.as_ref()).project == s.project;
-        // Only a document the step changed is restored: `restore` marks it dirty, and an untouched one must stay clean
-        // (no empty sdc-project.toml on Save, no spurious changed-on-disk dialog).
-        if let Some(p) = self.project.as_mut().filter(|p| p.text() != s.sdc_toml) {
-            p.restore(&s.sdc_toml);
+        if let Some(p) = self.project.as_mut() {
+            p.restore_snapshot(&s.sdc_toml);
+            if command.type_alpha && !p.read_only() {
+                p.mark_type_alpha_edit();
+            }
         }
         // The JSON hash is not part of a step: export writes it outside history (spec §7.2, final review I2).
         if let Some(d) = self.sets_doc.as_mut() {
+            let side = usize::from(redo);
+            if let Some(p) = &self.project {
+                d.restore_normal_baseline(
+                    p.saved_text(),
+                    &command.normal_prunes[1 - side],
+                    &command.normal_prunes[side],
+                );
+            }
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
@@ -3530,13 +4626,43 @@ impl AppModel {
         Some(UNDO_NOTE_FOR.saturating_sub(now.saturating_duration_since(at)))
     }
 
-    /// "1 texture, 1 set" / "3 textures, 2 sets" (Note FI14).
-    fn counts_line(&self) -> String {
-        let (t, s) = (self.items.len(), sets::carded_sets(self));
+    pub fn export_summary(&self) -> export::ExportSummary {
+        let views = sets::views(self);
+        let mut outputs = BTreeMap::new();
+        for (_, key, path) in views.iter().flat_map(sets::set_outputs) {
+            let Some(job) = self.item(key).and_then(|i| i.job.as_ref()) else {
+                continue;
+            };
+            if !matches!(job.status, engine::policy::JobStatus::PackingInput { .. }) {
+                outputs.insert(path, job.pack.is_some() || job.derive.is_some());
+            }
+        }
+        // An undecided single file can have a planned output before it gets its own set card.
+        for item in self.items.iter().filter(|i| i.waiting) {
+            if let Some(job) = &item.job {
+                outputs.entry(&job.output).or_insert(false);
+            }
+        }
+        export::ExportSummary {
+            files: self.input_count,
+            textures: outputs.len(),
+            generated: outputs.values().filter(|&&g| g).count(),
+            sets: sets::carded_sets(self),
+        }
+    }
+
+    pub fn status_line_counts(&self) -> String {
+        let s = self.export_summary();
+        let packed = if s.generated > 0 {
+            format!(" ({} packed or generated)", s.generated)
+        } else {
+            String::new()
+        };
         format!(
-            "{}, {}",
-            code_text::counted(t, "texture", "textures"),
-            code_text::counted(s, "set", "sets")
+            "{} → {}{packed} · {}",
+            code_text::counted(s.files, "file", "files"),
+            code_text::counted(s.textures, "texture", "textures"),
+            code_text::counted(s.sets, "set", "sets")
         )
     }
 
@@ -3546,7 +4672,7 @@ impl AppModel {
         self.drop_undo_note();
         let n = format!("{verb}: {label}.");
         // In front of the normal status text, not in place of it; the plan the step started rewrites the counts.
-        let counts = self.counts_line();
+        let counts = self.status_line_counts();
         self.status_line = match &self.status_note {
             Some(c) => format!("{n} {c} {counts}"),
             None => format!("{n} {counts}"),
@@ -3584,8 +4710,15 @@ impl AppModel {
                 self.refresh_banner();
             }
         }
-        self.apply_snapshot(&c.before);
-        self.undo_noted("Undid", &c.label);
+        self.apply_snapshot(&c, false);
+        self.undo_noted(
+            if self.centre_over_meshes {
+                "Undone"
+            } else {
+                "Undid"
+            },
+            &c.label,
+        );
     }
 
     /// Note FB5: after the documents load, each one's crash `.recovery` file is loaded into it as one Undo step
@@ -3628,11 +4761,11 @@ impl AppModel {
         let before = self.history.undo.len();
         // Only a document whose text really changed counts as restored: `restore` ignores text that does not parse.
         let mut restored = vec![];
+        // Note JS7 (N8-h): the restore reinstates the list as the snapshot recorded it: no unlisting, no follow-on.
+        self.automatic_step = Some(AutomaticStep::Recovery);
         self.edit_docs(LABEL, None, false, |p, s| {
             if let Some((path, t)) = project {
-                let old = p.text();
-                p.restore(&t);
-                if p.text() != old {
+                if p.restore_recovery(&t) {
                     restored.push(path);
                 }
             }
@@ -3644,6 +4777,7 @@ impl AppModel {
                 }
             }
         });
+        self.automatic_step = None;
         // shortcut: a file that does not parse as TOML restores nothing, shows no notice and stays on disk (the
         // other document's file, if it restored, is the only one the toast's Undo deletes); give it a notice if one
         // is ever seen.
@@ -3714,8 +4848,15 @@ impl AppModel {
                 }
             }
         }
-        self.apply_snapshot(&c.after);
-        self.undo_noted("Redid", &c.label);
+        self.apply_snapshot(&c, true);
+        self.undo_noted(
+            if self.centre_over_meshes {
+                "Redone"
+            } else {
+                "Redid"
+            },
+            &c.label,
+        );
     }
 
     /// The slot card's preset dropdown: format and tag together, one undo step (M3b §4.1).
@@ -3742,6 +4883,9 @@ impl AppModel {
 
     /// Note JI5: the diffuse slot row's alpha type, written to the item's own `alpha.policy` in one step.
     pub fn set_alpha(&mut self, item: &str, p: AlphaPolicy) {
+        if p == AlphaPolicy::Data && self.data_pick_unlists("Alpha", item) {
+            return;
+        }
         let k = item.to_string();
         self.edit("Alpha", move |d| {
             d.set_file_value(&k, "alpha.policy", &json!(p))
@@ -3810,6 +4954,13 @@ impl AppModel {
                 self.weighting_follow
                     .push((item_key.to_string(), w.to_string(), merge));
             }
+            return;
+        }
+        // Note JS7 (N-34): the user's Data on a key the share step listed is the user's own value now.
+        if field == "alpha.policy"
+            && value == json!("data")
+            && self.data_pick_unlists(&format!("Change {field}"), item_key)
+        {
             return;
         }
         let k = item_key.to_string();
@@ -3884,7 +5035,14 @@ impl AppModel {
 
     /// "Presets…": open the creator on a fresh scan of the presets folder.
     pub fn open_presets(&mut self) {
-        self.presets_model().rescan();
+        let preset = self.project_preset();
+        let default = engine::presets::default_preset_for(self.target);
+        let presets = self.presets_model();
+        if presets.draft.is_none() {
+            presets.select(preset.as_deref().unwrap_or(default));
+        } else {
+            presets.rescan();
+        }
         self.presets_open = true;
         if !self.presets_popped {
             self.centre_tab = CentreTab::Presets;
@@ -4008,35 +5166,39 @@ impl AppModel {
     }
 
     pub fn is_dirty(&self) -> bool {
+        self.needs_write()
+            || (self.ignored_by_plan
+                && self
+                    .project
+                    .as_ref()
+                    .is_some_and(ProjectDoc::has_stashed_edits))
+    }
+
+    pub(crate) fn project_user_dirty(&self) -> bool {
+        self.project
+            .as_ref()
+            .is_some_and(|p| p.user_dirty() || (self.ignored_by_plan && p.stashed_user_edit()))
+    }
+
+    /// The user's changes since the last save, including a tentative edit the retry plan still holds.
+    pub fn unsaved(&self) -> bool {
+        self.project_user_dirty()
+            || self
+                .sets_doc
+                .as_ref()
+                .is_some_and(crate::sets_doc::SetsDoc::user_dirty)
+    }
+
+    pub fn needs_write(&self) -> bool {
         self.project.as_ref().is_some_and(ProjectDoc::is_dirty)
-            || self.tentative_edits().is_some()
             || self
                 .sets_doc
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
     }
 
-    /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, or the Fuzz-8 switch on open with
-    /// the recording that joined it, still the top step. It neither asks on close, open or reload nor marks the title;
-    /// Save stays live and writes it.
-    /// shortcut: a user edit followed by its Undo leaves `pushes` advanced, so that state prompts although the text
-    /// equals the automatic state; compare the document with the recording's snapshot if users report it.
-    pub fn only_automatic_unsaved(&self) -> bool {
-        (self
-            .auto_note
-            .as_ref()
-            .is_some_and(|a| a.clean_before && a.step == self.history.pushes)
-            || self.only_switch_unsaved())
-            && !self
-                .sets_doc
-                .as_ref()
-                .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
-            && self.tentative_edits().is_none()
-    }
-
-    /// Unsaved changes the close, open and reload dialogs ask about: a user's, not only automatic ones (Note FI4).
-    pub fn prompts_unsaved(&self) -> bool {
-        self.is_dirty() && !self.only_automatic_unsaved()
+    pub fn write_project_now(&mut self) {
+        let _ = self.save();
     }
 
     /// The unsaved `sdc.toml` edits stashed by a blame that is still tentative (the retry plan has not landed), so
@@ -4052,17 +5214,24 @@ impl AppModel {
     pub fn recovery_snapshot(&self) -> Vec<(std::path::PathBuf, String)> {
         let mut out = vec![];
         // Note FI4: automatic types alone are recorded again on the next plan, so a restore never offers them.
-        let only_auto = self.only_automatic_unsaved();
-        if let Some(p) = self.project.as_ref().filter(|p| p.is_dirty() && !only_auto) {
+        if !self.unsaved() {
+            return out;
+        }
+        if let Some(p) = self
+            .project
+            .as_ref()
+            .filter(|p| p.is_dirty() || p.user_dirty())
+        {
             out.push((p.path().to_path_buf(), p.text()));
         }
         if let (Some(p), Some(text)) = (self.project.as_ref(), self.tentative_edits()) {
             out.push((p.path().to_path_buf(), text));
         }
+        // A files-only user edit needs the recorded types and their ownership listing together on restore.
         if let Some(s) = self
             .sets_doc
             .as_ref()
-            .filter(|s| s.is_dirty() && !s.read_only())
+            .filter(|s| (s.is_dirty() || s.user_dirty()) && !s.read_only())
         {
             out.push((s.path().to_path_buf(), s.text()));
         }
@@ -4075,7 +5244,7 @@ impl AppModel {
         let key = (
             self.project
                 .as_ref()
-                .map(|p| (p.rev(), p.is_dirty(), self.only_automatic_unsaved())),
+                .map(|p| (p.rev(), p.is_dirty(), self.unsaved())),
             self.sets_doc
                 .as_ref()
                 .map(|s| (s.rev(), s.is_dirty(), s.read_only())),
@@ -4143,7 +5312,7 @@ impl AppModel {
         #[allow(clippy::permissions_set_readonly_false)]
         perm.set_readonly(false);
         std::fs::set_permissions(path, perm).map_err(fail)?;
-        if self.prompts_unsaved() {
+        if self.unsaved() {
             self.status_line = "Read-only flag cleared: Save to write your changes".into();
             self.refresh_banner();
         } else {
@@ -4237,7 +5406,7 @@ impl AppModel {
     /// Reload both documents from disk (the banner's Reload), then plan once.
     /// The banner's Reload: at once when nothing is unsaved, else ask first (`Dialog::ReloadUnsaved`).
     pub fn request_reload(&mut self) {
-        if self.prompts_unsaved() {
+        if self.unsaved() {
             self.dialog = Some(Dialog::ReloadUnsaved);
         } else {
             self.reload_documents();
@@ -4251,6 +5420,7 @@ impl AppModel {
         // Review Focus 2: so does a JSON answer; the running export asks instead (the safe side).
         self.pending_json_answer = None;
         self.export_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         self.reset_type_follow();
         if let Some(p) = self.project.as_mut() {
@@ -4269,28 +5439,28 @@ impl AppModel {
         self.replan();
     }
 
-    /// Save `sdc.toml`, then `sdc-project.toml`; the first error is returned (and raises its dialog). A clean
-    /// document is not written (audit 2026-10-14 finding 3: writing it would offer "Overwrite" over a hand edit
-    /// the GUI never loaded).
+    fn pending_files_save(&self) -> Option<FilesSave> {
+        let p = self.project.as_ref()?;
+        if self.ignored_by_plan && p.has_stashed_edits() {
+            Some(FilesSave::Stashed)
+        } else {
+            (p.is_dirty() || p.user_dirty()).then_some(FilesSave::Live)
+        }
+    }
+
+    /// Save pending edits to `sdc.toml`, then persist any pending sets text, including an automatic listing.
+    /// Return the first write error and show its dialog.
     pub fn save(&mut self) -> Result<(), SaveError> {
+        let user_save = self.unsaved();
+        let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit);
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
-        if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
-            match p.save_stashed() {
-                Ok(w) => {
-                    if w {
-                        crate::crash_log::discard_recovery(p.path());
-                    }
-                    wrote |= w;
-                }
-                Err(e) => {
-                    self.save_failed(DocKind::SdcToml, &e);
-                    return Err(e);
-                }
-            }
-        }
-        if let Some(p) = self.project.as_mut().filter(|p| p.is_dirty()) {
-            if let Err(e) = p.save(false) {
+        if let (Some(source), Some(p)) = (self.pending_files_save(), self.project.as_mut()) {
+            let result = match source {
+                FilesSave::Live => p.save(false),
+                FilesSave::Stashed => p.save_stashed().map(|_| ()),
+            };
+            if let Err(e) = result {
                 self.save_failed(DocKind::SdcToml, &e);
                 return Err(e);
             }
@@ -4298,13 +5468,11 @@ impl AppModel {
             crate::crash_log::discard_recovery(p.path());
             wrote = true;
         }
-        // A clean sdc-project.toml is not written (no empty file, no spurious conflict); a read-only one never has edits.
-        if let Some(s) = self
-            .sets_doc
-            .as_mut()
-            .filter(|s| s.is_dirty() && !s.read_only())
-        {
+        if let Some(s) = self.sets_doc.as_mut().filter(|s| s.needs_save()) {
             if let Err(e) = s.save(false) {
+                if let Some(p) = self.project.as_mut() {
+                    p.type_alpha_edit = type_alpha;
+                }
                 self.save_failed(DocKind::Project, &e);
                 return Err(e);
             }
@@ -4312,8 +5480,13 @@ impl AppModel {
             wrote = true;
         }
         if wrote {
-            self.refresh_banner(); // the save removed the saved documents' recovery files
-            self.messages.notify(messages::Severity::Info, "Saved");
+            self.refresh_banner();
+            if user_save {
+                self.messages.notify(messages::Severity::Info, "Saved");
+            }
+        }
+        if !self.needs_write() {
+            self.never_saved = false;
         }
         Ok(())
     }
@@ -4326,8 +5499,17 @@ impl AppModel {
                     return;
                 };
                 if overwrite {
+                    let pending_claim = p.type_alpha_edit.filter(|_| {
+                        self.sets_doc
+                            .as_ref()
+                            .is_some_and(crate::sets_doc::SetsDoc::needs_save)
+                    });
                     match p.save(true) {
-                        Ok(()) => crate::crash_log::discard_recovery(p.path()),
+                        Ok(()) => {
+                            // This confirmation writes only sdc.toml. Its ownership listing may still need Save.
+                            p.type_alpha_edit = pending_claim;
+                            crate::crash_log::discard_recovery(p.path());
+                        }
                         Err(e) => self.save_failed(which, &e),
                     }
                 } else {
@@ -4347,7 +5529,9 @@ impl AppModel {
                 };
                 if overwrite {
                     match s.save(true) {
-                        Ok(()) => crate::crash_log::discard_recovery(s.path()),
+                        Ok(()) => {
+                            crate::crash_log::discard_recovery(s.path());
+                        }
                         Err(e) => self.save_failed(which, &e),
                     }
                 } else {
@@ -4366,7 +5550,7 @@ impl AppModel {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
             false
-        } else if self.prompts_unsaved() {
+        } else if self.unsaved() {
             self.dialog = Some(Dialog::OpenUnsaved(root));
             false
         } else {
@@ -4429,7 +5613,7 @@ impl AppModel {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Close));
             false
-        } else if self.prompts_unsaved() {
+        } else if self.unsaved() {
             self.dialog = Some(Dialog::CloseUnsaved);
             false
         } else {
@@ -4438,39 +5622,47 @@ impl AppModel {
     }
 }
 
-/// Delete a file a command created, if it still has the SHA-256 it was created with.
-/// Redo of a Duplicate: copy the source to the copy's path again, never over a file already there; the new
-/// copy's hash.
-fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
-    let fail = |e: std::io::Error| format!("could not copy {} again: {e}", cf.source.display());
-    let mut out = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&cf.path)
-    {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(format!(
-                "{} already exists, so redo does not copy over it. Move or delete it, then redo.",
-                cf.path.display()
-            ))
+/// Write and hash the image created by Duplicate.
+fn write_copy(mut input: impl std::io::Read, path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{ErrorKind, Write};
+
+    let mut out = std::fs::File::create_new(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = [0; 8192];
+    let copied = loop {
+        let n = match input.read(&mut buf) {
+            Ok(0) => break Ok(hex::encode(hash.finalize())),
+            Ok(n) => n,
+            Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) => break Err(e),
+        };
+        if let Err(e) = out.write_all(&buf[..n]) {
+            break Err(e);
         }
-        Err(e) => return Err(fail(e)),
-        Ok(f) => f,
+        hash.update(&buf[..n]);
     };
-    // From here the file at `cf.path` is the one just created, so a failure removes it.
-    let copied =
-        std::fs::File::open(&cf.source).and_then(|mut src| std::io::copy(&mut src, &mut out));
     drop(out);
-    if let Err(e) = copied {
-        let _ = std::fs::remove_file(&cf.path);
-        return Err(fail(e));
-    }
-    history::sha256_of(&cf.path).ok_or_else(|| {
-        let _ = std::fs::remove_file(&cf.path);
-        format!("could not read the copy {}", cf.path.display())
+    copied.inspect_err(|_| {
+        // shortcut: the path may have been replaced, use handle-owned cleanup once persist_noclobber lands (SC-45).
+        let _ = std::fs::remove_file(path);
     })
 }
 
+/// Redo Duplicate only while the original destination is free.
+fn copy_again(cf: &history::CreatedFile) -> Result<String, String> {
+    std::fs::File::open(&cf.source)
+        .and_then(|input| write_copy(input, &cf.path))
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("{} already exists, so redo does not copy over it. Move or delete it, then redo.", cf.path.display())
+            } else {
+                format!("could not copy {} again: {e}", cf.source.display())
+            }
+        })
+}
+
+/// Delete a file a command created, if it still has the SHA-256 it was created with.
 fn remove_created(cf: &history::CreatedFile) -> Result<(), String> {
     match history::sha256_of(&cf.path) {
         None => Ok(()), // already gone
@@ -4483,12 +5675,8 @@ fn remove_created(cf: &history::CreatedFile) -> Result<(), String> {
     }
 }
 
-/// The toast of a finished export: "Export finished: 12 written, 3 skipped, 0 failed".
-pub fn export_finished_text(s: &engine::api::BatchSummary) -> String {
-    format!(
-        "Export finished: {} written, {} skipped, {} failed",
-        s.converted, s.skipped, s.failed
-    )
+pub fn export_finished_text(result: &export::ExportResult) -> String {
+    format!("Export finished: {}", export::result_line(result))
 }
 
 #[cfg(test)]
@@ -4502,11 +5690,231 @@ mod tests {
         AppModel::new(GuiSettings::default(), None, session)
     }
 
+    #[test]
+    fn duplicate_preserves_a_file_created_after_the_name_was_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chosen.png");
+        std::fs::write(&path, b"foreign").unwrap();
+        let result = super::write_copy(&b"image"[..], &path);
+        assert_eq!(std::fs::read(&path).unwrap(), b"foreign");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+    }
+
+    #[test]
+    fn undo_keeps_a_replacement_swapped_in_at_the_end_of_duplicate() {
+        use std::io::{self, Read};
+        struct SwapAtEof<'a>(&'a Path);
+        impl Read for SwapAtEof<'_> {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                std::fs::rename(self.0, self.0.with_extension("moved"))?;
+                std::fs::write(self.0, b"foreign")?;
+                Ok(0)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("copy.png");
+        let input = b"image".as_slice().chain(SwapAtEof(&path));
+        let sha256 = write_copy(input, &path).unwrap();
+        assert_eq!(
+            Some(&sha256),
+            history::sha256_of(&path.with_extension("moved")).as_ref()
+        );
+        let copy = history::CreatedFile {
+            source: dir.path().join("source.png"),
+            path: path.clone(),
+            sha256,
+        };
+        assert!(remove_created(&copy).unwrap_err().contains("undo keeps it"));
+        assert_eq!(std::fs::read(path).unwrap(), b"foreign");
+    }
+
+    #[test]
+    fn duplicate_removes_its_partial_file_on_a_read_error() {
+        use std::io::{self, Read};
+        struct Failed;
+        impl Read for Failed {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("read failed halfway"))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial.png");
+        let input = b"first bytes".as_slice().chain(Failed);
+        assert!(super::write_copy(input, &path).is_err());
+        assert!(
+            !path.exists(),
+            "a failed Duplicate must remove the partial file"
+        );
+    }
+
     /// An idle model has nothing in flight, and `wait_idle` returns at once.
     #[test]
     fn an_idle_model_is_idle() {
         let mut m = bare_model();
         assert!(m.wait_idle(Duration::from_secs(1)));
+    }
+
+    /// Ruling 3c-40: a missing destination resolves through its nearest existing parent; a read that fails for another
+    /// reason than "not found" (here an invalid file name) is indeterminate, and an indeterminate resolution equals
+    /// nothing, itself included.
+    #[test]
+    fn an_indeterminate_destination_never_compares_equal() {
+        let d = tempfile::tempdir().unwrap();
+        let missing = d.path().join("missing").join("deeper");
+        assert_eq!(
+            target_mod::resolve_destination(&missing),
+            Some(
+                d.path()
+                    .canonicalize()
+                    .unwrap()
+                    .join("missing")
+                    .join("deeper")
+            )
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            target_mod::resolve_destination(&d.path().join("bad?name").join("x")),
+            None,
+            "an invalid name is not \"not found\""
+        );
+        let unsure = ArmedWrite {
+            resolved: None,
+            ..bare_model().armed_now(false)
+        };
+        assert!(
+            !unsure.matches_click(&unsure.clone()),
+            "two failed reads are not equal"
+        );
+        let sure = ArmedWrite {
+            resolved: Some(d.path().to_path_buf()),
+            ..unsure.clone()
+        };
+        assert!(sure.matches_click(&sure.clone()));
+        assert!(!sure.matches_click(&unsure) && !unsure.matches_click(&sure));
+    }
+
+    #[test]
+    fn a_whole_view_restores_its_caller_on_return_and_unwind() {
+        let m = AppModel::placeholder(Default::default());
+        let nested = m.with_whole_view(|| {
+            m.with_whole_view(|| ());
+            m.whole_view.get()
+        });
+        assert!(nested, "nested read ended the outer whole view");
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            m.with_whole_view(|| panic!("interrupted read"));
+        }));
+        assert!(!m.whole_view.get(), "unwind left whole view active");
+    }
+
+    #[test]
+    fn unreadable_normal_snapshots_protect_the_key() {
+        let write = crate::project::AutoWrite {
+            key: "a_n.png".into(),
+            field: "subtype",
+            value: serde_json::json!("normal"),
+            only_if: None,
+        };
+        for (files, sets) in [("[", ""), ("", "[")] {
+            let protected = std::panic::catch_unwind(|| {
+                normal_follow::protected_normals(
+                    files,
+                    sets,
+                    std::slice::from_ref(&write),
+                    &Default::default(),
+                    &[write.key.clone()].into(),
+                )
+            });
+            assert!(
+                protected.is_ok_and(|keys| keys.contains(&write.key)),
+                "invalid snapshot must protect {}",
+                write.key
+            );
+        }
+    }
+
+    #[test]
+    fn a_settled_recorder_builds_its_normal_facts_once() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("textures");
+        std::fs::create_dir(&root).unwrap();
+        let normal = image::RgbImage::from_pixel(16, 16, image::Rgb([128, 128, 255]));
+        let mut files = String::new();
+        let mut sets = String::from("[project.auto_normal]\n");
+        for i in 0..2_048 {
+            let key = format!("rock{i}_n.png");
+            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
+            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            if i < 16 {
+                normal.save(root.join(key)).unwrap();
+            }
+        }
+        sets.push_str("\n[[sets]]\nid = 'rock0'\nshader = 'pbr'\n");
+        std::fs::write(root.join("sdc.toml"), files).unwrap();
+        std::fs::write(root.join("sdc-project.toml"), sets).unwrap();
+        let mut m = bare_model();
+        m.open_folder(root);
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(m.sets_doc.as_ref().unwrap().auto_normal().len(), 2_048);
+        let candidates = sets::views(&m);
+        assert_eq!(candidates.len(), 16);
+        assert!(candidates.iter().all(|v| v
+            .shader
+            .as_ref()
+            .is_some_and(|p| p.bakes_any_tangent())
+            && matches!(
+                v.slots.get(&sets::SlotKind::Normal),
+                Some(sets::SlotFill::Own { .. })
+            )));
+        let counts = || {
+            [
+                crate::sets_doc::AUTO_NORMAL_READS.get(),
+                crate::project::key_walks(),
+                sets::LOCK_MAP_BUILDS.get(),
+            ]
+        };
+        let before = counts();
+        assert!(
+            !m.record_auto_decisions(),
+            "every normal already has its recorded type"
+        );
+        let after = counts();
+        let builds: [usize; 3] = std::array::from_fn(|i| after[i] - before[i]);
+        assert_eq!(
+            builds,
+            [1, 1, 1],
+            "auto_normal reads, [files] walks and lock maps in one recorder pass"
+        );
+
+        // The next pass has a listed plain normal to promote under the same PBR pick.
+        let key = "rock0_n.png";
+        let sets = m.sets_doc.as_mut().unwrap();
+        let mut listing = sets.auto_normal();
+        listing.insert(key.into(), "normal".into());
+        sets.set_auto_normal(&listing);
+        m.project
+            .as_mut()
+            .unwrap()
+            .set_file_value(key, "subtype", &serde_json::json!("normal"));
+        let reads = crate::sets_doc::AUTO_NORMAL_READS.get();
+        assert!(m.record_auto_decisions());
+        assert_eq!(
+            crate::sets_doc::AUTO_NORMAL_READS.get() - reads,
+            1,
+            "verifying the write reuses the listing"
+        );
+        assert_eq!(
+            m.sets_doc.as_ref().unwrap().auto_normal_word(key),
+            Some("pbr_normal")
+        );
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(key, "subtype"),
+            Some(serde_json::json!("pbr_normal"))
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
     }
 
     /// An opened, planned project on `cs`: a PBR set whose `_rmaos` is packed (rock01, with a prefix, so its outputs
@@ -4550,6 +5958,66 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(60)));
         assert_eq!(m.target, Target::Cs);
         m
+    }
+
+    #[test]
+    fn a_warm_assign_menu_copies_no_skipped_set_ids() {
+        use crate::project::SKIPPED_IDS_COPIED;
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_also_settings(|c| c.skip = (0..3000).map(|n| format!("sets/{n}")).collect());
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let menu = || m.slot_menu("landscape/rock01", sets::SlotKind::Diffuse);
+        assert!(menu()
+            .iter()
+            .any(|e| matches!(e.action, bulk::MenuAction::SlotLink { .. })));
+        SKIPPED_IDS_COPIED.set(0);
+        assert_eq!(m.also_config().skip.len(), 3000);
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "the probe observes a whole configuration copy"
+        );
+        menu();
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "a cache hit copied skip entries"
+        );
+    }
+
+    #[test]
+    fn reselecting_the_same_folder_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let before = m.pick_key();
+        m.set_export_folder(m.export_root());
+        assert!(!m.inputs_unsettled());
+        assert!(
+            before != m.pick_key(),
+            "reselecting the folder must invalidate the row cache"
+        );
+    }
+
+    #[test]
+    fn terminal_failure_with_equal_inputs_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_export_folder(m.export_root());
+        let pending = m.pick_key();
+        m.handle(WorkerMsg::Planned {
+            generation: m.generation,
+            result: Err(PlanFailure {
+                message: "failed".into(),
+                config: false,
+            }),
+        });
+        assert!(!m.inputs_unsettled() && !m.full_plan_pending());
+        assert!(
+            pending != m.pick_key(),
+            "terminal failure must invalidate the row cache"
+        );
+        assert_eq!(m.pick_waits_cached(), Some(sets::PICK_PLAN_AGAIN));
     }
 
     /// Final fix I1: the indexed `engine_inputs` and `output_candidates` equal the linear scans they replaced, on a

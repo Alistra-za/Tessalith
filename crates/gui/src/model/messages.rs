@@ -102,9 +102,7 @@ impl Messages {
         if self.log.len() > LOG_CAP {
             self.log.pop_front();
         }
-        if !self.open {
-            self.unread = (self.unread + 1).min(self.log.len());
-        }
+        self.unread = (self.unread + 1).min(self.log.len());
     }
 
     /// The log and a toast (a routine result).
@@ -198,7 +196,7 @@ impl Messages {
         self.log.is_empty()
     }
 
-    /// Entries logged while the Messages tab was not showing.
+    /// Entries added since the Messages tab last drew its log.
     pub fn unread(&self) -> usize {
         self.unread
     }
@@ -207,12 +205,12 @@ impl Messages {
         self.open
     }
 
-    /// Opening reads everything; so does anything logged while it is open.
     pub fn set_open(&mut self, open: bool) {
         self.open = open;
-        if open {
-            self.unread = 0;
-        }
+    }
+
+    pub fn mark_read(&mut self) {
+        self.unread = 0;
     }
 
     /// The Clear button: the log goes, a toast on screen finishes on its own.

@@ -10,7 +10,7 @@ use image::{ImageBuffer, Rgb, Rgba};
 use sdc_gui::model::bottom::{problems, At};
 use sdc_gui::model::export::{cli_command, RowState};
 use sdc_gui::model::review::DiskState;
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, SetTarget};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -165,6 +165,24 @@ fn a_tick_is_one_undo_step_and_exports_three_folders() {
     );
     assert!(v.join("textures/clutter/cup.dds").is_file());
     assert!(c.join("textures/arm/steel_m.dds").is_file());
+    let result = m.export.result.as_ref().unwrap();
+    let records = engine::manifest::Manifest::at(&v).read().unwrap();
+    let copies: Vec<_> = records
+        .iter()
+        .filter(|(_, rec)| rec.raw.get("copied_from").is_some())
+        .collect();
+    assert_eq!(result.copied, 1);
+    assert_eq!(copies.len(), result.copied as usize);
+    for (path, _) in copies {
+        assert_eq!(
+            std::fs::read(p.join(path)).unwrap(),
+            std::fs::read(v.join(path)).unwrap()
+        );
+    }
+    assert_eq!(
+        result.phases[0].1.written + result.copied as usize,
+        support::dds_under(&v)
+    );
     assert!(
         p.join("PBRNIFPatcher")
             .read_dir()
@@ -354,7 +372,9 @@ fn the_count_is_the_pbr_folders_and_the_other_folders_are_named() {
         assert_eq!(button, format!("Export {counted} files + {named}"));
         assert_eq!(
             m.written_text(),
-            format!("{counted} DDS files in the PBR folder, plus the {named}")
+            format!(
+                "{counted} files · checking which changed… in the PBR folder, plus the {named}"
+            )
         );
         let hover = sdc_gui::ui::header::export_hover(&m);
         assert!(
@@ -391,6 +411,90 @@ fn one_epoch_for_the_whole_also_export() {
     assert_eq!(m.drawer_epoch, e + 1);
     let (done, total) = m.export.progress();
     assert!(total > 0 && done == total);
+}
+
+#[test]
+fn with_an_also_tick_the_equality_holds_for_the_pbr_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    tick(&mut m, AlsoTarget::Cm);
+    let n = m.export_files();
+    export(&mut m);
+    let folders = m.also_folders();
+    assert_eq!(support::dds_under(&folders[0]), n);
+    assert_eq!(m.export.progress(), (n, n));
+    let r = m.export.result.as_ref().unwrap();
+    assert_eq!(r.primary.written, n);
+    assert_eq!(r.phases.len(), 2);
+    let vanilla = &r.phases[0].1;
+    let cm = &r.phases[1].1;
+    assert_eq!(
+        vanilla.written + r.copied as usize,
+        support::dds_under(&folders[1])
+    );
+    assert_eq!(cm.written, support::dds_under(&folders[2]));
+    assert_eq!((n, vanilla.written, cm.written, r.copied), (5, 4, 1, 0));
+    let line = "5 written, 0 up to date, 0 failed · Vanilla: 4 written, 0 up to date, 0 failed · CM: 1 written, 0 up to date, 0 failed, 1 skipped source";
+    assert!(
+        m.messages
+            .entries()
+            .any(|e| e.text == format!("Export finished: {line}")),
+        "{r:?}"
+    );
+    let h = ui_harness(m, 1600.0);
+    assert!(has_label(&h, line));
+}
+
+#[test]
+fn vanilla_counts_the_unused_packing_source_in_its_own_events() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    let path = m
+        .root
+        .as_ref()
+        .unwrap()
+        .join("textures/clutter/orphan_opacity.png");
+    png(&path, [90, 90, 90, 255]);
+    m.replan();
+    idle(&mut m);
+    tick(&mut m, AlsoTarget::Vanilla);
+    export(&mut m);
+    let r = m.export.result.as_ref().unwrap();
+    assert_eq!(r.phases[0].1.skipped_sources, 1, "{r:?}");
+}
+
+#[test]
+fn a_cm_failure_keeps_the_completed_vanilla_counts() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Cm);
+    let folders = m.also_folders();
+    std::fs::create_dir_all(folders[2].join("_sdc/manifest.jsonl")).unwrap();
+    export(&mut m);
+    assert_eq!(support::dds_under(&folders[1]), 4);
+    let result = m.export.result.as_ref().unwrap();
+    assert_eq!(result.phases.len(), 1);
+    assert_eq!((result.phases[0].1.written, result.copied), (3, 1));
+    let line = m
+        .messages
+        .entries()
+        .rev()
+        .find(|e| e.text.starts_with("Export finished: "))
+        .unwrap()
+        .text
+        .clone();
+    assert!(
+        line.contains("Vanilla: 3 written, 0 up to date, 0 failed")
+            && line.contains("CM phase failed")
+            && line.contains("1 Vanilla copy"),
+        "{line}"
+    );
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    assert!(has_label(
+        &h,
+        line.strip_prefix("Export finished: ").unwrap()
+    ));
 }
 
 #[test]
@@ -705,9 +809,13 @@ fn press(h: &mut H, node: impl Fn(&H) -> egui_kittest::Node<'_>) {
 fn reviewing(d: &Path, w: f32) -> H {
     let mut m = project(d);
     tick(&mut m, AlsoTarget::Vanilla);
+    for job in m.items.iter().filter_map(|i| i.job.as_ref()) {
+        std::fs::create_dir_all(job.output.parent().unwrap()).unwrap();
+    }
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_some());
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, w);
     settle(&mut h);
     h
@@ -721,7 +829,9 @@ fn reviews_footer_counts_the_pbr_folder_and_names_the_vanilla_folder() {
         let d = tempfile::tempdir().unwrap();
         let h = reviewing(d.path(), w);
         let n = h.state().export_files();
-        let line = format!("{n} DDS files in the PBR folder, plus the Vanilla folder");
+        let line = format!(
+            "Will be written ({n}) · Up to date (0) in the PBR folder, plus the Vanilla folder"
+        );
         assert!(has_label(&h, &line), "{w}: {line}");
         assert!(has_label(&h, &format!("Export {n} files + Vanilla folder")));
     }
@@ -885,7 +995,7 @@ fn reviews_export_stays_disabled_with_the_also_reason() {
         })
         .expect("Review's Export");
     assert!(button.accesskit_node().is_disabled());
-    // The reason is drawn beside the button (as before) and in the Also section.
+    // The reason is drawn beside the button and in Blockers.
     assert!(h.query_all_by_label(reason).count() >= 2);
     set_ro(false);
 }
@@ -1154,6 +1264,7 @@ fn recipe_link_over_the_settings_tab_shows_the_also_export_tab() {
     m.select_set(&k);
     m.open_settings_tab();
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert_eq!(h.state().centre_front(), CentreTab::Settings, "fixture");
@@ -1229,6 +1340,7 @@ fn recipe_link_from_3d_switches_to_2d() {
     tick(&mut m, AlsoTarget::Vanilla);
     m.settings.set_view_3d = true;
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let steel = steel_key(&m);
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
@@ -1250,10 +1362,10 @@ fn recipe_set_prefers_the_selected_pbr_set_then_the_first_unskipped() {
     png(&arm.join("brass_rmaos.png"), [128, 255, 200, 255]);
     let mut m = project(d.path());
     let all = sdc_gui::model::sets::views(&m);
-    let pbr: Vec<(String, String)> = all
+    let pbr: Vec<(SetTarget, String)> = all
         .iter()
         .filter(|v| sdc_gui::model::also::is_pbr_set(v))
-        .map(|v| (v.key.clone(), v.id.clone()))
+        .map(|v| (SetTarget::view(v), v.id.clone()))
         .collect();
     assert_eq!(pbr.len(), 2, "brass and steel are PBR sets");
     let cup = all
@@ -1283,12 +1395,76 @@ fn recipe_set_prefers_the_selected_pbr_set_then_the_first_unskipped() {
         Some(&pbr[0].0),
         "all skipped: the first"
     );
-    m.select_set(&pbr[1].0);
+    m.select_target(pbr[1].0.clone());
     assert_eq!(
         m.recipe_set().as_ref(),
         Some(&pbr[1].0),
         "the selected PBR set"
     );
+
+    let target = add_keyless_pbr(&mut m);
+    m.select_target(target.clone());
+    m.set_skip_also(&steel_id(&m), false);
+    m.set_skip_also(&steel_key(&m), true);
+    idle(&mut m);
+    assert_eq!(m.recipe_set(), Some(target.clone()), "selected by id");
+    m.select_set(&cup);
+    m.set_skip_also(&steel_id(&m), true);
+    m.set_skip_also(&steel_key(&m), false);
+    idle(&mut m);
+    assert_eq!(m.recipe_set(), Some(target), "the unskipped key-less set");
+}
+
+// The new card's document id is also the steel card's engine key.
+fn add_keyless_pbr(m: &mut AppModel) -> SetTarget {
+    let id = steel_key(m);
+    let source = steel_id(m);
+    m.edit_docs("Create PBR borrower", None, true, |_, doc| {
+        doc.create_set(&id);
+        doc.set_borrow(&id, 1, Some(&source));
+    });
+    idle(m);
+    let all = sdc_gui::model::sets::views(m);
+    assert!(all.iter().any(|v| v.key == id && v.id == source));
+    assert!(all.iter().any(|v| v.key.is_empty() && v.id == id && v.pbr));
+    SetTarget::Id(id)
+}
+
+#[test]
+fn recipe_link_opens_the_keyless_pbr_cards_also_tab() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    let target = add_keyless_pbr(&mut m);
+    m.set_skip_also(&steel_id(&m), true);
+    idle(&mut m);
+    let views = sdc_gui::model::sets::views(&m);
+    let cup = views.iter().find(|v| v.key.ends_with("cup")).unwrap();
+    m.select_set(&cup.key);
+    assert!(
+        matches!(&m.selection, sdc_gui::model::Selection::Set(k) if k.ends_with("cup")),
+        "Recipe must start on the non-PBR cup"
+    );
+    assert_eq!(
+        m.recipe_set(),
+        Some(target.clone()),
+        "the borrower is the unskipped PBR fallback"
+    );
+    m.settings.set_view_3d = true;
+    m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
+    let mut h = ui_harness(m, 1600.0);
+    press(&mut h, |h| h.get_by_label("Recipe settings…"));
+    settle(&mut h);
+    assert_eq!(h.state().selection.set_target(), Some(target));
+    assert!(!h.state().settings.set_view_3d);
+    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
+    assert!(
+        h.query_by_label("This set has no texture files of its own for Also export to skip.")
+            .is_some(),
+        "the borrower explains why it has no Skip control"
+    );
+    assert!(h.query_by_label("Skip vanilla/CM for this set").is_none());
 }
 
 /// Note JI2 (Review Focus 1): with no PBR set there is no set to open, so the link is not drawn.
@@ -1306,6 +1482,7 @@ fn the_recipe_link_is_not_drawn_without_a_pbr_set() {
         .all(|v| !sdc_gui::model::also::is_pbr_set(v)));
     assert_eq!(m.recipe_set(), None);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert!(has_label(&h, "Also export as"), "Review's Also column");
@@ -1385,6 +1562,7 @@ fn cs_review_without_a_tick_has_the_also_column() {
     let mut m = project(d.path());
     assert!(!m.also_on());
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert!(has_label(&h, "Also export as"));
@@ -1417,6 +1595,7 @@ fn a_stale_tick_can_be_cleared_in_the_vanilla_mode() {
         assert!(m.also_on());
         let label = if from_review {
             m.open_review();
+            m.review.as_mut().unwrap().options_open = true;
             "Vanilla"
         } else {
             "Also export as Vanilla"
@@ -1451,6 +1630,7 @@ fn the_also_controls_are_off_while_an_export_runs() {
         .clone();
     m.select_set(&steel_key);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     m.export.running = Some(Default::default());
     let mut h = ui_harness(m, 1600.0);
     h.run_steps(4);
@@ -1537,6 +1717,7 @@ fn a_long_skip_list_scrolls_and_its_last_row_works() {
     let mut m = support::opened_as_the_app(root, d.path().join("out"));
     tick(&mut m, AlsoTarget::Vanilla);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let last = sdc_gui::model::sets::views(&m)
         .iter()
         .find(|v| v.id.ends_with("set09"))
@@ -1625,6 +1806,8 @@ fn a_name_draft_is_cancelled_by_esc_and_stays_with_its_project() {
     h.state_mut().export_clicked();
     settle(&mut h);
     assert!(h.state().review.is_some());
+    h.state_mut().review.as_mut().unwrap().options_open = true;
+    settle(&mut h);
     assert_ne!(
         field(&h).accesskit_node().value().as_deref(),
         Some("Plain"),
@@ -1658,14 +1841,16 @@ fn nif_export_is_due_once_after_an_also_run_ends() {
     assert!(!m.take_nif_export_due(), "once");
 }
 
-/// Backlog T29 (Note FP1): a tick sends the header's Export click to Review, so the button reads Review, not Export.
+/// Backlog T29 (Note FP1), E3: a tick leaves the header on Review and takes `export_is_clean` away (the
+/// write-now label under the opt-out is pinned in export_shell.rs on a row-free project; this fixture keeps warnings).
 #[test]
 fn a_tick_makes_the_header_read_review() {
     let d = tempfile::tempdir().unwrap();
     let mut m = project(d.path());
+    assert!(m.export_is_clean(), "clean before the tick");
     assert!(
-        m.header_export_text().starts_with("Export "),
-        "clean before the tick: {}",
+        m.header_export_text().starts_with("Review "),
+        "{}",
         m.header_export_text()
     );
     tick(&mut m, AlsoTarget::Vanilla);

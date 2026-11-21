@@ -24,50 +24,9 @@ fn idle(m: &mut AppModel) {
     assert!(m.wait_idle(WAIT), "the model did not settle");
 }
 
-fn colour(path: &Path, tint: u8) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, tint]))
-        .save(path)
-        .unwrap();
-}
-
-fn flat(path: &Path) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
-        .save(path)
-        .unwrap();
-}
-
-/// A colour map whose right half is transparent: its alpha needs a decision.
-fn half_alpha(path: &Path) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| {
-        Rgba([
-            (x * 4) as u8,
-            (y * 4) as u8,
-            90,
-            if x < 32 { 255 } else { 0 },
-        ])
-    })
-    .save(path)
-    .unwrap();
-}
-
-/// `textures/g`: a ready set `g/<n>` per `ready` (a colour map and a flat `_n`), and a set per `warn` whose colour
-/// map has an alpha that needs a decision. Opened as the app opens a folder, exports under `<dir>/export`.
+/// `support::project_with`: sets `ready` and a set per `warn` with an undecided alpha, opened as the app opens it.
 fn plain(dir: &Path, ready: &[&str], warn: &[&str]) -> AppModel {
-    let g = dir.join("textures/g");
-    for n in ready {
-        colour(&g.join(format!("{n}.png")), 90);
-        flat(&g.join(format!("{n}_n.png")));
-    }
-    for n in warn {
-        half_alpha(&g.join(format!("{n}.png")));
-        flat(&g.join(format!("{n}_n.png")));
-    }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
-    idle(&mut m);
-    m
+    project_with(dir, ready, warn)
 }
 
 /// `textures/pbr/arm`: PBR sets `steel` and `iron` (colour, `_n`, `_rmaos`).
@@ -120,11 +79,9 @@ fn group(m: &mut AppModel, name: &str, ids: &[&str]) {
 
 /// Share `item` into set `to`, replacing its own occupant.
 fn share(m: &mut AppModel, item: &str, to: &str) {
-    if matches!(
-        m.drop_choice(item, to, DropChoice::Share),
-        DropOutcome::AskReplace { .. }
-    ) {
-        m.drop_replace(item, to, DropChoice::Share).unwrap();
+    if let DropOutcome::AskReplace { kind, existing } = m.drop_choice(item, to, DropChoice::Share) {
+        m.drop_replace(item, to, DropChoice::Share, kind, &existing)
+            .unwrap();
     }
     idle(m);
 }
@@ -185,6 +142,23 @@ fn export_set_writes_only_that_set_and_its_borrow_host() {
 }
 
 #[test]
+fn removing_a_borrow_in_review_leaves_the_previous_host_out_of_export() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["h", "u"], &[]);
+    share(&mut m, "g/h_n.png", "g/u");
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    let host = key(&m, "g/h");
+    assert!(m.export_scope().unwrap().keys.contains(&host));
+    m.set_slot_command("g/u", 2, sdc_gui::model::sets::SlotCommand::FromSet)
+        .unwrap();
+    idle(&mut m);
+    assert!(!m.export_scope().unwrap().keys.contains(&host));
+    finish(&mut m);
+    assert!(out(&m, "textures/g/u.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/g/h.dds").exists());
+}
+
+#[test]
 fn export_group() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b", "c"], &[]);
@@ -219,15 +193,46 @@ fn export_n_sets() {
 // ---- When it starts ----
 
 #[test]
-fn a_clean_scoped_export_starts_at_once() {
+fn a_clean_scoped_export_opens_its_review_and_writes_from_there() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.review.is_none(), "no Review for a clean scope");
-    assert!(m.export.running.is_some() || m.export_queued());
+    assert!(m.review.is_some(), "a scoped export opens Review (E3)");
+    assert!(m.export.running.is_none() && !m.export_queued());
+    assert!(!out(&m, "textures/g/a.dds").exists());
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/g/b.dds").exists());
+}
+
+#[test]
+fn export_set_opens_a_scoped_review() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "u"], &[]);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(m.review.is_some() && m.export.running.is_none());
+    assert!(m.review_button_text().contains("Export set g/u"));
+    m.close_review();
+    m.set_export_without_review(true);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(
+        m.review.is_none() && m.export.running.is_some(),
+        "the opt-out covers scoped exports too"
+    );
+}
+
+#[test]
+fn a_scoped_export_ignores_other_sets_problems_and_also_ticks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "u"], &["w"]); // w: undecided alpha in another set
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.also_on(), "the tick took (cs mode): {}", m.status_line);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_without_review(true);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(m.review.is_none() && m.export.running.is_some());
 }
 
 #[test]
@@ -239,7 +244,13 @@ fn others_problems_do_not_block() {
     m.close_review();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.review.is_none(), "w is outside the run");
+    assert!(m.review.is_some(), "Review opens for the scope");
+    assert!(
+        m.review_gate().is_ok(),
+        "w is outside the run, so its question does not gate the scope: {:?}",
+        m.review_gate()
+    );
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
     assert!(!out(&m, "textures/g/w.dds").exists());
@@ -609,7 +620,7 @@ fn also_project(d: &Path) -> AppModel {
 }
 
 #[test]
-fn also_does_not_run_on_a_scoped_export_and_ticks_do_not_open_review_for_it() {
+fn also_does_not_run_on_a_scoped_export() {
     let d = tempfile::tempdir().unwrap();
     let mut m = also_project(d.path());
     m.export_clicked();
@@ -618,10 +629,15 @@ fn also_does_not_run_on_a_scoped_export_and_ticks_do_not_open_review_for_it() {
     let cup = id_ending(&m, "clutter/cup");
     let k = keys(&m, &[&cup]);
     m.export_sets(k, "Export set clutter/cup".into());
+    // E3: a scoped export opens Review too; its gate and button leave the tick out (an Also run is whole).
+    assert!(m.review.is_some(), "a scoped export opens Review");
+    assert!(m.review_gate().is_ok());
     assert!(
-        m.review.is_none(),
-        "the tick does not open Review for a scope"
+        !m.review_button_text().contains("Vanilla"),
+        "the tick is not part of a scoped run: {}",
+        m.review_button_text()
     );
+    m.export_from_review();
     idle(&mut m);
     let [p, v, _] = m.also_folders();
     assert!(
@@ -703,14 +719,20 @@ fn closing_review_ends_the_scope() {
     assert!(m.export_scope().is_none());
 }
 
-/// Note HF10: a queued scoped export that is dropped (a dialog open when the plan lands) takes its scope with it.
+/// Note HF10: a queued scoped export that is dropped (a dialog open when the plan lands) leaves its scope to the Review that queued it.
 #[test]
 fn a_dropped_queued_export_ends_the_scope() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
+    // Round 2 (3c-25): a scoped click never queues a write; Review's own Export is what waits for the plan.
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "Review opens at once"
+    );
+    m.export_from_review();
     assert!(m.export_queued(), "waits for the plan");
     assert!(m.export_scope().is_some());
     m.dialog = Some(sdc_gui::model::Dialog::Error("x".into()));
@@ -724,25 +746,105 @@ fn a_dropped_queued_export_ends_the_scope() {
     assert!(m.export_scope().is_some(), "kept while the dialog is open");
     m.dialog = None;
     idle(&mut m);
-    assert!(m.export_scope().is_none(), "the dropped export ends it");
+    // The Review that queued the export is still open, so it keeps its scope until it closes.
+    assert!(m.export_scope().is_some(), "Review keeps its scope");
+    m.close_review();
+    assert!(m.export_scope().is_none(), "closing ends it");
     assert_eq!(m.write_only(), None, "the next export is whole");
 }
 
-/// Note HF10 (final review I4): a scoped export that waits for a plan writes only its own set when the plan lands.
+/// Note HF10 (final review I4), ruling 3c-20 (revising 3c-16): a scoped click that waits for a plan under the opt-out
+/// always lands in its scoped Review and writes nothing there, whatever the counts. Review's Export then writes only
+/// the scope.
 #[test]
 fn a_queued_scoped_export_writes_only_its_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.set_export_without_review(true);
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.export_queued(), "waits for the plan");
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "3c-25: the scoped Review opens at once, nothing queues"
+    );
+    idle(&mut m);
+    // E3 (3c-20): the landed plan opens the scoped Review and writes nothing; Review's Export then writes only the
+    // scope.
+    assert!(m.review.is_some(), "a different count opens Review");
+    assert!(!out(&m, "textures/g/a.dds").exists());
+    assert_eq!(
+        m.export_scope().map(|s| s.label.as_str()),
+        Some("Export set g/a")
+    );
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
     assert!(
         !out(&m, "textures/g/b.dds").exists(),
         "b is outside the scope"
     );
+}
+
+/// Ruling 3c-20: a scope can equal the whole project's count (one set, or a group holding every set); the queued
+/// scoped click still opens its Review and writes nothing.
+#[test]
+fn a_queued_scoped_export_that_covers_the_whole_project_still_opens_its_review() {
+    for via_group in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = plain(d.path(), &["a"], &[]);
+        m.set_export_without_review(true);
+        if via_group {
+            group(&mut m, "All", &["g/a"]);
+        }
+        m.replan();
+        assert!(m.full_plan_pending(), "guard");
+        if via_group {
+            m.export_group("All");
+        } else {
+            let k = keys(&m, &["g/a"]);
+            m.export_sets(k, "Export set g/a".into());
+        }
+        assert!(
+            m.review.is_some() && !m.export_queued(),
+            "via_group={via_group}: the scoped Review opens at once (3c-25)"
+        );
+        idle(&mut m);
+        assert!(
+            m.writes_without_review(),
+            "guard: the landed plan is clean under the scope, and its count is the project's"
+        );
+        assert!(
+            m.review.is_some(),
+            "via_group={via_group}: the scoped click opens Review"
+        );
+        assert!(
+            m.export.running.is_none() && !out(&m, "textures/g/a.dds").exists(),
+            "via_group={via_group}: nothing was written"
+        );
+        assert!(m.export_scope().is_some(), "via_group={via_group}");
+    }
+}
+/// E3: without the opt-out a scoped click during a plan opens its Review at once (nothing queues) and writes
+/// nothing; Review's own Export then queues behind the plan as usual.
+#[test]
+fn a_scoped_click_during_a_plan_opens_its_review_at_once() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.replan();
+    assert!(m.full_plan_pending());
+    let k = keys(&m, &["g/a"]);
+    m.export_sets(k, "Export set g/a".into());
+    assert!(m.review.is_some() && !m.export_queued());
+    assert_eq!(
+        m.export_scope().map(|s| s.label.as_str()),
+        Some("Export set g/a")
+    );
+    m.export_from_review();
+    assert!(m.export_queued(), "Review's Export waits for the plan");
+    idle(&mut m);
+    assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/g/b.dds").exists());
 }
 
 /// Note HF10 (final review I6): Export set is off, with the reason, on a set with no files.
@@ -887,7 +989,8 @@ fn the_scope_keys_the_texture_counts_and_lists() {
 fn a_scoped_review_has_no_also_column() {
     use eframe::egui;
     use egui_kittest::kittest::Queryable;
-    let also_column = |m: AppModel| {
+    let also_column = |mut m: AppModel| {
+        m.review.as_mut().unwrap().options_open = true;
         let mut h = egui_kittest::Harness::builder()
             .with_context_setup(|ctx| {
                 sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -1021,6 +1124,9 @@ fn scoped_cup_export(m: &mut AppModel) {
     let cup = id_ending(m, "clutter/cup");
     let k = keys(m, &[&cup]);
     m.export_sets(k, "Export set clutter/cup".into());
+    // E3: a scoped export opens its Review; Review's Export runs the same guards (`export_stopped`).
+    assert!(m.review.is_some(), "a scoped export opens Review");
+    m.export_from_review();
     idle(m);
 }
 
@@ -1058,4 +1164,492 @@ fn a_scoped_export_with_a_tick_never_writes_into_the_source_mod() {
         cup.display()
     );
     assert!(matches!(m.dialog, Some(Dialog::Error(_))), "{:?}", m.dialog);
+}
+
+// ---- Review E1 (Task 15a): with no link and no clear, Export is what it was ----
+
+/// `textures/arch` with no link and no clear: `wall` a PBR set with a height (Parallax), `lacq` a set with both `_cnr`
+/// and `_f`, a borrow chain (`leaf` slot 4 from `stone`, `stone` slot 4 from `wall`), `iron` with a texture-set block
+/// whose statics are Never, and `stone` with a typed `slot5` no set writes.
+fn guard_project(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::cs_pbr::{Kind as CsKind, Statics};
+    let mut m = no_albedo_pair_with(
+        dir,
+        &[
+            ("wall_p.png", [128, 128, 128], Subtype::Height),
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+            ("lacq_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("iron.png", [150, 150, 160], Subtype::PbrAlbedo),
+            ("iron_n.png", [128, 128, 255], Subtype::PbrNormal),
+        ],
+    );
+    for n in ["arch/stone_n.png", "arch/iron_n.png"] {
+        m.decide(n, Answer::Green(GreenConvention::Directx));
+    }
+    idle(&mut m);
+    m.edit_docs("chain", None, true, |_, s| {
+        s.set_borrow("arch/leaf", 4, Some("arch/stone"));
+        s.set_borrow("arch/stone", 4, Some("arch/wall"));
+    });
+    idle(&mut m);
+    m.add_cs_block("arch/iron", CsKind::Txst);
+    m.set_cs_statics("arch/iron", Statics::Never);
+    m.set_json_value(
+        "arch/stone",
+        "slot5",
+        Some(json!(r"textures\cubemaps\shiny_e.dds")),
+    );
+    idle(&mut m);
+    m
+}
+
+/// Captured on the task's base (3c919443).
+const GUARD_BLOCKS: &[&str] = &["arch/lacq: _cnr and _f both use slot 7"];
+
+/// Captured on the task's base (3c919443): `iron` (statics Never) has no entry, `lacq` (excluded) none yet.
+const GUARD_JSON: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/hakasapl/PGPatcher/main/schema/pbr.schema.json",
+  "default": {
+    "emissive": false,
+    "parallax": false,
+    "displacement_scale": 1.0,
+    "specular_level": 0.04,
+    "roughness_scale": 1.0,
+    "subsurface": false
+  },
+  "entries": [
+    {
+      "match1": "arch\\leaf.dds",
+      "parallax": true,
+      "slot1": "textures\\arch\\leaf.dds",
+      "slot2": "textures\\arch\\leaf_n.dds",
+      "slot4": "textures\\pbr\\arch\\stone_p.dds",
+      "slot6": "textures\\arch\\leaf_rmaos.dds"
+    },
+    {
+      "match1": "arch\\stone.dds",
+      "parallax": true,
+      "slot4": "textures\\pbr\\arch\\stone_p.dds",
+      "slot5": "textures\\cubemaps\\shiny_e.dds"
+    },
+    {
+      "match1": "arch\\wall.dds",
+      "parallax": true,
+      "slot4": "textures\\pbr\\arch\\stone_p.dds"
+    }
+  ]
+}
+"#;
+
+/// Task 15a's guard, written first and kept unchanged through the task: on a project with no link and no clear, the
+/// export blocks and the written PGPatcher JSON are what the task's base gave (captured there). The `_cnr` + `_f` set
+/// blocks a whole export, so the JSON is taken from a whole export with that set's group excluded.
+#[test]
+fn with_no_link_and_no_clear_export_blocks_and_writes_what_it_did() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = guard_project(d.path());
+    let blocks: Vec<String> = sdc_gui::model::pbr_export::export_blocks(&m)
+        .iter()
+        .map(|i| i.text.clone())
+        .collect();
+    assert_eq!(blocks, GUARD_BLOCKS);
+    group(&mut m, "Clash", &["arch/lacq"]);
+    m.set_group_excluded("Clash", true).unwrap();
+    idle(&mut m);
+    assert!(
+        sdc_gui::model::pbr_export::export_blocks(&m).is_empty(),
+        "{:?}",
+        sdc_gui::model::pbr_export::export_blocks(&m)
+    );
+    whole(&mut m);
+    assert_eq!(pgp_text(&m), GUARD_JSON, "{}", notes(&m));
+    assert_eq!(
+        notes(&m)
+            .lines()
+            .filter(|l| l.starts_with("not in JSON"))
+            .collect::<Vec<_>>(),
+        ["not in JSON: arch/lacq (not exported yet)"]
+    );
+}
+
+/// Ruling 3b-F12: `textures/arch` with no stored slot command anywhere. `lacq` gets `_cnr` + `_f` and `stone` turns
+/// emissive on with no `_g`, after a first export wrote their files (`lacq_f` was a height then).
+fn no_command_project(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    let mut m = no_albedo_pair_with(
+        dir,
+        &[
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+            ("lacq_f.png", [128, 128, 128], Subtype::Height),
+        ],
+    );
+    m.decide("arch/stone_n.png", Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    m
+}
+
+/// Captured with the same steps on the code before fix round 1 (06035d6c, main's rule for a set with no slot command):
+/// `task-15a-fix2-f12-capture-06035d6c.log`.
+const NO_COMMAND_JSON: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/hakasapl/PGPatcher/main/schema/pbr.schema.json",
+  "default": {
+    "emissive": false,
+    "parallax": false,
+    "displacement_scale": 1.0,
+    "specular_level": 0.04,
+    "roughness_scale": 1.0,
+    "subsurface": false
+  },
+  "entries": [
+    {
+      "match1": "arch\\lacq.dds",
+      "lock_normal": true,
+      "lock_rmaos": true,
+      "multilayer": true,
+      "coat_normal": true,
+      "slot1": "textures\\arch\\lacq.dds",
+      "slot7": "textures\\arch\\lacq_f.dds"
+    },
+    {
+      "match1": "arch\\stone.dds",
+      "emissive": true
+    },
+    {
+      "match1": "arch\\leaf.dds",
+      "slot1": "textures\\arch\\leaf.dds",
+      "slot2": "textures\\arch\\leaf_n.dds",
+      "slot6": "textures\\arch\\leaf_rmaos.dds"
+    },
+    {
+      "match1": "arch\\wall.dds"
+    }
+  ]
+}
+"#;
+
+/// Ruling 3b-F12, the guard's variant: with no slot command anywhere, a set left out of the run is not checked. Its
+/// files are on disk from an earlier export, so its entry is written as main writes it, a slot 7 clash and a feature
+/// with no map included.
+#[test]
+fn with_no_slot_command_an_excluded_set_is_written_as_main_writes_it() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_command_project(d.path());
+    whole(&mut m);
+    m.decide("arch/lacq_f.png", Answer::Subtype(Subtype::PbrFuzz));
+    m.set_json_value("arch/stone", "emissive", Some(json!(true)));
+    idle(&mut m);
+    let blocks = |m: &AppModel| -> Vec<String> {
+        sdc_gui::model::pbr_export::export_blocks(m)
+            .iter()
+            .map(|i| i.text.clone())
+            .collect()
+    };
+    assert_eq!(
+        blocks(&m),
+        [
+            "arch/lacq: _cnr and _f both use slot 7",
+            "arch/stone: emissive is on but the set has no emissive texture (_g)"
+        ],
+        "premise"
+    );
+    group(&mut m, "Bad", &["arch/lacq", "arch/stone"]);
+    m.set_group_excluded("Bad", true).unwrap();
+    idle(&mut m);
+    assert!(blocks(&m).is_empty(), "{:?}", blocks(&m));
+    whole(&mut m);
+    assert_eq!(pgp_text(&m), NO_COMMAND_JSON, "{}", notes(&m));
+    assert!(!notes(&m).contains("not in JSON"), "{}", notes(&m));
+}
+
+// ---- Review E1 (Task 15a, R2): a resolved local link is a dependency exactly as a borrow is ----
+
+/// `no_albedo_pair` with a PBR set `arch/stone` (an albedo and a `_p`, written under its prefix) and a `wall_p`:
+/// `arch/leaf` has no height of its own.
+fn lender_project(dir: &Path) -> AppModel {
+    use engine::config::Subtype;
+    no_albedo_pair_with(
+        dir,
+        &[
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_p.png", [128, 128, 128], Subtype::Height),
+            ("wall_p.png", [100, 100, 100], Subtype::Height),
+        ],
+    )
+}
+
+/// `arch/leaf`'s slot 4 takes `arch/stone`'s height: through a borrow, or through a link to the same file.
+fn leaf_takes_stone(m: &mut AppModel, by_link: bool) {
+    if by_link {
+        let a = MenuAction::SlotLink {
+            set: "arch/leaf".into(),
+            n: 4,
+            item: "arch/stone_p.png".into(),
+        };
+        assert_eq!(m.run_menu(a), None);
+    } else {
+        m.edit_docs("share", None, true, |_, s| {
+            s.set_borrow("arch/leaf", 4, Some("arch/stone"))
+        });
+    }
+    idle(m);
+}
+
+/// Every file under `root`, as `/`-separated paths relative to it, sorted. An unreadable folder or entry fails the
+/// test, naming the folder (ruling 3b-F10: a skipped one would hide a missing file).
+fn files_under(root: &Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let entries = std::fs::read_dir(&d).unwrap_or_else(|e| panic!("{}: {e}", d.display()));
+        for e in entries {
+            let p = e.unwrap_or_else(|e| panic!("{}: {e}", d.display())).path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                let rel = p.strip_prefix(root).unwrap().to_string_lossy();
+                out.push(rel.replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// What a run left: the files under the export folder, `arch/leaf`'s entry in the written JSON, and the "not in JSON"
+/// notes.
+fn what_the_run_left(m: &AppModel) -> (Vec<String>, Option<serde_json::Value>, Vec<String>) {
+    let entry = serde_json::from_str::<serde_json::Value>(&pgp_text(m))
+        .ok()
+        .and_then(|j| {
+            j["entries"]
+                .as_array()?
+                .iter()
+                .find(|e| e["match1"] == r"arch\leaf.dds")
+                .cloned()
+        });
+    let held = notes(m)
+        .lines()
+        .filter(|l| l.starts_with("not in JSON"))
+        .map(String::from)
+        .collect();
+    (files_under(&m.export_root()), entry, held)
+}
+
+/// R2: Export set on the consumer alone, into a fresh folder: a borrow and a link to the same lender file end the same
+/// way (the lender comes in, the same files, the same entry).
+#[test]
+fn a_scoped_export_treats_a_linked_lender_as_a_borrowed_one() {
+    let run = |by_link: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = lender_project(d.path());
+        leaf_takes_stone(&mut m, by_link);
+        let whole = m.export_files();
+        m.export_sets(keys(&m, &["arch/leaf"]), "Export set arch/leaf".into());
+        let n = m.export_files();
+        assert!(n < whole);
+        idle(&mut m);
+        assert_eq!(m.header_answer().files, whole);
+        let writes = m.review_writes();
+        let dds: Vec<_> = writes
+            .outputs
+            .iter()
+            .filter(|o| o.path.extension().is_some_and(|e| e == "dds"))
+            .collect();
+        assert_eq!(dds.len(), n);
+        assert!(dds.iter().any(|o| o.path.ends_with("arch/stone_p.dds")));
+        assert!(!dds.iter().any(|o| o.path.ends_with("arch/wall_p.dds")));
+        m.export_from_review();
+        assert_eq!(m.export.progress(), (0, n));
+        idle(&mut m);
+        assert_eq!(m.export.progress(), (n, n));
+        assert_eq!(m.export.result.as_ref().unwrap().primary.written, n);
+        what_the_run_left(&m)
+    };
+    let (borrowed, linked) = (run(false), run(true));
+    assert!(
+        borrowed.0.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the borrow brings the lender in: {borrowed:?}"
+    );
+    assert!(borrowed.1.is_some(), "premise: {borrowed:?}");
+    assert_eq!(linked, borrowed);
+}
+
+#[test]
+fn linking_a_lender_in_open_scoped_review_refreshes_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    m.export_sets(keys(&m, &["arch/leaf"]), "Export set arch/leaf".into());
+    idle(&mut m);
+    let lender = |m: &AppModel| {
+        m.review_writes()
+            .outputs
+            .iter()
+            .any(|o| o.path.ends_with("arch/stone_p.dds"))
+    };
+    assert!(!lender(&m));
+    leaf_takes_stone(&mut m, true);
+    assert!(lender(&m), "the open Review omitted the linked lender");
+    assert!(m.review_gate().is_ok());
+}
+
+/// R2: a lender left out of the run on purpose (an excluded group) and never exported: the entry is held with the same
+/// note whether it borrows or links the lender's file.
+#[test]
+fn an_excluded_linked_lender_holds_the_entry_as_a_borrowed_one_does() {
+    let run = |by_link: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = lender_project(d.path());
+        leaf_takes_stone(&mut m, by_link);
+        group(&mut m, "Lender", &["arch/stone"]);
+        m.set_group_excluded("Lender", true).unwrap();
+        whole(&mut m);
+        what_the_run_left(&m)
+    };
+    let (borrowed, linked) = (run(false), run(true));
+    assert!(
+        borrowed
+            .2
+            .contains(&"not in JSON: arch/leaf (not exported yet)".to_string()),
+        "premise: {borrowed:?}"
+    );
+    assert!(
+        linked.1.is_none(),
+        "the held consumer reached disk: {linked:?}"
+    );
+    assert!(
+        !linked.0.iter().any(|f| f.ends_with("stone_p.dds")),
+        "{linked:?}"
+    );
+    assert_eq!(linked, borrowed);
+}
+
+fn excluded_unicode_lender(by_link: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    m.set_json_value("arch/stone", "rename", Some(json!(r"textures\İ\stone")));
+    idle(&mut m);
+    leaf_takes_stone(&mut m, by_link);
+    whole(&mut m);
+    let slot = what_the_run_left(&m).1.unwrap()["slot4"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let actual = out(&m, &slot.replace('\\', "/"));
+    assert!(slot.contains('İ') && actual.is_file(), "{slot}");
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    let folded = out(&m, &slot.to_lowercase().replace('\\', "/"));
+    std::fs::create_dir_all(folded.parent().unwrap()).unwrap();
+    std::fs::rename(&actual, &folded).unwrap();
+    whole(&mut m);
+    let (_, entry, held) = what_the_run_left(&m);
+    assert!(entry.is_none(), "the combining-dot DDS admitted {entry:?}");
+    assert!(held.contains(&"not in JSON: arch/leaf (not exported yet)".to_owned()));
+    std::fs::rename(folded, actual).unwrap();
+    whole(&mut m);
+    assert_eq!(what_the_run_left(&m).1.unwrap()["slot4"], json!(slot));
+}
+
+#[test]
+fn an_excluded_unicode_lenders_link_checks_the_written_path() {
+    excluded_unicode_lender(true);
+}
+
+#[test]
+fn an_excluded_unicode_lenders_borrow_checks_the_written_path() {
+    excluded_unicode_lender(false);
+}
+
+/// R2: a borrow under a link is not in the JSON, so it is no dependency of the entry: a never-exported excluded lender
+/// of that borrow holds nothing.
+#[test]
+fn a_borrow_under_a_link_is_no_dependency() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    leaf_takes_stone(&mut m, false);
+    let a = MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 4,
+        item: "arch/wall_p.png".into(),
+    };
+    assert_eq!(m.run_menu(a), None);
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    whole(&mut m);
+    let (files, entry, held) = what_the_run_left(&m);
+    assert!(!held.iter().any(|l| l.contains("arch/leaf")), "{held:?}");
+    assert!(
+        !files.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the lender was left out: {files:?}"
+    );
+    assert!(entry.is_some(), "{}", notes(&m));
+}
+
+// ---- Task 15a fix round 1 (ruling 3b-F7): an entry left out of the run passes the run's own checks ----
+
+/// 3b-F7: an entry left out of the run that the run's own checks would refuse (Parallax on with its height cleared) is
+/// held with the "not in JSON" note naming why, and the selected sets still export.
+#[test]
+fn an_entry_left_out_of_the_run_is_held_when_its_own_checks_refuse_it() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_p.png", [128, 128, 128], Subtype::Height)],
+    );
+    m.set_json_value("arch/leaf", "parallax", Some(json!(true)));
+    whole(&mut m);
+    assert!(
+        what_the_run_left(&m).1.is_some(),
+        "premise: the entry is written while it has its height: {}",
+        notes(&m)
+    );
+    m.set_json_value("arch/leaf", "slot4", Some(json!("")));
+    group(&mut m, "Leaf", &["arch/leaf"]);
+    m.set_group_excluded("Leaf", true).unwrap();
+    idle(&mut m);
+    assert!(
+        sdc_gui::model::pbr_export::export_blocks(&m).is_empty(),
+        "an entry outside the run blocks nothing: {:?}",
+        sdc_gui::model::pbr_export::export_blocks(&m)
+    );
+    whole(&mut m);
+    let (_, entry, held) = what_the_run_left(&m);
+    assert_eq!(
+        held,
+        ["not in JSON: arch/leaf (parallax is on but the set has no height texture (_p))"],
+        "{}",
+        notes(&m)
+    );
+    assert!(entry.is_none(), "{entry:?}");
+    assert!(
+        pgp_text(&m).contains(r"arch\\wall.dds"),
+        "the run's own set is written"
+    );
+}
+
+/// 3b-F7 (pin): an entry's dependencies are the local files its slots name, for a clear as for a link, so a clear over
+/// a borrow from a never-exported set left out of the run lets the entry in.
+#[test]
+fn a_clear_over_a_never_exported_borrow_lets_the_entry_in() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    leaf_takes_stone(&mut m, false);
+    m.set_json_value("arch/leaf", "slot4", Some(json!("")));
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    whole(&mut m);
+    let (files, entry, held) = what_the_run_left(&m);
+    assert!(
+        !files.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the lender was left out: {files:?}"
+    );
+    assert!(!held.iter().any(|l| l.contains("arch/leaf")), "{held:?}");
+    assert_eq!(entry.expect("the entry is written")["slot4"], json!(""));
 }

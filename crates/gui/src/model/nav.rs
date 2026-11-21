@@ -21,7 +21,7 @@ pub struct Nav {
     pub cursor: Option<String>,
     /// A texture or set to scroll into view in its column on the next frame.
     pub reveal_item: Option<String>,
-    pub reveal_set: Option<String>,
+    pub reveal_set: Option<super::SetTarget>,
     /// Review E10: Go to set's slot or file, for the set editor to scroll to and outline when it next draws that set.
     pub reveal_slot: Option<RevealSlot>,
     /// The F1 shortcut sheet is open.
@@ -44,7 +44,7 @@ pub enum SlotTarget {
 /// Review E10: a Go to set waiting for the set editor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevealSlot {
-    pub set_key: String,
+    pub set: super::SetTarget,
     pub target: SlotTarget,
 }
 
@@ -199,7 +199,7 @@ impl AppModel {
             }
             Pick::Set(k) => {
                 self.click_set(k, false, false);
-                self.nav.reveal_set = Some(k.clone());
+                self.nav.reveal_set = Some(super::SetTarget::Key(k.clone()));
             }
         }
     }

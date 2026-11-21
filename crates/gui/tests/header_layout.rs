@@ -7,7 +7,7 @@ use egui_kittest::Harness;
 use sdc_gui::model::meshes::MeshesModel;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::MeshesSettings;
-use sdc_gui::ui::header::elide_middle;
+use sdc_gui::ui::header::{elide_middle, readable_path};
 use sdc_gui::ui::State;
 use support::*;
 
@@ -15,18 +15,77 @@ type H = Harness<'static, (AppModel, State, MeshesModel)>;
 
 const WIDTHS: [f32; 4] = [1440.0, 1024.0, 800.0, 640.0];
 
-/// The controls every Textures header must show (plus "Export to: …", matched by its start, and Undo / Redo, found by
-/// `header_undo`).
-/// Found by role and name: egui 0.37 names the Preset combo like the "Preset" Label beside it.
-const CONTROLS: [(Role, &str); 7] = [
+/// Fixed, exactly named controls. The export action, path and history buttons have dynamic names.
+const CONTROLS: [(Role, &str); 5] = [
     (Role::Button, "Open"),
-    (Role::Button, "MO2…"),
-    (Role::ComboBox, "Preset"),
     (Role::Button, "Textures view"),
     (Role::Button, "Meshes view"),
     (Role::Button, "Settings…"),
     (Role::Button, "Save"),
 ];
+
+const MORE: &str = "More header items";
+const LONG_DESTINATION: &str = r"C:\Users\runneradmin\AppData\Local\Temp\a rather long folder name number 0\a rather long folder name number 1\mods\Landscape textures at full resolution";
+
+fn reachable_controls(h: &mut H, w: f32) {
+    let panel = outer(h, "header");
+    for (role, label) in CONTROLS {
+        let r = widget(h, role, label).rect();
+        assert!(
+            panel.contains_rect(r) && r.right() <= w,
+            "{label} at {w}: {r:?}"
+        );
+    }
+    let export = h.state().0.export_text(&h.state().0.header_answer());
+    for r in [
+        header_undo(h, "Undo").rect(),
+        header_undo(h, "Redo").rect(),
+        h.get_by_label_contains("Export to: ").rect(),
+        widget(h, Role::Button, &export).rect(),
+    ] {
+        assert!(panel.contains_rect(r) && r.right() <= w, "at {w}: {r:?}");
+    }
+    if w == 640.0 {
+        let save = h.get_by_label("Save").rect();
+        let chip = h.get_by_label_contains("Export to: ").rect();
+        assert!(save.top() > h.get_by_label("Open").rect().bottom());
+        assert!(
+            chip.y_range().contains(save.center().y),
+            "{chip:?} vs {save:?}"
+        );
+    }
+    let mut moved = Vec::new();
+    for (role, label) in [
+        (Role::Button, "Tools"),
+        (Role::Button, "MO2…"),
+        (Role::ComboBox, "Preset"),
+    ] {
+        if let Some(n) = h.query_by_role_and_label(role, label) {
+            assert!(
+                panel.contains_rect(n.rect()) && n.rect().right() <= w,
+                "{label} at {w}"
+            );
+        } else {
+            moved.push(label);
+        }
+    }
+    if !moved.is_empty() {
+        let more = h.get_by_label(MORE);
+        assert_eq!(
+            more.accesskit_node().description().as_deref(),
+            Some("Show more header controls")
+        );
+        assert!(panel.contains_rect(more.rect()) && more.rect().right() <= w);
+        more.click();
+        h.run_steps(3);
+        for label in moved {
+            let r = h.get_by_role_and_label(Role::Button, label).rect();
+            assert!(r.left() >= 0.0 && r.right() <= w, "{label} at {w}: {r:?}");
+        }
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+    }
+}
 
 fn harness(m: AppModel, w: f32, meshes_view: bool) -> H {
     harness_sized(m, egui::vec2(w, 800.0), meshes_view)
@@ -95,14 +154,12 @@ fn assert_no_overlap(h: &H, id: &str, w: f32) {
 fn the_textures_header_never_overlaps() {
     let d = tempfile::tempdir().unwrap();
     for w in WIDTHS {
-        let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
+        let mut h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         assert_no_overlap(&h, "header", w);
         // Note AM: an idle scan row is not drawn (the source moved to MO2…).
         assert!(!panel_never_built(&h.ctx, "header"));
         assert!(panel_never_built(&h.ctx, "textures-scan"));
-        for (role, c) in CONTROLS {
-            widget(&h, role, c);
-        }
+        reachable_controls(&mut h, w);
         header_undo(&h, "Undo");
         header_undo(&h, "Redo");
         // Note FB1: Export reads "Review n files" until the project is clean.
@@ -139,6 +196,35 @@ fn elide_middle_keeps_the_drive_and_the_tail() {
     assert_eq!(elide_middle(r"C:\a\VeryLongFolderName", 10), "…olderName");
 }
 
+#[test]
+fn readable_path_keeps_the_drive_and_the_last_folder() {
+    for (path, expected) in [
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\mods\Landscape textures at full resolution",
+            r"C:\…\Landscape textures at full resolution",
+        ),
+        (
+            r"C:\Users\Modder\AppData\Local\Temp\mods\My Mod",
+            r"C:\…\My Mod",
+        ),
+        (r"C:\export", r"C:\export"),
+        (r"C:\a\b", r"C:\…\b"),
+        (r"C:\é\b", r"C:\…\b"),
+        (r"C:\ab\b", r"C:\…\b"),
+        (r"D:\Mods\StoneWork\sdc-out", r"D:\…\sdc-out"),
+        ("C:/Users/Modder/mods/My Mod", "C:/…/My Mod"),
+        (
+            r"C:\Mods\Landscape textures at full resolution\",
+            r"C:\…\Landscape textures at full resolution",
+        ),
+        (r"C:\", r"C:\"),
+    ] {
+        let readable = readable_path(path);
+        assert_eq!(readable, expected, "{path}");
+        assert_eq!(readable_path(&readable), readable, "{path}");
+    }
+}
+
 /// A4 (K2): one row: every control's rect holds Open's centre line, and they run left to right in the spec's order.
 #[test]
 fn the_header_is_one_row_in_the_spec_order() {
@@ -147,22 +233,655 @@ fn the_header_is_one_row_in_the_spec_order() {
     assert_one_row_in_the_spec_order(&h);
 }
 
-/// Note CD2: the header is one row at 1280 pt (measured after Note FI16 took Mode out and FI5 fixed the Undo slot
-/// width). Note JI1's Settings… is narrower than the two column eyes it replaced: one row from 1210 pt (measured in
-/// 1 pt steps; 1209 wraps), pinned with 5 pt of slack each side; narrower, Save wraps onto the second line.
+/// Note CD2: the fixed controls stay on one row.
 #[test]
 fn the_header_is_one_row_from_1280() {
     let d = tempfile::tempdir().unwrap();
-    for (w, one_row) in [(1280.0, true), (1215.0, true), (1205.0, false)] {
+    for w in [1280.0, 1215.0, 1055.0] {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         let open = h.get_by_label("Open").rect().center().y;
         let save = h.get_by_label("Save").rect();
-        assert_eq!(
+        assert!(
             save.min.y <= open && open <= save.max.y,
-            one_row,
             "at {w}: Save {save:?}, Open's centre at y {open}"
         );
     }
+}
+
+#[test]
+fn the_header_is_one_row_at_1055_1100_and_1280_in_both_views() {
+    for meshes in [false, true] {
+        for w in [1055.0, 1100.0, 1280.0] {
+            let d = tempfile::tempdir().unwrap();
+            let h = harness(opened(d.path()), w, meshes);
+            assert_header_row(&h, w, meshes, true);
+        }
+    }
+}
+
+#[test]
+fn the_1055_header_fits_long_fields_pending_nif_edits_and_launch() {
+    let d = tempfile::tempdir().unwrap();
+    for meshes in [false, true] {
+        let mut m = opened(d.path());
+        let preset = "High resolution landscape and architecture ".repeat(4);
+        m.set_preset(Some(preset.clone()));
+        choose_export(
+            &mut m,
+            d.path()
+                .join("Long destination for a texture overhaul")
+                .join("Landscape textures at full resolution"),
+        );
+        m.set_nif_review_rows(vec![nif_row(r"meshes\landscape\rock.nif", None)]);
+        assert_eq!(m.project_preset(), Some(preset));
+        let mut h = harness(m, 1055.0, meshes);
+        if meshes {
+            let step = "Change the shader type on the mountain cliff shape";
+            let target = sdc_gui::ui::meshes::UndoTarget {
+                can_undo: true,
+                can_redo: false,
+                undo_label: Some(step.into()),
+                redo_label: None,
+            };
+            h.ctx
+                .data_mut(|d| d.insert_temp(egui::Id::unique("nif-undo-target"), Some(target)));
+            h.run_steps(1);
+            h.get_by_label(&format!("Undo (NIF edit history): {step}"));
+        }
+        assert_eq!(h.state().0.nif_review_rows().len(), 1);
+        h.get_by_label(MORE);
+        assert_header_row(&h, 1055.0, meshes, true);
+
+        let empty = AppModel::new(Default::default(), None, session());
+        let h = harness(empty, 1055.0, meshes);
+        assert!(h.query_by_label(MORE).is_none());
+        assert_header_row(&h, 1055.0, meshes, false);
+    }
+}
+
+fn assert_header_row(h: &H, w: f32, meshes: bool, project: bool) {
+    let panel = outer(h, "header");
+    let y = h.get_by_label("Open").rect().center().y;
+    assert_eq!(h.state().0.root.is_some(), project);
+    let mut rects: Vec<_> = CONTROLS
+        .iter()
+        .filter(|(_, name)| project || *name != "Save")
+        .map(|&(role, name)| (name, widget(h, role, name).rect()))
+        .collect();
+    if project || (meshes && !h.state().0.nif_review_rows().is_empty()) {
+        let export = h.state().0.export_text(&h.state().0.header_answer());
+        rects.extend([
+            ("Undo", header_undo(h, "Undo").rect()),
+            ("Redo", header_undo(h, "Redo").rect()),
+            ("Export", widget(h, Role::Button, &export).rect()),
+        ]);
+    }
+    let dest = if project {
+        h.get_by_label_contains("Export to: ")
+    } else {
+        h.get_by_label("More export options")
+    };
+    rects.push(("Export to", dest.rect()));
+    let mut moved = false;
+    for (role, name) in [
+        (Role::Button, "Tools"),
+        (Role::Button, "MO2…"),
+        (Role::ComboBox, "Preset"),
+    ] {
+        if let Some(node) = h.query_by_role_and_label(role, name) {
+            rects.push((name, node.rect()));
+        } else if project || name != "Tools" {
+            moved = true;
+        }
+    }
+    if moved {
+        rects.push((MORE, h.get_by_label(MORE).rect()));
+    } else {
+        assert!(h.query_by_label(MORE).is_none());
+    }
+    for (_, r) in &rects {
+        assert!(
+            panel.contains_rect(*r) && r.right() <= w && (r.center().y - y).abs() < 1.0,
+            "{w} px, meshes {meshes}, {panel:?}: {rects:?}"
+        );
+    }
+    let rows: std::collections::BTreeSet<_> = widgets(h, "header")
+        .iter()
+        .map(|(_, _, r)| r.center().y.round() as i32)
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "{w} px, meshes {meshes}: {:?}",
+        widgets(h, "header")
+    );
+    assert_no_overlap(h, "header", w);
+}
+
+#[test]
+fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves() {
+    let d = tempfile::tempdir().unwrap();
+    let chip_width = |h: &H| h.get_by_label_contains("Export to: ").rect().width();
+    let floor = chip_width(&harness_with_destination(
+        d.path(),
+        r"C:\…\Landscape textures at full resolution",
+        2400.0,
+        false,
+    ));
+    let mut h = harness_with_destination(d.path(), LONG_DESTINATION, 2400.0, false);
+    let full = chip_width(&h);
+    let resize = |h: &mut H, w| {
+        h.set_size(egui::vec2(w as f32, 800.0));
+        h.run_steps(3);
+    };
+    let widths = (900..=2400).rev().step_by(20);
+    let mut first_more = None;
+    let mut smallest_with_optional = full;
+    let mut cut_before_move = false;
+    let mut cut_after_all_moved = false;
+    for w in widths.clone() {
+        resize(&mut h, w);
+        let chip = chip_width(&h);
+        let more = h.query_by_label(MORE).is_some();
+        if more {
+            first_more.get_or_insert(w);
+        } else {
+            cut_before_move |= chip < full - 1.0;
+        }
+        if h.query_by_role_and_label(Role::Button, "MO2…").is_some()
+            || h.query_by_role_and_label(Role::ComboBox, "Preset")
+                .is_some()
+        {
+            smallest_with_optional = smallest_with_optional.min(chip);
+        } else if more && h.query_by_role_and_label(Role::Button, "Tools").is_none() {
+            cut_after_all_moved |= chip < floor - 1.0;
+        }
+    }
+
+    let first_more = first_more.expect("the sweep reaches overflow");
+    let w0 = (first_more + 1..=2400)
+        .find(|&w| {
+            resize(&mut h, w);
+            h.query_by_label(MORE).is_none()
+        })
+        .expect("the wide header fits all controls");
+    let chip = chip_width(&h);
+    assert!(
+        (floor - 0.5..=floor + 12.0).contains(&chip),
+        "at w0 {w0}: chip {chip}, floor {floor}, full {full}"
+    );
+    resize(&mut h, w0 - 1);
+    h.get_by_label(MORE);
+    assert!(h.query_by_role_and_label(Role::Button, "Tools").is_none());
+    h.get_by_role_and_label(Role::Button, "MO2…");
+    h.get_by_role_and_label(Role::ComboBox, "Preset");
+    assert!(
+        smallest_with_optional >= floor - 0.5,
+        "chip {smallest_with_optional}, floor {floor}"
+    );
+    assert!(cut_before_move, "the path shortened before overflow");
+    assert!(
+        cut_after_all_moved,
+        "the path shrank below its readable form"
+    );
+
+    for w in widths.chain([1055, 640]) {
+        resize(&mut h, w);
+        let open = h.get_by_label("Open").rect();
+        let chip = h.get_by_label_contains("Export to: ").rect();
+        if w >= 1055 || chip.y_range().contains(open.center().y) {
+            assert_header_row(&h, w as f32, false, true);
+        } else {
+            let save = h.get_by_label("Save").rect();
+            let export = h.get_by_label(&header_export_label(&h)).rect();
+            let panel = outer(&h, "header");
+            assert!(
+                [chip, save, export]
+                    .into_iter()
+                    .all(|r| panel.contains_rect(r) && r.right() <= w as f32),
+                "at {w}: wrapped chip {chip:?}, Save {save:?}, Export {export:?}, header {panel:?}"
+            );
+            for r in [chip, save, export] {
+                assert!(
+                    r.top() > open.bottom() && (r.center().y - chip.center().y).abs() < 1.0,
+                    "at {w}: Open {open:?}, chip {chip:?}, Save {save:?}, Export {export:?}"
+                );
+            }
+            assert_no_overlap(&h, "header", w as f32);
+        }
+    }
+}
+
+fn harness_with_destination(dir: &std::path::Path, path: &str, w: f32, meshes: bool) -> H {
+    let mut m = opened(dir);
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_export_folder(path.as_ref());
+    harness(m, w, meshes)
+}
+
+/// Find the first whole-pixel viewport width at which the reference header fits.
+fn first_fit(h: &mut H, fits: impl Fn(&H) -> bool) -> f32 {
+    let (mut low, mut high) = (640, 1600);
+    h.set_size(egui::vec2(low as f32, 800.0)).run_steps(3);
+    assert!(!fits(h), "header already fits at {low}");
+    h.set_size(egui::vec2(high as f32, 800.0)).run_steps(3);
+    assert!(fits(h), "header still does not fit at {high}");
+    while high - low > 1 {
+        let mid = (low + high) / 2;
+        h.set_size(egui::vec2(mid as f32, 800.0)).run_steps(3);
+        if fits(h) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    high as f32
+}
+
+fn tools_on_row(h: &H) -> bool {
+    h.query_by_role_and_label(Role::Button, "Tools").is_some()
+}
+
+fn painted_chip(h: &H) -> String {
+    let rect = h.get_by_label_contains("Export to: ").rect();
+    assert!(!painted_elided(h, rect));
+    painted_in(h, rect)
+}
+
+#[test]
+fn one_letter_folder_keeps_tools_when_the_cut_path_fits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\b", 1600.0, false);
+    let w = first_fit(&mut reference, tools_on_row);
+    let h = harness_with_destination(d.path(), r"C:\W\b", w, false);
+    assert!(tools_on_row(&h), "Tools moved while C:\\…\\b fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\b ▾");
+}
+
+#[test]
+fn short_leaf_keeps_tools_at_the_drive_and_leaf_boundary() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\x", 1600.0, false);
+    let w = first_fit(&mut reference, tools_on_row);
+    let h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", w, false);
+    assert!(tools_on_row(&h), "Tools moved while C:\\…\\x fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\x ▾");
+    assert_header_row(&h, w, false, true);
+}
+
+#[test]
+fn short_leaf_wraps_only_when_the_drive_and_leaf_no_longer_fit() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\x", 1600.0, false);
+    let one_row = |h: &H| {
+        h.get_by_label("Save")
+            .rect()
+            .y_range()
+            .contains(h.get_by_label("Open").rect().center().y)
+    };
+    let w = first_fit(&mut reference, one_row);
+    let mut h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", w, false);
+    assert!(one_row(&h), "export end wrapped while C:\\…\\x fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\x ▾");
+    assert_header_row(&h, w, false, true);
+    h.set_size(egui::vec2(w - 1.0, 800.0)).run_steps(3);
+    assert!(!one_row(&h));
+}
+
+#[test]
+fn tools_stays_when_the_full_path_is_narrower_than_the_readable_form() {
+    let d = tempfile::tempdir().unwrap();
+    let full = r"C:\ii\Landscape textures at full resolution";
+    let mut reference = harness_with_destination(
+        d.path(),
+        r"C:\…\Landscape textures at full resolution",
+        1600.0,
+        false,
+    );
+    let mut h = harness_with_destination(d.path(), full, 1600.0, false);
+    let width = |h: &H| h.get_by_label_contains("Export to: ").rect().width();
+    let saved = (width(&reference) - width(&h)).floor();
+    assert!(saved >= 1.0, "the full path must save at least one pixel");
+    let w = first_fit(&mut reference, tools_on_row) - saved;
+    h.set_size(egui::vec2(w, 800.0)).run_steps(3);
+    assert!(
+        tools_on_row(&h),
+        "Tools moved while the full path fits at {w}"
+    );
+    assert_eq!(painted_chip(&h), format!("Export to: {full} ▾"));
+    assert_header_row(&h, w, false, true);
+}
+
+#[test]
+fn the_first_resize_frame_matches_the_settled_header_in_both_directions() {
+    let d = tempfile::tempdir().unwrap();
+    for path in [LONG_DESTINATION, r"C:\Users\Modder\mods\x"] {
+        let mut h = harness_with_destination(d.path(), path, 1600.0, false);
+        let w = first_fit(&mut h, tools_on_row);
+        h.set_size(egui::vec2(w, 800.0)).run_steps(3);
+        for (width, tools_visible) in [(w - 1.0, false), (w, true)] {
+            h.set_size(egui::vec2(width, 800.0)).step();
+            let first = (widgets(&h, "header"), painted_chip(&h));
+            h.run_steps(3);
+            assert_eq!(tools_on_row(&h), tools_visible, "{path} at {width}");
+            assert_eq!(
+                first,
+                (widgets(&h, "header"), painted_chip(&h)),
+                "{path} at {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_cut_destination_trims_the_painted_separator_but_keeps_it_on_hover() {
+    let d = tempfile::tempdir().unwrap();
+    let path = r"C:\Users\Modder\long parent folder for a texture overhaul\mods\My Mod\";
+    let mut h = harness_with_destination(d.path(), path, 1280.0, false);
+    let text = painted_chip(&h);
+    assert!(text.contains('…') && text.ends_with(r"\My Mod ▾"), "{text}");
+    h.get_by_role_and_label(Role::Button, &format!("Export to: {path}"))
+        .hover();
+    h.run();
+    h.get_by_label(path);
+}
+
+#[test]
+fn a_long_export_path_keeps_tools_mo2_and_preset_at_1440_and_1600() {
+    let d = tempfile::tempdir().unwrap();
+    let mut path = String::from(r"C:\Users\runneradmin\AppData\Local\Temp\");
+    for i in 0..4 {
+        path.push_str(&format!(r"a rather long folder name number {i}\"));
+    }
+    path.push_str("export");
+    for (w, meshes) in [
+        (1440.0, false),
+        (1600.0, false),
+        (1600.0, true),
+        (1440.0, true),
+        (1055.0, false),
+        (1055.0, true),
+    ] {
+        let h = harness_with_destination(d.path(), &path, w, meshes);
+        if w >= 1600.0 || (w == 1440.0 && !meshes) {
+            for (role, name) in [
+                (Role::Button, "Tools"),
+                (Role::Button, "MO2…"),
+                (Role::ComboBox, "Preset"),
+            ] {
+                assert!(
+                    h.query_by_role_and_label(role, name).is_some(),
+                    "{name} missing at {w} px, meshes {meshes}"
+                );
+            }
+            assert!(h.query_by_label(MORE).is_none());
+        }
+        assert_header_row(&h, w, meshes, true);
+        let chip = h.get_by_label(&format!("Export to: {path}")).rect();
+        assert!(chip.right() <= h.get_by_label("Save").rect().left());
+    }
+}
+
+#[test]
+fn no_more_button_when_nothing_moved() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(opened(d.path()), 1600.0, false);
+    assert_eq!(h.query_all_by_label(MORE).count(), 0);
+}
+
+#[test]
+fn overflow_moves_tools_first_then_mo2_then_preset() {
+    use sdc_gui::ui::header::{overflow, HeaderWidths, Overflow};
+    let mut w = HeaderWidths {
+        fixed: 900.0,
+        tools: 70.0,
+        mo2: 60.0,
+        preset: 180.0,
+        more: 30.0,
+    };
+    for (avail, tools, mo2, preset) in [
+        (1300.0, false, false, false),
+        (1210.0, false, false, false),
+        (1170.0, true, false, false),
+        (1150.0, true, true, false),
+        (1000.0, true, true, true),
+    ] {
+        assert_eq!(
+            overflow(avail, &w),
+            Overflow { tools, mo2, preset },
+            "at {avail}"
+        );
+    }
+    w.tools = 0.0;
+    w.mo2 = 0.0;
+    assert_eq!(
+        overflow(1000.0, &w),
+        Overflow {
+            tools: false,
+            mo2: false,
+            preset: true
+        }
+    );
+}
+
+#[test]
+fn undo_is_sized_to_its_label_in_the_textures_view() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(opened(d.path()), 1600.0, false);
+    let undo = header_undo(&h, "Undo").rect();
+    assert!(undo.width() < 80.0, "{}", undo.width());
+    assert_eq!(header_undo(&h, "Redo").rect().width(), undo.width());
+}
+
+fn open_moved_item(h: &mut H, label: &str) {
+    assert!(
+        h.query_by_label(MORE).is_some(),
+        "{label} needs the overflow menu at 800 px"
+    );
+    h.get_by_label(MORE).click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, label).click();
+    h.run_steps(3);
+}
+
+#[test]
+fn overflow_tools_can_change_reencode() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "Tools");
+    h.get_by_label("Re-encode every output").click();
+    h.run_steps(3);
+    assert!(h.state().0.reencode_all);
+}
+
+#[test]
+fn overflow_mo2_opens_before_an_instance_is_chosen() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "MO2…");
+    h.get_by_label("Instance: none");
+    h.get_by_label("Scan a folder…");
+}
+
+#[test]
+fn overflow_preset_can_select_an_installed_preset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    open_moved_item(&mut h, "Preset");
+    pick_installed_preset(&mut h);
+}
+
+#[test]
+fn picking_the_current_preset_closes_both_pickers() {
+    for requested in [false, true] {
+        for use_default in [true, false] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = opened(d.path());
+            let current = if use_default {
+                None
+            } else {
+                Some(m.preset_choices()[0].clone())
+            };
+            m.set_preset(current.clone());
+            let label = current.clone().unwrap_or_else(|| {
+                format!(
+                    "{} · default",
+                    engine::presets::default_preset_for(m.target)
+                )
+            });
+            let mut h = harness(m, 800.0, false);
+            if requested {
+                h.state_mut().0.choose_preset = Some(h.ctx.cumulative_pass_nr());
+                h.run_steps(4);
+            } else {
+                open_moved_item(&mut h, "Preset");
+            }
+            let current_row = h.get_by_role_and_label(Role::Button, &label);
+            assert_eq!(
+                current_row.accesskit_node().toggled(),
+                Some(egui::accesskit::Toggled::True),
+                "the current preset {label} is selected"
+            );
+            current_row.click();
+            h.run_steps(4);
+            assert!(
+                h.query_by_role_and_label(Role::Button, &label).is_none(),
+                "clicking {label} left the preset picker open, requested={requested}"
+            );
+            assert_eq!(h.state().0.project_preset(), current);
+        }
+    }
+}
+
+#[test]
+fn short_preset_popups_reach_the_last_choice_and_editor() {
+    for requested in [false, true] {
+        for editor in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = opened(d.path());
+            let dir = d.path().join("presets");
+            std::fs::create_dir(&dir).unwrap();
+            for n in 0..32 {
+                let id = format!("user-{n:02}");
+                let base = engine::presets::default_preset_for(m.target);
+                std::fs::write(
+                    dir.join(format!("{id}.toml")),
+                    format!(
+                    "schema_version = 1\nid = \"{id}\"\nversion = \"1.0.0\"\nbase = \"{base}\"\n"
+                ),
+                )
+                .unwrap();
+            }
+            m.user_presets = Some(dir);
+            let choices = m.preset_choices();
+            assert!(choices.len() >= 32);
+            let last = choices.last().unwrap();
+            let mut h = harness_sized(m, egui::vec2(800.0, 320.0), false);
+            if requested {
+                h.state_mut().0.choose_preset = Some(h.ctx.cumulative_pass_nr());
+                h.run_steps(4);
+            } else {
+                open_moved_item(&mut h, "Preset");
+            }
+            let label = if editor { "Presets…" } else { last };
+            h.get_by_role_and_label(Role::Button, &choices[0]).hover();
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1600.0),
+                source: egui::MouseWheelSource::Wheel,
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(45);
+            let row = h.query_by_role_and_label(Role::Button, label);
+            assert!(
+                row.as_ref()
+                    .is_some_and(|r| h.ctx.content_rect().contains_rect(r.rect())),
+                "{label} outside the short popup, requested={requested}: {:?}",
+                row.map(|r| r.rect())
+            );
+            h.get_by_role_and_label(Role::Button, label).click();
+            h.run_steps(4);
+            if editor {
+                assert!(h.state().0.presets_open);
+            } else {
+                assert_eq!(h.state().0.project_preset().as_ref(), Some(last));
+            }
+        }
+    }
+}
+
+#[test]
+fn keyboard_more_reaches_mo2_and_selects_a_preset() {
+    use egui::Key;
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), 800.0, false);
+    let choice = h.state_mut().0.preset_choices()[0].clone();
+    assert_ne!(h.state().0.project_preset().as_ref(), Some(&choice));
+    let press = |h: &mut H, key| {
+        h.key_press(key);
+        h.run_steps(3);
+    };
+    for _ in 0..12 {
+        if h.get_by_label(MORE).is_focused() {
+            break;
+        }
+        press(&mut h, Key::Tab);
+    }
+    assert!(h.get_by_label(MORE).is_focused());
+    press(&mut h, Key::Enter);
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("Tools").is_focused());
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("MO2…").is_focused());
+    press(&mut h, Key::ArrowRight);
+    let scan = h.query_by_role_and_label(Role::Button, "Scan");
+    assert!(
+        scan.is_some_and(|n| n.accesskit_node().is_disabled()),
+        "Scan is disabled before choosing an instance"
+    );
+    press(&mut h, Key::ArrowLeft);
+    assert!(h.get_by_label("MO2…").is_focused());
+    press(&mut h, Key::ArrowDown);
+    assert!(h.get_by_label("Preset").is_focused());
+    press(&mut h, Key::ArrowRight);
+    for _ in 0..3 {
+        if h.get_by_role_and_label(Role::Button, &choice).is_focused() {
+            break;
+        }
+        press(&mut h, Key::ArrowDown);
+    }
+    assert!(h.get_by_role_and_label(Role::Button, &choice).is_focused());
+    press(&mut h, Key::Enter);
+    assert_eq!(h.state().0.project_preset(), Some(choice));
+}
+
+fn pick_installed_preset(h: &mut H) {
+    let id = h.state_mut().0.preset_choices()[0].clone();
+    h.get_by_role_and_label(Role::Button, &id).click();
+    h.run_steps(3);
+    assert_eq!(h.state().0.project_preset(), Some(id));
+}
+
+#[test]
+fn choose_preset_from_review_reaches_the_overflow_presets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_preset(Some("missing".into()));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.open_review();
+    let mut h = harness(m, 800.0, false);
+    assert!(h
+        .query_by_role_and_label(Role::ComboBox, "Preset")
+        .is_none());
+    h.get_by_role_and_label(Role::Button, "Choose preset…")
+        .click();
+    h.run_steps(4);
+    pick_installed_preset(&mut h);
+    assert!(h.state().0.choose_preset.is_none());
 }
 
 /// The assertions of `the_header_is_one_row_in_the_spec_order`, on a 1600 px harness (P20: shared, not restated).
@@ -172,6 +891,7 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         ("Undo", header_undo(h, "Undo").rect()),
         ("Redo", header_undo(h, "Redo").rect()),
         ("Preset", widget(h, Role::ComboBox, "Preset").rect()),
+        ("Tools", h.get_by_label("Tools").rect()),
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
         ("Settings…", h.get_by_label("Settings…").rect()),
@@ -329,8 +1049,7 @@ fn the_export_chip_holds_at_three_widths() {
     }
 }
 
-/// Note FI16 (owner O7): the Mode control left the header for the Presets tab; the Preset menu stays. Plus the plan's
-/// capture check as a test: at 1100, 1280 and 1600 px nothing overlaps and MO2… stands in the row.
+/// Note FI16: Mode is in Settings. Preset and MO2… stay reachable at every width.
 #[test]
 fn the_header_has_no_mode_control() {
     let d = tempfile::tempdir().unwrap();
@@ -344,7 +1063,7 @@ fn the_header_has_no_mode_control() {
         (1600.0, false),
     ] {
         let m = pbr_opened(&d.path().join(format!("{w}-{meshes_view}")));
-        let h = harness(m, w, meshes_view);
+        let mut h = harness(m, w, meshes_view);
         assert_no_overlap(&h, "header", w);
         let header = outer(&h, "header");
         let inside = |r: egui::Rect| header.contains_rect(r);
@@ -362,8 +1081,7 @@ fn the_header_has_no_mode_control() {
             }),
             "at {w}: the header has a Mode combo"
         );
-        widget(&h, Role::ComboBox, "Preset");
-        h.get_by_label("MO2…");
+        reachable_controls(&mut h, w);
     }
 }
 
@@ -410,8 +1128,7 @@ fn the_settings_button_shows_with_no_folder_and_in_meshes_view() {
         let r = h.get_by_role_and_label(Role::Button, "Settings…").rect();
         assert!(header.contains_rect(r), "meshes {meshes_view}: {r:?}");
         assert!(h.query_by_label("Textures column").is_none());
-        // A click puts the tab in front; from the Meshes view it also asks the app to show the centre (Note FB7:
-        // `app.rs` takes `reveal_centre` and switches to Textures; the Textures view's draw clears it itself).
+        // The Meshes header asks the app to show the docked tool. Textures already drew its centre.
         h.get_by_role_and_label(Role::Button, "Settings…").click();
         h.run_steps(3);
         let m = &h.state().0;
@@ -424,6 +1141,79 @@ fn the_settings_button_shows_with_no_folder_and_in_meshes_view() {
     }
 }
 
+#[test]
+fn the_default_preset_shows_once_with_a_tag() {
+    let d = tempfile::tempdir().unwrap();
+    let m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    let mut h = harness(m, 1600.0, false);
+    let tagged = format!("{def} · default");
+    h.query_all_by_role(Role::ComboBox)
+        .find(|n| n.accesskit_node().value().is_some_and(|v| v == tagged))
+        .expect("the closed Preset combo reads the tagged default")
+        .click();
+    h.run();
+    assert_eq!(h.query_all_by_label_contains("default (").count(), 0);
+    let rows: Vec<String> = h
+        .query_all_by_label_contains(def)
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(rows, vec![tagged.clone()], "{rows:?}");
+    assert_eq!(
+        h.get_by_role_and_label(Role::Button, &tagged)
+            .accesskit_node()
+            .toggled(),
+        Some(egui::accesskit::Toggled::True)
+    );
+}
+
+#[test]
+fn clicking_the_selected_explicit_default_returns_to_following_the_target() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    m.set_preset(Some(def.into()));
+    let mut h = harness(m, 1600.0, false);
+    h.get_by_role_and_label(Role::ComboBox, "Preset").click();
+    h.run();
+    h.query_all_by_label_contains(def)
+        .find(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
+        .expect("the project's explicit default is selected")
+        .click();
+    h.run();
+    assert_eq!(h.state().0.project_preset(), None);
+}
+
+#[test]
+fn presets_opens_on_the_projects_preset() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.set_preset(Some("cs-compact".into()));
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), "cs-compact");
+}
+
+#[test]
+fn presets_opens_on_the_target_default_without_a_project_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let def = engine::presets::default_preset_for(m.target);
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), def);
+}
+
+#[test]
+fn reopening_presets_keeps_the_editors_draft() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let target = m.target;
+    m.presets_model().new_preset(target);
+    m.presets_model().set_id("work-in-progress");
+    m.open_presets();
+    assert_eq!(m.presets_model().id(), "work-in-progress");
+    assert!(m.presets_model().dirty());
+}
+
 /// Note JI1: the Preset combo's hover sends a mode change to Settings.
 #[test]
 fn the_preset_hover_names_settings() {
@@ -434,7 +1224,7 @@ fn the_preset_hover_names_settings() {
             n.accesskit_node()
                 .value()
                 .or(n.accesskit_node().label())
-                .is_some_and(|v| v.starts_with("default ("))
+                .is_some_and(|v| v.ends_with(" · default"))
         })
         .expect("the Preset combo")
         .hover();
@@ -467,7 +1257,62 @@ fn a_running_export_shows_progress_in_the_header() {
     assert!(p.top() >= export.bottom() - 0.5 && (p.left() - export.left()).abs() < 1.0);
 }
 
-/// Note BH7, R14: Export to ▾ → PGPatcher JSON editor… opens the editor, whose top field renames the JSON.
+#[test]
+fn tools_holds_the_json_editor_marker_and_reencode() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()), 1600.0, false);
+    h.get_by_label("Tools").click();
+    h.run();
+    h.get_by_label("PGPatcher JSON editor…");
+    h.get_by_label("Make marker cube…");
+    h.get_by_role_and_label(Role::CheckBox, "Re-encode every output")
+        .hover();
+    h.run();
+    h.get_by_label("Encode every output again, even when nothing changed. Files Tessalith has no record of are kept.");
+}
+
+#[test]
+fn export_to_holds_only_export_things() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened_unchosen(d.path()), 1600.0, false);
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    for gone in [
+        "Make marker cube…",
+        "Re-encode every output",
+        "PGPatcher JSON editor…",
+    ] {
+        assert_eq!(h.query_all_by_label(gone).count(), 0, "{gone}");
+    }
+    h.get_by_label("Choose export folder…");
+    h.get_by_label("Open export folder (none chosen yet)");
+}
+
+#[test]
+fn tools_explains_why_the_json_editor_is_disabled() {
+    let d = tempfile::tempdir().unwrap();
+    for (vanilla, reason) in [
+        (true, "Switch to Community Shaders mode in Settings."),
+        (false, "Load the project's sets document first."),
+    ] {
+        let mut m = pbr_opened(&d.path().join(vanilla.to_string()));
+        if vanilla {
+            m.target = engine::config::Target::Vanilla;
+        } else {
+            m.sets_doc = None;
+        }
+        let mut h = harness(m, 1600.0, false);
+        h.get_by_label("Tools").click();
+        h.run();
+        let json = h.get_by_label("PGPatcher JSON editor…");
+        assert!(json.accesskit_node().is_disabled());
+        json.hover();
+        h.run();
+        h.get_by_label(reason);
+    }
+}
+
+/// Note BH7, R14: Tools ▾ → PGPatcher JSON editor… opens the editor, whose top field renames the JSON.
 #[test]
 fn pg_json_editor_opens_the_editor_with_the_name_field() {
     let d = tempfile::tempdir().unwrap();
@@ -475,7 +1320,7 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
     assert!(h
         .query_by_label(sdc_gui::ui::json_editor::NAME_LABEL)
         .is_none());
-    h.get_by_label_contains("Export to: ").click();
+    h.get_by_label("Tools").click();
     h.run_steps(2);
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR).click();
     h.run_steps(2);
@@ -513,11 +1358,9 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
 fn the_meshes_header_never_overlaps() {
     let d = tempfile::tempdir().unwrap();
     for w in WIDTHS {
-        let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, true);
+        let mut h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, true);
         assert_no_overlap(&h, "header", w);
-        for c in ["Open", "MO2…", "Meshes view", "Save"] {
-            h.get_by_label(c);
-        }
+        reachable_controls(&mut h, w);
         header_undo(&h, "Undo");
         header_export_label(&h);
         // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).

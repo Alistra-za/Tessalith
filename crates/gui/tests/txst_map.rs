@@ -15,7 +15,7 @@ use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
 use std::path::Path;
 use std::time::Duration;
-use support::session;
+use support::{session, shapes};
 
 pub const X: &str = "textures/s/x";
 
@@ -1025,7 +1025,257 @@ fn render_shared_set_shots() {
 // ---- Task 5: record slots fill from the project (Note HG) ----
 
 use sdc_gui::model::bulk::MenuAction;
-use sdc_gui::model::sets::SlotFill;
+use sdc_gui::model::sets::{
+    slot_shown, BorrowOccupant, BorrowOutcome, SlotCommand, SlotFill, SlotShown,
+};
+
+const RECORD_DEST: &str = "textures/v/a";
+const LENDER: &str = "textures/v/b";
+const LENT_NORMAL: &str = "textures/v/b_normal.png";
+const RECORD_NORMAL: &str = "textures/black.dds";
+
+/// Note JW1: an external record fill keeps its chip and path, and supplies no draggable item.
+#[test]
+fn an_external_record_chip_stays_named_at_rest() {
+    use sdc_gui::ui::sets_column::{DragBorrow, DragItem};
+    let d = tempfile::tempdir().unwrap();
+    let m = record_only_normal(d.path());
+    assert!(!view(&m, RECORD_DEST).empty.contains(&SlotKind::Normal));
+    let mut h = harness(m, 1100.0);
+    h.ctx
+        .global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    h.run();
+    let card = h
+        .get_by_label_contains("Set textures/v/a, position ")
+        .rect();
+    let chips: Vec<_> = h
+        .query_all_by_label("N, record textures/black.dds")
+        .filter(|n| card.contains_rect(n.rect()))
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(
+        chips.len(),
+        1,
+        "one named external Normal on the destination"
+    );
+    assert!(!h
+        .query_all_by_label("N, empty")
+        .any(|n| card.contains_rect(n.rect())));
+    let at = chips[0].center();
+    h.hover_at(at);
+    h.run();
+    h.run();
+    h.get_by_label(RECORD_NORMAL);
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(at + egui::vec2(20.0, 0.0)));
+    h.run_steps(2);
+    assert!(!egui::DragAndDrop::has_payload_of_type::<DragItem>(&h.ctx));
+    assert!(!egui::DragAndDrop::has_payload_of_type::<DragBorrow>(
+        &h.ctx
+    ));
+}
+
+fn record_only_normal(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::Answer;
+    let toml = format!(
+        "[[sets]]\nid = \"{RECORD_DEST}\"\nshader = \"pbr_landscape\"\n{}",
+        txst(&[(2, RECORD_NORMAL)])
+    );
+    let mut m = project_toml(
+        dir,
+        &["textures/v/a.png", "textures/v/b.png", LENT_NORMAL],
+        &toml,
+    );
+    m.decide(LENT_NORMAL, Answer::Subtype(Subtype::PbrNormal));
+    m.decide(LENT_NORMAL, Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    assert_eq!(
+        slot_shown(&view(&m, LENDER), SlotKind::Normal),
+        SlotShown::Own { item: LENT_NORMAL }
+    );
+    let dest = view(&m, RECORD_DEST);
+    assert!(!dest.slots.contains_key(&SlotKind::Normal));
+    assert_eq!(
+        slot_shown(&dest, SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    m
+}
+
+#[test]
+fn a_record_fuzz_chip_cannot_lend_coat_from_the_same_numbered_slot() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    const FUZZ: &str = "textures/v/b_f.png";
+    const COAT: &str = "textures/v/b_cnr.png";
+    const DEST: &str = "textures/v/drop";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project_toml(d.path(), &[FUZZ, COAT, "textures/v/a.png"], "");
+    m.decide(FUZZ, Answer::Subtype(Subtype::PbrFuzz));
+    m.decide(COAT, Answer::Subtype(Subtype::CoatNormal));
+    idle(&mut m);
+    let path = m.item(FUZZ).unwrap().job_key.clone();
+    m.edit_docs("Read the fuzz by path", None, true, |_, s| {
+        s.set_txst(RECORD_DEST, Some(&record(&[(7, &path)])));
+        s.create_set(DEST);
+    });
+    idle(&mut m);
+    let owner = view(&m, LENDER);
+    assert_eq!(
+        slot_shown(&owner, SlotKind::Coat),
+        SlotShown::Own { item: COAT }
+    );
+    assert_eq!(
+        slot_shown(&owner, SlotKind::Fuzz),
+        SlotShown::Own { item: FUZZ }
+    );
+    let card = view(&m, RECORD_DEST);
+    let chip = slot_shown(&card, SlotKind::Fuzz);
+    assert_eq!(
+        chip,
+        SlotShown::Borrowed {
+            item: FUZZ,
+            from: LENDER
+        }
+    );
+    let SlotShown::Borrowed { item, from } = chip else {
+        unreachable!()
+    };
+    let before = (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len());
+    assert_eq!(
+        m.drop_borrow(item, from, DEST),
+        Ok(BorrowOutcome::Refused(
+            "The shared source changed. Drag the chip again.".into()
+        ))
+    );
+    assert_eq!(
+        (m.sets_doc.as_ref().unwrap().text(), m.history.undo.len()),
+        before
+    );
+    assert_eq!(m.drop_borrow(COAT, LENDER, DEST), Ok(BorrowOutcome::Joined));
+    idle(&mut m);
+    assert_eq!(
+        entry(&m, DEST).borrow.get(&7).map(String::as_str),
+        Some(LENDER)
+    );
+    assert_eq!(
+        slot_shown(&view(&m, DEST), SlotKind::Coat),
+        SlotShown::Borrowed {
+            item: COAT,
+            from: LENDER
+        }
+    );
+}
+
+#[test]
+fn a_borrow_asks_before_replacing_a_record_only_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = record_only_normal(d.path());
+    let docs = |m: &AppModel| {
+        (
+            m.project.as_ref().unwrap().text(),
+            m.sets_doc.as_ref().unwrap().text(),
+            m.history.undo.len(),
+        )
+    };
+    let existing = BorrowOccupant::Record {
+        path: RECORD_NORMAL.into(),
+    };
+    let ask = |m: &mut AppModel| {
+        assert_eq!(
+            m.drop_borrow(LENT_NORMAL, LENDER, RECORD_DEST),
+            Ok(BorrowOutcome::AskReplace {
+                kind: SlotKind::Normal,
+                existing: existing.clone()
+            })
+        )
+    };
+    let before = docs(&m);
+    let mapping = entry(&m, RECORD_DEST).txst;
+    ask(&mut m);
+    assert_eq!(docs(&m), before);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    m.replace_borrow(
+        LENT_NORMAL,
+        LENDER,
+        RECORD_DEST,
+        SlotKind::Normal,
+        &existing,
+    )
+    .unwrap();
+    idle(&mut m);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Borrowed {
+            item: LENT_NORMAL,
+            from: LENDER
+        }
+    );
+    let dest = entry(&m, RECORD_DEST);
+    assert_eq!(dest.txst, mapping);
+    assert_eq!(dest.borrow.get(&2).map(String::as_str), Some(LENDER));
+    assert_eq!(m.history.undo.len(), before.2 + 1);
+    m.undo();
+    idle(&mut m);
+    assert_eq!(docs(&m), before);
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+
+    m.set_target(engine::config::Target::Cs);
+    m.set_shader(RECORD_DEST, Some(engine::shader::Shader::Pbr));
+    m.set_field("textures/v/a.png", "subtype", serde_json::json!("diffuse"));
+    m.set_cs_statics(RECORD_DEST, sdc_gui::model::cs_pbr::Statics::Always);
+    idle(&mut m);
+    assert!(sdc_gui::model::pbr_export::written_json_entries(&m)
+        .iter()
+        .any(|(v, _)| v.id == RECORD_DEST));
+    assert_eq!(
+        slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal),
+        SlotShown::Record {
+            path: RECORD_NORMAL
+        }
+    );
+    ask(&mut m);
+    let path = r"textures\other\record_n.dds";
+    m.set_slot_command(RECORD_DEST, 2, SlotCommand::Path(path.into()))
+        .unwrap();
+    idle(&mut m);
+    assert!(
+        matches!(slot_shown(&view(&m, RECORD_DEST), SlotKind::Normal), SlotShown::Linked(l) if l.path == path)
+    );
+    let after = docs(&m);
+    let why = format!("{RECORD_DEST}'s Normal _n is linked to {path}: Unlink it first.");
+    assert_eq!(
+        m.replace_borrow(
+            LENT_NORMAL,
+            LENDER,
+            RECORD_DEST,
+            SlotKind::Normal,
+            &existing
+        ),
+        Err(why.clone())
+    );
+    assert_eq!(m.status_line, why);
+    assert_eq!(docs(&m), after);
+}
 
 const R_FILES: &[&str] = &[
     "textures/s/x_normal.png",
@@ -1089,6 +1339,64 @@ fn a_record_slot_another_set_writes_is_borrowed() {
     assert!(c.filled.contains_key(&2) && c.filled.contains_key(&3));
 }
 
+/// Note JW3 (A5-1, HG7): a record fill is a `SlotFill::Borrowed` chip, drawn by the same `chip_row` arm as a borrow
+/// line, so it takes the neutral outline too, never amber.
+#[test]
+fn a_record_fill_chip_is_outlined_neutral() {
+    let d = tempfile::tempdir().unwrap();
+    let mut files = R_FILES.to_vec();
+    files.push("textures/s/x_detail_n.png");
+    let m = r_with(d.path(), &files, "", "");
+    let c = view(&m, M);
+    assert_eq!(
+        borrowed_from(&c, SlotKind::Normal).as_deref(),
+        Some(X),
+        "premise: a record fill"
+    );
+    assert_eq!(
+        borrowed_from(&c, SlotKind::SkinSk).as_deref(),
+        Some(X),
+        "premise: a record fill"
+    );
+    assert_eq!(borrowed_from(&c, SlotKind::SkinDetail).as_deref(), Some(X));
+    let mut h = harness(m, 1100.0);
+    h.run();
+    h.run();
+    let card = h
+        .get_by_label_contains(&format!("Set {M}, position "))
+        .rect();
+    let strong = h.ctx.global_style().visuals.strong_text_color();
+    let shapes = shapes(&h);
+    for label in ["N", "SK", "DETAIL_N"] {
+        let chips: Vec<_> = h
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, label)
+            .map(|n| n.rect())
+            .filter(|r| card.contains_rect(*r))
+            .collect();
+        assert_eq!(chips.len(), 1, "the recipient's {label} chip");
+        let chip = chips[0];
+        let outline = |colour| {
+            shapes.iter().any(|s| {
+                matches!(s, egui::Shape::Rect(r)
+            if r.rect == chip && r.stroke.width == 2.0 && r.stroke.color == colour)
+            })
+        };
+        assert!(outline(strong) && !outline(sdc_gui::ui::status::AMBER));
+        let mark =
+            egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0));
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r)
+            if r.rect == mark && r.fill == h.ctx.global_style().visuals.panel_fill)));
+        assert_eq!(
+            shapes
+                .iter()
+                .filter(|s| matches!(s, egui::Shape::Circle(c)
+            if c.stroke.width == 1.5 && c.stroke.color == strong && mark.contains(c.center)))
+                .count(),
+            2
+        );
+    }
+}
+
 #[test]
 fn a_fill_writes_nothing() {
     let d = tempfile::tempdir().unwrap();
@@ -1127,6 +1435,66 @@ fn one_normal_is_written() {
             .ends_with("/textures/s/body_n.dds")
     });
     assert!(outs.next().is_some() && outs.next().is_none());
+}
+
+/// Ruling 3b-F13: a stored `slot2` of any value (`""` or a hand-edited `false`) on the mapped skin set C, which owns
+/// an unshared `_rfaos` and no normal, keeps the record from filling slot 2, as on main a0e2610c: the engine is told of
+/// no borrowed normal, so C's `_rfaos` bakes as main bakes it. With no slot key the record's normal is borrowed.
+#[test]
+fn a_stored_slot_key_keeps_the_record_normal_out_of_the_engine_inputs() {
+    use serde_json::json;
+    let borrowed = |m: &AppModel| sdc_gui::model::sets::borrowed_normal(m).get(M).cloned();
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    assert_eq!(
+        borrowed(&m).as_deref(),
+        Some(X),
+        "no slot key: the record's normal"
+    );
+    for value in [json!(""), json!(false)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = r(d.path());
+        m.set_json_value(M, "slot2", Some(value.clone()));
+        idle(&mut m);
+        assert_eq!(borrowed(&m), None, "slot2 = {value}");
+        assert_eq!(
+            m.request().unwrap().borrowed_normal.get(M),
+            None,
+            "slot2 = {value}: the request the engine gets"
+        );
+    }
+}
+
+/// Ruling 3b-F25: the slot2 edit above changes the engine's borrowed normal but plans nothing (`set_json_value` plans
+/// again only for `match*`, `path_contains` and `rename`), so the plan on screen is out of date with no plan running.
+/// A From another set row then says the plan must run again, not "Planning", and the click refuses with the same.
+#[test]
+fn with_the_plan_out_of_date_and_none_running_a_member_pick_says_it_must_plan_again() {
+    use sdc_gui::model::bulk::MenuAction;
+    use serde_json::json;
+    const AGAIN: &str = "The plan must run again first: pick a file once a new plan has finished";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_json_value(M, "slot2", Some(json!("")));
+    idle(&mut m);
+    assert!(!m.full_plan_pending(), "premise: no plan is running");
+    assert!(!m.inputs_settled(), "premise: the plan is out of date");
+    let rows: Vec<_> = set_views(&m)
+        .iter()
+        .flat_map(|v| {
+            SlotKind::ALL
+                .iter()
+                .filter(|k| k.game_slot().is_some())
+                .flat_map(|k| m.slot_menu(&v.id, *k))
+                .collect::<Vec<_>>()
+        })
+        .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+        .collect();
+    assert!(!rows.is_empty(), "premise: a member is offered");
+    for e in &rows {
+        assert_eq!(e.disabled.as_deref(), Some(AGAIN), "{e:?}");
+    }
+    assert_eq!(m.run_menu(rows[0].action.clone()), Some(AGAIN.to_string()));
 }
 
 #[test]
@@ -1215,6 +1583,38 @@ fn a_chosen_shader_on_it_wins() {
         sdc_gui::model::sets::set_shaders(&m).get(X),
         Some(&engine::shader::Shader::Skin)
     );
+}
+
+#[test]
+fn keep_alpha_uses_the_planned_shader_of_a_shared_skin_host() {
+    use engine::shader::{Shader, ShaderOrigin};
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let normal = "textures/s/x_normal.png";
+    for path in R_FILES.iter().copied().chain(["textures/armor/steel.png"]) {
+        colour(d.path(), path);
+    }
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgba([128u8, 128, 255, (x * 3 + y) as u8])
+    })
+    .save(d.path().join(normal))
+    .unwrap();
+    let sets = format!(
+        "{}[[sets]]\nid = \"textures/armor/steel\"\nborrow = {{ slot2 = \"{X}\" }}\n",
+        r_toml("", "")
+    );
+    std::fs::write(d.path().join("sdc-project.toml"), sets).unwrap();
+    let m = support::opened_as_the_app(d.path().into(), d.path().join("export"));
+    let pick = view(&m, X).shader.unwrap();
+    assert_eq!(
+        (pick.shader, pick.provenance),
+        (Shader::AdvancedSkin, ShaderOrigin::Set)
+    );
+    assert!(problems(&m)
+        .iter()
+        .any(|r| r.at == At::Texture(normal.into())
+            && r.is_note()
+            && r.shown().contains("shared with a regular set")));
 }
 
 #[test]

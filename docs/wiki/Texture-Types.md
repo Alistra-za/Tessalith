@@ -48,7 +48,7 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | Suffix | Suggested sub-type | Confidence |
 |---|---|---|
 | none, or `_d` | `diffuse`; `pbr_albedo` in a PBR set; `skin_albedo` in an Advanced skin set; `landscape_diffuse` when a folder in the path is named `landscape`; `ui_sky` under `interface` or `sky` folders; `hdr_sky` for a float source under `sky` | High (`hdr_sky` Medium) |
-| `_n` | `normal`; `pbr_normal` in a PBR set; `landscape_normal` under a `landscape` folder | High |
+| `_n` | `normal`, `pbr_normal` in a PBR set, or `landscape_normal` under a `landscape` folder. See [Picking a shader for a normal](Set-Shaders.md#picking-a-shader-for-a-normal). | High |
 | `_msn` | `msn` (model-space normal) | High |
 | `_s` | `msn_specular` when the set has `_msn`; `pbr_subsurface` in a PBR set; otherwise `subsurface_tint` | High, High, Low |
 | `_m`, `_em`, `_envmask` | `envmask`; `complex_material` when the alpha minimum is below 251 | High for both |
@@ -119,9 +119,9 @@ One row per sub-type. **vanilla** says whether the sub-type exists under the Van
 | `ui_sky` | Color | BC7 | UNORM | remove | yes | No mips. |
 | `skin_albedo` | Color | BC7 | UNORM | remove | no | Advanced skin. UNORM because the CS skin shader reads it that way. |
 | `cubemap` | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | yes | See [Cubemaps](Cubemaps.md). BC1, BC3, BC7, RGBA8 or RGB8 only. |
-| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. |
+| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
 | `landscape_normal` | Normal | BC7 | UNORM | data | yes | |
-| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. Vanilla specular in alpha is dropped. |
+| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. The default drops specular alpha silently. Pick **Data** on the Alpha row to keep it. For shared normals, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS8 --> |
 | `detail_normal` | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
 | `msn` | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
 | `coat_normal` | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
@@ -160,8 +160,8 @@ Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doe
 
 ### Formats and mips
 
-- **Normal maps are never BC4 or BC5,** `skin_detail` aside: the game would decode Z as −1 and lose the alpha (`FMT-BC5-NORMAL`, blocking).
-- **Mips are renormalised to unit length.** In a PBR set the detail each mip loses goes into the roughness instead: [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). The keys are `mips.normal` and `mips.normal_base` ([Mipmaps](Project-Config.md#mipmaps)); why it's done is on [Research](Research.md#why-renormalise-normal-mips).
+- **Use XYZ storage for a base normal.** Skyrim reads Z from blue. BC5, RG8, BC4 and R8 discard Z and alpha, so `FMT-BC5-NORMAL` blocks conversion until acknowledged. The Advanced Skin loader accepts BC5 for [`skin_detail`](#detail-names).
+- **Normal mips default to unit length.** For deliberately short normals, see [Normal length by output](Project-Config.md#normal-length-by-output). A set can bake the spread of normal directions into its [roughness mips](Texture-Packing.md#variance-and-gloss-bake).
 
 ### Model-space normals (MSN)
 

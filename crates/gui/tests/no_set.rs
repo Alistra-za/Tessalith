@@ -29,6 +29,13 @@ fn sets_text(m: &AppModel) -> String {
     m.sets_doc.as_ref().unwrap().text()
 }
 
+#[test]
+fn toml_has_key_matches_the_assignment_name() {
+    assert!(!toml_has_key("export_folder = 'padding'", "add"));
+    assert!(toml_has_key("add = ['rock.png']", "add"));
+    assert!(toml_has_key("[[sets]]\n  add=['rock.png']", "add"));
+}
+
 /// Whether some set view holds `key`.
 fn in_a_view(m: &AppModel, key: &str) -> bool {
     set_views(m)
@@ -91,7 +98,7 @@ fn removing_a_member_puts_it_in_no_set() {
     assert_eq!(no_set(&m), [NORMAL]);
     assert!(m.is_no_set(NORMAL));
     assert!(!in_a_view(&m, NORMAL), "no view holds it");
-    assert!(!sets_text(&m).contains("remove"), "{}", sets_text(&m));
+    assert!(!toml_has_key(&sets_text(&m), "remove"), "{}", sets_text(&m));
     // A moved-in member: its `add` line goes too.
     let odd = "landscape/odd.png";
     let id = m.drop_new_set(odd).unwrap();
@@ -100,7 +107,7 @@ fn removing_a_member_puts_it_in_no_set() {
     m.remove_member(&id, odd).expect("removed");
     idle(&mut m);
     assert!(no_set(&m).iter().any(|k| k == odd));
-    assert!(!sets_text(&m).contains("add"), "{}", sets_text(&m));
+    assert!(!toml_has_key(&sets_text(&m), "add"), "{}", sets_text(&m));
     // The only member of an automatic set (today refused).
     m.remove_member("landscape/leaf", LEAF).expect("removed");
     idle(&mut m);
@@ -540,7 +547,7 @@ fn nothing_opens_the_set_of_a_no_set_texture() {
     }));
     // The panel follows no set when the texture is selected.
     m.select_item(NORMAL);
-    assert_eq!(sdc_gui::model::set_preview::followed_set(&m), None);
+    assert!(m.resolved_selection().target.is_none());
     // The Review "Go to set" and Problems rows take their set key from a view: every key is a card's.
     let keys: Vec<String> = set_views(&m).iter().map(|v| v.key.clone()).collect();
     for b in sdc_gui::model::pbr_export::export_blocks(&m).iter() {

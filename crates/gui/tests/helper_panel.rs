@@ -392,14 +392,13 @@ fn panel_controls_inside_panel_at_1100() {
 fn one_undo_step_per_edit() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(d.path(), &XSET, ""), "x_roughness.png");
-    // Steps before the edit: the opening's "Set n types automatically" (Note FC1), if any.
-    let steps = h.state().history.undo.len();
+    assert!(!h.state().can_undo());
     pick(&mut h, "Helper role", "Glossiness");
     assert!(value(&h, "x_roughness.png", "helper.role").is_some());
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     settle(&mut h);
     assert_eq!(value(&h, "x_roughness.png", "helper.role"), None);
-    assert_eq!(h.state().history.undo.len(), steps, "one step");
+    assert!(!h.state().can_undo(), "one step");
 }
 
 /// The rect of the widget with `role` and `name` (nothing here is clipped, so it equals the interact rect).

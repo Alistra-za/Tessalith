@@ -31,7 +31,7 @@ pub fn state_json(m: &AppModel) -> Value {
     let visible_sets = m.visible_sets();
     let visible_items = m.visible_items();
     let problems = bottom::problems(m);
-    let selected = m.selected_sets();
+    let selected = m.selected_set_ids();
 
     let mut set_map = Map::new();
     for (n, v) in views.iter().enumerate() {
@@ -53,7 +53,7 @@ pub fn state_json(m: &AppModel) -> Value {
                 "key": v.key,
                 "shader": v.shader.as_ref().map(|p| p.shader.label()),
                 "visible": visible_sets.contains(&n),
-                "selected": selected.contains(&v.key),
+                "selected": selected.contains(&v.id),
                 "members": v.members.len(),
                 "slots": slots,
             }),
@@ -86,8 +86,9 @@ pub fn state_json(m: &AppModel) -> Value {
             Selection::None => "none".to_string(),
             Selection::Item(k) => format!("item:{k}"),
             Selection::Set(k) => format!("set:{}", id_of(&by_key, k)),
+            Selection::SetId(id) => format!("set:{}", m.resolved_selection().view().map_or(id, |v| &v.id)),
         },
-        "selected_sets": selected.iter().map(|k| id_of(&by_key, k)).collect::<Vec<_>>(),
+        "selected_sets": selected,
         "expanded": m.expanded,
         "dirty": m.is_dirty(),
         "counts": {

@@ -1,22 +1,366 @@
 //! The set preview's model (P1-A Tasks 13–14): encodes, fingerprint and change classification, query keys,
 //! PGPatcher simulation per shape, and the orchestration without a GPU.
 mod support;
+use engine::config::Subtype;
+use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::items::{ItemKind, ItemStatus};
 use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::preview::DEBOUNCE;
 use sdc_gui::model::set_preview::*;
-use sdc_gui::model::sets::{SetView, SlotKind};
+use sdc_gui::model::sets::{member_game_path, SetView, SlotKind};
 use sdc_gui::model::viewport3d::FileSource;
 use sdc_gui::model::AppModel;
 use sdc_gui::pgp::writer::EntryInput;
 use std::time::{Duration, Instant};
 use support::*;
 
+#[test]
+fn preview_follow_polls_the_second_borrowers_fingerprint() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, expected) = preview_borrower(d.path());
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    s.shown = true;
+    s.poll_at(&m, Instant::now());
+    assert_eq!(
+        s.fp.as_ref().map(|f| (f.label.as_str(), f.entry.as_ref())),
+        Some(("landscape/other", Some(&expected))),
+        "follow must deliver the second candidate"
+    );
+}
+
+#[test]
+fn an_enabled_material_layer_reuses_its_owner_between_checks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01.png");
+    m.add_cs_block("landscape/rock01", sdc_gui::model::cs_pbr::Kind::Mato);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    s.set_mato_layer(true);
+    let now = Instant::now();
+    s.shown = true;
+    s.poll_at(&m, now);
+    assert!(s.mato_available() && s.mato_layer);
+    let checks = s.checks;
+    let reads = sdc_gui::model::sets::root_reads();
+    s.shown = true;
+    s.poll_at(&m, now);
+    assert_eq!(s.checks, checks);
+    assert_eq!(
+        sdc_gui::model::sets::root_reads(),
+        reads,
+        "unchanged layer rebuilt its view key"
+    );
+}
+
+fn preview_borrower(dir: &std::path::Path) -> (AppModel, EntryInput) {
+    let mut m = key_less_json_sets(dir);
+    let id = "landscape/other";
+    m.set_json_value(id, "roughness_scale", Some(serde_json::json!(0.25)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let entries = json_entries(&m);
+    let candidate = |id: &str| entries.iter().find(|(v, _)| v.id == id).unwrap().1.clone();
+    let expected = candidate(id);
+    assert_ne!(candidate("landscape/empty"), expected);
+    m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
+    (m, expected)
+}
+
+#[test]
+fn the_second_key_less_set_supplies_its_own_candidate_to_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, expected) = preview_borrower(d.path());
+    let id = "landscape/other";
+    let fp = fingerprint(&m, sdc_gui::model::SetTarget::Id(id.into()));
+    assert_eq!(
+        fp.as_ref().map(|f| (f.label.as_str(), f.entry.as_ref())),
+        Some((id, Some(&expected))),
+        "second borrower's fingerprint"
+    );
+}
+
 fn rock(m: &AppModel) -> (SetView, EntryInput) {
     json_entries(m)
         .into_iter()
         .find(|(v, _)| v.id == "landscape/rock01")
         .expect("the fixture's PBR set")
+}
+
+/// What `member_slots` serves for the set `arch/leaf`, built as the preview builds it.
+fn leaf_slots(m: &AppModel) -> Vec<MemberSlot> {
+    let (v, e) = rock_named(m, "arch/leaf");
+    member_slots(m, &v, Some(&e))
+}
+
+#[test]
+fn a_linked_slot_serves_the_linked_file_at_its_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, "arch/wall.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 1,
+        item: "arch/wall.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let served = slots
+        .iter()
+        .find(|s| s.item == "arch/wall.png")
+        .expect("the linked file is served");
+    assert_eq!(served.paths, vec![canon(&game)]);
+    m.undo();
+    assert!(leaf_slots(&m).iter().all(|s| s.item != "arch/wall.png"));
+}
+
+#[test]
+fn a_slot_7_link_serves_only_the_link() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let served = |m: &AppModel| {
+        leaf_slots(m)
+            .into_iter()
+            .map(|s| s.item)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        served(&m).iter().any(|i| i == "arch/leaf_f.png"),
+        "premise: the own _f is served"
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let s = served(&m);
+    assert!(
+        s.iter().any(|i| i == "arch/lacq_cnr.png"),
+        "the link is served"
+    );
+    assert!(
+        !s.iter().any(|i| i == "arch/leaf_f.png"),
+        "the own _f is not in the JSON, so not served"
+    );
+}
+
+#[test]
+fn an_unresolved_typed_path_serves_only_the_local_prefix() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let normal = |m: &AppModel| {
+        leaf_slots(m)
+            .into_iter()
+            .find(|s| s.kind == SlotKind::Normal)
+            .unwrap()
+    };
+    let prefix = "textures/pbr/arch/leaf_n.dds";
+    assert!(normal(&m).paths.iter().any(|p| p == prefix));
+    let missing = r"textures\elsewhere\normal.dds";
+    m.set_json_value("arch/leaf", "slot2", Some(serde_json::json!(missing)));
+    let slots = leaf_slots(&m);
+    assert!(
+        slots.iter().all(|s| !s.paths.contains(&canon(missing))),
+        "no local bytes for the typed path"
+    );
+    assert_eq!(
+        normal(&m).paths,
+        [prefix],
+        "the own normal keeps only its prefix"
+    );
+}
+
+#[test]
+fn a_coat_link_skips_a_replaced_borrowed_fuzz() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("moss_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    m.edit_docs("Share fuzz", None, true, |_, s| {
+        s.set_borrow("arch/leaf", 7, Some("arch/moss"))
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        leaf_slots(&m).iter().any(|s| s.item == "arch/moss_f.png"),
+        "premise: borrowed fuzz is served"
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    assert!(
+        slots.iter().any(|s| s.item == "arch/lacq_cnr.png"),
+        "linked coat is served"
+    );
+    assert!(
+        slots.iter().all(|s| s.item != "arch/moss_f.png"),
+        "replaced borrowed fuzz is skipped"
+    );
+}
+
+#[test]
+fn an_unresolved_link_uses_the_game_texture_in_the_preview_scene() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let key = rock_named(&m, "arch/wall").0.key;
+    m.select_set(&key);
+    let local = member_game_path(&m, "arch/leaf_n.png").unwrap();
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(local)));
+    let mut preview = SetPreview::new(Some(bsa_db(d.path())), DEFAULT_CAP);
+    run(&mut preview, &m);
+    let Some(Content::Builtin { textures, .. }) = preview.v3.content() else {
+        panic!("expected the built-in preview");
+    };
+    assert!(matches!(
+        textures.get(&canon(&local)),
+        Some(FileSource::Memory { .. })
+    ));
+
+    let external = r"textures\clutter\vanilla_m.dds";
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(external)));
+    run(&mut preview, &m);
+    let Some(Content::Builtin {
+        material, textures, ..
+    }) = preview.v3.content()
+    else {
+        panic!("expected the built-in preview after resync");
+    };
+    assert_eq!(material.slots[1].norm, canon(external));
+    assert_eq!(
+        textures.get(&canon(external)),
+        Some(&FileSource::Bsa {
+            archive: d.path().join("Skyrim - Textures0.bsa"),
+            norm: canon(external),
+        })
+    );
+    assert!(
+        !textures.contains_key(&canon(&local)),
+        "old linked bytes survived resync"
+    );
+}
+
+#[test]
+fn a_link_with_no_preview_row_contributes_no_local_bytes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let local = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.set_json_value("arch/leaf", "slot5", Some(serde_json::json!(local)));
+    let (v, entry) = rock_named(&m, "arch/leaf");
+    assert_eq!(v.linked[&5].item.as_deref(), Some("arch/wall_n.png"));
+    assert!(v.linked[&5].row.is_none());
+    assert_eq!(entry.slots[&5], local);
+    let mut enc = Encoder::new(DEFAULT_CAP);
+    enc.sync(&m, member_slots(&m, &v, Some(&entry)), Instant::now(), true);
+    settle(&mut enc, &m);
+    let sources = enc.memory_sources();
+    assert!(
+        !sources.contains_key(&canon(&local)),
+        "rowless link served local bytes"
+    );
+    assert!(sources.contains_key("textures/pbr/arch/leaf_n.dds"));
+}
+
+fn no_shared_kind(slots: &[MemberSlot]) {
+    let mut kinds: Vec<_> = slots.iter().map(|s| s.kind).collect();
+    kinds.sort();
+    let n = kinds.len();
+    kinds.dedup();
+    assert_eq!(kinds.len(), n, "two members share a kind: {slots:?}");
+}
+
+#[test]
+fn a_link_to_another_slots_kind_leaves_the_own_file_of_that_kind_served() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let own = leaf_slots(&m)
+        .into_iter()
+        .find(|s| s.item == "arch/leaf_n.png")
+        .expect("premise: the own _n is served");
+    let game = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let still = slots.iter().find(|s| s.item == "arch/leaf_n.png");
+    assert_eq!(
+        still.map(|s| s.paths.clone()),
+        Some(own.paths.clone()),
+        "the own _n keeps its path"
+    );
+    let linked = slots.iter().find(|s| s.item == "arch/wall_n.png");
+    assert_eq!(
+        linked.map(|s| s.paths.clone()),
+        Some(vec![canon(&game)]),
+        "the link is served at its path"
+    );
+    no_shared_kind(&slots);
+}
+
+#[test]
+fn a_link_on_the_own_files_slot_replaces_it_in_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 2,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let normals: Vec<_> = slots
+        .iter()
+        .filter(|s| s.kind == SlotKind::Normal)
+        .collect();
+    assert_eq!(normals.len(), 1, "{slots:?}");
+    assert_eq!(normals[0].item, "arch/wall_n.png");
+    assert_eq!(normals[0].paths, vec![canon(&game)]);
+    assert!(slots.iter().all(|s| s.item != "arch/leaf_n.png"));
+    no_shared_kind(&slots);
+}
+
+#[test]
+fn syncing_an_unchanged_linked_set_twice_resets_no_member() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 2,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let mut enc = Encoder::new(DEFAULT_CAP);
+    enc.sync(&m, slots.clone(), Instant::now(), true);
+    settle(&mut enc, &m);
+    let first = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    enc.set_mode(PreviewMode::Source, Instant::now());
+    settle(&mut enc, &m);
+    let source = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    assert_ne!(first, source, "the linked PNG has two distinct A/B encodes");
+    enc.sync(&m, slots.clone(), Instant::now(), false);
+    enc.sync(&m, slots, Instant::now(), false);
+    assert!(matches!(&enc.members[&SlotKind::Normal].state, EncState::Fresh(e) if e.id == source));
+    assert!(
+        enc.has_alt(SlotKind::Normal),
+        "unchanged sync keeps the other A/B copy"
+    );
+    enc.set_mode(PreviewMode::Encoded, Instant::now());
+    assert!(
+        enc.settled(),
+        "an unchanged sync leaves every member settled"
+    );
+    let st = &enc.members[&SlotKind::Normal].state;
+    assert!(matches!(st, EncState::Fresh(e) if e.id == first), "{st:?}");
 }
 
 fn settle(e: &mut Encoder, m: &AppModel) {
@@ -973,7 +1317,7 @@ fn a_scanned_mesh_is_listed_and_an_unreadable_one_falls_back_to_the_sphere() {
         })
     ));
     assert_eq!(
-        s.choice.get(&key),
+        s.choice.get(&sdc_gui::model::SetTarget::Key(key.clone())),
         Some(&MeshChoice::Builtin(Builtin::Cube))
     );
 }

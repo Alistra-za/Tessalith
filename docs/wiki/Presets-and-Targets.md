@@ -40,11 +40,13 @@ The preset is chosen from the first of these that is set:
 2. `preset` in the user config.
 3. The default for the target: `cs-quality` or `vanilla-quality`.
 
+The first **Preset** row shows the target default once, for example **cs-quality · default**. Pick it to clear the project's override. <!-- D:JY16 -->
+
 Every built-in preset has one rule: any file under an `interface` or `sky` folder gets `mips.levels = "none"`.
 
 ## Making your own preset in the GUI
 
-**Presets…** (the last entry of the header's **Preset** menu) opens the preset creator as a tab of the centre column. <!-- D:FB7 --> It edits the files in `%APPDATA%\sdc\presets\`, so you never write TOML by hand unless you want to. **TOML preview** shows exactly what **Save preset** writes.
+**Presets…** (the last entry of the header's **Preset** menu) opens the creator in the current view on the project's preset or the target default. If you already have a draft, it stays open. <!-- D:JY15,JY16 --> It edits the files in `%APPDATA%\sdc\presets\`, so you never write TOML by hand unless you want to. **TOML preview** shows exactly what **Save preset** writes.
 
 ![The Presets tab.](../img/gui/Presets-and-Targets/presets-tab.png)
 

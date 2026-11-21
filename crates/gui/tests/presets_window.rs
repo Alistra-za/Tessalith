@@ -28,7 +28,7 @@ fn presets_opens_the_creator_and_a_builtin_is_read_only() {
             n.accesskit_node()
                 .value()
                 .or(n.accesskit_node().label())
-                .is_some_and(|v| v.starts_with("default ("))
+                .is_some_and(|v| v.ends_with(" · default"))
         })
         .expect("the Preset combo")
         .click();
@@ -371,7 +371,7 @@ fn the_presets_tab_has_no_project_block() {
     let mut h = harness(m);
     h.run();
     h.get_by_label("Presets tab");
-    h.get_by_label("Pick a preset, or New.");
+    h.get_by_label("Built-in presets are read-only: Duplicate makes an editable copy.");
     assert!(h.query_by_label_contains("This project").is_none());
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h

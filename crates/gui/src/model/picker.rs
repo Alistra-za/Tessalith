@@ -20,7 +20,7 @@ pub enum PickerPurpose {
     SaveReport,
     /// Review's Also section: where the PBR, Vanilla and CM folders go (TA10).
     AlsoLocation,
-    /// Export to ▾: where the marker cube is saved.
+    /// Where the marker cube is saved.
     MakeMarker,
     /// Map to target…: the project's target mod folder (Note HL4).
     TargetMod,
@@ -50,6 +50,8 @@ pub struct PickerSpec {
     pub kind: PickerKind,
     /// The folder the dialog starts in (None: the OS's choice). A `Save` picker has its own `dir`.
     pub start: Option<PathBuf>,
+    /// Ordered directories for the picker worker to check before opening the dialog.
+    pub start_candidates: Vec<PathBuf>,
 }
 
 impl PickerSpec {
@@ -58,6 +60,7 @@ impl PickerSpec {
             title: None,
             kind: PickerKind::Folder,
             start: None,
+            start_candidates: Vec::new(),
         }
     }
 
@@ -195,10 +198,15 @@ impl Picker {
         let (me, ctx, owner) = (self.clone(), ctx.clone(), self.1);
         let work = move || {
             // A panicking dialog must not leave the buttons disabled for good.
-            let path =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.pick(&spec)))
-                    .ok()
-                    .flatten();
+            let path = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut spec = spec;
+                if !spec.start_candidates.is_empty() {
+                    spec.start = spec.start_candidates.iter().find(|p| p.is_dir()).cloned();
+                }
+                backend.pick(&spec)
+            }))
+            .ok()
+            .flatten();
             {
                 let mut s = me.lock();
                 s.open = None;
@@ -261,9 +269,44 @@ use super::AppModel;
 impl AppModel {
     /// Open a picker for `purpose`, tagged with the opened folder when the purpose is folder-scoped. False when a
     /// dialog is already open.
-    pub fn pick(&self, ctx: &egui::Context, purpose: PickerPurpose, spec: PickerSpec) -> bool {
+    pub fn pick(&self, ctx: &egui::Context, purpose: PickerPurpose, mut spec: PickerSpec) -> bool {
+        match purpose {
+            PickerPurpose::ExportFolder => {
+                let chosen = self
+                    .sets_doc
+                    .as_ref()
+                    .filter(|d| !d.read_only())
+                    .and_then(|d| d.export_folder_ref())
+                    .map(std::path::Path::to_owned);
+                spec.start = None;
+                spec.start_candidates = [
+                    chosen,
+                    self.settings.last_export_folder.clone(),
+                    self.root
+                        .as_deref()
+                        .or_else(|| self.settings.recent.first()?.parent())
+                        .map(std::path::Path::to_owned),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+            }
+            PickerPurpose::AlsoLocation | PickerPurpose::TargetMod => {
+                spec.start = self.project_start();
+            }
+            PickerPurpose::SaveReport => {
+                if let PickerKind::Save { dir, .. } = &mut spec.kind {
+                    *dir = self.project_start();
+                }
+            }
+            _ => {}
+        }
         let scope = purpose.folder_scoped().then(|| self.root.clone()).flatten();
         self.picker.request(ctx, purpose, scope, spec)
+    }
+
+    fn project_start(&self) -> Option<PathBuf> {
+        self.root.clone().or_else(|| self.open_folder_spec().start)
     }
 
     /// The Open folder dialog: it starts in the parent of the most recent project, when that parent still exists
@@ -281,14 +324,9 @@ impl AppModel {
         }
     }
 
-    /// Open the export folder picker, starting in the app-wide last pick (`gui.toml`) when there is one (Note FB1:
-    /// it is no longer the project's choice, only where the dialog opens).
+    /// Open the export folder picker for the current project.
     pub fn pick_export_folder(&self, ctx: &egui::Context) -> bool {
-        let spec = match self.settings.export_folder.clone() {
-            Some(p) => PickerSpec::folder().start_in(p),
-            None => PickerSpec::folder(),
-        };
-        self.pick(ctx, PickerPurpose::ExportFolder, spec)
+        self.pick(ctx, PickerPurpose::ExportFolder, PickerSpec::folder())
     }
 
     /// The export folder chosen in the picker, for this project (owner ruling, Note BV6): saved in
@@ -298,7 +336,7 @@ impl AppModel {
     pub fn set_export_folder(&mut self, path: std::path::PathBuf) {
         match self.sets_doc.as_mut().filter(|d| !d.read_only()) {
             Some(d) => {
-                let was_dirty = d.is_dirty();
+                let was_dirty = d.defer_record_save();
                 d.set_export_folder(&path);
                 if was_dirty {
                     self.status_line =
@@ -339,7 +377,18 @@ impl AppModel {
                 self.messages
                     .notify(super::messages::Severity::Warning, note);
             }
-            PickerPurpose::ExportFolder => self.set_export_folder(path),
+            PickerPurpose::ExportFolder => {
+                // A fresh pick is an edit even when it repeats the loaded value (three-way settings merge).
+                if let Some((base, _)) = &mut self.settings_base {
+                    base.last_export_folder = None;
+                }
+                self.settings.last_export_folder = Some(path.clone());
+                // Without a writable project, set_export_folder saves both settings together.
+                if self.sets_doc.as_ref().is_some_and(|d| !d.read_only()) {
+                    self.save_settings();
+                }
+                self.set_export_folder(path);
+            }
             // Refused (with the status line) while an export runs, as every Also edit is.
             PickerPurpose::AlsoLocation => self.set_also_location(&path),
             PickerPurpose::SaveReport => self.save_report(path),

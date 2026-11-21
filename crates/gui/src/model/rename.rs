@@ -646,6 +646,9 @@ impl AppModel {
     /// How many sets the selection covers: the selected sets, or the distinct sets of the selected textures (the
     /// total the Outputs entry's count is compared with).
     pub fn selected_set_total(&self) -> usize {
+        if matches!(self.selection, super::Selection::SetId(_)) {
+            return 1;
+        }
         let sets = self.selected_sets().len();
         if sets > 0 {
             return sets;
@@ -666,18 +669,7 @@ impl AppModel {
     /// when none qualify), or the PBR sets of the selected textures.
     pub fn rename_keys(&self, mode: RenameMode) -> Vec<String> {
         let views = views(self);
-        // First match wins, as a front-to-back search over `views` did.
-        let mut by_key: HashMap<&str, &SetView> = HashMap::new();
-        let selected = self.selected_sets();
-        if !selected.is_empty() {
-            for v in views.iter() {
-                by_key.entry(&v.key).or_insert(v);
-            }
-        }
-        let sets: Vec<&SetView> = selected
-            .iter()
-            .filter_map(|k| by_key.get(k.as_str()).copied())
-            .collect();
+        let sets = self.selected_set_views(&views);
         let items = self.selected_items();
         // `out` is the answer and keeps the order; `seen` only answers "already in `out`?".
         let mut out: Vec<String> = vec![];

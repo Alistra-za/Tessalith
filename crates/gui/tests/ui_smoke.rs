@@ -46,8 +46,8 @@ fn the_start_screen_offers_open_folder_recent_and_the_drop_hint() {
         h.query_all_by_label("Sets").next().is_none(),
         "no Sets column"
     );
-    h.get_by_label("Save");
-    header_export_label(&h);
+    assert!(h.query_by_label("Save").is_none());
+    assert_eq!(header_export_action(&h), None);
 }
 
 #[test]
@@ -63,6 +63,8 @@ fn a_recent_folder_on_the_start_screen_opens_it() {
     h.get_by_label(&root.display().to_string()).click();
     h.run();
     assert_eq!(h.state().root.as_deref(), Some(root.as_path()));
+    h.get_by_label("Save");
+    header_export_label(&h);
 }
 
 #[test]
@@ -720,7 +722,7 @@ fn export_asks_about_undecided_textures_then_the_drawer_reports() {
     for label in ["Files", "Save report…", "Copy CLI command", "Close"] {
         h.get_by_label(label);
     }
-    h.get_by_label_contains("converted, ");
+    h.get_by_label_contains("written, ");
     assert!(h.query_all_by_label_contains("skipped: undecided").count() >= 1);
     press(&mut h, "Close");
     assert!(!h.state().bottom.open);
@@ -1524,7 +1526,8 @@ fn the_preview_has_a_close_button_that_collapses_it() {
 
 #[test]
 fn the_export_button_is_big_enough_to_find() {
-    let mut h = harness(AppModel::placeholder(GuiSettings::default()));
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(dir.path()));
     h.run();
     let r = h.get_by_label(&header_export_label(&h)).rect();
     assert!(r.width() >= 110.0 && r.height() >= 28.0, "{r:?}");
@@ -1765,14 +1768,15 @@ fn the_dim_box_offers_no_resize_button() {
 #[test]
 fn an_accepted_suggestion_reads_auto_with_its_reason_on_hover() {
     let d = tempfile::tempdir().unwrap();
-    let mut model = opened_as_the_app(mod_folder(d.path()), d.path().join("export"));
-    // Note FC1 (R1): the opening recorded the accepted types as project values; with that step undone (and not
-    // recorded again) the type is the accepted suggestion once more.
-    assert!(model
-        .undo_label()
-        .is_some_and(|l| l.ends_with("automatically")));
-    model.undo();
-    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    let root = mod_folder(d.path());
+    // The crash-restore step keeps the accepted suggestion visible before it is recorded (FB5).
+    std::fs::write(
+        sdc_gui::crash_log::recovery_path(&root.join("sdc.toml")),
+        "# recovered\n",
+    )
+    .unwrap();
+    let mut model = opened_as_the_app(root, d.path().join("export"));
+    assert_eq!(model.undo_label(), Some("Restore crash edits"));
     model.select_item("landscape/rock01.png");
     let mut h = harness(model);
     h.ctx.global_style_mut(|s| {

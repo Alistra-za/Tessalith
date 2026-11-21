@@ -85,7 +85,7 @@ Like any DDS it is skipped (`IN-DDS-SKIPPED`) unless you set `reencode = true` o
 
 Community Shaders and ENB read a 1×1 cube whose +Y is black as "reflect the live scene" instead of a picture (a dynamic cubemap). In Community Shaders the +X pixel then sets the reflection's colour (RGB) and roughness (alpha). For ENB, PGPatcher already applies a dynamic cubemap with every feature ENB supports.
 
-**Make marker cube…** in **Export to ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw 0 to 255 codes on the +X face; +Y stays black, so the file is always a marker. **Roughness** is 0 to 1 and optional (the *Set roughness* tick); leave it out and Community Shaders uses its defaults. **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. A file Tessalith didn't write is kept: the dialog says so and stays open so you can pick another name. Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.
+**Make marker cube…** in **Tools ▾** (**More ▾** with no project open) opens a small dialog, with or without a project. **Colour** is raw 0 to 255 codes on the +X face; +Y stays black, so the file is always a marker. **Roughness** is 0 to 1 and optional (the *Set roughness* tick); leave it out and Community Shaders uses its defaults. **Save…** opens the file dialog, in `<textures folder>\cubemaps` when that exists, named `marker_e.dds`. A file Tessalith didn't write is kept: the dialog says so and stays open so you can pick another name. Tessalith never writes a picture cube at 1×1, so a real cube can't turn into a marker.
 
 On the command line: [CLI reference](CLI-Reference.md#cubemaps-from-the-command-line).
 

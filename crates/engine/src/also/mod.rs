@@ -5,7 +5,7 @@ use crate::api::{
     LowDetailMode, OnExisting, Plan,
 };
 use crate::codes::{Code, Warning};
-use crate::config::{GraySource, Profile, RawMap, Target};
+use crate::config::{GraySource, Profile, RawMap, Subtype, Target};
 use crate::dds::{may_replace, write_atomic};
 use crate::derive::{vanilla_rel, DeriveKind, DeriveMode, DeriveRequest, DeriveSet};
 use crate::events::{
@@ -16,7 +16,7 @@ use crate::pack::{rmaos_channel, ChannelSource, RecipeKind, Slot};
 use crate::policy::{JobStatus, Provenance, ResolvedJob, SourceStamp};
 use crate::presets::{AlsoTarget, ExportConfig};
 use crate::session::AnalysisCache;
-use crate::shader::{assign, MemberMap};
+use crate::shader::{assign, MemberMap, Shader};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -426,7 +426,28 @@ pub fn derive_sets(
                 .collect(),
             members,
             albedo: albedo.map(|j| j.input.clone()),
-            normal: role("_n").map(|j| j.input.clone()),
+            // Note JS4 (N-8): on pbr and pbr_grass the `_n` role takes any tangent-space normal; prefer the
+            // `pbr_normal`, then `normal`, then `landscape_normal`, so a set that had a `pbr_normal` keeps its source.
+            // PBR Landscape keeps its first-in-order `_n`, as before.
+            normal: if matches!(pick.shader, Shader::Pbr | Shader::PbrGrass) {
+                [
+                    Subtype::PbrNormal,
+                    Subtype::Normal,
+                    Subtype::LandscapeNormal,
+                ]
+                .into_iter()
+                .find_map(|st| {
+                    plain
+                        .iter()
+                        .zip(&roles)
+                        .find(|(j, r)| {
+                            r.is_some_and(|r| r.label == "_n") && j.profile.subtype == st
+                        })
+                        .map(|(j, _)| j.input.clone())
+                })
+            } else {
+                role("_n").map(|j| j.input.clone())
+            },
             rough: channel(Slot::Roughness, rough_default as f32),
             metal: channel(Slot::Metallic, 0.0),
             ao: channel(Slot::Ao, 1.0),

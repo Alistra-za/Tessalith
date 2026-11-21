@@ -196,27 +196,37 @@ fn a_long_value_does_not_widen_the_column() {
 #[test]
 fn rows_stay_inside_the_column_at_1100() {
     let d = tempfile::tempdir().unwrap();
-    let h = harness(model(d.path()), 1100.0);
+    let mut h = harness(model(d.path()), 1100.0);
+    h.get_by_label("New project: nothing saved yet.");
     let c = centre(&h);
     let edge = h.ctx.content_rect().right() - 8.0;
     assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
-    for (n, r) in controls(&h, c) {
+    let mut combo_width = None;
+    for (role, n) in COMBOS
+        .map(|n| (Role::ComboBox, n))
+        .into_iter()
+        .chain(CHECKS.map(|n| (Role::CheckBox, n)))
+    {
+        h.query_all(by().role(role).label(n))
+            .find(|n| n.rect().left() >= c.left())
+            .unwrap()
+            .scroll_to_me();
+        h.run();
+        let r = control(&h, role, n, c);
         assert!(
             r.max.x <= c.max.x,
             "{n} ends at {}, the centre at {}",
             r.max.x,
             c.max.x
         );
-    }
-    // Scaled down or not, the column keeps one width.
-    let all = combos(&h, c);
-    for (n, r) in &all {
-        assert!(
-            (r.width() - all[0].1.width()).abs() <= 1.0,
-            "{n} is {} wide, Sub-type {}",
-            r.width(),
-            all[0].1.width()
-        );
+        if role == Role::ComboBox {
+            let width = *combo_width.get_or_insert(r.width());
+            assert!(
+                (r.width() - width).abs() <= 1.0,
+                "{n} is {} wide, Sub-type {width}",
+                r.width()
+            );
+        }
     }
 }
 
@@ -693,7 +703,7 @@ type H3 = Harness<'static, (AppModel, sdc_gui::ui::State)>;
 /// AG132: a set member selected in the 3D view shows its settings in the floating window, at its default size.
 fn window_harness(dir: &std::path::Path) -> H3 {
     use sdc_gui::model::pbr_export::json_entries;
-    use sdc_gui::model::set_preview::{followed_set, SetPreview, DEFAULT_CAP};
+    use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
     let mut m = pbr_opened_plain(dir);
     let key = json_entries(&m)
         .into_iter()
@@ -703,7 +713,8 @@ fn window_harness(dir: &std::path::Path) -> H3 {
         .key;
     m.select_set(&key);
     m.settings.set_view_3d = true;
-    let set = followed_set(&m).unwrap();
+    let active = m.resolved_selection();
+    let set = &active.view().expect("keyed fixture").key;
     let item = m
         .items
         .iter()

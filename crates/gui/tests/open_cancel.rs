@@ -173,7 +173,7 @@ fn undo_label_names_the_nif_history() {
         redo_label: None,
     };
     let b = undo_button(Some(&nif), true, Some("Mode"));
-    assert_eq!(b.text, "Undo NIF edit: Set shader type");
+    assert_eq!(b.text, "Undo NIF edit");
     // E28: the name says whose history it is and the step.
     assert_eq!(b.name, "Undo (NIF edit history): Set shader type");
     assert!(b.enabled);
@@ -193,20 +193,20 @@ fn undo_label_names_the_nif_history() {
     assert_eq!((r.text.as_str(), r.enabled), ("Redo", false));
     assert_eq!(r.hover, "Nothing to redo");
     assert_eq!(r.name, "Redo");
-    // A long NIF step is shortened on the button; the full text stays in the hover.
+    // Long steps stay in the name and hover for either direction.
     let long = UndoTarget {
         undo_label: Some("Set the emissive colour of every shape in the mesh".into()),
+        can_redo: true,
+        redo_label: Some("Set the emissive colour of every shape in the mesh".into()),
         ..nif
     };
-    let b = undo_button(Some(&long), true, None);
-    assert!(
-        b.text.ends_with('…') && b.text.chars().count() <= 40,
-        "{}",
-        b.text
-    );
-    assert!(b
-        .hover
-        .starts_with("Undo NIF edit: Set the emissive colour of every shape in the mesh"));
+    for (undo, verb) in [(true, "Undo"), (false, "Redo")] {
+        let b = undo_button(Some(&long), undo, None);
+        let step = "Set the emissive colour of every shape in the mesh";
+        assert_eq!(b.text, format!("{verb} NIF edit"));
+        assert_eq!(b.name, format!("{verb} (NIF edit history): {step}"));
+        assert!(b.hover.starts_with(&format!("{verb} NIF edit: {step}")));
+    }
 }
 
 fn lone_normal(root: &std::path::Path, rel: &str) {
@@ -227,7 +227,7 @@ fn cancel_does_not_keep_the_automatic_types_marked_written() {
         lone_normal(&root, k);
     }
     let mut m = support::opened_as_the_app(root, d.path().join("export"));
-    assert!(m.only_automatic_unsaved());
+    assert!(m.needs_write() && !m.unsaved());
     let other = d.path().join("other");
     lone_normal(&other, "b/w_n.png");
     assert!(m.request_open(other));

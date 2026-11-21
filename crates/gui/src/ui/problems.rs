@@ -4,8 +4,9 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts, USE_PBR_NORMAL,
+    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered_by, flagged, is_hidden,
+    kinds, problems, At, Fix, Level, NameKind, Problem, ProblemsFilter, TabCounts,
+    KEEP_ALPHA_HOVER,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -13,7 +14,7 @@ use crate::model::meshes::NifTab;
 use crate::model::nav::SlotTarget;
 use crate::model::sets::{shader_options, Missing};
 use crate::model::shell::ShellRequest;
-use crate::model::{Answer, AppModel};
+use crate::model::{Answer, AppModel, SetTarget};
 use crate::pgp::settings::feature_key;
 use crate::sets_doc::IntendedKey;
 use eframe::egui;
@@ -80,6 +81,7 @@ fn lead_width(ui: &egui::Ui, p: &Problem) -> f32 {
 fn link_text(p: &Problem) -> &str {
     match &p.at {
         At::Texture(k) | At::File(k) | At::Nif(k) => k.as_str(),
+        At::Set { id, .. } if id.is_empty() => "Unnamed set",
         At::Set { id, .. } => id.as_str(),
         At::Project => "Project",
     }
@@ -120,6 +122,7 @@ type Rows = Arc<Vec<Problem>>;
 struct Listed {
     all: Rows,
     filter: Option<ProblemsFilter>,
+    name_kind: NameKind,
     hidden_kinds: Vec<Code>,
     rows: Rows,
     checks: usize,
@@ -132,6 +135,8 @@ struct Listed {
     hideable: bool,
     /// Review E2: the listed rows that are not notes (the empty and first-line texts).
     problem_rows: usize,
+    /// Visible NIF problems grouped at their highest severity in the default list.
+    nif_group: std::ops::Range<usize>,
     /// Review E2: the set's notes, not hidden, while a set filter is on (the Notes pill and the first line).
     set_notes: Option<usize>,
 }
@@ -139,21 +144,26 @@ struct Listed {
 /// `filtered` at most once per change: keyed on the (cached) problems build, the filter and the hidden kinds. Also
 /// whether the `Checks` pill shows (the set's check rows while a Set filter is on, else the project's; K6, review M2),
 /// and the project's rows with a suggestion, which "Accept all suggestions" decides (Note FB9).
-fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
+fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
     let all = problems(model);
-    let f = model.bottom.filter.clone();
+    let kind = model.bottom.name_kind;
     let hidden_kinds = model.hidden_kinds();
-    let id = egui::Id::unique("problems-rows");
+    // The tab hover reads the default list even while a filtered list is open.
+    let id = egui::Id::unique(("problems-rows", f.is_some()));
     if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
-        if Arc::ptr_eq(&l.all, &all) && l.filter == f && l.hidden_kinds == hidden_kinds {
+        if Arc::ptr_eq(&l.all, &all)
+            && l.filter == f
+            && l.name_kind == kind
+            && l.hidden_kinds == hidden_kinds
+        {
             return l;
         }
     }
-    let out: Rows = filtered(model, f.as_ref());
+    let out: Rows = filtered_by(model, f.as_ref(), kind);
     // The Checks pill under a set's list or its notes leads to the set's checks, so it counts those.
     let checks = match &f {
         Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
-            count_in_set(model, k, counts_as_check)
+            count_in_set(model, k, kind, counts_as_check)
         }
         _ => flagged(model).check_rows,
     };
@@ -162,7 +172,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let set_notes = match &f {
         Some(
             ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
-        ) => Some(count_in_set(model, k, |p| {
+        ) => Some(count_in_set(model, k, kind, |p| {
             p.is_note() && !is_hidden(p, &hidden_kinds)
         })),
         _ => None,
@@ -172,7 +182,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         .iter()
         .filter(|p| !p.is_note() && is_hidden(p, &hidden_kinds))
         .count();
-    let rows: Rows = if hidden == 0 {
+    let mut rows: Rows = if hidden == 0 {
         out
     } else {
         Arc::new(
@@ -182,13 +192,29 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
                 .collect(),
         )
     };
+    let problem_rows = rows.iter().filter(|p| !p.is_note()).count();
+    let nif_group = if f.is_none() && !model.nif_problems.is_empty() {
+        let problems = &mut Arc::make_mut(&mut rows)[..problem_rows];
+        // The worklist already puts NIF blockers before NIF warnings. Keep the first one's position.
+        let start = problems
+            .iter()
+            .position(Problem::is_nif_problem)
+            .unwrap_or(problems.len());
+        let tail = &mut problems[start..];
+        tail.sort_by_key(|p| !p.is_nif_problem());
+        start..start + tail.partition_point(Problem::is_nif_problem)
+    } else {
+        0..0
+    };
     let l = Listed {
         set_notes,
-        problem_rows: rows.iter().filter(|p| !p.is_note()).count(),
+        problem_rows,
+        nif_group,
         suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
         hideable: all.iter().any(can_hide),
         all,
         filter: f,
+        name_kind: kind,
         hidden_kinds: hidden_kinds.clone(),
         rows,
         checks,
@@ -197,6 +223,10 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     };
     ui.data_mut(|d| d.insert_temp(id, l.clone()));
     l
+}
+
+pub(super) fn nif_problem_count(ui: &egui::Ui, model: &AppModel) -> usize {
+    rows(ui, model, None).nif_group.len()
 }
 
 /// The `Kinds ▾` menu (Note HC4): one tick per kind of row the project has, unticked when hidden. The menu stays open,
@@ -345,8 +375,8 @@ pub fn forget_focus(ctx: &egui::Context) {
 
 enum Act {
     Texture(String),
-    /// The set (by key) and, from Go to set, the slot or file to outline (review E10).
-    Set(String, Option<SlotTarget>),
+    /// The source set and, from Go to set, the slot or file to outline (review E10).
+    Set(SetTarget, Option<SlotTarget>),
     File(String),
     Pick(RowPick),
     Apply(Fix, At),
@@ -501,7 +531,11 @@ fn shader_menu(
         .inner
     });
     let menu = r.inner;
-    let name = format!("Change shader for {id}");
+    // Two rows of one set can both offer it: the row's code tells their names apart (final wave Group 5).
+    let name = format!(
+        "Change shader for {id} ({})",
+        p.code.map_or("", |c| c.as_str())
+    );
     menu.response
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
     if let Some(why) = off {
@@ -707,22 +741,32 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
-        // Note JP3 (B3-27): it switches a type, as Tag as grass does, so it keeps Enter and Space (`RebuildZ`'s shape,
-        // not `click_only_button`). The refusal is read at draw time: the problems cache key does not follow locks.
-        Fix::UsePbrNormal(k) => {
-            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
-            let why = off
-                .map(str::to_string)
-                .or_else(|| m.use_pbr_normal_refusal(k));
-            let name = format!("{USE_PBR_NORMAL} for {file}");
-            let b = ui.add_enabled(why.is_none(), egui::Button::new(USE_PBR_NORMAL));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, why.is_none(), &name));
+        // Owner A1-8: it writes sdc.toml, so a read-only one disables it with its reason; a pointer click only (FC5).
+        Fix::ClearRecipe(k) => {
+            let out = format!("{}.dds", k.rsplit('/').next().unwrap_or(k));
+            // Two rows (a PACK-RECIPE-* and the SHADER-EXTRA-MAP of one output) can both offer it: the row's code
+            // tells their names apart (egui-ui-rules 8.4; final wave Group 5).
+            let name = format!(
+                "Clear the packing recipe of {out} ({})",
+                p.code.map_or("", |c| c.as_str())
+            );
+            let toml = m.toml_read_only_reason();
+            let off = toml.as_deref().or(off);
+            click_only_button(
+                ui,
+                egui::Button::new("Clear recipe"),
+                Some(&name),
+                "Remove packing.recipe from this set's packed entries in sdc.toml. A project or preset recipe can apply next.",
+                off,
+            )
+        }
+        Fix::KeepAlpha { table, name } => {
+            let why = off.or_else(|| table.as_ref().err().map(String::as_str));
+            let b = ui.add_enabled(why.is_none(), egui::Button::new("Keep alpha"));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, why.is_none(), name));
             match why {
                 Some(why) => b.on_disabled_hover_text(why),
-                None => b.on_hover_text(
-                    "Set its sub-type to PBR normal (subtype = \"pbr_normal\" in sdc.toml): its alpha is dropped, \
-                     and any _rmaos in this set bakes from it, so distant surfaces shine less.",
-                ),
+                None => b.on_hover_text(KEEP_ALPHA_HOVER),
             }
             .clicked()
         }
@@ -914,7 +958,7 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
     let width = stored.map_or(full, |b| {
         (lead_width(ui, p) + gaps + b + ROW_MARGIN).min(full)
     });
-    // The wrapper is `interact_size.y` high, as the focus rect above is: `row_h` is that plus the item spacing.
+    // Match the focus rect and the virtual row height. The scroll area adds the item spacing.
     let size = egui::vec2(width, ui.spacing().interact_size.y);
     let ((l, r), buttons) = ui
         .allocate_ui(size, |ui| {
@@ -930,7 +974,7 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
                     } else if ui.link(link).clicked() {
                         a = match &p.at {
                             At::Texture(k) => Some(Act::Texture(k.clone())),
-                            At::Set { key, .. } => Some(Act::Set(key.clone(), None)),
+                            At::Set { key, id } => Some(Act::Set(SetTarget::of(key, id), None)),
                             At::File(k) => Some(Act::File(k.clone())),
                             // A NIF's link opens it, as its fix does.
                             At::Nif(_) => p.fix.clone().map(|f| Act::Apply(f, p.at.clone())),
@@ -965,9 +1009,9 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
                     // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to set. The
                     // layout is right to left, so Go to set is drawn first.
                     let mut a = None;
-                    if let At::Set { key, .. } = &p.at {
+                    if let At::Set { key, id } = &p.at {
                         if ui.button("Go to set").clicked() {
-                            a = Some(Act::Set(key.clone(), p.target.clone()));
+                            a = Some(Act::Set(SetTarget::of(key, id), p.target.clone()));
                         }
                     }
                     // Review E4: the widgets from here to the fix are Mark, the second fix and the fix; the last one
@@ -1030,9 +1074,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         hidden_problems,
         hideable,
         problem_rows,
+        nif_group,
         set_notes,
         ..
-    } = rows(ui, model);
+    } = rows(ui, model, model.bottom.filter.clone());
     // Review E2: the set's notes under a set filter, else the tab's own cached count; neither scans a row on a
     // settled frame. Read once a frame (review E18): the first lines read it too.
     let tab_counts = cached_tab_counts(model);
@@ -1041,12 +1086,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
     let mut act = None;
-    let label = |k: &String| {
-        crate::model::sets::views(model)
-            .iter()
-            .find(|v| v.key == *k)
-            .map_or(k.clone(), |v| v.id.clone())
-    };
+    let label =
+        |k: &String| crate::model::bottom::cached_scope_label(model, k, model.bottom.name_kind);
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
     let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
     if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {
@@ -1139,7 +1180,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     if let Some(text) = lines.plain {
         ui.weak(text);
     }
-    let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    let row_h = ui.spacing().interact_size.y;
+    let nif_problems = nif_group.len();
+    let heading = (!nif_group.is_empty()).then_some(nif_group.start);
     let m = &*model;
     // Review Focus 5: the focused row left the list (its question was answered) and egui dropped the focus, so the
     // row now at its index takes it, or the last row.
@@ -1162,7 +1205,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let fix_focus = taken.and_then(|id| list.iter().position(|p| row_id(p) == id).map(|i| (id, i)));
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     if let Some((_, i)) = fix_focus {
-        area = area.vertical_scroll_offset(i as f32 * row_h);
+        let display_row = i + usize::from(heading.is_some_and(|h| h <= i));
+        area =
+            area.vertical_scroll_offset(display_row as f32 * (row_h + ui.spacing().item_spacing.y));
     }
     let rows_in = RowsIn {
         m,
@@ -1177,11 +1222,27 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         focus_now: None,
         sizing: false,
     };
-    area.show_rows(ui, row_h, list.len(), |ui, range| {
-        for i in range {
-            row_ui(ui, &rows_in, i, &mut out);
-        }
-    });
+    area.show_rows(
+        ui,
+        row_h,
+        list.len() + usize::from(heading.is_some()),
+        |ui, range| {
+            for i in range {
+                if heading == Some(i) {
+                    let text = format!("From the NIF you are editing ({nif_problems})");
+                    ui.add_sized(
+                        [ui.available_width(), row_h],
+                        egui::Label::new(egui::RichText::new(text).strong())
+                            .halign(egui::Align::Min)
+                            .truncate(),
+                    );
+                } else {
+                    let row = i - usize::from(heading.is_some_and(|h| h < i));
+                    row_ui(ui, &rows_in, row, &mut out);
+                }
+            }
+        },
+    );
     let RowsOut {
         act,
         focus_now,
@@ -1211,9 +1272,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
     });
     // Every click-through lands in the Textures view.
-    let to_textures = |ui: &egui::Ui| super::header::set_meshes_view(ui.ctx(), false);
     match act {
-        Some(Act::Texture(k)) => {
+        Some(Act::Texture(k)) => super::navigate(ui.ctx(), model, move |ctx, model| {
             // Note FB12: a helper in a collapsed Helpers group opens it, as the palette does. Local to this click:
             // `select_item` also runs for restores, which must not reopen a group the user collapsed.
             if model
@@ -1224,11 +1284,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 model.nav.reveal_item = Some(k.clone());
             }
             model.select_item(&k);
-            to_textures(ui);
-        }
-        Some(Act::Set(k, target)) => {
-            model.go_to_set(&k, target);
-            to_textures(ui);
+            super::header::set_meshes_view(ctx, false);
+        }),
+        Some(Act::Set(target, slot)) => {
+            super::navigate(ui.ctx(), model, move |_, m| m.go_to_target(target, slot))
         }
         // Re-check A5: a Vanilla or CM row of the last Also export names no texture; its file is shown in Explorer.
         Some(Act::File(k)) => match model.also_file(&k) {
@@ -1237,13 +1296,22 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     model.status_line = e;
                 }
             }
-            None => {
-                model.select_job(&k);
-                to_textures(ui);
-            }
+            None => super::navigate(ui.ctx(), model, move |ctx, m| {
+                m.select_job(&k);
+                super::header::set_meshes_view(ctx, false);
+            }),
         },
+        Some(Act::Pick(r @ RowPick::Select(_))) => {
+            super::navigate(ui.ctx(), model, move |_, m| apply(m, r))
+        }
         Some(Act::Pick(r)) => apply(model, r),
-        Some(Act::Apply(fix, at)) => apply_fix(ui, model, fix, at),
+        Some(Act::Apply(
+            fix @ (Fix::FixPath(..) | Fix::ShowNifTab(..) | Fix::ChoosePreset),
+            at,
+        )) => {
+            super::navigate(ui.ctx(), model, move |ctx, m| apply_fix(ctx, m, fix, at));
+        }
+        Some(Act::Apply(fix, at)) => apply_fix(ui.ctx(), model, fix, at),
         Some(Act::Filter(f)) => model.bottom.filter = f,
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::HideKind(code, hide)) => model.set_kind_hidden(code, hide),
@@ -1254,8 +1322,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 /// What a row's fix button does (Note FC3). Only the writes named in Review Focus 3 write, and only from this click.
-fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
-    let to_textures = |ui: &egui::Ui| super::header::set_meshes_view(ui.ctx(), false);
+fn apply_fix(ctx: &egui::Context, model: &mut AppModel, fix: Fix, at: At) {
     match fix {
         Fix::RemoveMissing(miss) => {
             if let At::Set { id, .. } = at {
@@ -1272,24 +1339,25 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::TurnFeatureOff(id, f) => model.turn_feature_off(&id, f),
         // Its buttons ask for `TurnFeatureOff` (`fix_button`).
         Fix::FeatureClash(..) => {}
-        Fix::FixPath(key, field) => {
-            let id = crate::model::sets::views(model)
-                .iter()
-                .find(|v| v.key == key)
-                .map(|v| v.id.clone());
-            model.select_set(&key);
-            to_textures(ui);
+        Fix::FixPath(target, field) => {
+            model.go_to_target(target, None);
+            let active = model.resolved_selection();
+            let id = active.view().map(|v| v.id.clone());
             if let Some(id) = id {
-                let at = ui.ctx().cumulative_pass_nr();
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
+                if model.settings.set_view_3d {
+                    model.settings.set_view_3d = false;
+                    model.save_settings();
+                }
+                super::set_editor::show_main_tab(ctx);
+                let at = ctx.cumulative_pass_nr();
+                ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
             }
         }
         Fix::UndoLast => model.undo(),
         Fix::ShowNifTab(p, t, f) => model.nif_tab_request = Some((p, t, f)),
         Fix::ChoosePreset => {
-            to_textures(ui);
-            model.choose_preset = Some(ui.ctx().cumulative_pass_nr());
+            super::header::set_meshes_view(ctx, false);
+            model.choose_preset = Some(ctx.cumulative_pass_nr());
         }
         // Note FC10: each writes from this click only (Review Focus 3); a refusal goes to the status line.
         Fix::OpenInEditor(p) => model.shell.push(ShellRequest::Open(p)),
@@ -1321,9 +1389,12 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
-        Fix::UsePbrNormal(k) => {
-            if let Err(why) = model.use_pbr_normal(&k) {
-                model.status_line = why;
+        Fix::ClearRecipe(k) => model.clear_packing_recipe(&k),
+        Fix::KeepAlpha { table, .. } => {
+            if let (At::Texture(key), Ok(table)) = (at, table) {
+                if let Err(why) = model.keep_alpha_shown(&key, Some(&table)) {
+                    model.status_line = why;
+                }
             }
         }
     }
