@@ -553,7 +553,7 @@
         "normal_base": {
           "$ref": "#/$defs/NormalBase",
           "default": "renormalize",
-          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors. `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,\nup to what XYZ can hold. On other normal maps, `keep` applies only to mip 0."
+          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors.\nAdvanced Skin detail normals always start from unit length. For other normal maps, `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,\nup to what XYZ can hold. Other normal maps renormalize lower mips."
         }
       },
       "required": [
@@ -980,7 +980,7 @@
         "normal_base": {
           "$ref": "#/$defs/NormalBase",
           "default": "renormalize",
-          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors. `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,\nup to what XYZ can hold. On other normal maps, `keep` applies only to mip 0."
+          "description": "Normal length after resizing. `renormalize` (default) stores unit vectors.\nAdvanced Skin detail normals always start from unit length. For other normal maps, `keep` preserves mip 0 as authored.\nOn XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,\nup to what XYZ can hold. Other normal maps renormalize lower mips."
         }
       },
       "type": "object"

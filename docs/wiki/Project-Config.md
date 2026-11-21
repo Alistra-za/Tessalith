@@ -272,6 +272,7 @@ These rules apply to normal-map filtering. HDR outputs use the mip rules for the
 |---|---|---|
 | `normal`, `landscape_normal`, `pbr_normal` | Unit vectors at every level. | Mip 0 keeps its authored vectors. Each lower mip takes the direction of the average vector and scales it to the average authored length of the texels it covers, up to what XYZ can hold. Use a format that stores XYZ, such as BC7. <!-- D:LA1,LA2 --> |
 | `coat_normal` (`_cnr`) | Unit vectors at every level. | With XYZ storage, the same length rule applies even when the coat roughness bake is off. <!-- D:LA3 --> |
+| Advanced Skin detail normal (`skin_detail`) | Unit vectors at every level. | Unit vectors at every level, including mip 0. BC5 is valid with Keep. <!-- D:LA6 --> |
 | Other normal maps, including the normal half of complex grass | Renormalises each normal mip. | Keeps the full-size normal vectors only. Smaller normal mips still renormalise. <!-- D:LA5 --> |
 | Baked `_rmaos`, `_rfaos`, complex `_m` gloss and coat roughness | The bake reads the source normal's directions. | The bake still reads those directions, whatever base mode the roughness member uses. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
 

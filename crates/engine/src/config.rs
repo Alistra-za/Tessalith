@@ -370,6 +370,10 @@ pub enum MipLevels {
 }
 
 impl Subtype {
+    pub(crate) fn always_unit_base(self) -> bool {
+        self == Self::SkinDetail
+    }
+
     pub(crate) fn needs_unit_base(self, format: Format) -> bool {
         matches!(self, Self::Normal | Self::LandscapeNormal | Self::PbrNormal)
             && !stores_xyz(format)
@@ -556,9 +560,10 @@ pub struct MipSpec {
     #[serde(default, skip_serializing_if = "MipEdge::is_wrap")]
     pub edge: MipEdge,
     pub normal: NormalMips,
-    /// Normal length after resizing. `renormalize` (default) stores unit vectors. `keep` preserves mip 0 as authored.
+    /// Normal length after resizing. `renormalize` (default) stores unit vectors.
+    /// Advanced Skin detail normals always start from unit length. For other normal maps, `keep` preserves mip 0 as authored.
     /// On XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,
-    /// up to what XYZ can hold. On other normal maps, `keep` applies only to mip 0.
+    /// up to what XYZ can hold. Other normal maps renormalize lower mips.
     #[serde(default = "default_normal_base")]
     pub normal_base: NormalBase,
     /// Clamp `t` of the variance bake (spec §6.2, DECISIONS Note E): the added variance is at most `t²`. 0.25;

@@ -175,9 +175,12 @@ fn vector_length(px: &[f32; 4]) -> f32 {
 
 /// Mip 0 as stored (spec §5.4, DECISIONS R1): a normal map's base vectors at unit length unless
 /// `mips.normal_base = keep` and the output supports that base. Other domains keep the authored values.
+/// Advanced Skin detail needs unit directions because CS reconstructs BC5 Z and normalizes BC7 RGB.
 fn base_level(work: &Work, p: &Profile, output: Subtype) -> Rgba32F {
     let mut out = work.img.clone();
-    if (p.mips.normal_base == NormalBase::Renormalize || output.needs_unit_base(p.format))
+    if (p.mips.normal_base == NormalBase::Renormalize
+        || output.always_unit_base()
+        || output.needs_unit_base(p.format))
         && matches!(work.domain, Domain::Normal | Domain::Msn)
     {
         for px in &mut out.px {
@@ -833,21 +836,22 @@ mod tests {
     }
 
     #[test]
-    fn skin_detail_lower_normals_stay_unit_in_both_base_modes() {
+    fn skin_detail_normals_stay_unit_in_both_base_modes() {
         let w = work(
             Rgba32F::new(2, 1, [0.0, 0.0, 0.5, 0.25]),
             Domain::Normal,
             true,
         );
         let mut p = profile(Subtype::SkinDetail);
-        for fmt in [Format::Bc5, Format::Bc7] {
-            p.format = fmt;
-            for (mode, base_z) in [(NormalBase::Renormalize, 1.0), (NormalBase::Keep, 0.5)] {
-                p.mips.normal_base = mode;
+        for mode in [NormalBase::Renormalize, NormalBase::Keep] {
+            p.mips.normal_base = mode;
+            let bases = [Format::Bc5, Format::Bc7].map(|fmt| {
+                p.format = fmt;
                 let chain = build_chain(&w, &p);
-                assert_eq!(chain[0].px[0], [0.0, 0.0, base_z, 0.25]);
                 assert_eq!(chain[1].px[0], [0.0, 0.0, 1.0, 0.25]);
-            }
+                chain[0].px[0]
+            });
+            assert_eq!(bases, [[0.0, 0.0, 1.0, 0.25]; 2], "BC5 and BC7 {mode:?}");
         }
     }
 

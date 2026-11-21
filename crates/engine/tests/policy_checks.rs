@@ -220,6 +220,24 @@ fn xy_only_keep_is_an_error_even_when_the_format_is_allowed() {
 }
 
 #[test]
+fn skin_detail_accepts_project_wide_keep_with_bc5() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x_detail_n.png",
+        Some("detail_n"),
+        &["detail_n"],
+        opaque(),
+        &["subtype=skin_detail", "mips.normal_base=keep"],
+        &[],
+    );
+    assert_eq!(j.profile.subtype, Subtype::SkinDetail);
+    assert_eq!(j.profile.mips.normal_base, NormalBase::Keep);
+    assert_eq!(j.profile.format, Format::Bc5);
+    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
+    assert_eq!(j.status, JobStatus::Ready);
+}
+
+#[test]
 fn pbr_albedo_unavailable_under_vanilla_and_srgb_is_an_error_there() {
     let j = run(
         Target::Vanilla,

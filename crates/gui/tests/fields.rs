@@ -245,6 +245,7 @@ fn keep_help_covers_coat_and_lower_mips() {
         "coat normals",
         "up to what XYZ can hold",
         "full-size level only",
+        "Advanced Skin detail normals always start from unit length",
     ] {
         assert!(help.contains(detail), "missing {detail:?} in {help}");
     }

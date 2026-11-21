@@ -29,7 +29,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | BC7 weighting, Perceptual | `encoder.bc7_weights`, `encoder.perceptual` |
 | DDS header | `header` |
 
-- Under **Normal base level**, choose **Keep as authored** to carry deliberately short normals into the smaller mips of an XYZ base or coat normal. Other normal types keep only the full-size level. [Normal length by output](Project-Config.md#normal-length-by-output).
+- Under **Normal base level**, choose **Keep as authored** to carry deliberately short normals into the smaller mips of an XYZ base or coat normal. See [Normal length by output](Project-Config.md#normal-length-by-output) for other normal types.
 - When the texture set enables the [roughness bake](Texture-Packing.md#variance-and-gloss-bake), the normal's **Normal handling** row reads *decided by the texture set*. If your project explicitly sets `renormalize_bake`, the row shows where that setting came from.
 - The Sub-type picker is the one the Problems **Set type…** button opens.
 - For an emissive, the reason it is BC6H or BC7 sRGB shows under Compression (`FMT-HDR-SOURCE`).

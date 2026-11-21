@@ -53,8 +53,9 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
         // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
-        // A new sub-type in 3.0.0.
-        Subtype::SkinWet | Subtype::SkinDetail => "3.0.0",
+        Subtype::SkinWet => "3.0.0",
+        // Advanced Skin detail needs a unit base even with Keep (Note LA6).
+        Subtype::SkinDetail => ENGINE_VERSION,
         // Keep carries authored normal length and bakes angular spread (Note LA).
         Subtype::Normal
         | Subtype::LandscapeNormal
@@ -607,7 +608,6 @@ mod tests {
             let want = if matches!(
                 st,
                 Subtype::SkinWet
-                    | Subtype::SkinDetail
                     | Subtype::Diffuse
                     | Subtype::PbrAlbedo
                     | Subtype::UiSky
@@ -620,6 +620,7 @@ mod tests {
                     | Subtype::LandscapeNormal
                     | Subtype::PbrNormal
                     | Subtype::Rmaos
+                    | Subtype::SkinDetail
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial
                     | Subtype::CoatNormal
