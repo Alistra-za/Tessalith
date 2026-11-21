@@ -130,6 +130,14 @@
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
 
+- NIF edits are saved with the project. Export writes the edited NIF and its record to the chosen export folder. An unexported draft from an older version moves out of that folder on your next edit.
+- The NIF edit footer shows where the draft is saved. **Show in Explorer** selects the file.
+- **Edit** is a button beside the NIF’s name. Long paths in the Meshes list and edit footer shorten in the middle so you can still read the file name.
+- Switching or closing projects ends the old NIF edit session once its changes are saved. The selected NIF can reopen with the other project’s edits.
+- The Meshes list names the scan it shows and when the scan data was last written. The **Scan** row tells you which choice is missing. Hover the disabled folder pickers to see when a scan is running.
+- The NIF editor uses **Texture wrap**, **Shader flags 1** and **Shader flags 2**. Hover the controls for the names and values found in the NIF.
+- Texture slots scroll above the NIF edit footer when the bottom panel is open.
+
 ## 3.0.0
 
 ### Main
