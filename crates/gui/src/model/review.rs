@@ -960,8 +960,8 @@ impl AppModel {
             }
             if r.draft_unsaved {
                 put(r.draft.clone(), NIF_DRAFT_HOVER, false);
-                if let Some(p) = &r.kept_backup {
-                    put(p.clone(), NIF_BACKUP_HOVER, true);
+                if let Some(backup) = &r.kept_backup {
+                    put(backup.path.clone(), NIF_BACKUP_HOVER, true);
                 }
             }
         }

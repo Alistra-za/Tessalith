@@ -8113,6 +8113,101 @@ fn a_locked_future_winner_stops_the_draft_before_a_new_edit_is_written() {
 }
 
 #[test]
+fn export_stops_when_the_listed_backup_of_a_deferred_kept_edit_is_taken() {
+    let (d, mut m, p) = saved_in_p();
+    m.close_edit();
+    let k = kept(&d, &id_of(&p));
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 8.5)).unwrap();
+    make_old(&k);
+    let kept_bytes = std::fs::read(&k).unwrap();
+    m.open_edit();
+    assert_eq!(vals(&m), [12.5]);
+    assert!(!autosave(&d).exists());
+    tick(&mut m, 40.5);
+    let row = review_row(&m);
+    assert!(row.draft_unsaved);
+    let offered = row.kept_backup.unwrap().path;
+    let mut model = export_review(&d);
+    model.set_nif_review_rows(m.nif_review_rows());
+    assert!(support::listed(&model.review_writes())
+        .iter()
+        .any(|w| w.path == offered));
+    std::fs::write(&offered, b"already taken").unwrap();
+
+    let result = export(&mut m);
+    assert!(
+        !exported(&d).exists(),
+        "Export wrote the NIF after its listed backup failed"
+    );
+    assert!(!nif_doc(&export_root(&d)).exists());
+    let why = result.unwrap_err();
+    assert!(
+        why.contains(&row.path) && why.contains(offered.to_str().unwrap()),
+        "{why}"
+    );
+    assert!(m.edit.as_ref().unwrap().pending());
+    assert_eq!(std::fs::read(&offered).unwrap(), b"already taken");
+    assert_eq!(std::fs::read(&k).unwrap(), kept_bytes);
+
+    let retry = review_row(&m).kept_backup.unwrap().path;
+    assert_ne!(retry, offered);
+    model.set_nif_review_rows(m.nif_review_rows());
+    model.open_review();
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(sdc_gui::ui::review::tab, model);
+    h.run_steps(4);
+    let (_, failure) = why.split_once(offered.to_str().unwrap()).unwrap();
+    let reason = format!(
+        "{} · Last backup failed ({}{failure})",
+        row.path,
+        offered.display()
+    );
+    h.get_by_label_contains(&reason);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(std::fs::read(retry).unwrap(), kept_bytes);
+    assert_eq!(std::fs::read(offered).unwrap(), b"already taken");
+}
+
+#[test]
+fn retry_after_a_failed_draft_write_backs_up_the_displaced_edits_again() {
+    let (d, mut m) = export_session();
+    let (p, _) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+    let path = draft(&p);
+    let displaced = std::fs::read(&path).unwrap();
+    assert_eq!(vals(&m), [9.5]);
+    let moved = d.path().join("moved");
+    let (from, to) = (p.clone(), moved.clone());
+    set_write_hook(Some(Box::new(move |stage| {
+        if stage == "root checked" {
+            std::fs::rename(&from, &to).unwrap();
+        }
+    })));
+    let first = export(&mut m);
+    set_write_hook(None);
+    assert!(first.unwrap_err().contains("could not be saved"));
+    std::fs::rename(moved, p).unwrap();
+    let backups = moved_aside_from(&path);
+    assert_eq!(backups.len(), 1);
+    assert_eq!(std::fs::read(&backups[0]).unwrap(), displaced);
+    std::fs::remove_file(&backups[0]).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), displaced);
+
+    assert_eq!(export(&mut m), Ok(1));
+    let backups = moved_aside_from(&path);
+    assert_eq!(
+        backups.len(),
+        1,
+        "retry overwrote the only copy of the displaced edits"
+    );
+    assert_eq!(std::fs::read(&backups[0]).unwrap(), displaced);
+    assert_eq!(doc_values(&path), [9.5]);
+}
+
+#[test]
 fn a_project_moved_during_the_draft_write_can_still_find_its_kept_edit() {
     let (d, mut m) = export_session();
     let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
@@ -14862,8 +14957,10 @@ fn review_export_lists_the_backup_of_a_losing_kept_edit() {
     // A second process takes the offered name before the write. The next Review can offer another one.
     let offered = h.state().model.nif_review_rows()[0]
         .kept_backup
-        .clone()
-        .unwrap();
+        .as_ref()
+        .unwrap()
+        .path
+        .clone();
     std::fs::write(&offered, b"already taken").unwrap();
     assert!(
         export(&mut h.state_mut().meshes).is_err(),

@@ -317,7 +317,7 @@ pub const NO_CLEANUP: &str =
 pub struct NifReviewRow {
     pub draft: PathBuf,
     pub draft_unsaved: bool,
-    pub kept_backup: Option<PathBuf>,
+    pub kept_backup: Option<KeptBackup>,
     pub path: String,
     pub mod_name: String,
     pub blocked: Option<String>,
@@ -685,15 +685,24 @@ struct Picked {
     unreadable: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeptBackup {
+    pub path: PathBuf,
+    pub last_error: Option<String>,
+}
+
 struct KeptLoser {
     path: PathBuf,
     fp: String,
-    backup: PathBuf,
+    backup: KeptBackup,
 }
 
 impl KeptLoser {
     fn new((path, fp): (PathBuf, String)) -> Self {
-        let backup = backup_name(&path);
+        let backup = KeptBackup {
+            path: backup_name(&path),
+            last_error: None,
+        };
         Self { path, fp, backup }
     }
 }
@@ -1545,7 +1554,7 @@ impl NifEdit {
                         || self
                             .kept_older
                             .as_ref()
-                            .is_some_and(|k| !files.contains(&k.backup))))
+                            .is_some_and(|k| !files.contains(&k.backup.path))))
         }) {
             return ExportOutcome::Blocked("Export would write files that Review did not list for this NIF. Open Review again.".into());
         }
@@ -1897,7 +1906,7 @@ impl NifEdit {
     fn save_draft(&mut self, allow_kept_fallback: bool) -> Result<(), String> {
         self.prepare_kept_for_save()?;
         let Err(why) = self.write_draft() else {
-            return Ok(());
+            return self.draft_saved();
         };
         if !allow_kept_fallback || self.project.is_none() {
             return Err(why);
@@ -1920,7 +1929,6 @@ impl NifEdit {
             None => edit_doc::save(&path, &self.doc),
         }?;
         self.draft_fp = Some(fp);
-        self.draft_saved();
         Ok(())
     }
 
@@ -1928,14 +1936,14 @@ impl NifEdit {
     /// redundant is removed: the plain autosave this session recovered or carried in (Note GD5 (c), GD11) and the
     /// kept autosave it wrote or loaded, each only while it holds the bytes the session knows (ruling E6-F): a file
     /// replaced since is not the session's to delete.
-    fn draft_saved(&mut self) {
+    fn draft_saved(&mut self) -> Result<(), String> {
         self.id_on_disk = true;
         self.draft_export.clone_from(&self.doc.export);
         self.unsaved = false;
         let at = self.draft_path.clone();
         self.held(&at);
         if self.project.is_none() {
-            return;
+            return Ok(());
         }
         // ruling E6-D: the older kept autosave goes to `<sha>.<id>.<secs>.toml`; a failed move is tried by the next save
         // ruling E6-L: only while it still holds the bytes it lost with; other bytes there are not the session's. Ruling
@@ -1945,7 +1953,8 @@ impl NifEdit {
                 if !k.path.is_file() {
                     self.kept_older = None;
                 } else if let Err(e) = self.move_kept_older() {
-                    self.error = Some(e);
+                    self.unsaved = true;
+                    return Err(e);
                 }
             }
         }
@@ -1961,6 +1970,7 @@ impl NifEdit {
                 }
             }
         }
+        Ok(())
     }
 
     /// The save before the session ends (a project switch, another NIF, Close edit): the draft in its own project,
@@ -2197,10 +2207,11 @@ impl NifEdit {
 
     fn move_kept_older(&mut self) -> Result<(), String> {
         let mut k = self.kept_older.take().expect("a known kept loser");
-        if let Err(e) = self.keep_aside(&k.path, "The kept autosave", Some(&k.backup)) {
-            if k.backup.exists() {
-                k.backup = backup_name(&k.path); // the next Review can approve the new name
+        if let Err(e) = self.keep_aside(&k.path, "The kept autosave", Some(&k.backup.path)) {
+            if k.backup.path.exists() {
+                k.backup.path = backup_name(&k.path); // the next Review can approve the new name
             }
+            k.backup.last_error = Some(e.clone());
             self.kept_older = Some(k);
             return Err(e);
         }
@@ -2226,10 +2237,11 @@ impl NifEdit {
                 Err(e) => return Err(format!("{}: {e}", to.display())),
             }
         };
+        let mut copied_fp = None;
         let result = if keep_draft {
             std::fs::read(path).and_then(|bytes| {
                 engine::dds::write_atomic(&to, &bytes)?;
-                self.draft_fp = Some(edit_doc::sha256_hex(&bytes));
+                copied_fp = Some(edit_doc::sha256_hex(&bytes));
                 Ok(())
             })
         } else {
@@ -2245,7 +2257,7 @@ impl NifEdit {
             self.data_path,
             to.display()
         ));
-        if keep_draft && !edit_doc::is_known(path, self.draft_fp.as_deref()) {
+        if copied_fp.is_some_and(|fp| !edit_doc::is_known(path, Some(&fp))) {
             return Err(format!("{} changed during save", path.display()));
         }
         Ok(())
