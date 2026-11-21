@@ -2,7 +2,8 @@
 
   py -3.13 -I tools/pbr-balls.py [--out docs/img/pbr-effects] [--size 128]
 
-Needs numpy and Pillow. Writes one PNG per ball and overwrites the old ones; the same inputs give the same bytes.
+Needs numpy and Pillow (made with numpy 2.5.3 and Pillow 12.3.0). Writes one PNG per ball and overwrites the old
+ones; two runs with the same numpy and Pillow give the same bytes.
 
 Each ball is a unit sphere seen head-on, lit by one directional light, a two-colour ambient and a made-up sky for
 reflections. The shading follows the pinned Community Shaders source in crates/render3d/shaders/cs/: the direct

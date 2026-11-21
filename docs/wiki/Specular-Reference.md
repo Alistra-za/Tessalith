@@ -38,25 +38,25 @@ Each setting multiplies its channel, so a white channel gives you the setting as
 
 ### What each effect looks like
 
-Each ball adds one effect to the baseline ball, or to the ball its tip names. `tools/pbr-balls.py` draws them with CS's shading maths, one light and a made-up sky, so they compare effects; they are not in-game captures.
+Each ball adds one effect to the baseline ball, or to the ball its tip names. `tools/pbr-balls.py` draws them as approximations of CS's shading, with one light and a made-up sky, so they compare effects; they are not in-game captures.
 
 | Ball | Effect | What it simulates | Tip |
 |---|---|---|---|
-| ![Grey matte ball](../img/pbr-effects/baseline.png) | Baseline | Grey albedo 150, roughness 0.55, metallic 0, F0 0.04. | The ball the others start from. |
+| ![Grey matte ball](../img/pbr-effects/baseline.png) | Baseline | Base colour: the colour a non-metal scatters back. Here grey albedo 150, roughness 0.55, metallic 0, F0 0.04. | The ball the others start from. |
 | ![Grey ball with a small sharp highlight](../img/pbr-effects/roughness.png) | Roughness | Tiny scratches and bumps that blur reflections: low is polished, high is chalky. | Ball: 0.15. CS never goes below 0.04, so a mirror keeps a slight blur. |
 | ![Dark grey ball reflecting the sky](../img/pbr-effects/metallic.png) | Metallic | Bare metal: no diffuse colour, and the reflection takes the albedo colour. | Paint 0 or 255; values between are for blends such as rust on steel. Metal colours: [Metals](#metals). |
 | ![Grey ball with brighter reflections](../img/pbr-effects/specular.png) | Specular | How much a non-metal reflects head-on (F0). | Ball: 0.17 (diamond). Values: [Setting F0](#setting-f0-on-a-true-pbr-set). |
 | ![Grey ball with bevelled tiles](../img/pbr-effects/normal.png) | Normal | Small dents and bevels that catch light without extra geometry. | DirectX green: [Green direction](Texture-Types.md#green-direction). |
 | ![Grey ball with dark grout lines](../img/pbr-effects/ao.png) | AO | Cracks and corners that ambient light can't reach. | CS dims ambient light and reflections with it; direct light only where the AO is dark and the light comes in low. Keep AO out of the albedo, or cavities go dark twice. |
 | ![Tiled ball whose tiles stand out from the grout](../img/pbr-effects/parallax.png) | Parallax | Real depth: raised parts hide what is behind them as you move. | The normal ball plus a `_p`. Needs CS's Extended Materials parallax on. Height rules: [Height maps](Texture-Types.md#height-maps). |
-| ![Grey ball with glowing orange runes](../img/pbr-effects/emissive.png) | Emissive | Light the surface gives off: embers, runes, lava. | Unaffected by lighting, and lights nothing else. Above 1.0 needs a float source: [Texture types](Texture-Types.md#which-files-tessalith-reads). |
+| ![Grey ball with glowing orange runes](../img/pbr-effects/emissive.png) | Emissive | Light the surface gives off: embers, glowing runes. | Unaffected by lighting. Above 1.0 needs a float source: [Texture types](Texture-Types.md#which-files-tessalith-reads). |
 | ![Pinkish ball, redder on the shadow side](../img/pbr-effects/subsurface.png) | Subsurface | Light that enters skin, wax or marble, scatters, and comes out tinted. | Lights the shadow side and glows when the light is behind. Strength is 1 - **Subsurface opacity** × `_s` alpha: opacity 1 with a white alpha turns it off. |
 | ![Ball with a green glow only on the side away from the light](../img/pbr-effects/foliage.png) | Foliage subsurface | Thin leaves lit from behind. | Only light from behind comes through. CS uses this on Tree Anim meshes and the standard subsurface on all others: [Subsurface](GUI-PGPatcher-JSON.md#subsurface). |
 | ![Matte grey ball with a sharp highlight on top](../img/pbr-effects/coat.png) | Coat | A clear layer on top: varnish, lacquer, glaze, ice. | Adds a second reflection and dims the base under it. **Coat specular level** is the coat's F0: take it from [Non-metals](#non-metals). The sky reflection keeps the base roughness; only lights get the coat's sharp highlight. |
 | ![Blue ball with a sharp highlight](../img/pbr-effects/coat-colour.png) | Coat diffuse | A coloured coat: enamel, stained varnish. | The coat ball with a blue **Coat colour**. Without **Coat diffuse**, **Coat colour** and `_s` RGB do nothing. At **Coat strength** 1 you see almost only the coat colour. |
-| ![Grey ball with a broken-up highlight](../img/pbr-effects/coat-normal.png) | Coat normal | A coat with its own surface: drips, orange peel, ripples. | The coat ball plus a `_cnr`. Only the coat's highlight from lights follows `_cnr`, and with **Coat parallax** the ray bending too. Without it the coat uses `_n`. |
-| ![Tiled ball under a glossy coat](../img/pbr-effects/coat-parallax-regular.png) ![The same tiles sunk under the coat](../img/pbr-effects/coat-parallax-inner.png) | Coat parallax | The base seen through a thick clear layer: inlay under resin, a floor under ice. | The coat ball with tiled albedo and one `_p`: left regular parallax, right **Coat parallax**. [How they differ](#inner-layer-parallax-vs-regular-parallax). |
-| ![Grey ball with a bright sheen on its edge](../img/pbr-effects/fuzz.png) | Fuzz | Fibres that catch light at grazing angles: velvet, felt, peach skin. | **Fuzz weight** 0 keeps the normal reflection, 1 is all sheen. The sheen's width follows roughness. |
+| ![Grey ball with a broken-up highlight](../img/pbr-effects/coat-normal.png) | Coat normal | A coat with its own surface, such as drips or orange peel. | The coat ball plus a `_cnr`. Only the coat's highlight from lights follows `_cnr`, and with **Coat parallax** the ray bending too. Without it the coat uses `_n`. |
+| ![Tiled ball under a glossy coat](../img/pbr-effects/coat-parallax-regular.png) ![The same tiles sunk under the coat](../img/pbr-effects/coat-parallax-inner.png) | Coat parallax | The base seen through a thick clear layer: inlay under resin, a floor under ice. | The coat ball with tiled albedo and one `_p`: left regular parallax, right **Coat parallax**. The hard shadow edge on the right is real: the coat bends light onto the base right up to that edge. [How they differ](#inner-layer-parallax-vs-regular-parallax). |
+| ![Grey ball with a bright sheen on its edge](../img/pbr-effects/fuzz.png) | Fuzz | Fibres that catch light at grazing angles, as on velvet or felt. | **Fuzz weight** 0 keeps the normal reflection, 1 is all sheen. The sheen's width follows roughness. |
 | ![Grey ball with sparkles in its highlight](../img/pbr-effects/glint.png) | Glint | Sparkling flakes: snow, sand, frost, mica. | No texture. Nothing sparkles until **Log microfacet density** is above 1.1. This ball uses random flakes, not CS's glint model. |
 
 **Hair** has no ball. It swaps the reflection model for a strand model meant for hair cards, ignores the specular level (it uses a fixed hair IOR of 1.55), and shows nothing useful on a sphere.
@@ -69,7 +69,6 @@ The two are opposite: they put your main texture on different layers.
 
 - **Vanilla multilayer parallax:** your diffuse, `_n` and env map are the top layer. The `_i` inner layer is under it, seen where the diffuse alpha is low, and shifted by the view angle and the inner thickness.
 - **CS True PBR coat:** your albedo, `_n` and `_rmaos` are the bottom layer. `_s` and `_cnr` describe the layer on top: its colour, strength, normal and roughness.
-- **Porting a vanilla multilayer material:** the `_i` plays the part of the PBR albedo, not the diffuse.
 
 ### Inner-layer parallax vs regular parallax
 
