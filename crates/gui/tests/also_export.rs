@@ -1829,6 +1829,8 @@ fn nif_export_is_due_once_after_an_also_run_ends() {
     m.set_nif_review_rows(vec![sdc_gui::model::meshes::NifReviewRow {
         path: r"meshes\x.nif".into(),
         mod_name: "Mod".into(),
+        draft: Default::default(),
+        draft_unsaved: false,
         blocked: None,
         foreign: None,
         answer: None,

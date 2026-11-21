@@ -142,6 +142,7 @@ pub const HOVER_MANIFEST: &str =
 pub const HOVER_COPY: &str = "A vanilla file a set borrows, copied so PGPatcher finds it.";
 pub const HOVER_NIF: &str = "The NIF with your edits.";
 pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
+pub const NIF_DRAFT_HOVER: &str = "Your NIF edit's draft. Export saves it first.";
 pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
 /// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
 pub const HOVER_MARKED: &str = "It changes only if this export's new files change it.";
@@ -942,6 +943,9 @@ impl AppModel {
             }
             if let Ok(p) = super::meshes::edit_doc::doc_path(&out, &r.path) {
                 put(p, HOVER_NIF_RECORD, false);
+            }
+            if r.draft_unsaved {
+                put(r.draft.clone(), NIF_DRAFT_HOVER, false);
             }
         }
         // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".

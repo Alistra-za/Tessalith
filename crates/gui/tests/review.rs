@@ -716,6 +716,8 @@ fn review_has_no_half_size_or_stale_group() {
         sdc_gui::model::meshes::NifReviewRow {
             path: r"meshes\a.nif".into(),
             mod_name: "My Mod".into(),
+            draft: Default::default(),
+            draft_unsaved: false,
             blocked: None,
             foreign: None,
             answer: None,
@@ -724,6 +726,8 @@ fn review_has_no_half_size_or_stale_group() {
         sdc_gui::model::meshes::NifReviewRow {
             path: r"meshes\b.nif".into(),
             mod_name: "My Mod".into(),
+            draft: Default::default(),
+            draft_unsaved: false,
             blocked: Some("conflicts are open".into()),
             foreign: None,
             answer: None,

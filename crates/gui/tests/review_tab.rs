@@ -265,6 +265,8 @@ fn nif_row(blocked: Option<&str>) -> sdc_gui::model::meshes::NifReviewRow {
     sdc_gui::model::meshes::NifReviewRow {
         path: r"meshes\x.nif".into(),
         mod_name: "My Mod".into(),
+        draft: Default::default(),
+        draft_unsaved: false,
         blocked: blocked.map(String::from),
         foreign: None,
         answer: None,

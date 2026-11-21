@@ -19,6 +19,8 @@ pub struct SourceId {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ExportRec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
     pub sha256: Option<String>,
     pub at: Option<u64>,
     pub ops_hash: Option<String>,

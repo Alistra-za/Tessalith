@@ -258,6 +258,8 @@ pub fn nif_row(path: &str, foreign: Option<[u8; 32]>) -> sdc_gui::model::meshes:
     sdc_gui::model::meshes::NifReviewRow {
         path: path.into(),
         mod_name: "My Mod".into(),
+        draft: Default::default(),
+        draft_unsaved: false,
         blocked: None,
         foreign,
         answer: None,

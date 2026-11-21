@@ -64,6 +64,10 @@ pub struct NifEdit {
     /// Where the working document (the draft) is saved: under the project (`edit_doc::draft_path`), else `autosave`.
     /// Empty with neither (a test's read-only session): nothing is saved.
     pub draft_path: PathBuf,
+    id_on_disk: bool,
+    /// The draft's own state, used when the chosen folder's record belongs to another draft.
+    draft_export: ExportRec,
+    record_owner: Option<String>,
     /// The project the draft belongs to; None: the draft is the autosave.
     project: Option<PathBuf>,
     /// The record an export leaves in the export folder (`edit_doc::doc_path`), when a folder is chosen.
@@ -193,6 +197,8 @@ pub struct NifEdit {
     /// the next Export may replace that NIF without the Overwrite question (`foreign_hash`), and with no record and no
     /// ops it names the undone edit (`undone_export`). Pending is worked out from disk (`nif_drift`). In memory only.
     partial: Option<String>,
+    #[cfg(feature = "test-hooks")]
+    fail_record_write_after_nif: bool,
     /// Ruling E6-N: the installed NIF is not the one the record names (`derive_export`, read from disk).
     nif_drift: bool,
     /// Ruling E6-O: a record that blocked was replaced by one that does not load: why the export may not replace it.
@@ -305,6 +311,8 @@ pub const NO_CLEANUP: &str =
 /// the hash it was given for; `compaction`: the orphan blocks the export drops (None when it cannot clean up).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NifReviewRow {
+    pub draft: PathBuf,
+    pub draft_unsaved: bool,
     pub path: String,
     pub mod_name: String,
     pub blocked: Option<String>,
@@ -313,13 +321,14 @@ pub struct NifReviewRow {
     pub compaction: Option<usize>,
 }
 
-/// `foreign_cache`'s key: the export path, the last export's hash, a partial export's hash (ruling E6-I) and the
-/// file's (length, modified time).
+/// The edit revision, folder ownership, recorded and partial hashes, and installed file metadata.
 pub(super) type ForeignKey = (
     PathBuf,
     Option<String>,
     Option<String>,
     Option<(u64, Option<std::time::SystemTime>)>,
+    u64,
+    bool,
 );
 pub(super) type ForeignCache = Option<(ForeignKey, Result<Option<[u8; 32]>, String>)>;
 
@@ -889,7 +898,7 @@ fn autosave_dir(autosave: &Path) -> Option<&Path> {
 impl NifEdit {
     /// Opens `source`, the bytes of `source_copy`, at `data_path`. The draft is read from the project's
     /// (`edit_doc::draft_path`), or from `autosave` with no project; neither: read-only with an in-memory document.
-    /// `export_root` None: export is blocked; with one, the export state (`doc.export`) is the record's there. A saved
+    /// With an export folder, the record supplies the export state unless another draft owns it. A saved
     /// document is loaded (Err when it is malformed or newer: it is never overwritten); when its source hash differs,
     /// its ops are re-anchored on the new source and `source_changed` counts the outcomes.
     pub fn open(
@@ -950,7 +959,8 @@ impl NifEdit {
         };
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
         // the id every draft save writes (`write_draft` writes `doc`); a draft without one gets it with its next edit
-        if doc.id.is_none() {
+        let id_on_disk = doc.id.is_some();
+        if !id_on_disk {
             doc.id = Some(edit_doc::new_id(data_path));
         }
         // the record wins: what was exported to the chosen folder, and from which source (`take_record`, below)
@@ -969,6 +979,9 @@ impl NifEdit {
             doc.source = id; // saved with the next change; the statuses carry the conflicts
         }
         let mut e = NifEdit {
+            id_on_disk,
+            draft_export: doc.export.clone(),
+            record_owner: None,
             doc,
             history: NifHistory::default(),
             draft_path,
@@ -1031,6 +1044,8 @@ impl NifEdit {
             notice: None,
             export_note: None,
             partial: None,
+            #[cfg(feature = "test-hooks")]
+            fail_record_write_after_nif: false,
             nif_drift: false,
             record_err: None,
             record_source: None,
@@ -1081,7 +1096,7 @@ impl NifEdit {
     }
 
     /// Takes the export folder's record (`edit_doc::load_fp` of `record_path`; None: never exported there): its export
-    /// entry becomes the session's, kept in memory only (ruling E6-A). A record exported from another source than the
+    /// entry becomes the session's unless another draft owns it (ruling r4-1). A record exported from another source than the
     /// current one makes the edit pending (Note GQ1's sentinel). Rulings E6-F, E6-L: a record with the session's ops,
     /// or the bytes it wrote there, is known as its own by its fingerprint; one holding nothing the session lacks (its
     /// ops empty or the first of the session's) may be replaced; any other is remembered (`foreign_record`) so the
@@ -1089,6 +1104,7 @@ impl NifEdit {
     fn take_record(&mut self, record: Option<(EditDoc, String)>) {
         self.record_meta = self.record_path.as_deref().and_then(file_meta);
         self.record_err = None;
+        self.record_owner = record.as_ref().and_then(|(r, _)| r.export.owner.clone());
         let Some((r, fp)) = record else {
             self.doc.export = ExportRec::default();
             self.foreign_record = None;
@@ -1098,7 +1114,8 @@ impl NifEdit {
             self.nif_drift = false;
             return;
         };
-        self.record_source = Some(r.source.sha256.clone());
+        let other = self.other_owner();
+        self.record_source = (!other).then(|| r.source.sha256.clone());
         // rulings E6-L, E6-Q: the fingerprint is the session's when these are its ops (it takes the record's export
         // state as its own) or the bytes it wrote at this very pathname; a record that only begins the session's ops
         // loses nothing (not foreign, the Export running now may replace it) but gives no ownership
@@ -1106,9 +1123,29 @@ impl NifEdit {
         let ours = self.record_fp.as_ref() == Some(&(path.clone(), fp.clone()))
             || same_ops(&r.ops, &self.doc.ops);
         self.record_fp = ours.then_some((path, fp));
-        self.foreign_record = (!ours && !starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
-        self.doc.export = r.export;
+        self.foreign_record = (!ours && !starts(&r.ops, &self.doc.ops) && !self.other_export(&r))
+            .then(|| r.ops.clone());
+        self.doc.export = if other {
+            self.draft_export.clone()
+        } else {
+            r.export
+        };
         self.derive_export();
+    }
+
+    fn other_owner(&self) -> bool {
+        self.record_owner.is_some() && self.record_owner != self.doc.id
+    }
+
+    /// Another draft's completed export, including its ops preserved in our pre-record after a failed final write.
+    /// A divergent copy with the same ID or a record with unexported ops still needs the record guard.
+    fn other_export(&self, r: &EditDoc) -> bool {
+        r.export.owner.is_some()
+            && (r.export.owner != self.doc.id || r.id != r.export.owner)
+            && r.export
+                .ops_hash
+                .as_ref()
+                .is_some_and(|h| *h == r.ops_hash())
     }
 
     /// Ruling E6-N: whether the installed NIF is the one the record names (`nif_drift`), read from disk (one read and
@@ -1117,12 +1154,16 @@ impl NifEdit {
     fn derive_export(&mut self) {
         self.nif_drift = match (
             &self.doc.export.sha256,
-            self.export_path.as_os_str().is_empty(),
+            self.export_path.as_os_str().is_empty() || self.other_owner(),
         ) {
             (Some(rec), false) => match std::fs::read(&self.export_path) {
                 Ok(b) => edit_doc::sha256_hex(&b) != *rec,
                 Err(e) => e.kind() != std::io::ErrorKind::NotFound,
             },
+            // A first pre-record identifies the folder after a restart, but names no completed NIF.
+            (None, false) if self.record_owner.is_some() => {
+                !matches!(present(&self.export_path), (false, None))
+            }
             _ => false,
         };
     }
@@ -1175,20 +1216,22 @@ impl NifEdit {
         self.refresh_blocked();
     }
 
-    /// Ruling E6-F at the write: the record at `record_path` may be replaced when it is absent, holds exactly the
-    /// bytes this session knows as its own (`record_fp`), or holds nothing the session's ops lack. Else the reason.
-    fn record_write_block(&self) -> Option<String> {
-        let p = self.record_path.as_deref()?;
-        // ruling E6-Q: the remembered bytes count only at the pathname they were taken from
-        if let Some((_, fp)) = self.record_fp.as_ref().filter(|(at, _)| at == p) {
-            if edit_doc::is_known(p, Some(fp)) {
-                return None;
+    /// Preserve the last export in the pre-record. An absent record starts with no ops or export state.
+    fn pre_record(&self, path: &Path) -> Result<(EditDoc, Option<String>), String> {
+        match edit_doc::load_fp(path)? {
+            None => Ok((EditDoc::new(self.doc.source.clone()), None)),
+            Some((r, fp)) => {
+                let known = self
+                    .record_fp
+                    .as_ref()
+                    .is_some_and(|(at, h)| at == path && *h == fp);
+                if !known && !self.other_export(&r) {
+                    if let Some(why) = self.record_block(Some(&r.ops)) {
+                        return Err(why);
+                    }
+                }
+                Ok((r, Some(fp)))
             }
-        }
-        match edit_doc::load(p) {
-            Ok(None) => None,
-            Ok(Some(r)) => self.record_block(Some(&r.ops)),
-            Err(e) => Some(e),
         }
     }
 
@@ -1218,19 +1261,18 @@ impl NifEdit {
         // a source other than the record's makes the edit pending (`stale_source`, computed, ruling E6-N)
     }
 
-    /// Writes `record` (the document as exported, with its new export entry) to the export folder; only `write_out`
-    /// calls it (ruling E6-A). Ok with no folder.
-    fn write_record(&self, record: &EditDoc) -> Result<Option<String>, String> {
-        match &self.record_path {
-            Some(p) => edit_doc::save(p, record).map(Some),
-            None => Ok(None),
-        }
+    fn draft_unsaved(&self) -> bool {
+        self.unsaved || !self.id_on_disk
     }
 
     /// The source copy's bytes changed on disk (export step 1): the ops are re-anchored on them and the statuses
     /// updated and saved in the draft. The export folder is not written (ruling E6-A): the forced re-export (GQ1) is
     /// in memory, and the next open works it out again from the record's source.
     pub fn reload_source(&mut self, source: Vec<u8>) -> Result<(), String> {
+        self.reload_source_for_save(source, true)
+    }
+
+    fn reload_source_for_save(&mut self, source: Vec<u8>, save_now: bool) -> Result<(), String> {
         let (scan, model) = read_source(&source)?;
         self.doc.source = source_id(&self.source_copy, &self.data_path, &source);
         self.source_warnings = validate(&model, None);
@@ -1240,7 +1282,7 @@ impl NifEdit {
         self.reapply();
         self.count_changed();
         self.derive_export();
-        self.ops_changed(true);
+        self.ops_changed(save_now);
         Ok(())
     }
 
@@ -1407,16 +1449,17 @@ impl NifEdit {
     /// Tessalith did not write is replaced only when `overwrite`, the SHA-256 its Overwrite answer was given for, is
     /// the hash of the bytes on disk now.
     pub(super) fn write_out(&mut self, overwrite: Option<[u8; 32]>) -> ExportOutcome {
-        if self.edit_mod.as_os_str().is_empty() {
+        let Some(record_path) = self.record_path.clone() else {
             return ExportOutcome::Blocked(NO_EXPORT_FOLDER.into());
-        }
+        };
         let c = &self.source_copy;
         let now = match read_file(&FileSource::from_store(c.kind, &c.root, &self.data_path)) {
             Ok(b) => b,
             Err(e) => return ExportOutcome::Blocked(e),
         };
+        let draft_listed = self.draft_unsaved();
         if edit_doc::sha256_hex(&now) != self.doc.source.sha256 {
-            if let Err(e) = self.reload_source(now) {
+            if let Err(e) = self.reload_source_for_save(now, false) {
                 return ExportOutcome::Blocked(e);
             }
         }
@@ -1424,42 +1467,62 @@ impl NifEdit {
         if let Some(why) = self.blocked.clone() {
             return ExportOutcome::Blocked(why);
         }
+        if !draft_listed && self.draft_unsaved() {
+            return ExportOutcome::Blocked(
+                "The source NIF changed. Review the updated draft and export again.".into(),
+            );
+        }
         // Note CQ: the file drops the blocks our edits appended that nothing reaches; on any doubt it is the patch
         // (`reapply` made both, Note GD2)
         let (out, skipped) = (self.out.to_vec(), self.cleanup_skip.clone());
         let path = self.export_path.clone();
+        let (mut pre, previous_fp) = match self.pre_record(&record_path) {
+            Ok(r) => r,
+            Err(why) => return ExportOutcome::Blocked(why),
+        };
         match foreign_hash(
             &path,
-            self.doc.export.sha256.as_deref(),
+            pre.export.sha256.as_deref(),
             self.partial.as_deref(),
+            pre.export.owner.is_some() && pre.export.owner != self.doc.id,
         ) {
             Err(e) => return ExportOutcome::Blocked(e),
             Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
             Ok(_) => {}
         }
-        // Rulings E6-A, E6-F: the record there now (read again: it may have come or changed since it was taken) is
-        // replaced only when it is absent, the session's known bytes, or holds nothing this session lacks
-        if let Some(why) = self.record_write_block() {
-            return ExportOutcome::Blocked(why);
-        }
         // the draft first, when a drag was not flushed: the NIF is written from what the draft holds, and not at all
         // when the draft cannot be saved (ruling E6-E)
-        if self.unsaved {
+        if self.draft_unsaved() {
+            self.unsaved = true;
             self.save();
-            if self.unsaved {
+            if self.draft_unsaved() {
                 let why = self.error.take().unwrap_or_default();
                 return ExportOutcome::Blocked(format!(
                     "the edits could not be saved, so nothing was exported: {why}"
                 ));
             }
         }
+        pre.export.owner.clone_from(&self.doc.id);
+        if !edit_doc::is_known(&record_path, previous_fp.as_deref()) {
+            return ExportOutcome::Blocked(format!(
+                "{} changed during export",
+                record_path.display()
+            ));
+        }
+        let pre_fp = match edit_doc::save(&record_path, &pre) {
+            Ok(fp) => fp,
+            Err(e) => return ExportOutcome::Blocked(e),
+        };
+        self.record_fp = Some((record_path.clone(), pre_fp.clone()));
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
+            self.recheck_record(true);
             return ExportOutcome::Blocked(format!("Cannot write {}: {e}", path.display()));
         }
         let at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let export = ExportRec {
+            owner: self.doc.id.clone(),
             sha256: Some(edit_doc::sha256_hex(&out)),
             at: Some(at),
             ops_hash: Some(self.doc.ops_hash()),
@@ -1469,12 +1532,23 @@ impl NifEdit {
             export: export.clone(),
             ..self.doc.clone()
         };
-        let fp = match self.write_record(&record) {
+        #[cfg(feature = "test-hooks")]
+        let fail = std::mem::take(&mut self.fail_record_write_after_nif);
+        #[cfg(not(feature = "test-hooks"))]
+        let fail = false;
+        let result = if fail {
+            Err("simulated final record write failure".into())
+        } else if edit_doc::is_known(&record_path, Some(&pre_fp)) {
+            edit_doc::save(&record_path, &record)
+        } else {
+            Err(format!("{} changed during export", record_path.display()))
+        };
+        let fp = match result {
             Ok(fp) => fp,
             Err(e) => {
                 // ruling E6-I: the NIF in place is this session's and not recorded: pending until repaired
                 self.partial = export.sha256.clone();
-                self.derive_export(); // ruling E6-N: the NIF in place is not the recorded one
+                self.recheck_record(true);
                 return ExportOutcome::Blocked(format!(
                     "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
                     path.display()
@@ -1482,12 +1556,13 @@ impl NifEdit {
             }
         };
         self.doc.export = export;
+        self.record_owner.clone_from(&self.doc.id);
         self.record_source = Some(self.doc.source.sha256.clone());
         self.partial = None;
         self.nif_drift = false; // the NIF just written is the one the record now names
         self.up_to_date = true;
         self.foreign_record = None;
-        self.record_fp = self.record_path.clone().zip(fp);
+        self.record_fp = Some((record_path, fp));
         self.record_meta = self.record_path.as_deref().and_then(file_meta);
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
@@ -1721,6 +1796,8 @@ impl NifEdit {
     /// kept autosave it wrote or loaded, each only while it holds the bytes the session knows (ruling E6-F): a file
     /// replaced since is not the session's to delete.
     fn draft_saved(&mut self) {
+        self.id_on_disk = true;
+        self.draft_export.clone_from(&self.doc.export);
         self.unsaved = false;
         let at = self.draft_path.clone();
         self.held(&at);
@@ -2037,8 +2114,8 @@ impl NifEdit {
     /// the caller has made durable (`MeshesModel::may_end_edit`), so its time is the live edit's. Ruling E6-D: the
     /// decision `open` makes (`pick_draft`) runs against the project's draft and the kept autosave of its id. When the
     /// autosave wins, the document stays in memory and moves to the project's draft (`edit_doc::draft_path`), taking
-    /// the draft's id (a new one when the project has none); the caller saves it there, and a draft the project
-    /// already holds is kept aside by that save (Notes GD19, GD25). Ok(None) when the project's draft or kept autosave
+    /// the project draft's id if it has one. The caller saves the edit there, keeping a displaced draft aside
+    /// (Notes GD19, GD25). Ok(None) when the project's draft or kept autosave
     /// wins: nothing moved, and the caller opens the NIF in the project, where `open` makes the same decision (the
     /// live edit stays in the autosave). Err (nothing moved, the reason) when the project is not a folder or its
     /// draft does not load, so it is never overwritten.
@@ -2053,12 +2130,11 @@ impl NifEdit {
         };
         let theirs = picked.draft.map(|(d, _)| d);
         self.kept_older = picked.kept_older;
-        self.doc.id = Some(
-            theirs
-                .as_ref()
-                .and_then(|t| t.id.clone())
-                .unwrap_or_else(|| edit_doc::new_id(&self.data_path)),
-        );
+        let dest_id = theirs.as_ref().and_then(|d| d.id.as_ref());
+        self.id_on_disk = dest_id.is_some();
+        if let Some(id) = dest_id {
+            self.doc.id = Some(id.clone());
+        }
         let mut lines = vec![];
         if theirs.is_some() {
             lines.push(format!(
@@ -2710,6 +2786,7 @@ fn foreign_hash(
     path: &Path,
     last: Option<&str>,
     partial: Option<&str>,
+    other_owner: bool,
 ) -> Result<Option<[u8; 32]>, String> {
     match std::fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -2717,7 +2794,7 @@ fn foreign_hash(
         Ok(b) => {
             let h: [u8; 32] = Sha256::digest(&b).into();
             let hex = hex::encode(h);
-            match last == Some(hex.as_str()) || partial == Some(hex.as_str()) {
+            match !other_owner && (last == Some(hex.as_str()) || partial == Some(hex.as_str())) {
                 true => Ok(None),
                 false => Ok(Some(h)),
             }
@@ -3296,7 +3373,7 @@ impl MeshesModel {
     }
 
     /// Note GD2: one row per NIF with pending edits (today the open edit only), for the Review. Reads the export
-    /// path's state from the disk only when its length, time or the last export's hash changed.
+    /// path's state from disk when the edit revision, ownership, expected hashes or file metadata change.
     pub fn nif_review_rows(&self) -> Vec<NifReviewRow> {
         // a session no save works for has its row too, with that reason, even when it equals the last export (E6-C)
         let Some(e) = self
@@ -3327,6 +3404,8 @@ impl MeshesModel {
             }
         }
         vec![NifReviewRow {
+            draft: e.draft_path.clone(),
+            draft_unsaved: e.draft_unsaved(),
             path: e.data_path.clone(),
             mod_name: e
                 .edit_mod
@@ -3342,15 +3421,18 @@ impl MeshesModel {
 
     /// The export path of `e` as the export would find it: None when absent or Tessalith's own, Some(SHA-256) when
     /// Tessalith did not write it, Err when it cannot be read.
-    // The edit's bytes are not part of the answer (ruling E6-S2: a file equal to them is not Tessalith's for that), so
-    // the key leaves them out.
     fn disk_state(&self, e: &NifEdit) -> Result<Option<[u8; 32]>, String> {
         let meta = std::fs::metadata(&e.export_path)
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
         // ruling E6-O: a hit compares in place; the key is cloned only on a miss
         if let Some((k, v)) = &*self.foreign_cache.borrow() {
-            if k.0 == e.export_path && k.1 == e.doc.export.sha256 && k.2 == e.partial && k.3 == meta
+            if k.0 == e.export_path
+                && k.1 == e.doc.export.sha256
+                && k.2 == e.partial
+                && k.3 == meta
+                && k.4 == e.rev
+                && k.5 == e.other_owner()
             {
                 return v.clone();
             }
@@ -3360,14 +3442,25 @@ impl MeshesModel {
             e.doc.export.sha256.clone(),
             e.partial.clone(),
             meta,
+            e.rev,
+            e.other_owner(),
         );
         let v = foreign_hash(
             &e.export_path,
             e.doc.export.sha256.as_deref(),
             e.partial.as_deref(),
+            e.other_owner(),
         );
         *self.foreign_cache.borrow_mut() = Some((key, v.clone()));
         v
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_record_write_after_nif_for_test(&mut self) {
+        self.edit
+            .as_mut()
+            .expect("open edit")
+            .fail_record_write_after_nif = true;
     }
 
     /// Note GD2: Review's answer for the file at `path`'s export path, given for the file with hash `sha256`. It
@@ -3477,6 +3570,7 @@ impl MeshesModel {
                 None if e.touched()
                     && e.doc.ops.is_empty()
                     && e.doc.export.sha256.is_none()
+                    && e.record_owner.is_none()
                     && e.partial.is_none()
                     && !e.export_path.as_os_str().is_empty()
                     && installed =>
