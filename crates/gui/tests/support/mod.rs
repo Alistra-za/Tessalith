@@ -15,6 +15,18 @@ use std::time::{Duration, Instant};
 
 type RecordedSpecs = Arc<Mutex<Vec<PickerSpec>>>;
 
+/// Opens the header's Tools menu. A long export path (CI's temp folder is longer than a dev machine's) can move Tools
+/// into the ⋯ overflow (3c Task 13), so open ⋯ first when Tools is not on the row.
+#[allow(dead_code)]
+pub fn open_tools<S>(h: &mut egui_kittest::Harness<'_, S>) {
+    use egui_kittest::kittest::Queryable as _;
+    if h.query_by_label("Tools").is_none() {
+        h.get_by_label("More header items").click();
+        h.run();
+    }
+    h.get_by_label("Tools").click();
+}
+
 pub fn recording_picker(answer: Option<PathBuf>) -> (Arc<dyn PickerBackend>, RecordedSpecs) {
     struct Recorder(RecordedSpecs, Option<PathBuf>);
     impl PickerBackend for Recorder {
