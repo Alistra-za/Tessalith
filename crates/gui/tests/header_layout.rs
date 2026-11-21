@@ -422,7 +422,7 @@ fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves()
         "the path shrank below its readable form"
     );
 
-    for w in widths.chain([1055]) {
+    for w in widths.chain([1055, 640]) {
         resize(&mut h, w);
         let open = h.get_by_label("Open").rect();
         let chip = h.get_by_label_contains("Export to: ").rect();
@@ -431,6 +431,13 @@ fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves()
         } else {
             let save = h.get_by_label("Save").rect();
             let export = h.get_by_label(&header_export_label(&h)).rect();
+            let panel = outer(&h, "header");
+            assert!(
+                [chip, save, export]
+                    .into_iter()
+                    .all(|r| panel.contains_rect(r) && r.right() <= w as f32),
+                "at {w}: wrapped chip {chip:?}, Save {save:?}, Export {export:?}, header {panel:?}"
+            );
             for r in [chip, save, export] {
                 assert!(
                     r.top() > open.bottom() && (r.center().y - chip.center().y).abs() < 1.0,
@@ -449,6 +456,117 @@ fn harness_with_destination(dir: &std::path::Path, path: &str, w: f32, meshes: b
         .unwrap()
         .set_export_folder(path.as_ref());
     harness(m, w, meshes)
+}
+
+/// Find the first whole-pixel viewport width at which the reference header fits.
+fn first_fit(h: &mut H, fits: impl Fn(&H) -> bool) -> f32 {
+    let (mut low, mut high) = (640, 1600);
+    while high - low > 1 {
+        let mid = (low + high) / 2;
+        h.set_size(egui::vec2(mid as f32, 800.0)).run_steps(3);
+        if fits(h) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    high as f32
+}
+
+fn tools_on_row(h: &H) -> bool {
+    h.query_by_role_and_label(Role::Button, "Tools").is_some()
+}
+
+fn painted_chip(h: &H) -> String {
+    let rect = h.get_by_label_contains("Export to: ").rect();
+    assert!(!painted_elided(h, rect));
+    painted_in(h, rect)
+}
+
+#[test]
+fn short_leaf_keeps_tools_at_the_drive_and_leaf_boundary() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\x", 1600.0, false);
+    let w = first_fit(&mut reference, tools_on_row);
+    let h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", w, false);
+    assert!(tools_on_row(&h), "Tools moved while C:\\…\\x fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\x ▾");
+    assert_header_row(&h, w, false, true);
+}
+
+#[test]
+fn short_leaf_wraps_only_when_the_drive_and_leaf_no_longer_fit() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\x", 1600.0, false);
+    let one_row = |h: &H| {
+        h.get_by_label("Save")
+            .rect()
+            .y_range()
+            .contains(h.get_by_label("Open").rect().center().y)
+    };
+    let w = first_fit(&mut reference, one_row);
+    let mut h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", w, false);
+    assert!(one_row(&h), "export end wrapped while C:\\…\\x fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\x ▾");
+    assert_header_row(&h, w, false, true);
+    h.set_size(egui::vec2(w - 1.0, 800.0)).run_steps(3);
+    assert!(!one_row(&h));
+}
+
+#[test]
+fn tools_stays_when_the_full_path_is_narrower_than_the_readable_form() {
+    let d = tempfile::tempdir().unwrap();
+    let full = r"C:\ii\Landscape textures at full resolution";
+    let mut reference = harness_with_destination(
+        d.path(),
+        r"C:\…\Landscape textures at full resolution",
+        1600.0,
+        false,
+    );
+    let mut h = harness_with_destination(d.path(), full, 1600.0, false);
+    let width = |h: &H| h.get_by_label_contains("Export to: ").rect().width();
+    let saved = (width(&reference) - width(&h)).floor();
+    assert!(saved >= 1.0, "the full path must save at least one pixel");
+    let w = first_fit(&mut reference, tools_on_row) - saved;
+    h.set_size(egui::vec2(w, 800.0)).run_steps(3);
+    assert!(
+        tools_on_row(&h),
+        "Tools moved while the full path fits at {w}"
+    );
+    assert_eq!(painted_chip(&h), format!("Export to: {full} ▾"));
+    assert_header_row(&h, w, false, true);
+}
+
+#[test]
+fn the_first_resize_frame_matches_the_settled_header_in_both_directions() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", 1600.0, false);
+    let w = first_fit(&mut h, tools_on_row);
+    h.set_size(egui::vec2(w, 800.0)).run_steps(3);
+    for (width, tools_visible) in [(w - 1.0, false), (w, true)] {
+        h.set_size(egui::vec2(width, 800.0)).step();
+        let first = (widgets(&h, "header"), painted_chip(&h));
+        h.run_steps(3);
+        assert_eq!(tools_on_row(&h), tools_visible, "at {width}");
+        assert_eq!(
+            first,
+            (widgets(&h, "header"), painted_chip(&h)),
+            "at {width}"
+        );
+    }
+}
+
+#[test]
+fn a_cut_destination_trims_the_painted_separator_but_keeps_it_on_hover() {
+    let d = tempfile::tempdir().unwrap();
+    let path = r"C:\Users\Modder\long parent folder for a texture overhaul\mods\My Mod\";
+    let mut h = harness_with_destination(d.path(), path, 1280.0, false);
+    let text = painted_chip(&h);
+    assert!(text.contains('…') && text.ends_with(r"\My Mod ▾"), "{text}");
+    h.get_by_role_and_label(Role::Button, &format!("Export to: {path}"))
+        .hover();
+    h.run();
+    h.get_by_label(path);
 }
 
 #[test]

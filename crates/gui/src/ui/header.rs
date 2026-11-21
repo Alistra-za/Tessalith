@@ -19,11 +19,11 @@ const EXPORT_WIDTH: f32 = 240.0;
 const MORE_TEXT: &str = "More ▾";
 /// What it says with a project open and no export folder chosen for it (Note FI5).
 const NOT_CHOSEN_TEXT: &str = "Export to: not chosen ▾";
-/// The fewest path characters Export to ▾ shows (K1).
+/// Character budget after overflow, when the drive and last folder no longer fit (K1).
 const PATH_MIN_CHARS: usize = 12;
 
 pub struct HeaderWidths {
-    /// Fixed controls with the destination reserved at its readable form (Note LB1).
+    /// Fixed controls with the narrower of the full and readable destinations (Note LC1).
     pub fixed: f32,
     pub tools: f32,
     pub mo2: f32,
@@ -223,10 +223,10 @@ struct ExportEnd {
     min_width: f32,
     normal_width: f32,
     give_way_width: f32,
-    floor_chars: usize,
+    readable: String,
 }
 
-/// Reserve the readable destination for overflow and its shortest form for wrapping (Note LB1).
+/// Reserve the narrower of full and readable for overflow. Allow a shorter tail before wrapping (Note LC1).
 fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd {
     let gap = ui.spacing().item_spacing.x;
     let full_path = model
@@ -244,18 +244,17 @@ fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd
     } else {
         0.0
     } + if edits { gap + EXPORT_WIDTH } else { 0.0 };
-    let (normal_width, give_way_width, min_width, floor_chars) = if let Some(path) = &full_path {
+    let (normal_width, give_way_width, min_width, readable) = if let Some(path) = &full_path {
         let width = |p: &str| button_width(ui, &format!("Export to: {p} ▾")) + buttons_width;
         let base = cut_base(path);
-        (
-            width(path),
-            width(&readable_path(path)),
-            width(&elide_middle(base, PATH_MIN_CHARS)),
-            readable_chars(base),
-        )
+        let readable = readable_path(path);
+        let full = width(path);
+        let give_way = full.min(width(&readable));
+        let min = give_way.min(width(&elide_middle(base, PATH_MIN_CHARS)));
+        (full, give_way, min, readable)
     } else {
         let width = button_width(ui, lead) + buttons_width;
-        (width, width, width, PATH_MIN_CHARS)
+        (width, width, width, String::new())
     };
     ExportEnd {
         normal_width,
@@ -264,7 +263,7 @@ fn measure_export_end(ui: &egui::Ui, model: &AppModel, edits: bool) -> ExportEnd
         buttons_width,
         min_width,
         give_way_width,
-        floor_chars,
+        readable,
     }
 }
 
@@ -274,6 +273,8 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool, end: ExportEn
     let h = 2.0 * ui.spacing().interact_size.y;
     let save_w = button_width(ui, "Save");
     fit(ui, end.min_width);
+    // end_row resets the height. Centre the chip on Save and Export on the new row too.
+    ui.set_row_height(h);
     let text = match end.full_path.as_ref() {
         None => end.lead.to_string(),
         Some(p) if end.normal_width <= room(ui) => format!("Export to: {p} ▾"),
@@ -282,15 +283,19 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel, edits: bool, end: ExportEn
             let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
             let fixed = button_width(ui, end.lead) + end.buttons_width;
             let estimate = ((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize;
-            let stop = if end.give_way_width <= room(ui) {
-                end.floor_chars
+            let floor = if end.give_way_width <= room(ui) {
+                end.readable
             } else {
-                PATH_MIN_CHARS
+                elide_middle(base, PATH_MIN_CHARS)
             };
-            let mut chars = estimate.max(stop);
+            let stop = floor.chars().count();
+            let mut chars = estimate;
             loop {
+                if chars <= stop {
+                    break format!("Export to: {floor} ▾");
+                }
                 let text = format!("Export to: {} ▾", elide_middle(base, chars));
-                if chars <= stop || button_width(ui, &text) + end.buttons_width <= room(ui) - 0.5 {
+                if button_width(ui, &text) + end.buttons_width <= room(ui) - 0.5 {
                     break text;
                 }
                 chars -= 1;
@@ -365,12 +370,14 @@ pub fn elide_middle(path: &str, max_chars: usize) -> String {
 /// The shortest readable destination before optional controls move: the drive and the whole last folder.
 pub fn readable_path(path: &str) -> String {
     let base = cut_base(path);
-    let chars = readable_chars(base);
-    if path.chars().count() <= chars {
-        path.to_owned()
-    } else {
-        elide_middle(base, chars)
-    }
+    let Some((drive, rest)) = base.split_once(['\\', '/']) else {
+        return base.to_owned();
+    };
+    let Some((_, leaf)) = rest.rsplit_once(['\\', '/']) else {
+        return base.to_owned();
+    };
+    let sep = &base[drive.len()..drive.len() + 1];
+    format!("{drive}{sep}…{sep}{leaf}")
 }
 
 fn cut_base(path: &str) -> &str {
@@ -380,13 +387,6 @@ fn cut_base(path: &str) -> &str {
     } else {
         path // Keep a root's separator.
     }
-}
-
-fn readable_chars(base: &str) -> usize {
-    let mut parts = base.split(['\\', '/']);
-    let first = parts.next().unwrap_or_default();
-    let last = parts.rfind(|part| !part.is_empty()).unwrap_or(first);
-    (first.chars().count() + last.chars().count() + 3).max(PATH_MIN_CHARS)
 }
 
 /// What is left of this line of a wrapped row.
