@@ -461,19 +461,20 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         }
         let key = |id: &str| crate::sets::set_key(cx.output_root, id);
         let producer = key(&group.producer);
-        let Some(m) = roughness_members(jobs, of(&producer))
-            .into_iter()
-            .find(|&i| {
-                let j = &jobs[i];
-                j.profile.subtype == group.subtype
-                    && j.pack.is_none().then_some(&j.input) == group.source.as_ref()
-            })
-        else {
+        let Some(&m) = of(&producer).iter().find(|&&i| {
+            let j = &jobs[i];
+            writable(j)
+                && j.profile.subtype.is_roughness_member()
+                && j.profile.subtype == group.subtype
+                && j.pack.is_none().then_some(&j.input) == group.source.as_ref()
+        }) else {
             continue;
         };
         shared.insert(producer.clone());
         shared.extend(group.users.keys().map(|id| key(id)));
-        if cx.shared.contains(&producer)
+        // A shared DDS keeps R7 suppression for every user even though S6 excludes it from baking.
+        if is_dds(&jobs[m])
+            || cx.shared.contains(&producer)
             || group.users.keys().any(|id| cx.shared.contains(&key(id)))
         {
             continue;

@@ -682,6 +682,53 @@ fn shared_cloak_with_an_explicitly_excluded_user_skips_the_bake() {
 }
 
 #[test]
+fn shared_dds_roughness_keeps_the_r7_skip_for_every_user() {
+    use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
+    let d = tempfile::tempdir().unwrap();
+    let mut r = req(d.path(), &["file:**/iron_rmaos.dds.reencode=true"]);
+    let producer = "textures/pbr/iron";
+    let mut users = std::collections::BTreeMap::new();
+    for id in [producer, "textures/pbr/steel", "textures/pbr/copper"] {
+        let path = format!("{id}_n.png");
+        normal(d.path(), &path, 64, 64);
+        users.insert(id.into(), Some((id.into(), d.path().join("in").join(path))));
+    }
+    rough(d.path(), "textures/pbr/steel_rmaos.png", 64, 64);
+    let source = d.path().join("in/textures/pbr/iron_rmaos.dds");
+    let desc = DdsDesc {
+        width: 64,
+        height: 64,
+        format: Format::Rgba8,
+        srgb: false,
+        header: ResolvedHeader::Dx10,
+    };
+    std::fs::write(
+        &source,
+        dds_bytes(&desc, &[vec![128; 64 * 64 * 4]]).unwrap(),
+    )
+    .unwrap();
+    r.shared_roughness_groups.push(SharedRoughness {
+        producer: producer.into(),
+        source: Some(source),
+        subtype: Subtype::Rmaos,
+        users,
+    });
+
+    let (p, _) = plan(r);
+    assert_eq!(job(&p, "iron_rmaos.dds").profile.subtype, Subtype::Rmaos);
+    assert_eq!(job(&p, "steel_rmaos.png").profile.subtype, Subtype::Rmaos);
+    for j in &p.jobs {
+        assert!(j.bake.is_none(), "unexpected bake on {}", j.input.display());
+        assert!(
+            set_codes(j).is_empty(),
+            "{}: {:?}",
+            j.input.display(),
+            j.warnings
+        );
+    }
+}
+
+#[test]
 fn stale_shared_cloak_pack_does_not_suppress_the_current_member() {
     let d = tempfile::tempdir().unwrap();
     let mut r = shared_cloak(d.path(), &[]);
