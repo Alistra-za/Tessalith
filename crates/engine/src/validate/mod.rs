@@ -90,7 +90,7 @@ pub struct ValidationInput<'a> {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ValidationSummary {
-    /// No `Error`-severity warning.
+    /// No `Error`-severity warning. True when `skipped`: nothing was checked.
     pub passed: bool,
     /// The header's mip count.
     pub levels: u32,
@@ -100,6 +100,27 @@ pub struct ValidationSummary {
     /// Decoded coverage per level; filled only when the coverage check ran.
     pub coverage: Vec<f64>,
     pub bc6h_peak_ratio: Option<f64>,
+    /// The run did not validate this output (`BatchRequest::validate` off): nothing was checked, `passed` is true
+    /// and `levels` is the header's mip count.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub skipped: bool,
+}
+
+impl ValidationSummary {
+    /// The summary of an output the run did not validate: `levels` is the header's mip count per face.
+    pub fn not_run(levels: u32) -> ValidationSummary {
+        ValidationSummary {
+            passed: true,
+            levels,
+            skipped: true,
+            ..Default::default()
+        }
+    }
+}
+
+/// Note LF (owner OV-O1): these types are validated whatever BatchRequest::validate says.
+pub fn always_validated(st: Subtype) -> bool {
+    matches!(st, Subtype::ComplexMaterial | Subtype::ComplexGrass)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -492,4 +513,39 @@ pub fn validate(inp: &ValidationInput) -> ValidationReport {
         }
     }
     finish(s, w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 3.0.0 record has no `skipped`: it reads as validated, and a validated summary writes none.
+    #[test]
+    fn a_summary_without_skipped_reads_as_validated() {
+        let old: ValidationSummary = serde_json::from_str(
+            r#"{"passed":true,"levels":7,"min_mip_psnr_db":null,"alpha":[],"coverage":[],"bc6h_peak_ratio":null}"#,
+        )
+        .unwrap();
+        assert!(!old.skipped);
+        let v = serde_json::to_value(ValidationSummary::default()).unwrap();
+        assert!(v.get("skipped").is_none(), "{v}");
+        let v = serde_json::to_value(ValidationSummary::not_run(7)).unwrap();
+        assert_eq!(v["skipped"], true, "{v}");
+        assert_eq!(v["passed"], true, "{v}");
+        assert_eq!(v["levels"], 7, "{v}");
+    }
+
+    #[test]
+    fn always_validated_goes_by_subtype() {
+        assert!(always_validated(Subtype::ComplexMaterial));
+        assert!(always_validated(Subtype::ComplexGrass));
+        for st in [
+            Subtype::Envmask,
+            Subtype::Diffuse,
+            Subtype::Normal,
+            Subtype::Msn,
+        ] {
+            assert!(!always_validated(st), "{st:?}");
+        }
+    }
 }

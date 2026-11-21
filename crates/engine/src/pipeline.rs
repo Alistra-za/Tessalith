@@ -26,7 +26,9 @@ use crate::pack::assemble::assemble;
 use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
-use crate::validate::{validate, ValidationInput, ValidationReport};
+use crate::validate::{
+    always_validated, validate, ValidationInput, ValidationReport, ValidationSummary,
+};
 use std::cell::Cell;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -482,6 +484,8 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
 /// or anything panics, `tracker.written` tells the caller to remove the output, so an output on disk has its
 /// record, except after a second Ctrl-C: that aborts the process (exit 3) and can leave `.sdc-*.tmp` files, or an
 /// output without a record (`OUT-UNKNOWN-EXISTING` on the next run). A failed validation (`passed = false`) is not a failure here: the output is written and recorded.
+/// With `req.validate` off the output is not decoded again and its record says `validation.skipped`, unless its
+/// sub-type is always validated (`validate::always_validated`, owner OV-O1).
 ///
 /// Check 3 (`req.low_detail`): a flagged texture is written in full and carries the warning in its report under
 /// `Warn`.
@@ -571,17 +575,26 @@ pub fn process_file(
     drop(levels);
 
     // Validate the exact bytes about to be written: `validate` parses them with the engine's DDS reader (spec §5.8).
-    enter(Stage::Validate);
+    // Skipped, it only reads, so the bytes written are the same.
+    let validated = req.validate || always_validated(p.subtype);
     #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
     // only the test hook mutates the report
-    let mut report = validate(&ValidationInput {
-        bytes: &bytes,
-        profile: p,
-        encoder_input: Some(&prep.inputs),
-        base_coverage: prep.base_coverage,
-        source_peak: prep.source_peak,
-        expected_levels: Some(total),
-    });
+    let mut report = if validated {
+        enter(Stage::Validate);
+        validate(&ValidationInput {
+            bytes: &bytes,
+            profile: p,
+            encoder_input: Some(&prep.inputs),
+            base_coverage: prep.base_coverage,
+            source_peak: prep.source_peak,
+            expected_levels: Some(total),
+        })
+    } else {
+        ValidationReport {
+            summary: ValidationSummary::not_run(total),
+            warnings: vec![],
+        }
+    };
     // Test hook (Note DM, `test-hooks` only): record this output's encode-input hash for the encode-version guard.
     #[cfg(feature = "test-hooks")]
     if let Some(dir) = std::env::var_os("SDC_TEST_ENCODE_INPUT_DIR") {
@@ -592,8 +605,11 @@ pub fn process_file(
         std::fs::write(file, json.to_string()).expect("encode input hook");
     }
     drop(prep);
+    // Note K: the hook fails a validation, so it runs only when one ran.
     #[cfg(feature = "test-hooks")]
-    force_validation_failure_for_test(job, &mut report);
+    if validated {
+        force_validation_failure_for_test(job, &mut report);
+    }
     enter(Stage::Write);
     let mut record = ManifestRecord {
         schema: MANIFEST_SCHEMA,
