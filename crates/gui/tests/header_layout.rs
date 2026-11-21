@@ -1062,7 +1062,7 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
     assert!(h
         .query_by_label(sdc_gui::ui::json_editor::NAME_LABEL)
         .is_none());
-    h.get_by_label("Tools").click();
+    support::open_tools(&mut h);
     h.run_steps(2);
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR).click();
     h.run_steps(2);
