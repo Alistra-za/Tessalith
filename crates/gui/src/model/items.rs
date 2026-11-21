@@ -126,24 +126,31 @@ pub struct Producer {
     pub output: PathBuf,
     pub sources: Vec<String>,
     pub game_key: Option<String>,
-    key: engine::sets::OutputKey,
+    pub output_key: engine::sets::OutputKey,
     game_path: String,
 }
 
 impl Producer {
     pub(super) fn project(&mut self, m: &super::AppModel, roots: &[PathBuf; 2]) {
+        // A displaced pack can land under textures/pbr without an entry in slot_paths.
+        let landed = self
+            .output
+            .strip_prefix(&roots[1])
+            .ok()
+            .map(|rel| super::txst_map::game_key(&rel.to_string_lossy()))
+            .filter(|path| path.starts_with("textures/"));
         self.game_key = super::sets::projected_job_slot(
             m,
             roots,
             &self.output,
-            &self.game_path,
-            Some(&self.key),
+            landed.as_deref().unwrap_or(&self.game_path),
+            Some(&self.output_key),
         )
         .map(|path| path.to_ascii_lowercase());
     }
 
     pub(super) fn packed(&self) -> bool {
-        matches!(self.key, engine::sets::OutputKey::Packed { .. })
+        matches!(self.output_key, engine::sets::OutputKey::Packed { .. })
     }
 }
 
@@ -313,10 +320,13 @@ impl PlanView {
             } else {
                 key_of(root, &job.input)
             };
-            let recipe = job
-                .pack
-                .as_ref()
-                .map(|p| (engine::sets::set_id(out_root, &job.set_key), p.kind));
+            let producer_key = match &job.pack {
+                Some(pack) => engine::sets::OutputKey::Packed {
+                    set: engine::sets::set_id(out_root, &job.set_key),
+                    suffix: pack.kind.suffix().into(),
+                },
+                None => engine::sets::OutputKey::File(key.clone()),
+            };
             producers
                 .entry(job.set_key.clone())
                 .or_default()
@@ -328,7 +338,7 @@ impl PlanView {
                         || vec![key.clone()],
                         |p| p.sources.iter().map(|s| key_of(root, &s.path)).collect(),
                     ),
-                    key: super::sets::job_output_key(&key, recipe),
+                    output_key: producer_key,
                     game_path: job.game_path.clone(),
                     game_key: None,
                 });

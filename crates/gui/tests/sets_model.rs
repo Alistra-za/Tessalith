@@ -9,20 +9,31 @@ const ROCK: &str = "landscape/rock01";
 #[test]
 fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
     use crate::slot_links::{cape_packs, cape_project, cape_view, unused_rows, A, B, E};
-    use sdc_gui::model::pbr_export::{export_blocks, written_json_entries};
+    use sdc_gui::model::bottom::At;
+    use sdc_gui::model::pbr_export::{entries_by_set, export_blocks, written_json_entries};
+    let warns = |m: &sdc_gui::model::AppModel, set: &str| {
+        let rows = unused_rows(m);
+        assert!(
+            matches!(&rows[..], [row] if matches!(&row.at, At::Set { id, .. } if id == set)),
+            "{set}: {rows:?}"
+        );
+    };
     let dir = tempfile::tempdir().unwrap();
     let mut m = cape_packs(dir.path(), true, true);
+    let pack = m.producers[&cape_view(&m, E).key]
+        .iter()
+        .find(|p| p.kind == Some(SlotKind::Rmaos))
+        .unwrap();
+    let game_key = pack.game_key.clone().unwrap();
+    assert_eq!(game_key, r"textures\pbr\e\cape_rmaos.dds", "{pack:?}");
     let mut unexpected = Vec::new();
     for (name, key, value) in [
         ("W2 link", "slot6", json!(r"textures\pbr\b\cape_rmaos.dds")),
         ("W2 clear", "slot6", json!("")),
         ("W2 lock", "lock_rmaos", json!(true)),
-        (
-            "W4 own explicit slot",
-            "slot8",
-            json!(r"textures\e\cape_rmaos.dds"),
-        ),
+        ("W4 own explicit slot", "slot8", json!(game_key)),
     ] {
+        warns(&m, E);
         m.set_json_value(E, key, Some(value));
         idle(&mut m);
         if !unused_rows(&m).is_empty() {
@@ -31,11 +42,16 @@ fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
         m.set_json_value(E, key, None);
         idle(&mut m);
     }
+    warns(&m, E);
     m.set_target(engine::config::Target::Vanilla);
     idle(&mut m);
     assert!(unused_rows(&m).is_empty(), "Vanilla");
+    assert!(written_json_entries(&m).is_empty());
+    m.set_target(engine::config::Target::Cs);
+    idle(&mut m);
+    warns(&m, E);
     let dir = tempfile::tempdir().unwrap();
-    let m = cape_project(
+    let mut m = cape_project(
         dir.path(),
         &[
             (A, &["_height"], ""),
@@ -44,6 +60,8 @@ fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
                 E,
                 &["_n"],
                 r#"share = ["textures/a/cape_height.png"]
+[sets.borrow]
+slot4 = "textures/b/cape"
 [sets.txst]
 plugin = "a.esp"
 formid = "1"
@@ -52,6 +70,11 @@ slot4 = "textures/b/cape_p.dds""#,
             ),
         ],
     );
+    warns(&m, E);
+    m.edit_docs("Use the record fill", None, true, |_, s| {
+        s.set_borrow(E, 4, None)
+    });
+    idle(&mut m);
     let v = cape_view(&m, E);
     let producers = &m.producers[&v.key];
     assert!(
@@ -72,20 +95,35 @@ slot4 = "textures/b/cape_p.dds""#,
     assert!(unused_rows(&m).is_empty(), "TXST fill");
 
     let dir = tempfile::tempdir().unwrap();
-    let m = cape_project(
+    let mut m = cape_project(
         dir.path(),
         &[
             (B, &["", "_cnr"], ""),
-            (E, &["", "_f"], "[sets.borrow]\nslot7 = \"textures/b/cape\""),
+            (
+                E,
+                &["", "_f", "_cnr"],
+                "[sets.borrow]\nslot7 = \"textures/b/cape\"",
+            ),
         ],
     );
+    m.edit_docs("Leave only the coat", None, true, |_, s| {
+        s.remove_member(E, "textures/e/cape_f.png")
+    });
+    idle(&mut m);
+    warns(&m, E);
+    m.undo();
+    idle(&mut m);
+    m.edit_docs("Leave only the fuzz", None, true, |_, s| {
+        s.remove_member(E, "textures/e/cape_cnr.png")
+    });
+    idle(&mut m);
     assert!(export_blocks(&m)
         .iter()
         .any(|p| p.text.contains("both use slot 7")));
     assert!(unused_rows(&m).is_empty(), "different slot 7 kinds");
 
     let dir = tempfile::tempdir().unwrap();
-    let m = cape_project(
+    let mut m = cape_project(
         dir.path(),
         &[
             (B, &["", "_cnr"], ""),
@@ -96,6 +134,13 @@ slot4 = "textures/b/cape_p.dds""#,
             ),
         ],
     );
+    m.edit_docs("Remove the competing fill", None, true, |_, s| {
+        s.remove_member(E, "textures/e/cape_f.png")
+    });
+    idle(&mut m);
+    warns(&m, E);
+    m.undo();
+    idle(&mut m);
     let slot = written_json_entries(&m)
         .into_iter()
         .find(|(v, _)| v.id == E)
@@ -122,6 +167,7 @@ slot4 = "textures/b/cape_p.dds""#,
             ),
         ],
     );
+    warns(&m, E);
     m.edit_docs("Invalid data weighting", None, true, |p, _| {
         p.set_file_value(
             "textures/e/cape_rmaos.png",
@@ -167,6 +213,11 @@ slot4 = "textures/b/cape_p.dds""#,
                 (A, &[""], ""),
             ],
         );
+        assert!(
+            entries_by_set(&m).contains_key(&cape_view(&m, x).key),
+            "{case}"
+        );
+        warns(&m, x);
         m.set_json_value(A, "slot6", Some(json!(path)));
         idle(&mut m);
         let own = m.item(&format!("{x}_rmaos")).unwrap().job.as_ref().unwrap();
@@ -193,9 +244,14 @@ slot4 = "textures/b/cape_p.dds""#,
                 &["", "_roughness"],
                 "[sets.borrow]\nslot6 = \"textures/b/cape\"",
             ),
-            (y, &["_n"], "[sets.borrow]\nslot6 = \"textures/x/cape\""),
+            (y, &["_n"], ""),
         ],
     );
+    warns(&m, x);
+    m.edit_docs("Read the displaced pack", None, true, |_, s| {
+        s.set_borrow(y, 6, Some(x))
+    });
+    idle(&mut m);
     let entry = written_json_entries(&m)
         .into_iter()
         .find(|(v, _)| v.id == y)

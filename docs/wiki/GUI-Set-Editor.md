@@ -25,28 +25,28 @@ Click a reason to go to its fix:
 
 ## Output files
 
-In 2D, **Output files** lists DDS files from the set’s slots and members, including slotless files and files displaced by a share or link. Labels use the row title or filename. Paths outside the export folder are absolute. Hover for the full path. The closed header counts files on disk (“2 of 3 on disk”). Those files have **Show in Explorer**. <!-- D:JR3 -->
+In 2D, **Output files** lists planned DDS files from this set’s slots and members, including a file a share or link displaced and files without slots. Other sets list their own files. Lines use the row title or file name. Paths outside the export folder show in full. Hover a path for its full spelling. The closed header counts files present now, such as “2 of 3 on disk”. **Show in Explorer** appears for each file on disk. <!-- D:JR3 -->
 
 ## Slot rows
 
-Rows follow the shader’s PGPatcher slots in order (up to 8). An unusable filled slot stays amber. Hover for the reason. Set the cubemap with a slot command.
+One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
 
-If any row has a format dropdown, the headings read **Slot**, **File** and **Format**. Diffuse’s alpha dropdown adds **Alpha**. Hover for the full format. <!-- D:JR4 -->
+A heading line names the columns ("Slot", "File", "Format") while a row has a format dropdown, and "Alpha" while the Diffuse row has one. A format value cut short in a narrow window shows in full on hover. <!-- D:JR4 -->
 
-Borrowing **Normal** makes [your roughness bake use the lender’s highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts. The slot can show another file. A lender can supply its own normal while displaying a borrowed one.
+When you borrow the **Normal** slot, [your roughness bake uses the highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts from the lending set. The slot can show a different file. Even if the lending set shows a borrowed normal, it can lend you its own.
 
-When a PGPatcher entry or skin material uses a borrowed slot, **Problems** warns if no entry or material uses your own DDS. Export still writes it, and the warning can name a pack missing from **Output files**. The row names the lender and, when known, each shared pack input’s owning set. <!-- D:LB -->
+When a PGPatcher entry or skin material uses a borrowed slot, **Problems** warns if no entry or material uses your own DDS. Export still writes it, and the warning can name a pack missing from **Output files**. The row names the lender and, when known, each shared pack input's owning set. <!-- D:LB -->
 
 Remove the share or the own file, or drop the borrow. If a mesh or another mod uses the DDS, choose **Mark as intended** for this set and slot. <!-- D:LB -->
 
 - Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
-- Slot 7 takes `_cnr` or `_f`. With both, the red row lists each with a ✕ to remove it. Export warns “_cnr and _f both use slot 7”. Slot 3 treats `_g` and `_sk` the same way.
+- Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
 - A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
 
-With the JSON panel open, **Match on this** (the Flags link mark) matches meshes using that exact own or borrowed Diffuse or Normal texture. For a linked row use [Matching](GUI-PGPatcher-JSON.md#matching) on the Material tab. <!-- D:JR1,JR4 -->
+On an own or borrowed Diffuse or Normal row, **Match on this** is the link mark in the Flags column while the JSON panel shows. It matches meshes with that exact texture. For a linked row use [Matching](GUI-PGPatcher-JSON.md#matching) on the Material tab. <!-- D:JR1,JR4 -->
 
-Drag a texture from Explorer onto a compatible row. The file must belong to the open folder. The row explains refusals. No files are copied. **Shader** lists the Mode’s shaders. **Auto** clears your pick. See [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
+Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
 `sdc.exe` doesn't read your shader pick. So when you pick **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map, Tessalith writes the types `sdc.exe` needs, in the same undo step:
 
@@ -55,11 +55,7 @@ Drag a texture from Explorer onto a compatible row. The file must belong to the 
 
 Picking **Auto** or a shader outside the PBR family takes back what that pick wrote, unless you changed it since. A shader outside the PBR family, other than **Advanced Skin**, also restores `diffuse` and `glow` on colour and glow maps Tessalith typed while the set was PBR, so `sdc.exe` types those files the same way (the fuzz map is another matter: [Does the CLI use my GUI edits?](CLI-Reference.md#does-the-cli-use-my-gui-edits)). A file in a pinned slot keeps its type either way. <!-- D:JQ9,JQ16,JQ31,JQ54,JQ59 -->
 
-### Picking a shader for a normal
-
-The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. When a normal follows its set’s shader, Tessalith changes its settings only if the entry controls one input. The same check applies to **Keep alpha**, a shader pick, the diffuse’s **Switch** and **Revert**, and **Reset all**.
-
-If a cube face is read through `wall.png.tga`, recording its type can also mark `wall.png` as a cubemap. A mesh scan can write an alpha setting for `wall.png` that also applies to `wall.png.tga`. If the second file is a shared normal, **Remove** can drop its alpha without a **Keep alpha** row, as before this release. <!-- D:JS5,JS6 -->
+[Picking a shader for a normal](Set-Shaders.md#picking-a-shader-for-a-normal) explains when the Normal slot follows your choice.
 
 ## Alpha
 

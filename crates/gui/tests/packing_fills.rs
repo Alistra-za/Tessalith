@@ -63,6 +63,59 @@ fn fixture(dir: &Path) -> AppModel {
     fixture_with(dir, "", false)
 }
 
+#[test]
+fn packed_gui_items_and_their_producers_have_the_same_output_key() {
+    use engine::pack::RecipeKind;
+    use sdc_gui::model::{items::ItemKind, sets::item_output_key};
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("m");
+    std::fs::create_dir_all(&r).unwrap();
+    grey(&r, "rock01_height.png", 12);
+    grey(&r, "rock03_metallic.png", 5);
+    let mut m = fixture(d.path());
+    let mut recipes = Vec::new();
+    let mut check = |m: &AppModel| {
+        let views = views(m);
+        for item in m.items.iter().filter(|i| i.kind == ItemKind::Packed) {
+            let job = item.job.as_ref().unwrap();
+            let producer = m.producers[&job.set_key]
+                .iter()
+                .find(|p| p.output == job.output)
+                .unwrap();
+            assert_eq!(
+                item_output_key(&views, item).as_ref(),
+                Some(&producer.output_key),
+                "{}",
+                item.key
+            );
+            recipes.push(job.pack.as_ref().unwrap().kind);
+            let mut jobless = item.clone();
+            jobless.job = None;
+            assert_eq!(item_output_key(&views, &jobless), None);
+        }
+    };
+    check(&m);
+    m.set_field(DIFFUSE, "subtype", json!(Subtype::SkinAlbedo));
+    idle(&mut m);
+    check(&m);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    support::complex_material(&mut m, "m/rock01");
+    check(&m);
+    for recipe in [
+        RecipeKind::Rmaos,
+        RecipeKind::Rfaos,
+        RecipeKind::Parallax,
+        RecipeKind::VanillaM,
+        RecipeKind::CpmM,
+    ] {
+        assert!(
+            recipes.contains(&recipe),
+            "{recipe:?} missing from {recipes:?}"
+        );
+    }
+}
+
 fn idle(m: &mut AppModel) {
     assert!(
         m.wait_idle(Duration::from_secs(60)),

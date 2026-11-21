@@ -2,6 +2,7 @@
 pub mod also;
 pub mod auto_flags;
 mod auto_record;
+mod borrowed_unused;
 pub mod bottom;
 pub mod bulk;
 pub mod checks;
@@ -3762,9 +3763,10 @@ impl AppModel {
     /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
     /// `last_inputs`); the full plan lands behind it and replaces everything. It keeps the sub-types before the chain
     /// (`keep_type_base`), since the partial can be the first plan after an edit.
-    fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+    fn apply_partial(&mut self, mut view: PlanView, scope: &BTreeSet<String>) {
         self.keep_type_base();
         self.producers.retain(|set, _| !scope.contains(set));
+        view.producers.retain(|set, _| scope.contains(set));
         let producers = self.project_producers(view.producers);
         self.producers.extend(producers);
         let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));

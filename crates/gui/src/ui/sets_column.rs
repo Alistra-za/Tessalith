@@ -4887,6 +4887,18 @@ mod tests {
     use engine::codes::Code;
 
     #[test]
+    fn a_card_hover_lists_the_first_ten_warnings() {
+        let warnings: Vec<_> = (1..=12)
+            .map(|i| Warning::new(Code::ChanNotGray, format!("warning {i}")))
+            .collect();
+        let rows: Vec<_> = warnings.iter().map(|w| ("member", w)).collect();
+        let tip = warning_tooltip(&rows);
+        assert_eq!(tip.lines().count(), 11);
+        assert!(tip.lines().nth(9).unwrap().ends_with("warning 10"));
+        assert!(tip.ends_with("… and 2 more"));
+    }
+
+    #[test]
     fn an_image_drag_is_found_and_placed() {
         let (p, o) = (Some(egui::pos2(10.0, 10.0)), Some(egui::pos2(50.0, 50.0)));
         assert_eq!(

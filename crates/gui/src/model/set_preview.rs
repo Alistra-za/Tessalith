@@ -1079,7 +1079,7 @@ fn fingerprint_of(
     let entry = super::pbr_export::exports_json(m, v).then(|| {
         let (_, paths) = super::sets::engine_inputs(m);
         let roots = super::sets::output_roots(m);
-        super::pbr_export::candidate_input(m, v, all, &paths, &roots)
+        super::pbr_export::candidate_entry(m, v, all, &paths, &roots).input
     });
     SetFingerprint {
         set_key: target.clone(),

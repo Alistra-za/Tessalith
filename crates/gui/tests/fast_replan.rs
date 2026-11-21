@@ -55,7 +55,22 @@ fn the_borrowed_slot_warning_follows_partial_plans() {
         p.set_file_value("landscape/rock01_normal.png", "header", &json!("dx10"));
         p.set_file_value("landscape/rock01_normal.png", "format", &json!("rgb8"));
     });
-    let (partials, full) = collect(&mut m, 1, 1);
+    let (mut partials, full) = collect(&mut m, 1, 1);
+    let WorkerMsg::Partial {
+        result: Ok((partial, scope)),
+        ..
+    } = &mut partials[0]
+    else {
+        panic!("expected a partial plan");
+    };
+    let At::Set { key, .. } = &other.at else {
+        panic!("expected a set row")
+    };
+    // Deliver a partial for the edited set with a stray producer entry for the other borrower.
+    scope.remove(key);
+    partial.sets.retain(|s| &s.key != key);
+    partial.items.retain(|i| i.set_key.as_ref() != Some(key));
+    partial.producers.insert(key.clone(), Vec::new());
     deliver(&mut m, partials);
     assert_eq!(unused_rows(&m).as_slice(), std::slice::from_ref(&other));
     finish(&mut m, full);

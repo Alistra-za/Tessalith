@@ -116,6 +116,7 @@ fn two_own_normals_under_one_borrow_name_one_file() {
         rows[0].shown()
     );
     assert!(rows[0].shown().contains("and 1 more"));
+    assert!(!rows[0].shown().contains("silk_n.dds"));
     assert!(rows[0].detail.as_deref().unwrap().contains("silk_n.dds"));
 }
 
@@ -200,6 +201,53 @@ pub(crate) fn cape_view(m: &AppModel, id: &str) -> SetView {
 }
 
 #[test]
+fn borrowing_from_a_hidden_pack_owner_lends_the_resolved_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    m.edit_docs("Borrow through e", None, true, |_, s| {
+        s.set_borrow(A, 6, Some(E))
+    });
+    settle(&mut m);
+    let a = cape_view(&m, A);
+    assert!(
+        matches!(&a.slots[&SlotKind::Rmaos], SlotFill::Borrowed { from, item }
+        if from == B && item == "textures/b/cape_rmaos")
+    );
+    assert!(unused_rows(&m)
+        .iter()
+        .any(|r| matches!(&r.at, sdc_gui::model::bottom::At::Set { id, .. } if id == A)));
+    let doc = fresh_document(&mut m, "lender");
+    let slot = disk_set(&doc, r"a\cape.dds")["slot6"].as_str().unwrap();
+    let output = &m
+        .item("textures/b/cape_rmaos")
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap()
+        .output;
+    assert_eq!(m.export_root().join(slot), *output);
+    assert!(output.is_file());
+}
+
+#[test]
+fn a_borrowed_warning_targets_its_slot_when_the_fill_is_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    let warning = borrowed_unused(&m)[&cape_view(&m, E).key][0].clone();
+    m.edit_docs("Remove borrow and share", None, true, |_, s| {
+        s.set_borrow(E, 6, None);
+        s.remove_share(E, AO);
+    });
+    settle(&mut m);
+    assert!(!cape_view(&m, E).slots.contains_key(&SlotKind::Rmaos));
+    inject_view_warnings(&mut m, E, vec![warning]);
+    assert_eq!(
+        unused_rows(&m)[0].target,
+        Some(sdc_gui::model::nav::SlotTarget::Slot(SlotKind::Rmaos))
+    );
+}
+
+#[test]
 fn a_borrowed_slot_over_an_own_pack_warns() {
     use sdc_gui::model::{
         bottom::{set_ready, At, Level},
@@ -254,6 +302,8 @@ fn a_borrowed_slot_over_an_own_pack_warns() {
         .unwrap()
         .contains("mark this row as intended"));
     assert!(!set_ready(&m, &e));
+    assert!(sdc_gui::model::bottom::cached_set_reasons(&m, &e).iter().any(|reason|
+        matches!(&reason.go, sdc_gui::model::bottom::ReasonGo::Row(p) if p.as_ref() == row)));
     let own: Vec<_> = m.producers[&e.key]
         .iter()
         .filter(|p| p.kind == Some(SlotKind::Rmaos))
@@ -2703,7 +2753,7 @@ const REC_LEAF: &str = "textures/n/leaf";
 
 /// Ruling 3b-F9: a PBR-picked no-albedo set `textures/n/leaf` (`_n` only) whose TXST record names the height
 /// `textures/h/hgt_p.dds`, which the set `textures/h/hgt` writes, so the record borrows it into slot 4.
-pub(crate) fn record_height_project(dir: &std::path::Path) -> AppModel {
+fn record_height_project(dir: &std::path::Path) -> AppModel {
     for f in ["textures/n/leaf_n.png", "textures/h/hgt_p.png"] {
         let p = dir.join(f);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();

@@ -246,7 +246,7 @@ fn record_key(m: &AppModel, v: &SetView, record: &str) -> Option<String> {
 /// folder (`mod_a/textures/s/x_n.dds`) matches the consumer's record path resolved under its own
 /// (`mod_b/textures/s/x_n.dds`). With no `textures` folder (the root is at or inside it) every rel has the same shape
 /// and stays whole.
-fn game_key(rel: &str) -> String {
+pub(super) fn game_key(rel: &str) -> String {
     let rel = rel.replace('\\', "/").to_ascii_lowercase();
     match rel.split('/').position(|c| c == "textures") {
         Some(i) => rel.split('/').skip(i).collect::<Vec<_>>().join("/"),

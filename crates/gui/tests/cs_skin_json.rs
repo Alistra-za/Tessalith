@@ -71,6 +71,25 @@ fn a_skin_set_warns_only_for_the_slots_its_material_reads() {
     assert_eq!(restored.len(), 1);
     assert_eq!(restored[0].at, rows[0].at);
     assert_eq!(restored[0].shown(), rows[0].shown());
+
+    m.edit_docs("Borrow wet and detail", None, true, |_, s| {
+        s.set_borrow(&a, 9, Some(&b));
+        s.set_borrow(&a, 10, Some(&b));
+    });
+    export_and_wait(&mut m);
+    let rows = crate::slot_links::unused_rows(&m);
+    assert_eq!(rows.len(), 3);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    for (slot, field, suffix) in [(9, "wet", "wet"), (10, "detail", "detail_n")] {
+        assert!(rows
+            .iter()
+            .any(|r| r.shown().contains(&format!("Slot {slot} "))));
+        assert_eq!(
+            j["textures"][field],
+            json!(format!("textures/x/b_{suffix}.dds"))
+        );
+        assert!(out(&m, &format!("textures/x/a_{suffix}.dds")).is_file());
+    }
 }
 
 fn grey(dir: &Path, name: &str) {
