@@ -51,8 +51,9 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
         // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
+        Subtype::SkinWet => "3.0.0",
         // XY-only normal outputs need unit directions even with Keep (Note LA7).
-        Subtype::DetailNormal | Subtype::SkinWet => ENGINE_VERSION,
+        Subtype::DetailNormal => ENGINE_VERSION,
         // Advanced Skin detail needs a unit base even with Keep (Note LA6).
         Subtype::SkinDetail => ENGINE_VERSION,
         // Keep carries authored normal length and bakes angular spread (Note LA).
@@ -603,9 +604,14 @@ mod tests {
         for st in Subtype::ALL {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
             // 3.0.1 changes kept normal lengths, XY bases and the angular variance bake (LA).
+            // SkinWet stays at 3.0.0 because every writable format stores XYZ.
             let want = if matches!(
                 st,
-                Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo
+                Subtype::Diffuse
+                    | Subtype::PbrAlbedo
+                    | Subtype::UiSky
+                    | Subtype::SkinAlbedo
+                    | Subtype::SkinWet
             ) {
                 "3.0.0"
             } else if matches!(
@@ -615,7 +621,6 @@ mod tests {
                     | Subtype::PbrNormal
                     | Subtype::Rmaos
                     | Subtype::SkinDetail
-                    | Subtype::SkinWet
                     | Subtype::DetailNormal
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial

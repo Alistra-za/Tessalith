@@ -110,7 +110,7 @@
     sdc convert src --recursive --on-existing if-changed --ev --property normal --property landscape_normal --property pbr_normal --property coat_normal --property rmaos --property skin_rfaos --property complex_material
     ```
 - Advanced Skin detail normals now start from unit length even with `mips.normal_base = "keep"`. The encode version is 3.0.1. To rebuild otherwise matching older outputs, run `sdc convert src --recursive --on-existing if-changed --ev --property skin_detail`.
-- Tangent normal outputs in formats that drop Z start from unit length even with Keep. The texture panel locks **Normal base level** for those outputs and for Advanced Skin detail. To rebuild otherwise matching older outputs, run `sdc convert src --recursive --on-existing if-changed --ev --property coat_normal --property detail_normal --property skin_wet`.
+- Tangent normal outputs in formats that drop Z start from unit length even with Keep. The texture panel locks **Normal base level** for those outputs and for Advanced Skin detail. To rebuild otherwise matching older outputs, run `sdc convert src --recursive --on-existing if-changed --ev --property coat_normal --property detail_normal`.
 
 ## 3.0.0
 
