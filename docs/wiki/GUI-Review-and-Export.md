@@ -8,9 +8,11 @@ Click **Review n files…** in the header to review the whole project. Pending N
 
 To skip Review on a clean export, tick **Export without review next time** beside **Close** in Review. Clear **Export without review** in **Settings…** to bring Review back. Both controls need an open, writable project that has finished opening. <!-- D:JY3 --> The choice belongs to this project and starts off. It saves at once if the project document is clean, or with your next **Save** if you have edits. <!-- D:JY1 -->
 
-**Export n files now** writes on click. You'll see it when planning has settled, there are files to export, and nothing needs review. Blockers, undecided textures, counted problems, writable NIF edits, edited PGPatcher JSON or an applicable **Also export** tick bring you to Review. Checks, Notes, queued fixes and marked warnings don't prevent a clean export. <!-- D:JY2 -->
+**Export n files now** writes on click. You'll see it when planning has settled, there are files to export, and nothing needs review. [See what opens Review](#review). <!-- D:JY2 -->
 
 ## What Export does
+
+When the export opens Review, follow these steps.
 
 1. Check the files and resolve any blockers in [Review](#review).
 2. Click Review's **Export** button. Tessalith saves pending settings in `sdc.toml` and `sdc-project.toml` before writing outputs.
@@ -51,7 +53,9 @@ These entries are greyed while an export runs, and **Export set** is greyed on a
 
 ## Review
 
-Review opens in the bottom panel. You can edit the project with Review open and its lists update. Deciding the last texture doesn't start the export. Click **Export** to write, or **Close** to leave.
+Review opens in the bottom panel. Even with **Export without review** on, blockers, undecided textures, counted problems, writable NIF edits, an edited PGPatcher JSON or an applicable **Also export** tick bring you here. Checks, Notes, queued fixes and marked warnings don't prevent a clean export. <!-- D:JY2 -->
+
+You can edit the project with Review open and its lists update. Deciding the last texture doesn't start the export. Enter does nothing here. Click **Export** to write, or **Close** to leave. <!-- D:CA19 -->
 
 ![The Review tab.](../img/gui/GUI-Review-and-Export/review-tab.png)
 

@@ -327,6 +327,18 @@ enum Footer<'a> {
     Also(&'a Arc<ReviewWrites>),
 }
 
+#[cfg(test)]
+#[test]
+fn a_missing_footer_row_draws_an_empty_heading() {
+    let row = std::panic::catch_unwind(
+        || matches!(output_row(&ReviewWrites::default(), 0), Footer::Heading(text) if text.is_empty()),
+    );
+    assert!(
+        row.is_ok_and(|empty| empty),
+        "missing footer row must be harmless to draw"
+    );
+}
+
 /// Index the cached groups directly so scrolling to the end of a large project lays out only visible paths.
 fn output_row(w: &ReviewWrites, mut index: usize) -> Footer<'_> {
     if !w.outputs.is_empty() {
@@ -354,7 +366,7 @@ fn output_row(w: &ReviewWrites, mut index: usize) -> Footer<'_> {
         }
         index -= paths.len() + 1;
     }
-    unreachable!("index inside the Review file list")
+    Footer::Heading(String::new())
 }
 
 /// E7 (ruling 3c-49): the width of each entry's text and of the `…`, measured once per list and font (kept in the

@@ -295,9 +295,11 @@ pub fn with_marked(mut open: Vec<String>, marked: Vec<String>) -> Vec<String> {
 
 // A mark stores its code verbatim; sets_doc::folded folds only the subject.
 fn has_mark_of(m: &AppModel, code: Code) -> bool {
-    m.sets_doc
-        .as_ref()
-        .is_some_and(|doc| doc.intended_keys().iter().any(|k| k.code == code.as_str()))
+    use engine::codes::Severity;
+    matches!(code.severity(), Severity::Warning | Severity::Info)
+        && m.sets_doc
+            .as_ref()
+            .is_some_and(|doc| doc.intended_keys().iter().any(|k| k.code == code.as_str()))
 }
 
 /// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
@@ -305,15 +307,20 @@ fn has_mark_of(m: &AppModel, code: Code) -> bool {
 /// an Error code is not one. A Note's warning reads no mark (Note JP6): its row has no Mark, so a mark stored while it
 /// was a Problem shows nowhere.
 pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
-    use engine::codes::Severity;
-    if !matches!(w.code.severity(), Severity::Warning | Severity::Info) {
-        return false;
-    }
+    has_mark_of(m, w.code) && marked_code(m, at, w)
+}
+
+fn marked_code(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
         return false;
     };
-    has_mark_of(m, w.code) && class_at(m, at, w) == RowClass::Problem && {
-        let text = warning_text(job_at(m, at), w);
+    let job = if follows_job(w.code) {
+        job_at(m, at)
+    } else {
+        None
+    };
+    warning_class(job, w) == RowClass::Problem && {
+        let text = warning_text(job, w);
         let shown = code_text::shown_for(Some(w.code), &text);
         doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
     }
@@ -333,8 +340,8 @@ pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::War
         .filter(|i| i.status != ItemStatus::NeedsDecision)
         .and_then(|i| i.warnings.iter().find(|x| x.code == w.code).map(|x| (i, x)));
     match on_texture {
-        Some((i, x)) => marked(m, &At::Texture(i.key.clone()), x),
-        None => marked(m, &At::File(job_key.to_string()), w),
+        Some((i, x)) => marked_code(m, &At::Texture(i.key.clone()), x),
+        None => marked_code(m, &At::File(job_key.to_string()), w),
     }
 }
 
@@ -537,7 +544,7 @@ pub fn cached_tab_counts(m: &AppModel) -> TabCounts {
     let all = problems(m);
     let hidden = m.hidden_kinds();
     if let Some((_, _, c)) = m
-        .views
+        .view_cache()
         .borrow()
         .tab_counts
         .as_ref()
@@ -548,7 +555,7 @@ pub fn cached_tab_counts(m: &AppModel) -> TabCounts {
     #[cfg(feature = "test-hooks")]
     m.tab_count_scans.set(m.tab_count_scans.get() + 1);
     let c = tab_counts(&all, &hidden);
-    m.views.borrow_mut().tab_counts = Some((all, hidden, c));
+    m.view_cache().borrow_mut().tab_counts = Some((all, hidden, c));
     c
 }
 
@@ -667,7 +674,7 @@ pub struct Flagged {
 /// `set_ready_in` per card (Task 6).
 pub fn flagged(m: &AppModel) -> Arc<Flagged> {
     let all = problems(m);
-    if let Some(f) = &m.views.borrow().flagged {
+    if let Some(f) = &m.view_cache().borrow().flagged {
         return f.clone();
     }
     let mut f = Flagged::default();
@@ -685,7 +692,7 @@ pub fn flagged(m: &AppModel) -> Arc<Flagged> {
         };
     }
     let f = Arc::new(f);
-    m.views.borrow_mut().flagged = Some(f.clone());
+    m.view_cache().borrow_mut().flagged = Some(f.clone());
     f
 }
 
@@ -1816,7 +1823,7 @@ pub(crate) fn cached_scope_label(m: &AppModel, s: &str, kind: NameKind) -> Strin
     // Before the borrow: `views` writes the same cell.
     let views = sets::views(m);
     if let Some((.., l)) = m
-        .views
+        .view_cache()
         .borrow()
         .scope_label
         .as_ref()
@@ -1825,7 +1832,7 @@ pub(crate) fn cached_scope_label(m: &AppModel, s: &str, kind: NameKind) -> Strin
         return l.clone();
     }
     let l = scope_label(m, s, kind);
-    m.views.borrow_mut().scope_label = Some((views, s.to_string(), kind, l.clone()));
+    m.view_cache().borrow_mut().scope_label = Some((views, s.to_string(), kind, l.clone()));
     l
 }
 
@@ -1894,7 +1901,7 @@ pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     let all = problems(m);
     let hidden = m.hidden_kinds();
     if let Some((.., r)) = m
-        .views
+        .view_cache()
         .borrow()
         .set_reasons
         .as_ref()
@@ -1905,7 +1912,7 @@ pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     #[cfg(feature = "test-hooks")]
     m.reason_scans.set(m.reason_scans.get() + 1);
     let r = Arc::new(with_view_rows(m, v, reasons_for_view).unwrap_or_default());
-    m.views.borrow_mut().set_reasons = Some((all, v.id.clone(), hidden, r.clone()));
+    m.view_cache().borrow_mut().set_reasons = Some((all, v.id.clone(), hidden, r.clone()));
     r
 }
 

@@ -9,7 +9,7 @@ A map of the GUI (`tessalith.exe`) for anyone who just opened it, plus the keys,
 The picture shows a small made-up mod. Double-clicking a tile replaces the centre with the 2D preview: see [Previews](Previews.md).
 
 1. **Open, Undo, Redo**: [Main window](GUI-Main-Window.md#header).
-2. **MO2…**, **Preset** and **Tools ▾** share this part of the header. [Header menus](GUI-Main-Window.md#export-to). The Mode (the target, `cs` or `vanilla`) is set in the [Settings tab](GUI-Main-Window.md#settings-tab); what modes and presets do: [Presets and targets](Presets-and-Targets.md).
+2. **MO2…**, **Preset** and **Tools ▾** share this part of the header. [Header menus](GUI-Main-Window.md#header). The Mode (the target, `cs` or `vanilla`) is set in the [Settings tab](GUI-Main-Window.md#settings-tab); what modes and presets do: [Presets and targets](Presets-and-Targets.md).
 3. **Textures / Meshes tabs**: [Main window](GUI-Main-Window.md#header); the Meshes view is [Mod scanning](Mod-Scanning.md).
 4. **Export to ▾**: [Export to](GUI-Main-Window.md#export-to).
 5. **Save**: writes `sdc.toml` and `sdc-project.toml`.

@@ -40,6 +40,7 @@ fn build_model() -> AppModel {
     model
 }
 
+/// An invalid explicit folder reports its error even on a device-loss restart.
 fn open_startup_folder(
     model: &mut AppModel,
     args: impl IntoIterator<Item = std::ffi::OsString>,
@@ -177,19 +178,38 @@ mod tests {
 
     #[test]
     fn folder_arg_stores_dot_as_an_absolute_recent_folder() {
-        let dir = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
-        let argument = std::path::Path::new(".").join(dir.path().file_name().unwrap());
-        assert_eq!(
-            std::path::absolute(&argument).unwrap(),
-            dir.path(),
-            "only open the test-owned project"
-        );
-        let saved = dir.path().join("gui.toml");
+        const CHILD: &str = "SDC_TEST_STARTUP_FOLDER_CWD";
+        let Some(folder) = std::env::var_os(CHILD) else {
+            let dir = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "tests::folder_arg_stores_dot_as_an_absolute_recent_folder",
+                ])
+                .env(CHILD, dir.path())
+                .current_dir(dir.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            assert_eq!(
+                settings::GuiSettings::load(&dir.path().join("gui.toml"))
+                    .0
+                    .recent,
+                [dir.path()]
+            );
+            return;
+        };
+        let folder = std::path::PathBuf::from(folder);
+        assert_eq!(std::env::current_dir().unwrap(), folder);
+        let saved = folder.join("gui.toml");
         let mut model = AppModel::placeholder(settings::GuiSettings::default());
         model.settings_path = Some(saved.clone());
-        open_startup_folder(&mut model, [argument.into_os_string()], None);
-        assert_eq!(settings::GuiSettings::load(&saved).0.recent, [dir.path()]);
-        assert_eq!(model.settings.recent, [dir.path()]);
+        open_startup_folder(&mut model, [".".into()], None);
+        assert_eq!(
+            settings::GuiSettings::load(&saved).0.recent,
+            [folder.as_path()]
+        );
+        assert_eq!(model.settings.recent, [folder.as_path()]);
     }
 
     #[test]

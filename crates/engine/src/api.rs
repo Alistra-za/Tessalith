@@ -1022,6 +1022,7 @@ fn classify_ready_jobs<'a>(
     })
 }
 
+// Recheck at the verdict: the output can appear or disappear after parallel currency classification.
 fn ready_output_exists(output: &Path) -> bool {
     #[cfg(test)]
     READY_EXISTENCE_CHECKS.set(READY_EXISTENCE_CHECKS.get() + 1);

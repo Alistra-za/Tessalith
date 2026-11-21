@@ -8,6 +8,9 @@ use eframe::egui;
 /// (`look::tests::every_text_edit_carries_the_036_margin`).
 pub const TEXT_EDIT_MARGIN: egui::Margin = egui::Margin::symmetric(4, 2);
 
+/// Horizontal gap that keeps the narrow project header on one row at 1055 px.
+pub const COMPACT_HEADER_GAP: f32 = 3.5;
+
 /// Sets `style` to 0.36.2's defaults where 0.37 changed them (survey 4.2a): `button_padding`, `interact_size`, the
 /// widget visuals of `style`'s theme, and no rubber band. 0.37's kinetic `decay_time`/`stop_distance` stay: 0.36.2's
 /// hard-coded momentum cannot be written in them.

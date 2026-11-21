@@ -137,7 +137,7 @@ fn toast_undo_of_sets_only_recovery_leaves_the_files_document_clean() {
     std::fs::write(recovery_path(&sets), renamed).unwrap();
     let mut m = open(root);
     assert_eq!(sets_text(&m), renamed);
-    assert!(m.sets_user_dirty());
+    assert!(m.sets_doc.as_ref().unwrap().user_dirty());
     assert!(!m.project.as_ref().unwrap().user_dirty());
     m.undo_crash_restore();
     assert!(!m.unsaved());

@@ -274,7 +274,7 @@ impl AppModel {
     pub fn resolved_selection(&self) -> Arc<ResolvedSelection> {
         let views = sets::views(self);
         if let Some(hit) = self
-            .views
+            .view_cache()
             .borrow()
             .active
             .as_ref()
@@ -291,14 +291,22 @@ impl AppModel {
             Selection::None => None,
         };
         let hit = self.build_resolution(views, index);
-        self.views.borrow_mut().active = Some(hit.clone());
+        self.view_cache().borrow_mut().active = Some(hit.clone());
         hit
     }
 }
 
 impl AppModel {
+    fn view_cache(&self) -> &std::cell::RefCell<ViewCache> {
+        if self.whole_view.get() {
+            &self.whole_views
+        } else {
+            &self.views
+        }
+    }
+
     pub(super) fn warm_views(&self) -> Option<Arc<Vec<sets::SetView>>> {
-        let cache = self.views.borrow();
+        let cache = self.view_cache().borrow();
         let k = cache.key.as_ref()?;
         let (project, sets_read_only, fallback) = cache.root_inputs.as_ref()?;
         let current = *project == self.project.as_ref().map(|p| (p.rev(), p.read_only()))
@@ -313,7 +321,7 @@ impl AppModel {
             && k.scan == self.scan_stamp
             && k.known_rev == self.known_rev
             && k.target_mod_rev == self.target_mod_rev
-            && k.scope == self.scope_rev;
+            && k.scope == self.view_scope_rev();
         current.then(|| cache.views.clone()).flatten()
     }
 }
@@ -518,7 +526,7 @@ pub(crate) fn cached<T: Clone>(
 ) -> T {
     let key = m.view_key();
     {
-        let c = m.views.borrow();
+        let c = m.view_cache().borrow();
         if c.key.as_ref() == Some(&key) {
             if let Some(v) = get(&c) {
                 return v;
@@ -526,7 +534,7 @@ pub(crate) fn cached<T: Clone>(
         }
     }
     let v = build();
-    let mut c = m.views.borrow_mut();
+    let mut c = m.view_cache().borrow_mut();
     if c.key.as_ref() != Some(&key) {
         *c = ViewCache {
             key: Some(key),
@@ -601,7 +609,7 @@ struct ArmedWrite {
     destination: (PathBuf, Option<PathBuf>),
     /// Rulings 3c-33 and 3c-40: where `output_root()` resolves on disk. The same path through a retargeted junction is
     /// another destination. Read once at the click, once at landing.
-    resolved: Resolved,
+    resolved: Option<PathBuf>,
     /// The target mod's revision: its path is what the overlap blocker reads.
     target_mod_rev: u64,
     /// Re-encode all (`reencode_all`, the header's tick): it changes what the write does with existing outputs and
@@ -611,15 +619,10 @@ struct ArmedWrite {
     replanned: bool,
 }
 
-/// Ruling 3c-40: an export destination as resolved on disk (`target_mod::resolve_destination`: the canonical nearest
-/// existing ancestor plus the missing components). `None` is an indeterminate read, which equals nothing, itself
-/// included: two failed reads are not the same destination.
-#[derive(Debug, Clone)]
-struct Resolved(Option<PathBuf>);
-
-impl PartialEq for Resolved {
-    fn eq(&self, other: &Self) -> bool {
-        matches!((&self.0, &other.0), (Some(a), Some(b)) if a == b)
+impl ArmedWrite {
+    /// Two failed resolutions cannot confirm the destination, even when all recorded fields agree.
+    fn matches_click(&self, other: &Self) -> bool {
+        self.resolved.is_some() && self == other
     }
 }
 
@@ -793,7 +796,8 @@ pub struct AppModel {
     /// `TextureItem::key` to its index in `items` (audit 7).
     item_index: std::collections::HashMap<String, usize>,
     /// The cached set views and export blocks (DECISIONS Note Y7).
-    pub(crate) views: std::cell::RefCell<ViewCache>,
+    views: std::cell::RefCell<ViewCache>,
+    whole_views: std::cell::RefCell<ViewCache>,
     /// Ruling 3b-F24: the From another set rows' settled check (`settled_wait`) and the key it was computed under.
     pick_cache: std::cell::RefCell<Option<(PickKey, Option<&'static str>)>>,
     /// K3: `review_json` for a view key, and when it was read; cleared with `review`.
@@ -988,7 +992,7 @@ pub struct AppModel {
     /// re-plans): inside one the pending state is continuous, so the held pair is not taken again.
     landing: u8,
     /// E3 (ruling 3c-14): set while the whole-project header answer is computed, so `export_scope()` reads `None` and
-    /// every scope-keyed cache takes a slot of its own (`view_key`). Never set across a call that can return.
+    /// view lookups use the separate whole-project cache.
     whole_view: std::cell::Cell<bool>,
     /// E3: the whole project's keyed header terms while a scope is set (`review::WholeTerms`).
     whole_cache: std::cell::RefCell<Option<WholeAnswer>>,
@@ -1216,6 +1220,7 @@ impl AppModel {
             inputs_rev: 0,
             item_index: Default::default(),
             views: Default::default(),
+            whole_views: Default::default(),
             pick_cache: Default::default(),
             review_json_cache: Default::default(),
             review_writes_cache: Default::default(),
@@ -2725,7 +2730,7 @@ impl AppModel {
         if waited {
             let made_for = armed.as_ref().is_some_and(|a| {
                 let now = self.armed_now(a.replanned);
-                *a == now
+                a.matches_click(&now)
             });
             if !made_for || self.export_scope().is_some() || self.review.is_some() {
                 self.open_review();
@@ -2773,7 +2778,7 @@ impl AppModel {
         let output = self.output_root();
         ArmedWrite {
             scope_rev: self.scope_rev,
-            resolved: Resolved(target_mod::resolve_destination(&output)),
+            resolved: target_mod::resolve_destination(&output),
             destination: (output, self.export_folder_chosen()),
             target_mod_rev: self.target_mod_rev,
             reencode_all: self.reencode_all,
@@ -4172,11 +4177,7 @@ impl AppModel {
             known_rev: self.known_rev,
             target_mod_rev: self.target_mod_rev,
             // E3: the whole-project header answer reads with the scope off, in caches of its own.
-            scope: if self.whole_view.get() {
-                u64::MAX
-            } else {
-                self.scope_rev
-            },
+            scope: self.view_scope_rev(),
         }
     }
 
@@ -4688,7 +4689,14 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, false);
-        self.undo_noted("Undid", &c.label);
+        self.undo_noted(
+            if self.centre_over_meshes {
+                "Undone"
+            } else {
+                "Undid"
+            },
+            &c.label,
+        );
     }
 
     /// Note FB5: after the documents load, each one's crash `.recovery` file is loaded into it as one Undo step
@@ -4819,7 +4827,14 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, true);
-        self.undo_noted("Redid", &c.label);
+        self.undo_noted(
+            if self.centre_over_meshes {
+                "Redone"
+            } else {
+                "Redid"
+            },
+            &c.label,
+        );
     }
 
     /// The slot card's preset dropdown: format and tag together, one undo step (M3b §4.1).
@@ -5162,30 +5177,6 @@ impl AppModel {
 
     pub fn write_project_now(&mut self) {
         let _ = self.save();
-    }
-
-    #[cfg(feature = "test-hooks")]
-    pub fn prompts_unsaved(&self) -> bool {
-        self.unsaved()
-    }
-
-    #[cfg(feature = "test-hooks")]
-    pub fn only_automatic_unsaved(&self) -> bool {
-        self.is_dirty() && !self.unsaved()
-    }
-
-    #[cfg(feature = "test-hooks")]
-    pub fn sets_listing_only(&self) -> bool {
-        self.sets_doc
-            .as_ref()
-            .is_some_and(|s| s.is_dirty() && !s.defer_record_save())
-    }
-
-    #[cfg(feature = "test-hooks")]
-    pub fn sets_user_dirty(&self) -> bool {
-        self.sets_doc
-            .as_ref()
-            .is_some_and(crate::sets_doc::SetsDoc::user_dirty)
     }
 
     /// The unsaved `sdc.toml` edits stashed by a blame that is still tentative (the retry plan has not landed), so
@@ -5767,11 +5758,60 @@ mod tests {
             None,
             "an invalid name is not \"not found\""
         );
-        let unsure = Resolved(None);
-        assert!(unsure != unsure.clone(), "two failed reads are not equal");
-        let sure = Resolved(Some(d.path().to_path_buf()));
-        assert!(sure == sure.clone());
-        assert!(sure != unsure && unsure != sure);
+        let unsure = ArmedWrite {
+            resolved: None,
+            ..bare_model().armed_now(false)
+        };
+        assert!(
+            !unsure.matches_click(&unsure.clone()),
+            "two failed reads are not equal"
+        );
+        let sure = ArmedWrite {
+            resolved: Some(d.path().to_path_buf()),
+            ..unsure.clone()
+        };
+        assert!(sure.matches_click(&sure.clone()));
+        assert!(!sure.matches_click(&unsure) && !unsure.matches_click(&sure));
+    }
+
+    #[test]
+    fn a_whole_view_restores_its_caller_on_return_and_unwind() {
+        let m = AppModel::placeholder(Default::default());
+        let nested = m.with_whole_view(|| {
+            m.with_whole_view(|| ());
+            m.whole_view.get()
+        });
+        assert!(nested, "nested read ended the outer whole view");
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            m.with_whole_view(|| panic!("interrupted read"));
+        }));
+        assert!(!m.whole_view.get(), "unwind left whole view active");
+    }
+
+    #[test]
+    fn unreadable_normal_snapshots_protect_the_key() {
+        let write = crate::project::AutoWrite {
+            key: "a_n.png".into(),
+            field: "subtype",
+            value: serde_json::json!("normal"),
+            only_if: None,
+        };
+        for (files, sets) in [("[", ""), ("", "[")] {
+            let protected = std::panic::catch_unwind(|| {
+                normal_follow::protected_normals(
+                    files,
+                    sets,
+                    std::slice::from_ref(&write),
+                    &Default::default(),
+                    &[write.key.clone()].into(),
+                )
+            });
+            assert!(
+                protected.is_ok_and(|keys| keys.contains(&write.key)),
+                "invalid snapshot must protect {}",
+                write.key
+            );
+        }
     }
 
     #[test]

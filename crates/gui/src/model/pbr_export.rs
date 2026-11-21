@@ -441,7 +441,7 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
 /// is now, and what was derived from it: the Problems list copies its rows (`bottom::problems`), and the flagged keys
 /// read that list. A write decision calls it; nothing per frame does.
 pub(super) fn drop_blocks(m: &AppModel) {
-    let mut c = m.views.borrow_mut();
+    let mut c = m.view_cache().borrow_mut();
     c.blocks = None;
     c.problems = None;
     c.flagged = None;

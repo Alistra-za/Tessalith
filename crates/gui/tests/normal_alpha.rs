@@ -535,7 +535,11 @@ fn exercise_claim(start: ClaimStart, gesture: Gesture) {
         Gesture::KeepAlpha => false,
     };
     let recover_sets = m.sets_doc.as_ref().unwrap().is_dirty();
-    assert_eq!(m.sets_user_dirty(), sets_claimed, "{start:?} {gesture:?}");
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().user_dirty(),
+        sets_claimed,
+        "{start:?} {gesture:?}"
+    );
     check_close(&mut m, (true, sets_claimed), (true, recover_sets));
     m.save().unwrap();
     assert_claim_prompt(&mut m, false);
@@ -668,8 +672,8 @@ fn the_listing_alone_is_an_automatic_change() {
         m.sets_doc.as_ref().unwrap().is_dirty(),
         "the listing is unsaved"
     );
-    assert!(m.only_automatic_unsaved());
-    assert!(!m.prompts_unsaved());
+    assert!(m.is_dirty() && !m.unsaved());
+    assert!(!m.unsaved());
     assert!(
         m.recovery_snapshot().is_empty(),
         "{:?}",
@@ -680,13 +684,13 @@ fn the_listing_alone_is_an_automatic_change() {
     assert!(!m.sets_doc.as_ref().unwrap().is_dirty());
     let saved = std::fs::read_to_string(d.path().join("textures/sdc-project.toml")).unwrap();
     assert!(saved.contains("auto_normal"), "{saved}");
-    assert!(m.only_automatic_unsaved());
+    assert!(m.is_dirty() && !m.unsaved());
 }
 
 /// N-26, review 2 Important 1, review 3 Minor 2: the listing snapshot ends at a save. With no export folder chosen
 /// (so the Undo returns to the very text the snapshot holds): Save, a user edit to `sdc-project.toml`, Save, Undo. The
 /// document is back at the text the recording left, but that is now the user's unsaved change: it is asked about,
-/// named in the dialog's file list (`files_hint` reads `sets_user_dirty`), and no save-if-clean site writes it.
+/// named in the dialog's file list (`files_hint` reads `SetsDoc::user_dirty`), and no save-if-clean site writes it.
 #[test]
 fn a_save_ends_the_listing_snapshot() {
     let d = tempfile::tempdir().unwrap();
@@ -694,7 +698,9 @@ fn a_save_ends_the_listing_snapshot() {
     let mut m = opened_without_export(d.path());
     assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
     assert!(
-        m.sets_listing_only(),
+        m.sets_doc
+            .as_ref()
+            .is_some_and(|s| s.is_dirty() && !s.defer_record_save()),
         "precondition: the snapshot holds the listing's text"
     );
     assert!(m.save().is_ok());
@@ -706,10 +712,16 @@ fn a_save_ends_the_listing_snapshot() {
     m.undo();
     settle(&mut m);
     assert!(m.sets_doc.as_ref().unwrap().is_dirty());
-    assert!(!m.sets_listing_only());
-    assert!(m.sets_user_dirty(), "the dialog names sdc-project.toml");
-    assert!(m.prompts_unsaved());
-    assert!(!m.only_automatic_unsaved());
+    assert!(!m
+        .sets_doc
+        .as_ref()
+        .is_some_and(|s| s.is_dirty() && !s.defer_record_save()));
+    assert!(
+        m.sets_doc.as_ref().unwrap().user_dirty(),
+        "the dialog names sdc-project.toml"
+    );
+    assert!(m.unsaved());
+    assert!(!m.is_dirty() || m.unsaved());
     m.set_export_folder(d.path().join("export"));
     settle(&mut m);
     assert_eq!(
@@ -724,7 +736,13 @@ fn failed_listing_save(which: sdc_gui::model::DocKind) {
     let d = tempfile::tempdir().unwrap();
     wall(d.path());
     let mut m = opened_without_export(d.path());
-    assert!(m.only_automatic_unsaved() && m.sets_listing_only());
+    assert!(
+        m.is_dirty()
+            && !m.unsaved()
+            && m.sets_doc
+                .as_ref()
+                .is_some_and(|s| s.is_dirty() && !s.defer_record_save())
+    );
     let path = d.path().join("textures").join(which.file());
     std::fs::write(&path, "# edited outside Tessalith\n").unwrap();
     assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
@@ -734,10 +752,12 @@ fn failed_listing_save(which: sdc_gui::model::DocKind) {
         which == DocKind::SdcToml
     );
     assert!(
-        m.sets_listing_only(),
+        m.sets_doc
+            .as_ref()
+            .is_some_and(|s| s.is_dirty() && !s.defer_record_save()),
         "the failed Save still owns the listing"
     );
-    assert!(!m.sets_user_dirty() && !m.prompts_unsaved());
+    assert!(!m.sets_doc.as_ref().unwrap().user_dirty() && !m.unsaved());
     assert!(m.recovery_snapshot().is_empty());
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
@@ -746,7 +766,9 @@ fn failed_listing_save(which: sdc_gui::model::DocKind) {
     m.resolve_external_change(which, true);
     if which == DocKind::SdcToml {
         assert!(
-            m.sets_listing_only(),
+            m.sets_doc
+                .as_ref()
+                .is_some_and(|s| s.is_dirty() && !s.defer_record_save()),
             "only the files document has been saved"
         );
     }
@@ -819,11 +841,19 @@ fn a_files_only_edit_recovers_the_recorded_type_with_its_listing() {
     let d = tempfile::tempdir().unwrap();
     wall(d.path());
     let mut m = opened_without_export(d.path());
-    assert!(m.sets_listing_only() && m.recovery_snapshot().is_empty());
+    assert!(
+        m.sets_doc
+            .as_ref()
+            .is_some_and(|s| s.is_dirty() && !s.defer_record_save())
+            && m.recovery_snapshot().is_empty()
+    );
     m.set_field("test/wall.png", "alpha.policy", json!("data"));
     settle(&mut m);
-    assert!(m.project.as_ref().unwrap().is_dirty() && m.prompts_unsaved());
-    assert!(!m.sets_user_dirty(), "the close dialog names only sdc.toml");
+    assert!(m.project.as_ref().unwrap().is_dirty() && m.unsaved());
+    assert!(
+        !m.sets_doc.as_ref().unwrap().user_dirty(),
+        "the close dialog names only sdc.toml"
+    );
     let files = m.recovery_snapshot();
     let p = m.project.as_ref().unwrap();
     let s = m.sets_doc.as_ref().unwrap();
@@ -1253,7 +1283,10 @@ fn listing_b_keeps_as_ownership_in_the_snapshot_where_a_is_normal() {
     bumpy_n(&t.join("other_n.png"));
     m.replan();
     settle(&mut m);
-    assert!(!m.sets_user_dirty(), "B's automatic prune is clean");
+    assert!(
+        !m.sets_doc.as_ref().unwrap().user_dirty(),
+        "B's automatic prune is clean"
+    );
     assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("msn")));
     assert_eq!(listed(&m, WALL_N), None);
     assert_eq!(m.untouched_normal(b), Some(Subtype::Normal));

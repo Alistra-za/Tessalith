@@ -33,10 +33,14 @@ impl AppModel {
     /// E3 (ruling 3c-14): `f` read as if no scope were set, without touching the scope: `export_scope()` answers
     /// `None` and the view key moves to caches of their own meanwhile.
     pub(super) fn with_whole_view<T>(&self, f: impl FnOnce() -> T) -> T {
-        self.whole_view.set(true);
-        let out = f();
-        self.whole_view.set(false);
-        out
+        struct Restore<'a>(&'a std::cell::Cell<bool>, bool);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
+            }
+        }
+        let _restore = Restore(&self.whole_view, self.whole_view.replace(true));
+        f()
     }
 
     pub(super) fn set_scope(&mut self, scope: Option<ExportScope>) {

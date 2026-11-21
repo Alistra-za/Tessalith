@@ -666,9 +666,10 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
 #[test]
 fn the_export_summary_shows_kept_counts() {
     use egui_kittest::kittest::Queryable;
-    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Tools ▾) to encode them again";
+    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Tools) to encode them again";
     // A zero count is not named.
-    const LOWER_ONLY: &str = "1 kept at a higher quality target: tick Re-encode every output (Tools ▾) to encode it again";
+    const LOWER_ONLY: &str =
+        "1 kept at a higher quality target: tick Re-encode every output (Tools) to encode it again";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     // Nothing kept: no line.
@@ -711,7 +712,7 @@ fn the_export_summary_shows_kept_counts() {
     };
     assert!(sdc_gui::model::export::kept_note(&both)
         .unwrap()
-        .ends_with("(Tools ▾) to encode again"));
+        .ends_with("(Tools) to encode again"));
     // GUI words: the line never names the CLI flag.
     assert!(!m.export.notes.iter().any(|n| n.contains("--ev")));
     // The Files tab shows it.

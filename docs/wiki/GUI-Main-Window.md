@@ -8,7 +8,7 @@ A launch without a project opens the **Textures** start screen. Click **Open fol
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
-Reopening a project restores the saved view and column widths. If Tessalith can't read a folder supplied at launch, the start screen stays open and the status line gives the path and reason. With no project, the header hides **Undo**, **Redo**, **Save** and the export button, and the bottom tabs stay hidden. In **Meshes** you can browse the MO2 list and open a texture folder from the banner. Pending NIF edits bring back **Undo**, **Redo**, **Review** and the bottom tabs so you can export the edits on their own. <!-- D:JY10 -->
+Reopening a project restores the saved view and column widths. Run `tessalith.exe <folder>` to open that folder in place of the last project. If Tessalith can't read it, the start screen stays open and the status line gives the path and reason. With no project, the header hides **Undo**, **Redo**, **Save** and the export button, and the bottom tabs stay hidden. In **Meshes** you can browse the MO2 list and open a texture folder from the banner. Pending NIF edits bring back **Undo**, **Redo**, **Review** and the bottom tabs so you can export the edits on their own. <!-- D:JY10 -->
 
 While it opens, a progress bar counts the files to plan and **Cancel** returns to the folder you had before, with its undo history. When planning finishes, the thumbnails appear, settings become available and the status line gives one next step. It points first to **Undecided** for missing types, then **Problems**, then **Export to ▾** for a missing destination. If the project is ready, it names the header button to press. <!-- D:JY11 -->
 

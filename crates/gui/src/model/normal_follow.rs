@@ -266,15 +266,19 @@ pub(super) fn protected_normals(
     followed: &std::collections::HashSet<String>,
     promoted: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
-    let project =
-        std::cell::LazyCell::new(|| ProjectDoc::from_snapshot(files).expect("serialized project"));
-    let settings = std::cell::LazyCell::new(|| {
-        sets.parse::<toml_edit::DocumentMut>()
-            .expect("serialized sets")
+    let snapshot = std::cell::LazyCell::new(|| {
+        let project = ProjectDoc::from_snapshot(files)?;
+        Some((
+            super::shared_alpha::Tables::of(&project),
+            sets.parse::<toml_edit::DocumentMut>().ok()?,
+        ))
     });
-    let tables = std::cell::LazyCell::new(|| super::shared_alpha::Tables::of(&project));
     let mut protected = std::collections::HashSet::new();
     for w in writes.iter().filter(|w| listed_write(w).is_some()) {
+        let Some((tables, settings)) = snapshot.as_ref() else {
+            protected.insert(w.key.clone());
+            continue;
+        };
         let held = tables.subtype(&w.key);
         let ownership = || {
             settings

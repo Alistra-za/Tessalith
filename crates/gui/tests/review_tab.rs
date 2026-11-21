@@ -39,7 +39,7 @@ fn reviews_first_screen_is_blockers_list_and_button() {
 }
 
 #[test]
-fn opening_review_again_closes_options() {
+fn options_stay_open_until_review_closes() {
     let d = tempfile::tempdir().unwrap();
     let mut m = cs_opened_chosen(d.path());
     m.open_review();
@@ -52,6 +52,11 @@ fn opening_review_again_closes_options() {
         assert_eq!(h.state().review.as_ref().unwrap().options_open, open);
         assert_eq!(h.query_by_label("Skip these sets").is_some(), open);
     }
+    h.state_mut().open_review();
+    h.run();
+    assert!(h.state().review.as_ref().unwrap().options_open);
+    assert!(h.query_by_label("Skip these sets").is_some());
+    h.state_mut().close_review();
     h.state_mut().open_review();
     h.run();
     assert!(!h.state().review.as_ref().unwrap().options_open);

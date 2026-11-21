@@ -606,7 +606,7 @@ impl SetsDoc {
             && (self.is_dirty() || self.sidecar_pending_save || self.text() != self.saved_text())
     }
     /// A save-if-clean site may persist a pending automatic normal listing. Other pending writes still wait for Save.
-    pub(crate) fn defer_record_save(&self) -> bool {
+    pub fn defer_record_save(&self) -> bool {
         if !self.is_dirty() {
             return false;
         }

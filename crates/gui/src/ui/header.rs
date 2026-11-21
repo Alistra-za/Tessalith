@@ -121,7 +121,7 @@ fn row(
     ui.set_row_height(2.0 * ui.spacing().interact_size.y);
     // Keep the compact spacing on narrow project headers.
     if model.root.is_some() && ui.available_width() < 1280.0 {
-        ui.spacing_mut().item_spacing.x = 3.5;
+        ui.spacing_mut().item_spacing.x = crate::look::COMPACT_HEADER_GAP;
     }
     open_menu(ui, model);
     let edits = super::edit_controls_visible(ui.ctx(), model);
@@ -381,7 +381,6 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     };
     // Once per frame (ruling 3c-28): the text, the accent and the hover all read the same answer.
     let answer = model.header_answer();
-    let now = answer.now;
     let mut export = egui::Button::new(egui::RichText::new(model.export_text(&answer)).strong())
         .min_size(egui::vec2(size.x, button_h));
     if answer.accent {
@@ -397,21 +396,10 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
                 return;
             }
             // Note FC5 (supersedes CZ6's hover): NIF edits are Review rows, so the Meshes view's line is gone.
-            ui.label(export_hover_for(model, now));
-            if !now {
-                let nifs = model.nif_review_rows().len();
-                // A clean project that opens Review (the default) has nothing open to name.
-                match model.review_gate() {
-                    Err(why) => {
-                        ui.label(format!("Review first: {why}"));
-                    }
-                    Ok(_) if model.undecided() == 0 && nifs > 0 => {
-                        ui.label(format!("Review first: NIF edits ({nifs})"));
-                    }
-                    Ok(_) if model.undecided() > 0 => {
-                        ui.label(format!("Review first: {} undecided", model.undecided()));
-                    }
-                    Ok(_) => {}
+            ui.label(export_hover_for(model, answer));
+            if !answer.now {
+                if let Some(why) = model.header_review_reason() {
+                    ui.label(format!("Review first: {why}"));
                 }
             }
         };
@@ -452,13 +440,13 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
 /// Export's hover (A12): "{n} files, {m} problems" ("1 file, 1 problem" for one, `counted`); with an "Also export
 /// as" tick on, "{n} files + Vanilla folder, {m} problems" (Note JF1: the count is the PBR folder's).
 pub fn export_hover(model: &AppModel) -> String {
-    export_hover_for(model, model.header_writes_now())
+    export_hover_for(model, model.header_answer())
 }
 
 /// [`export_hover`] for the write-now answer the header already has this frame.
-fn export_hover_for(model: &AppModel, now: bool) -> String {
-    let n = crate::model::bottom::flagged(model).ready_rows;
-    let files = counted(model.export_files(), "file", "files");
+fn export_hover_for(model: &AppModel, answer: crate::model::review::HeaderAnswer) -> String {
+    let n = model.header_problem_count();
+    let files = counted(answer.files, "file", "files");
     let n = counted(n, "problem", "problems");
     let mut text = if model.also_on() {
         format!("{files} + {}, {n}", model.also_extra_folders())
@@ -466,7 +454,7 @@ fn export_hover_for(model: &AppModel, now: bool) -> String {
         format!("{files}, {n}")
     };
     // E3: the button reads "Export {n} files now": say why a click writes.
-    if now {
+    if answer.now {
         text.push_str(
             "\nWrites at once: Review is off for this project. Turn it back on in Settings.",
         );

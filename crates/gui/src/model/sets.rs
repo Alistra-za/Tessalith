@@ -1266,7 +1266,7 @@ pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
         |c, v| c.views = Some(v),
         || Arc::new(build_views(m)),
     );
-    m.views.borrow_mut().root_inputs = Some((
+    m.view_cache().borrow_mut().root_inputs = Some((
         m.project.as_ref().map(|p| (p.rev(), p.read_only())),
         m.sets_doc.as_ref().map(|d| d.read_only()),
         m.settings.export_folder.clone(),
@@ -1279,7 +1279,7 @@ pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
 pub fn inject_view_warnings(m: &mut AppModel, id: &str, warnings: Vec<Warning>) {
     m.invalidate_views();
     views(m);
-    let mut cache = m.views.borrow_mut();
+    let mut cache = m.view_cache().borrow_mut();
     let views = Arc::make_mut(cache.views.as_mut().unwrap());
     views.iter_mut().find(|v| v.id == id).unwrap().set_warnings = warnings;
 }

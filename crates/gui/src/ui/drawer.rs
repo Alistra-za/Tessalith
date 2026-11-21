@@ -215,7 +215,9 @@ fn files(
                     }
                     ui.label(r.state.label());
                     if !r.warnings.is_empty() {
-                        // shortcut: an items scan per visible warning whose code is marked; cache the counts in `FilesIndex` if a profile shows it.
+                        // shortcut: every visible warning scans the intended keys each frame. A marked code
+                        // costs up to two item scans. Has warnings pays the same per row on an index rebuild.
+                        // Cache the open counts in FilesIndex if a profile shows it.
                         let n = open_export_warnings(model, r);
                         let label = if n > 0 {
                             ui.label(counted(n, "warning", "warnings"))

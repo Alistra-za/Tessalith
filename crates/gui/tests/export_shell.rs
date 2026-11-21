@@ -1777,6 +1777,65 @@ fn key_of(m: &AppModel, id: &str) -> String {
         .clone()
 }
 
+#[test]
+fn scoped_frames_keep_their_views_across_a_whole_disk_refresh() {
+    use sdc_gui::model::{bottom::export_files_builds, review::whole_disk_reads, sets};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    // Vanilla's borrower-copy preparation asks which sets are in the whole run at each disk refresh.
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    let frame = || {
+        assert!(m.header_answer().now);
+        assert_eq!(m.export_files(), 2);
+        sets::views(&m);
+    };
+    frame();
+    let builds = || (export_files_builds(&m), sets::view_builds(&m));
+    let before = builds();
+    let reads = whole_disk_reads(&m);
+    m.expire_review_json();
+    for _ in 0..4 {
+        frame();
+    }
+    assert!(whole_disk_reads(&m) > reads);
+    assert_eq!(
+        builds(),
+        before,
+        "stable scoped frames rebuilt the file count or set views"
+    );
+}
+
+#[test]
+fn scoped_review_header_hover_counts_the_whole_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let expected = sdc_gui::ui::header::export_hover(&m);
+    let key = key_of(&m, "g/u");
+    m.export_sets([key].into(), "Export set".into());
+    assert_eq!(m.export_files(), 2);
+    assert_eq!(sdc_gui::ui::header::export_hover(&m), expected);
+}
+
+#[test]
+fn project_history_over_meshes_names_both_steps_in_the_status_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::set_type(&mut m, "other_unknown.png", "diffuse");
+    m.centre_over_meshes = true;
+    let label = m.undo_label().unwrap().to_string();
+    m.undo();
+    let undone = m.status_line.clone();
+    m.redo();
+    assert!(
+        undone.starts_with(&format!("Undone: {label}"))
+            && m.status_line.starts_with(&format!("Redone: {label}")),
+        "{undone} / {}",
+        m.status_line
+    );
+}
+
 // Ruling 3c-14: the header is always the whole project's, whatever scope an open Review was made for.
 #[test]
 fn the_header_is_the_whole_projects_while_a_scoped_review_is_open() {
@@ -1889,6 +1948,8 @@ fn the_opening_step_counts_the_other_sets_problem_during_scoped_review() {
     m.export_sets([key_of(&m, "g/clean")].into(), "Export set g/clean".into());
     assert!(m.review.is_some() && m.export_scope().is_some());
     assert!(!m.has_problem_rows(), "the set in Review is clean");
+    let hover = sdc_gui::ui::header::export_hover(&m);
+    assert!(hover.ends_with(", 1 problem"), "{hover}");
     land_plan(&mut m, follow_up);
     assert!(m.review.is_some() && m.export_scope().is_some());
     let line = format!(
@@ -2943,6 +3004,15 @@ fn the_header_accent_reads_the_whole_projects_gate_under_a_scope() {
     let k = key_of(&m, "landscape/leaf");
     m.export_sets([k].into(), "Export set landscape/leaf".into());
     assert!(!m.header_accent(), "the whole project's gate is closed");
+    let mut h = harness(m);
+    let label = h.state().header_export_text();
+    h.get_by_role_and_label(Role::Button, &label).hover();
+    h.run_steps(6);
+    assert!(
+        h.query_by_label_contains("Review first: Fix 1 blocker first")
+            .is_some(),
+        "the hover must explain the whole project's blocker"
+    );
 }
 // Ruling 3c-17: the accent shows only when a click has something to write or review.
 #[test]

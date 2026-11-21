@@ -586,7 +586,7 @@ pub fn kept_note(s: &BatchSummary) -> Option<String> {
     };
     (!parts.is_empty()).then(|| {
         format!(
-            "{}: tick Re-encode every output (Tools ▾) to encode{again} again",
+            "{}: tick Re-encode every output (Tools) to encode{again} again",
             parts.join(", ")
         )
     })

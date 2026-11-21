@@ -24,7 +24,7 @@ pub(super) struct WholeTerms {
     files: usize,
     blocks: usize,
     undecided: usize,
-    problem_rows: bool,
+    problem_rows: usize,
 }
 
 /// E3 (ruling 3c-28): the whole project's filesystem-derived display terms while a scope is set, in one drawing cache:
@@ -496,8 +496,6 @@ impl AppModel {
         }
         let review = self.review.get_or_insert_with(Review::default);
         review.toml_unwritable = unwritable;
-        review.options_open = false;
-        review.also_blocked = false;
         self.show_tab(BottomTab::Review);
         self.invalidate_currency();
         self.request_currency();
@@ -581,7 +579,7 @@ impl AppModel {
     }
 
     /// The scope `view_key` carries: the whole-project header reads with the scope off, in caches of its own.
-    fn writes_scope(&self) -> u64 {
+    pub(super) fn view_scope_rev(&self) -> u64 {
         if self.whole_view.get() {
             u64::MAX
         } else {
@@ -610,7 +608,7 @@ impl AppModel {
             scan_db: self.scan_db.clone(),
             known: self.known_rev,
             target_mod: self.target_mod_rev,
-            scope: self.writes_scope(),
+            scope: self.view_scope_rev(),
             root: self.root.clone(),
             settings_export: self.settings.export_folder.clone(),
             project_unsaved: self.pending_files_save().is_some(),
@@ -642,7 +640,7 @@ impl AppModel {
             && k.scan_db == self.scan_db
             && k.known == self.known_rev
             && k.target_mod == self.target_mod_rev
-            && k.scope == self.writes_scope()
+            && k.scope == self.view_scope_rev()
             && k.root == self.root
             && k.settings_export == self.settings.export_folder
             && k.project_unsaved == self.pending_files_save().is_some()
@@ -1331,7 +1329,7 @@ impl AppModel {
     /// Note FC5: the file names of the overwrite questions Review has no answer for: an edited PGPatcher JSON, then
     /// each NIF whose export path holds a file Tessalith did not write (a blocked NIF row is skipped, never asked).
     pub fn unanswered_overwrites(&self) -> Vec<String> {
-        // shortcut: the header asks this every frame (export_is_clean), so `review_json` rereads the JSON files once a
+        // shortcut: the header gate asks this on each unscoped frame, so `review_json` rereads the JSON files once a
         // second through its 1 s cache, even with no PGPatcher JSON edited (knowing that needs the same read); add a
         // cheap "any PBR set" check or an mtime key if a large CS PBR or CM set list makes that read show in a profile.
         let pgp = self
@@ -1422,6 +1420,7 @@ impl AppModel {
 
     /// Note FB1: Review would write without skipping anything: a finished plan with files to write, the gate open and
     /// nothing undecided (A12 withheld "ready" from an empty or still-planning project too).
+    #[cfg(feature = "test-hooks")]
     pub fn export_is_clean(&self) -> bool {
         self.planning.is_none()
             && self.votes_pending.is_none()
@@ -1446,19 +1445,7 @@ impl AppModel {
     /// eyes, so Export writes at once. `unanswered_overwrites` is left out: its NIF half needs a written NIF row
     /// (`nif_rows_written`) and its JSON half an edited PGPatcher JSON, both refused here.
     pub fn writes_without_review(&self) -> bool {
-        self.writes_rule(
-            || self.export_files(),
-            || self.review_gate().is_ok(),
-            || self.undecided(),
-            // Not `pgp_json_edited()`: it hashes the file on every call; `review_json` is cached for 1 s.
-            || {
-                self.review_json()
-                    .iter()
-                    .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
-            },
-            self.also_runs(),
-            || self.has_problem_rows(),
-        )
+        self.whole_rule(None, || self.review_gate().is_ok())
     }
 
     /// The one rule's terms, in its order, each read only when the ones before it allow the write. The caller says
@@ -1516,7 +1503,7 @@ impl AppModel {
             files: self.export_files(),
             blocks: pbr_export::export_blocks(self).len(),
             undecided: self.undecided(),
-            problem_rows: self.has_problem_rows(),
+            problem_rows: super::bottom::flagged(self).ready_rows,
         });
         *self.whole_cache.borrow_mut() = Some((view.clone(), problems, t));
         t
@@ -1603,7 +1590,7 @@ impl AppModel {
                 })
             },
             self.also_on(),
-            || t.problem_rows,
+            || t.problem_rows > 0,
         )
     }
 
@@ -1657,6 +1644,27 @@ impl AppModel {
             now,
             files,
             accent: (now || gate_ok()) && files + nifs > 0,
+        }
+    }
+
+    pub(crate) fn header_problem_count(&self) -> usize {
+        self.whole().map_or_else(
+            || super::bottom::flagged(self).ready_rows,
+            |(_, t)| t.problem_rows,
+        )
+    }
+
+    pub(crate) fn header_review_reason(&self) -> Option<String> {
+        let whole = self.whole();
+        if let Err(why) = self.whole_gate(whole.as_ref()) {
+            return Some(why);
+        }
+        let undecided = whole.map_or_else(|| self.undecided(), |(_, t)| t.undecided);
+        if undecided > 0 {
+            Some(format!("{undecided} undecided"))
+        } else {
+            let nifs = self.nif_review_rows().len();
+            (nifs > 0).then(|| format!("NIF edits ({nifs})"))
         }
     }
 
