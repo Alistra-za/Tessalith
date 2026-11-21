@@ -654,7 +654,7 @@ mod tests {
         m.export.running = Some(Default::default());
         m.export.running.as_ref().unwrap().cancel();
         m.also_tail = Some(None);
-        m.nif_export_queued = true;
+        m.nif_export_queued = Some(vec![]);
         m.also_walked(summary(None));
         assert!(m.export.running.is_none());
         assert!(
@@ -668,7 +668,7 @@ mod tests {
         // An uncancelled walk still hands the NIF export over.
         m.export.running = Some(Default::default());
         m.also_tail = Some(None);
-        m.nif_export_queued = true;
+        m.nif_export_queued = Some(vec![]);
         m.also_walked(summary(None));
         assert!(m.take_nif_export_due());
     }

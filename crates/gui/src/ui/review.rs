@@ -1162,7 +1162,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         // 3c-38: the click carries what the button saw when it fired, in case it waits a frame.
         Some(Act::Export) => {
             let press = model.export_press();
-            super::after_commit(ui.ctx(), model, move |m| m.review_export_pressed(press));
+            let nif_paths = writes.nif_paths();
+            super::after_commit(ui.ctx(), model, move |m| {
+                m.review_export_pressed(press, nif_paths)
+            });
         }
         Some(Act::Close) => model.close_review(),
         Some(Act::OptOut(on)) => model.set_export_without_review(on),

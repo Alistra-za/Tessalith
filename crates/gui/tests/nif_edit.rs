@@ -5363,6 +5363,54 @@ fn the_owner_survives_the_autosave_moving_into_a_project() {
 }
 
 #[test]
+fn a_carry_checks_the_kept_autosave_for_the_incoming_id() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let plain = autosave(&d);
+    let before = std::fs::read(&plain).unwrap();
+    let doc = load(&plain).unwrap().unwrap();
+    let k = kept(&d, doc.id.as_deref().unwrap());
+    save(&k, &with_value(doc, 8.5)).unwrap();
+    ahead(&k, 3600);
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    assert!(
+        !draft(&p).exists(),
+        "carry created a draft behind the newer kept autosave"
+    );
+    assert_eq!(std::fs::read(&plain).unwrap(), before);
+    assert_eq!(doc_values(&k), [8.5]);
+    assert!(review_row(&m).blocked.unwrap().contains("autosave"));
+}
+
+#[test]
+fn a_retried_carry_checks_the_kept_autosave_before_saving() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let plain = autosave(&d);
+    let before = std::fs::read(&plain).unwrap();
+    let doc = load(&plain).unwrap().unwrap();
+    let k = kept(&d, doc.id.as_deref().unwrap());
+    std::fs::write(p.join("_sdc"), b"blocked").unwrap();
+    m.set_project_root(Some(&p));
+    assert!(review_row(&m).blocked.is_some());
+    std::fs::remove_file(p.join("_sdc")).unwrap();
+    save(&k, &with_value(doc, 8.5)).unwrap();
+    ahead(&k, 3600);
+    gloss(&mut m, 13.5);
+    assert!(
+        !draft(&p).exists(),
+        "the retry wrote behind a new kept autosave"
+    );
+    assert_eq!(std::fs::read(&plain).unwrap(), before);
+    assert_eq!(doc_values(&k), [8.5]);
+    assert!(review_row(&m).blocked.is_some());
+}
+
+#[test]
 fn the_owner_survives_a_renamed_project_folder() {
     let (d, mut m, p) = saved_in_p();
     assert_eq!(export(&mut m), Ok(1));
@@ -5483,31 +5531,57 @@ fn an_export_from_another_project_asks_before_overwriting() {
 
 #[test]
 fn a_restarted_cross_project_export_asks_again_after_the_final_write_failed() {
-    let (d, mut m, a) = saved_in_p();
-    assert_eq!(export(&mut m), Ok(1));
-    let path = nif_doc(&export_root(&d));
-    let previous = load(&path).unwrap().unwrap();
-    let b = project_folder(&d, "b");
-    m.set_project_root(Some(&b));
-    gloss(&mut m, 13.5);
-    answer(&mut m, GuardChoice::Overwrite);
-    m.fail_record_write_after_nif_for_test();
-    export_fails(&mut m, "is in place, but its record");
-    let pre = load(&path).unwrap().unwrap();
-    assert_ne!(id_of(&a), id_of(&b));
-    assert_eq!(pre.export.owner, Some(id_of(&b)));
-    assert_eq!(pre.export.sha256, previous.export.sha256);
-    assert_eq!(pre.ops, previous.ops);
-    let installed = std::fs::read(exported(&d)).unwrap();
-    drop(m);
-    let mut m = restart(&d, &b);
-    m.open_edit();
-    assert_eq!(review_row(&m).foreign, Some(sha(&installed)));
-    export_fails(&mut m, NIF_UNANSWERED);
-    assert_eq!(load(&path).unwrap().unwrap(), pre);
-    answer(&mut m, GuardChoice::Overwrite);
-    assert_eq!(export(&mut m), Ok(1));
-    assert_eq!(doc_values(&path), [13.5]);
+    for (value, old_pre_record) in [(13.5, false), (12.5, false), (12.5, true)] {
+        let (d, mut m, a) = saved_in_p();
+        assert_eq!(export(&mut m), Ok(1));
+        let path = nif_doc(&export_root(&d));
+        let previous = load(&path).unwrap().unwrap();
+        let b = project_folder(&d, "b");
+        m.set_project_root(Some(&b));
+        gloss(&mut m, value);
+        answer(&mut m, GuardChoice::Overwrite);
+        m.fail_record_write_after_nif_for_test();
+        export_fails(&mut m, "is in place, but its record");
+        let mut pre = load(&path).unwrap().unwrap();
+        assert_ne!(id_of(&a), id_of(&b));
+        assert_eq!(pre.export.owner, Some(id_of(&b)));
+        assert_eq!(pre.export.sha256, previous.export.sha256);
+        assert_eq!(pre.ops, previous.ops);
+        let installed = std::fs::read(exported(&d)).unwrap();
+        let live_row = m.nif_review_rows();
+        drop(m);
+        if old_pre_record {
+            // The first owner-aware writer left A's document ID in B's pre-record.
+            pre.id.clone_from(&previous.id);
+            save(&path, &pre).unwrap();
+        }
+        let mut m = restart(&d, &b);
+        m.open_edit();
+        assert_eq!(
+            (live_row.len(), m.nif_review_rows().len()),
+            (1, 1),
+            "missing repair row for {value}"
+        );
+        assert_eq!(live_row[0].blocked, None);
+        if old_pre_record {
+            gloss(&mut m, 19.5);
+            m.set_nif_export_root(Some(d.path().join("other export")));
+            m.set_nif_export_root(Some(export_root(&d)));
+            assert!(m.undo_edit());
+            assert_eq!(
+                m.nif_review_rows().len(),
+                1,
+                "undo hid the old pre-record's repair"
+            );
+        }
+        assert_eq!(review_row(&m).foreign, Some(sha(&installed)));
+        export_fails(&mut m, NIF_UNANSWERED);
+        assert_eq!(load(&path).unwrap().unwrap(), pre);
+        answer(&mut m, GuardChoice::Overwrite);
+        assert_eq!(export(&mut m), Ok(1));
+        assert_eq!(doc_values(&path), [value]);
+        assert_eq!(load(&path).unwrap().unwrap().id, Some(id_of(&b)));
+    }
 }
 
 #[test]
@@ -5546,6 +5620,45 @@ fn another_owner_is_foreign_even_when_the_draft_knows_the_same_nif_hash() {
     assert_eq!(review_row(&m).foreign, Some(sha(&nif)));
     export_fails(&mut m, NIF_UNANSWERED);
     assert_eq!(std::fs::read(exported(&d)).unwrap(), nif);
+}
+
+#[test]
+fn undo_to_zero_cannot_replace_a_drifted_nif_in_another_owners_folder() {
+    let (d, mut m, _a) = saved_in_p();
+    assert_eq!(export(&mut m), Ok(1));
+    let installed = exported(&d);
+    let record = nif_doc(&export_root(&d));
+    let original = std::fs::read(&record).unwrap();
+    std::fs::write(&installed, b"replacement").unwrap();
+    let b = project_folder(&d, "b");
+    m.set_project_root(Some(&b));
+    assert!(m.nif_review_rows().is_empty(), "untouched B stays idle");
+    m.set_nif_export_root(Some(d.path().join("B exports")));
+    gloss(&mut m, 14.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(m.undo_edit());
+    m.set_nif_export_root(Some(export_root(&d)));
+    m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, sha(b"replacement"));
+    export_fails(&mut m, NIF_UNDONE);
+    assert_eq!(std::fs::read(installed).unwrap(), b"replacement");
+    assert_eq!(std::fs::read(record).unwrap(), original);
+}
+
+#[test]
+fn an_open_session_sees_the_new_owner_of_identical_installed_bytes() {
+    let (d, mut a, _p) = saved_in_p();
+    assert_eq!(export(&mut a), Ok(1));
+    let original = std::fs::read(exported(&d)).unwrap();
+    let mut b = restart(&d, &project_folder(&d, "b"));
+    b.open_edit();
+    gloss(&mut b, 12.5);
+    answer(&mut b, GuardChoice::Overwrite);
+    assert_eq!(export(&mut b), Ok(1));
+    assert_eq!(std::fs::read(exported(&d)).unwrap(), original);
+    gloss(&mut a, 13.5);
+    a.set_nif_export_root(Some(export_root(&d))); // the app's next frame
+    assert_eq!(review_row(&a).foreign, Some(sha(&original)));
+    export_fails(&mut a, NIF_UNANSWERED);
 }
 
 #[test]
@@ -14519,6 +14632,61 @@ fn reviews_export_writes_the_nif_edit() {
         .messages
         .entries()
         .any(|e| e.text == "NIF edits written: 1 file"));
+}
+
+#[test]
+fn queued_review_export_stops_when_a_kept_nif_disappears() {
+    let (_t, _d, mut h) = review_app();
+    let (path, out, _) = nif_out(&h);
+    let p = draft(h.state().model.root.as_deref().unwrap());
+    let record = nif_doc(&h.state().model.nif_export_root().unwrap());
+    h.state_mut().meshes.close_edit();
+    let mut legacy = load(&p).unwrap().unwrap();
+    legacy.id = None;
+    save(&p, &legacy).unwrap();
+    let before = std::fs::read(&p).unwrap();
+    h.state_mut().meshes.open_edit();
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, b"theirs").unwrap();
+    h.run_steps(4);
+    h.state_mut().model.open_review();
+    h.state_mut()
+        .model
+        .answer_review_nif(&path, false, sha(b"theirs"));
+    h.run_steps(4);
+    let m = &mut h.state_mut().model;
+    assert_eq!(m.nif_review_rows()[0].answer, Some(GuardChoice::KeepTheirs));
+    assert!(m.nif_review_rows()[0].draft_unsaved);
+    assert!(!m
+        .review_writes()
+        .also_updated
+        .iter()
+        .any(|w| [&out, &record, &p].contains(&&w.path)));
+    m.export_from_review();
+    assert!(
+        m.export.running.is_some(),
+        "texture export queued the NIF phase"
+    );
+    std::fs::remove_file(&out).unwrap();
+    let start = Instant::now();
+    while h.state().model.export.summary.is_none() {
+        assert!(start.elapsed() < Duration::from_secs(120));
+        h.run_steps(1);
+    }
+    h.run_steps(4);
+    assert!(
+        !out.exists(),
+        "queued export wrote a NIF that Review skipped"
+    );
+    assert!(!record.exists());
+    assert_eq!(std::fs::read(p).unwrap(), before);
+    assert!(h
+        .state()
+        .model
+        .export
+        .notes
+        .iter()
+        .any(|s| s.contains("Open Review again.")));
 }
 
 #[test]

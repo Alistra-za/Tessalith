@@ -438,8 +438,8 @@ impl eframe::App for SdcApp {
             }
         }
         let mut written = vec![];
-        if self.model.take_nif_export_due() {
-            written.push(self.meshes.export_nif_edits());
+        if let Some(paths) = self.model.take_reviewed_nif_export() {
+            written.push(self.meshes.export_reviewed_nif_edits(Some(&paths)));
         }
         written.extend(self.meshes.quick_export_result.take());
         for r in written {

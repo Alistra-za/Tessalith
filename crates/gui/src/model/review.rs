@@ -198,6 +198,14 @@ pub struct AlsoLabel {
 }
 
 impl ReviewWrites {
+    pub(crate) fn nif_paths(&self) -> Vec<PathBuf> {
+        self.also_updated
+            .iter()
+            .filter(|w| matches!(w.hover, HOVER_NIF | HOVER_NIF_RECORD | NIF_DRAFT_HOVER))
+            .map(|w| w.path.clone())
+            .collect()
+    }
+
     /// The Also folder entries of `also_updated`: their files exist only after the engine plans them (JF1), so a
     /// changed path under one counts as listed.
     pub fn also_folders(&self) -> Vec<PathBuf> {
@@ -1174,7 +1182,7 @@ impl AppModel {
         self.set_scope(None);
         // Note FC5 (GD29): the NIF answers go with Review; each foreign row asks again. Not while a run Review started
         // still owes the NIF export (a Reload mid-export): those answers are its own (rule 7.4).
-        self.nif_clear_answers_request |= !self.nif_export_queued;
+        self.nif_clear_answers_request |= self.nif_export_queued.is_none();
         self.nif_answer_request = None;
         self.review_json_cache.take();
         // Its queued export goes with it (Task 1.4's Close).
@@ -1398,10 +1406,13 @@ impl AppModel {
         self.nif_answer_request = Some((path.to_string(), choice, sha256));
     }
 
-    /// Note FC5: true once, in the frame after the run Review's Export started has fully ended (with Also on, after
-    /// its zips); `app.rs` then calls `MeshesModel::export_nif_edits` and passes the result to `nif_export_result`.
+    /// After Review's texture run and its zips, hand the app the NIF paths approved at the press.
+    pub(crate) fn take_reviewed_nif_export(&mut self) -> Option<Vec<PathBuf>> {
+        self.nif_export_due.take()
+    }
+
     pub fn take_nif_export_due(&mut self) -> bool {
-        std::mem::take(&mut self.nif_export_due)
+        self.take_reviewed_nif_export().is_some()
     }
 
     /// Note FC5: the NIF export's result, in Messages and in the export's notes (Review is closed by then; the notes
@@ -1784,11 +1795,11 @@ impl AppModel {
     /// wait), then `Continue::Review`: the guards and the gate again before the export. Never on a stale plan.
     /// A click run at once.
     pub fn export_from_review(&mut self) {
-        self.review_export_pressed(self.export_press());
+        self.review_export_pressed(self.export_press(), self.review_writes().nif_paths());
     }
 
     /// `export_from_review` for the press `press` (ruling 3c-38: Review's button can wait a frame).
-    pub fn review_export_pressed(&mut self, press: ExportPress) {
+    pub(crate) fn review_export_pressed(&mut self, press: ExportPress, nif_paths: Vec<PathBuf>) {
         // Rulings 3c-37, 3c-38: before anything is queued or started.
         if self.press_refused(press) {
             return;
@@ -1801,6 +1812,7 @@ impl AppModel {
         // Ruling 3c-35: confirmed for the scope Review showed at the press (`press_refused`: the same as now).
         self.continue_review(Continue::Review {
             scope_rev: press.scope_rev,
+            nif_paths,
         });
     }
 

@@ -375,11 +375,14 @@ pub enum Dialog {
 }
 
 /// How the export continues once the plan in flight has landed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Continue {
     /// R3: Review's Export: the guards and the Review gate again, then the export (undecided textures skipped).
     /// Ruling 3c-35: `scope_rev` is the scope the user confirmed it for; a different one when it runs drops it.
-    Review { scope_rev: u64 },
+    Review {
+        scope_rev: u64,
+        nif_paths: Vec<PathBuf>,
+    },
 }
 
 /// What was asked while an export ran: it happens when the export has ended.
@@ -1030,9 +1033,9 @@ pub struct AppModel {
     /// Note GF2: a foreign NIF row's `Diff…` in Review (its data path); `app.rs` calls `MeshesModel::show_nif_diff`.
     pub nif_diff_request: Option<String>,
     /// Note FC5: the running export was started by Review's Export and not cancelled: the NIF edits export after it.
-    nif_export_queued: bool,
-    /// Note FC5: the run has ended; `take_nif_export_due` hands it to `app.rs` once.
-    nif_export_due: bool,
+    nif_export_queued: Option<Vec<PathBuf>>,
+    /// The finished run's approved NIF paths, handed to the app once. An empty list authorizes no files.
+    nif_export_due: Option<Vec<PathBuf>>,
     /// Note CN: the last Also export's phase error (CN56), so its end is logged as an error, not a success.
     also_error: Option<String>,
     /// Note FW1: the phases the last Also export ran, each with whether it had failed files or an error. Empty for a
@@ -1339,8 +1342,8 @@ impl AppModel {
             nif_clear_answers_request: false,
             open_review_request: false,
             nif_diff_request: None,
-            nif_export_queued: false,
-            nif_export_due: false,
+            nif_export_queued: None,
+            nif_export_due: None,
             also_error: None,
             also_phases: Vec::new(),
             also_written: None,
@@ -1421,8 +1424,8 @@ impl AppModel {
         self.pending_xpmf = None;
         self.pending_cs_skin = None;
         self.pending_json_answer = None;
-        self.nif_export_queued = false;
-        self.nif_export_due = false;
+        self.nif_export_queued = None;
+        self.nif_export_due = None;
         self.weighting_follow.clear();
         self.reencode_follow = None;
         self.after_commit.clear();
@@ -2541,7 +2544,7 @@ impl AppModel {
     /// Note GF9: a cancelled run drops the NIF export it queued and the Review answers given for it (GD29), so the
     /// next Review asks again; `app.rs` calls `clear_nif_answers`.
     pub(super) fn abandon_nif_export(&mut self) {
-        if std::mem::take(&mut self.nif_export_queued) {
+        if self.nif_export_queued.take().is_some() {
             self.nif_clear_answers_request = true;
         }
     }
@@ -2551,7 +2554,9 @@ impl AppModel {
         // Note HF9: an Export set / group ends with its run.
         self.set_scope(None);
         // Note FC5: the run has fully ended (with Also on, after its walk). Opening another folder below clears it.
-        self.nif_export_due |= std::mem::take(&mut self.nif_export_queued);
+        if let Some(paths) = self.nif_export_queued.take() {
+            self.nif_export_due = Some(paths);
+        }
         // A user who cancelled the export to leave does not need its error as a dialog.
         if !self.run_after_export() {
             // Audit 08f-6: an open dialog stays; the error is in the Files tab and the Messages log.
@@ -3143,7 +3148,10 @@ impl AppModel {
 
     fn run_continue(&mut self, how: Continue) {
         match how {
-            Continue::Review { scope_rev } => {
+            Continue::Review {
+                scope_rev,
+                nif_paths,
+            } => {
                 // K4: Review closed (another folder, Reload) drops its queued export.
                 if self.review.is_none() {
                     return;
@@ -3160,7 +3168,7 @@ impl AppModel {
                         Ok(_) => {
                             self.review = None;
                             self.show_tab(bottom::BottomTab::Files);
-                            self.nif_export_due = true;
+                            self.nif_export_due = Some(nif_paths);
                         }
                         Err(why) => {
                             self.status_line = format!("Export not started: {why}");
@@ -3172,7 +3180,10 @@ impl AppModel {
                 }
                 // Never on a stale plan, whoever calls: wait again for the plan or the scan read in flight.
                 if self.planning.is_some() || self.votes_pending.is_some() {
-                    self.continue_after_plan = Some(how);
+                    self.continue_after_plan = Some(Continue::Review {
+                        scope_rev,
+                        nif_paths,
+                    });
                     return;
                 }
                 // The decisions made in Review can change the blocks (a diffuse decided as PBR switches the set's
@@ -3190,7 +3201,7 @@ impl AppModel {
                     Ok(_) => {
                         self.start_export_pass();
                         // Note FC5: Review's Export also writes the NIF edits, once the run has ended.
-                        self.nif_export_queued = self.export.running.is_some();
+                        self.nif_export_queued = self.export.running.is_some().then_some(nif_paths);
                     }
                     Err(why) => {
                         self.status_line = format!("Export not started: {why}");
@@ -3297,7 +3308,7 @@ impl AppModel {
             return;
         };
         self.reencode_all = false;
-        self.nif_export_queued = false;
+        self.nif_export_queued = None;
         let also = self.also_runs();
         self.also_error = None;
         self.also_phases.clear();
@@ -6384,20 +6395,20 @@ mod tests {
         let c = CancelToken::default();
         c.cancel();
         m.export.running = Some(c);
-        m.nif_export_queued = true;
+        m.nif_export_queued = Some(vec![]);
         m.end_export_with(Err("cancelled".into()));
         assert!(!m.take_nif_export_due());
         m.export.running = Some(CancelToken::default());
-        m.nif_export_queued = true;
+        m.nif_export_queued = Some(vec![]);
         m.end_export_with(Err("boom".into()));
         assert!(m.take_nif_export_due());
         assert!(!m.take_nif_export_due());
         // A Review closed while its run still owes the NIF export keeps the NIF answers.
         m.nif_clear_answers_request = false;
-        m.nif_export_queued = true;
+        m.nif_export_queued = Some(vec![]);
         m.close_review();
         assert!(!m.nif_clear_answers_request);
-        m.nif_export_queued = false;
+        m.nif_export_queued = None;
         m.close_review();
         assert!(m.nif_clear_answers_request);
     }
