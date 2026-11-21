@@ -33,3 +33,56 @@ jobs:
             dist/Tessalith-*-win-x64.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
+
+  # Owner 2026-11-20: every v* tag uploads the zip to Nexus as a new version of file 8217615 on
+  # skyrimspecialedition mod 196495 (v3 mod id 7318624468879 = game 1704 << 32 | 196495), archives the old
+  # version, sets the mod version and posts that version's CHANGELOG.md section. The API key is the secret
+  # NEXUSMODS_API_KEY of the "nexus" deployment environment; the owner sets it, never the workflow.
+  nexus:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: nexus
+      url: https://www.nexusmods.com/skyrimspecialedition/mods/196495?tab=files
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: tessalith-win-x64
+          path: dist
+      - name: Version, zip and changelog
+        id: rel
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $zip = Get-ChildItem dist -Filter "Tessalith-$version-win-x64.zip" | Select-Object -First 1
+          if (-not $zip) { throw "dist/Tessalith-$version-win-x64.zip is missing: the tag and the workspace version differ" }
+          # The section under "## <version>" up to the next "## " heading.
+          $lines = Get-Content CHANGELOG.md
+          $start = [array]::IndexOf($lines, "## $version")
+          if ($start -lt 0) { throw "CHANGELOG.md has no '## $version' section" }
+          $end = $start + 1
+          while ($end -lt $lines.Count -and -not $lines[$end].StartsWith('## ')) { $end++ }
+          $notes = ($lines[($start + 1)..($end - 1)] -join "`n").Trim()
+          $eof = "EOF$([guid]::NewGuid().ToString('N'))"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "changelog<<$eof`n$notes`n$eof" >> $env:GITHUB_OUTPUT
+      # Pinned to the commit of tag v1.0.0-beta.11.
+      - name: Upload to Nexus Mods
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: 8217615
+          mod_id: 7318624468879
+          filename: ${{ steps.rel.outputs.zip }}
+          version: ${{ steps.rel.outputs.version }}
+          display_name: Tessalith ${{ steps.rel.outputs.version }}
+          category: main
+          archive_existing_version: true
+          update_mod_version: true
+          changelog: ${{ steps.rel.outputs.changelog }}
