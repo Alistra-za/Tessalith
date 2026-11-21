@@ -266,6 +266,34 @@ fn normal_base_level_is_a_normal_map_field() {
 }
 
 #[test]
+fn skin_detail_locks_the_normal_base_level() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let mut p = reg.base_profile(Target::Cs, Subtype::SkinDetail);
+    for format in [Format::Bc5, Format::Bc7] {
+        p.format = format;
+        assert_eq!(
+            field_lock(Target::Cs, &p, "mips.normal_base"),
+            Some("Advanced Skin detail always starts from unit length")
+        );
+    }
+}
+
+#[test]
+fn xy_normal_formats_lock_the_normal_base_level() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let mut p = reg.base_profile(Target::Cs, Subtype::CoatNormal);
+    for format in [Format::Bc5, Format::Bc4, Format::Rg8, Format::R8] {
+        p.format = format;
+        assert_eq!(
+            field_lock(Target::Cs, &p, "mips.normal_base"),
+            Some("This format drops Z and needs a unit normal")
+        );
+    }
+    p.format = Format::Bc7;
+    assert_eq!(field_lock(Target::Cs, &p, "mips.normal_base"), None);
+}
+
+#[test]
 fn uncompressed_format_labels_say_so() {
     assert_eq!(
         format_label(Format::Rgba8, ColorTag::Srgb),

@@ -267,7 +267,7 @@ pub fn lengths_from(
 ) -> Result<LengthPyramid, String> {
     let mut work = crate::ops::preprocess_with(img, normal_profile, transfer);
     for px in &mut work.img.px {
-        crate::mips::normalize_bake_direction(px, work.domain, normal_profile.mips.normal_base);
+        crate::mips::normalize_base_direction(px, work.domain, normal_profile.mips.normal_base);
     }
     Ok(match fit {
         Some(member) => LengthPyramid::fitted(&work.img, member),

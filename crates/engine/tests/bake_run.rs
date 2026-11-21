@@ -146,6 +146,55 @@ fn a_baked_member_is_rougher_and_records_its_normal() {
 }
 
 #[test]
+fn kept_bc5_coat_and_detail_write_unit_base_directions() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("short.png");
+    ImageBuffer::from_pixel(4, 4, Rgb([166u8, 128, 179]))
+        .save(&input)
+        .unwrap();
+    let red = ["coat_normal", "detail_normal"].map(|subtype| {
+        let mut req = BatchRequest::new(vec![input.clone()], d.path().join(subtype), Target::Cs);
+        req.allow.insert(engine::codes::Code::FmtBc5Normal);
+        req.overrides = [
+            &format!("file:*short.png.subtype={subtype}"),
+            "format=bc5",
+            "color.tag=unorm",
+            "alpha.policy=remove",
+            "mips.normal_base=keep",
+        ]
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .into();
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                req,
+                &Reporter::new(Arc::new(NullSink), "bc5"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        let job = &p.jobs[0];
+        assert_eq!(job.profile.subtype.id(), subtype);
+        assert_eq!(job.status, JobStatus::Ready, "{:?}", job.warnings);
+        let path = job.output.clone();
+        let (s, events) = run(p);
+        assert_eq!(s.converted, 1, "{events:?}");
+        let dds = read_dds(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(dds.format, Format::Bc5.pixel_format(false));
+        let (w, h, range) = &dds.levels[0];
+        let Decoded::Ldr(px) = decode_level(dds.format, *w, *h, &dds.data[range.clone()]).unwrap()
+        else {
+            panic!("expected BC5")
+        };
+        px[0][0]
+    });
+    // The short vector has X = 77/255. Its unit direction has X ≈ 0.599.
+    assert!(
+        red.iter().all(|r| r.abs_diff(204) <= 1),
+        "coat and detail mip 0 red: {red:?}"
+    );
+}
+
+#[test]
 fn kept_normal_dds_preserves_length_at_two_lower_levels() {
     let d = tempfile::tempdir().unwrap();
     let input = d.path().join("iron_n.png");
@@ -543,7 +592,7 @@ fn keep_bake_changes_only_angular_roughness() {
     }
     let outputs = |base, mode| {
         let out = d.path().join(format!("{base}-{mode}"));
-        let mut req = BatchRequest::new(vec![input.clone()], out, Target::Cs);
+        let mut req = BatchRequest::new(vec![input.clone()], out.clone(), Target::Cs);
         req.recursive = true;
         req.accept = AcceptSuggestions::High;
         req.on_existing = OnExisting::IfChanged;
@@ -576,12 +625,29 @@ fn keep_bake_changes_only_angular_roughness() {
                 j.bake.as_ref().map(|b| &b.normal),
                 (mode == "renormalize_bake").then_some(&dir.join("iron_n.png"))
             );
-            j.output.clone()
+            let source = j.bake.as_ref().map(|b| {
+                assert_eq!(
+                    serde_json::to_value(b.normal_profile.mips.normal_base).unwrap(),
+                    base
+                );
+                engine::manifest::SourceRef {
+                    bake: Some(b.identity_sha256()),
+                    ..engine::manifest::SourceRef::of(&dir.join("iron_n.png")).unwrap()
+                }
+            });
+            (j.output.clone(), source)
         });
         let (s, ev) = run(p);
         assert_eq!(s.converted, 3, "{ev:#?}");
         assert_eq!(run(resolve()).0.up_to_date, 3);
-        members.map(|path| {
+        let manifest = Manifest::at(&out).load().unwrap();
+        members.map(|(path, source)| {
+            let key = engine::manifest::output_key(&out, &path);
+            assert_eq!(
+                manifest[&key].sources,
+                source.as_slice(),
+                "{key} {base} {mode}"
+            );
             let f = read_dds(&std::fs::read(path).unwrap()).unwrap();
             assert_eq!(f.format, Format::Rgba8.pixel_format(false));
             [0, 1, 2].map(|level: usize| {

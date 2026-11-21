@@ -16,8 +16,9 @@
 //!
 //! An *accumulation* chain is built by repeated box filtering of the unnormalised base; every output
 //! level is a *finalised* copy (√ back from squared roughness, renormalised vectors, clamps). Mip 0 is the base as
-//! authored, except a normal map's vectors, which are renormalised unless `mips.normal_base = keep` (DECISIONS R1); a
-//! kept XYZ tangent or coat normal carries its mean authored length separately from the vector mean.
+//! authored except where `base_level` normalises its vectors. Advanced Skin detail and tangent normal outputs in
+//! formats that drop Z start at unit length even under Keep. Kept XYZ base and coat normals carry mean authored
+//! length separately from the vector mean (DECISIONS R1, LA).
 //! A `_cnr` with `mips.normal = renormalize_bake` (the default) widens its own coat roughness (alpha) from its own
 //! mean unit directions (DECISIONS R2, LA3); `mips.normal` is inert on every other sub-type here: the `_n` -> `_rmaos` bake
 //! and the opt-in `normal` -> complex `_m` gloss bake (Note CL40) arrive through [`build_chain_with`].
@@ -178,13 +179,11 @@ fn vector_length(px: &[f32; 4]) -> f32 {
 /// Advanced Skin detail needs unit directions because CS reconstructs BC5 Z and normalizes BC7 RGB.
 fn base_level(work: &Work, p: &Profile, output: Subtype) -> Rgba32F {
     let mut out = work.img.clone();
-    if (p.mips.normal_base == NormalBase::Renormalize
-        || output.always_unit_base()
-        || output.needs_unit_base(p.format))
+    if (p.mips.normal_base == NormalBase::Renormalize || output.always_unit_base(p.format))
         && matches!(work.domain, Domain::Normal | Domain::Msn)
     {
         for px in &mut out.px {
-            normalize_vector(px, work.domain);
+            normalize_base_direction(px, work.domain, p.mips.normal_base);
         }
     }
     out
@@ -264,9 +263,9 @@ fn finalize(acc: &Rgba32F, work: &Work) -> Rgba32F {
 
 /// Finalised mip levels, level 0 first, in the Work's domain.
 ///
-/// Levels >= 1 are finalised and clamped (roughness √, vector renormalisation, domain clamps). Mip 0 is the base as
-/// authored, except a normal map's vectors, renormalised unless `mips.normal_base = keep` (DECISIONS R1); the
-/// consumer (Quantise, Task 31) clamps it for the target format.
+/// Under Keep, mip 0 retains authored vectors except for Advanced Skin detail and tangent normal outputs that
+/// drop Z. Lower mips carry mean authored length for kept XYZ base and coat normals. Other normal maps use unit
+/// vectors below mip 0. Quantisation clamps the stored values for the target format.
 pub fn build_chain(work: &Work, p: &Profile) -> Vec<Rgba32F> {
     build_chain_with(work, p, None)
 }
@@ -299,8 +298,8 @@ fn kept_length(px: &[f32; 4]) -> f64 {
     (x * x + y * y + z * z).sqrt()
 }
 
-pub(crate) fn normalize_bake_direction(px: &mut [f32; 4], domain: Domain, base: NormalBase) {
-    // A finite kept vector can overflow the f32 sum of squares. Preserve the default bake's arithmetic.
+pub(crate) fn normalize_base_direction(px: &mut [f32; 4], domain: Domain, base: NormalBase) {
+    // A finite kept vector can overflow the f32 sum of squares. Preserve the default path's arithmetic.
     if base == NormalBase::Keep && vector_length(px).is_infinite() {
         let len = kept_length(px);
         for c in &mut px[..3] {
@@ -333,7 +332,7 @@ fn kept_normal_chain(base: &Rgba32F, levels: u32, coat: Option<f64>) -> Vec<Rgba
     let mut coat_directions = coat.map(|clamp| {
         let mut directions = base.clone();
         for px in &mut directions.px {
-            normalize_bake_direction(px, Domain::Normal, NormalBase::Keep);
+            normalize_base_direction(px, Domain::Normal, NormalBase::Keep);
         }
         (clamp, directions)
     });
@@ -694,6 +693,19 @@ mod tests {
             got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-5),
             "{got:?}, expected {want:?}"
         );
+    }
+
+    #[test]
+    fn kept_xy_base_normalizes_large_finite_vectors() {
+        let mut p = profile(Subtype::DetailNormal);
+        p.mips.normal_base = NormalBase::Keep;
+        p.format = Format::Bc5;
+        let w = work(
+            Rgba32F::new(1, 1, [3.0e30, 0.0, 4.0e30, 0.25]),
+            Domain::Normal,
+            true,
+        );
+        assert_texel(build_chain(&w, &p)[0].px[0], [0.6, 0.0, 0.8, 0.25]);
     }
 
     #[test]

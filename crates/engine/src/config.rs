@@ -370,10 +370,13 @@ pub enum MipLevels {
 }
 
 impl Subtype {
-    pub(crate) fn always_unit_base(self) -> bool {
+    /// Whether this normal output uses unit directions at mip 0 even under Keep.
+    pub fn always_unit_base(self, format: Format) -> bool {
         self == Self::SkinDetail
+            || (self.category() == Category::Normal && self != Self::Msn && !stores_xyz(format))
     }
 
+    // Only these base profiles reject Keep at Resolve (LA1).
     pub(crate) fn needs_unit_base(self, format: Format) -> bool {
         matches!(self, Self::Normal | Self::LandscapeNormal | Self::PbrNormal)
             && !stores_xyz(format)
@@ -561,7 +564,8 @@ pub struct MipSpec {
     pub edge: MipEdge,
     pub normal: NormalMips,
     /// Normal length after resizing. `renormalize` (default) stores unit vectors.
-    /// Advanced Skin detail normals always start from unit length. For other normal maps, `keep` preserves mip 0 as authored.
+    /// Advanced Skin detail normals and tangent-space normal outputs in formats that drop Z always start from unit length.
+    /// For other normal maps, `keep` preserves mip 0 as authored.
     /// On XYZ tangent-space base normals and coat normals, lower mips carry the mean authored length,
     /// up to what XYZ can hold. Other normal maps renormalize lower mips.
     #[serde(default = "default_normal_base")]
