@@ -119,7 +119,7 @@
 - Launch Tessalith without a project to see **Open folder…** and any recent folders, even if you last used Meshes. Run `tessalith.exe <folder>` to open a project directly. Once the folder opens, the status line tells you what to do next.
 - With a project open, **Tools ▾** holds **PGPatcher JSON editor…**, **Make marker cube…** and **Re-encode every output**.
 - The export folder dialog starts at the project's destination, then tries the last export folder you picked, then the project folder. The extra export location, target mod and report dialogs also start in the project folder when one is open.
-- The header stays on one row down to 1055 px wide. As space runs out, **Tools ▾**, **MO2…** and then **Preset** move into **⋯**. **Settings…** stays visible.
+- The header stays on one row down to 1055 px wide. As space runs out, the export folder in **Export to ▾** is cut in the middle first, down to its drive and last folder; then **Tools ▾**, **MO2…** and **Preset** move into **⋯**. **Settings…** stays visible.
 - Open **Settings…**, Presets or the PGPatcher JSON editor from Meshes and the tool opens in the same view. **Back to meshes** returns you to the mesh you were editing.
 - The **Preset** picker lists the target's default once, at the top, tagged `· default`. Pick it to follow the target's default again.
 - On a high-DPI display, Tessalith limits the requested starting size to 8192 physical pixels per side using the reported screen scales and the saved scale. It fits the window to the GPU's limit once that is known and adjusts when the display scale changes.
@@ -129,6 +129,7 @@
 ### Added
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
+- In Review, a JSON line with a long path is cut at the panel's edge. Hover it for the whole line. **Also updated** is cut in the middle again.
 
 ## 3.0.0
 

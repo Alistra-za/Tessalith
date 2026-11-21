@@ -25,7 +25,7 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 - **Settings…** opens the [Settings tab](#settings-tab), where the Mode is set.
 - **Save** (**Ctrl+S**) writes your project edits, including the value in the field you're typing in. A dot in the title means the project has edits to save. Type and alpha choices you make or undo need a save even if the value matches disk. For a new project with settings to write, **Write project files now** saves them before the first export. <!-- D:JY6 --> See [Review and Export](GUI-Review-and-Export.md#the-export-button) for the button beside **Save**.
 
-As the header narrows, look in **⋯** for **Tools ▾**, then **MO2…**, then **Preset**. **Settings…** stays in the header. The destination, save and export controls stay together when they wrap. <!-- D:JY13 --> If a restored window is larger than your GPU can display, Tessalith reduces its size and logs the adjustment. <!-- D:JY17 -->
+As the header narrows, **Export to ▾** first cuts the export folder in the middle, down to its drive and last folder; hover it for the whole path. Then look in **⋯** for **Tools ▾**, then **MO2…**, then **Preset**. **Settings…** stays in the header. The destination, save and export controls stay together when they wrap. <!-- D:JY13,LC1 --> If a restored window is larger than your GPU can display, Tessalith reduces its size and logs the adjustment. <!-- D:JY17 -->
 
 ### Export to
 
