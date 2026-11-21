@@ -19,10 +19,14 @@ fn a_skin_set_warns_only_for_the_slots_its_material_reads() {
     let d = tempfile::tempdir().unwrap();
     let r = d.path().join("textures/x");
     std::fs::create_dir_all(&r).unwrap();
-    for f in ["a_n.png", "b_n.png"] {
+    for f in ["a_n.png", "b_n.png", "c.png"] {
         colour(&r, f);
     }
     let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    m.decide(
+        "textures/x/c.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::SkinAlbedo),
+    );
     let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
     for f in ["textures/x/a_n.png", "textures/x/b_n.png"] {
         m.decide(
@@ -46,6 +50,27 @@ fn a_skin_set_warns_only_for_the_slots_its_material_reads() {
     let j = read_json(&out(&m, "textures/x/a.csskin.json"));
     assert_eq!(j["textures"]["controls"], json!("textures/x/b_rfaos.dds"));
     assert!(j["textures"].get("normal").is_none());
+
+    let c = id_of(&m, "x/c");
+    m.edit_docs("Read a's controls", None, true, |_, s| {
+        s.set_borrow(&c, 6, Some(&a));
+    });
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/c.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/a_rfaos.dds"));
+    assert!(
+        crate::slot_links::unused_rows(&m).is_empty(),
+        "c reads a's controls"
+    );
+
+    m.edit_docs("Remove the controls borrow", None, true, |_, s| {
+        s.set_borrow(&c, 6, None);
+    });
+    idle(&mut m);
+    let restored = crate::slot_links::unused_rows(&m);
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].at, rows[0].at);
+    assert_eq!(restored[0].shown(), rows[0].shown());
 }
 
 fn grey(dir: &Path, name: &str) {

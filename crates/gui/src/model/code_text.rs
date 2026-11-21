@@ -20,10 +20,10 @@ pub(super) fn borrowed_line(data: &serde_json::Value, packed: bool) -> String {
         .flatten()
         .map(|c| {
             let source = c["source"].as_str().unwrap_or_default();
-            if c["shared"] == true {
-                format!("{source}, which this set shares")
-            } else {
-                source.to_owned()
+            match (c["shared"] == true, c["set"].as_str()) {
+                (true, Some(owner)) => format!("{source}, which this set shares from {owner}"),
+                (true, None) => format!("{source}, which this set shares"),
+                (false, _) => source.to_owned(),
             }
         })
         .collect::<Vec<_>>()

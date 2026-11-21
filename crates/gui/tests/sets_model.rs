@@ -8,9 +8,7 @@ const ROCK: &str = "landscape/rock01";
 
 #[test]
 fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
-    use crate::slot_links::{
-        cape_packs, cape_project, cape_view, record_height_project, unused_rows, A, B, E,
-    };
+    use crate::slot_links::{cape_packs, cape_project, cape_view, unused_rows, A, B, E};
     use sdc_gui::model::pbr_export::{export_blocks, written_json_entries};
     let dir = tempfile::tempdir().unwrap();
     let mut m = cape_packs(dir.path(), true, true);
@@ -37,8 +35,40 @@ fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
     idle(&mut m);
     assert!(unused_rows(&m).is_empty(), "Vanilla");
     let dir = tempfile::tempdir().unwrap();
-    let m = record_height_project(dir.path());
-    assert!(views(&m).iter().any(|v| v.filled.contains_key(&4)));
+    let m = cape_project(
+        dir.path(),
+        &[
+            (A, &["_height"], ""),
+            (B, &["_p"], ""),
+            (
+                E,
+                &["_n"],
+                r#"share = ["textures/a/cape_height.png"]
+[sets.txst]
+plugin = "a.esp"
+formid = "1"
+edid = "Cape"
+slot4 = "textures/b/cape_p.dds""#,
+            ),
+        ],
+    );
+    let v = cape_view(&m, E);
+    let producers = &m.producers[&v.key];
+    assert!(
+        producers.iter().any(|p| p.ready
+            && p.kind == Some(SlotKind::Height)
+            && p.sources == ["textures/a/cape_height.png"]
+            && p.output.ends_with("textures/e/cape_p.dds")),
+        "{producers:?}"
+    );
+    let pack = "textures/a/cape_p".to_owned();
+    assert!(cape_view(&m, A).members.contains(&pack));
+    assert!(!v.members.contains(&pack));
+    assert_eq!(v.filled.get(&4).map(String::as_str), Some(B));
+    assert!(
+        matches!(v.slots.get(&SlotKind::Height), Some(SlotFill::Borrowed { from, item })
+        if from == B && item == "textures/b/cape_p.png")
+    );
     assert!(unused_rows(&m).is_empty(), "TXST fill");
 
     let dir = tempfile::tempdir().unwrap();

@@ -268,6 +268,13 @@ fn a_borrowed_slot_over_an_own_pack_warns() {
         json!(r"textures\pbr\b\cape_rmaos.dds")
     );
     assert!(output.is_file(), "{output:?}");
+    let owner = "textures/a/linen";
+    m.rename_set(A, owner).unwrap();
+    settle(&mut m);
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 1);
+    let cause = format!("{AO}, which this set shares from {owner}");
+    assert!(rows[0].shown().contains(&cause), "{}", rows[0].shown());
     let mut h = harness(m);
     h.run_steps(4);
     let badges: Vec<_> = h
@@ -282,6 +289,7 @@ fn a_borrowed_slot_over_an_own_pack_warns() {
                 .is_some()
                 && h.query_by_label_contains("Slot 6 uses textures/b/cape's file")
                     .is_some()
+                && h.query_by_label_contains(&cause).is_some()
                 && h.query_by_label_contains("mark this row as intended")
                     .is_some()
         }),
