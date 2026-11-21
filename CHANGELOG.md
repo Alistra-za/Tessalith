@@ -102,18 +102,18 @@
 - Replace waits for a successful plan after a texture type changes. Undo keeps a file that replaced a duplicate with different contents while the copy was finishing.
 - Helpers no longer take a full tile on a set card. A slot shows at most two helper thumbnails. Click the **+**, with or without a number, to list the rest.
 - Clicking a thumbnail on a set card opens the set. Shift+click the thumbnail to open the texture's settings.
-- The header's **Review n files…** opens Review for the whole project. Exporting a set, group or selection opens Review for that selection. Press **Export** in Review to write the files.
-- Tick **Export without review next time** to skip Review when this project is ready and has only its regular outputs to write. Problems, undecided textures, pending NIF writes, edited PGPatcher JSON or an extra export folder still bring you to Review. Turn the tick off in **Settings…** under **This project**.
+- The header's **Review n files…** opens Review for the whole project. By default, exporting a set, group or selection opens Review for that selection. Press **Export** in Review to write the files.
+- Tick **Export without review next time** to skip Review when this project is ready and has only its regular outputs to write; the header button then reads **Export n files now**. Problems, undecided textures, pending NIF writes or edited PGPatcher JSON still bring you to Review. For a whole-project export, ticking **Also export** also opens Review. Turn the tick off in **Settings…** under **This project**.
 - Review lists the DDS and JSON outputs. **Also updated:** shows the other files the export touches, including project settings, records, borrowed copies and edited NIFs. Extra export folders get one entry each. Hover a path to see why it is listed and whether it depends on what the export writes.
 - Opening a folder with automatic type or alpha picks leaves **Save** off and lets you close without a save prompt. In a new project, **Write project files now** saves those picks straight away. They also go to disk with your next save or export.
 - The status line counts source files, planned textures and sets, for example “57 files → 68 textures (11 packed or generated) · 7 sets”. Export progress and results count the primary outputs together and report each extra export separately.
-- Launch Tessalith without a project to see **Open folder** and **Recent**, even if you last used Meshes. Run `tessalith.exe <folder>` to open a project directly. Once the folder opens, the status line tells you what to do next.
+- Launch Tessalith without a project to see **Open folder…** and any recent folders, even if you last used Meshes. Run `tessalith.exe <folder>` to open a project directly. Once the folder opens, the status line tells you what to do next.
 - With a project open, **Tools ▾** holds **PGPatcher JSON editor…**, **Make marker cube…** and **Re-encode every output**.
 - The export folder dialog starts at the project's destination, then tries the last export folder you picked, then the project folder. The extra export location, target mod and report dialogs also start in the project folder when one is open.
 - The header stays on one row down to 1055 px wide. As space runs out, **Tools ▾**, **MO2…** and then **Preset** move into **⋯**. **Settings…** stays visible.
 - Open **Settings…**, Presets or the PGPatcher JSON editor from Meshes and the tool opens in the same view. **Back to meshes** returns you to the mesh you were editing.
 - The **Preset** picker lists the target's default once, at the top, tagged `· default`. Pick it to follow the target's default again.
-- On a high-DPI display, Tessalith limits the starting window to 8192 physical pixels per side using the reported screen scales and the saved scale. It fits the window to the GPU's limit once that is known and adjusts when the display scale changes.
+- On a high-DPI display, Tessalith limits the requested starting size to 8192 physical pixels per side using the reported screen scales and the saved scale. It fits the window to the GPU's limit once that is known and adjusts when the display scale changes.
 - Marking a warning as intended takes it out of the count beside its file in **Files**. When all its warnings are marked, the row shows a grey `n marked` and **Has warnings** leaves the file out.
 - **Export details** in **Files** and in the Markdown report lists what the export did besides converting textures. **Notes** stays in **Problems**.
 
