@@ -1831,6 +1831,7 @@ fn nif_export_is_due_once_after_an_also_run_ends() {
         mod_name: "Mod".into(),
         draft: Default::default(),
         draft_unsaved: false,
+        kept_backup: None,
         blocked: None,
         foreign: None,
         answer: None,

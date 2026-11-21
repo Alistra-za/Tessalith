@@ -108,9 +108,9 @@ pub struct NifEdit {
     /// The last "kept in" line `save_kept` put in Messages, so a waiting switch does not repeat it on every change.
     kept_line: Option<String>,
     /// Ruling E6-D: the kept autosave of the draft's id that lost to the newer draft at open; the first draft save
-    /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
+    /// moves it to `<sha>.<id>.<secs>.toml` (`keep_aside`, as `free_unseen` does), so its name is free and its bytes
     /// are kept.
-    kept_older: Option<(PathBuf, String)>,
+    kept_older: Option<KeptLoser>,
     /// Ruling E6-Y1: the file known to hold this session's ops: the draft, the plain autosave or the kept autosave,
     /// whichever the session was opened from or last wrote successfully (the footer's line and Show in Explorer).
     /// A failed write of ops the file does not hold clears it; a save not yet tried keeps it.
@@ -317,6 +317,7 @@ pub const NO_CLEANUP: &str =
 pub struct NifReviewRow {
     pub draft: PathBuf,
     pub draft_unsaved: bool,
+    pub kept_backup: Option<PathBuf>,
     pub path: String,
     pub mod_name: String,
     pub blocked: Option<String>,
@@ -684,6 +685,44 @@ struct Picked {
     unreadable: Option<String>,
 }
 
+struct KeptLoser {
+    path: PathBuf,
+    fp: String,
+    backup: PathBuf,
+}
+
+impl KeptLoser {
+    fn new((path, fp): (PathBuf, String)) -> Self {
+        let backup = backup_name(&path);
+        Self { path, fp, backup }
+    }
+}
+
+fn backup_names(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    (secs..).map(move |s| path.with_file_name(format!("{stem}.{s}.toml")))
+}
+
+fn backup_name(path: &Path) -> PathBuf {
+    backup_names(path)
+        .find(|p| !p.exists())
+        .expect("free timestamp")
+}
+
+#[cfg(windows)]
+fn check_removable(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    const DELETE: u32 = 0x0001_0000;
+    let file = std::fs::File::options().access_mode(DELETE).open(path)?;
+    if file.metadata()?.permissions().readonly() {
+        return Err(std::io::ErrorKind::PermissionDenied.into());
+    }
+    Ok(())
+}
+
 /// Note GD11, rulings E6-D and E6-H: the one recovery decision, for `open` in a project, for the live carry-over into
 /// one (`NifEdit::retarget`) and for what is durable (`NifEdit::durable`, ruling E6-G). It reads the project's draft
 /// at `draft_path` (Err when it does not load: it is never overwritten), then weighs the kept autosave of its id, then
@@ -1006,7 +1045,7 @@ impl NifEdit {
             kept_autosave,
             kept_fp,
             kept_line: None,
-            kept_older,
+            kept_older: kept_older.map(KeptLoser::new),
             held_at,
             held_ops: vec![],
             held_stale: false,
@@ -1162,13 +1201,23 @@ impl NifEdit {
                 .is_some_and(|h| *h == r.ops_hash())
     }
 
+    /// The hash retained from the previous export while this draft's ownership transfer is incomplete.
+    fn transfer_hash(&self) -> Option<&str> {
+        if self.record_sha.is_none() && self.record_owner.is_some() && !self.other_owner() {
+            self.doc.export.sha256.as_deref()
+        } else {
+            None
+        }
+    }
+
     /// Ruling E6-N: whether the installed NIF is the one the record names (`nif_drift`), read from disk (one read and
     /// hash of the NIF) when the session meets a folder: open, a folder change, a record read again, a source reload,
     /// an Export. Never per frame. A NIF that cannot be read is not known to be the recorded one.
     fn derive_export(&mut self) {
-        self.nif_drift = match (&self.record_sha, self.export_path.as_os_str().is_empty()) {
+        let recorded = self.record_sha.as_deref().or_else(|| self.transfer_hash());
+        self.nif_drift = match (recorded, self.export_path.as_os_str().is_empty()) {
             (Some(rec), false) => match std::fs::read(&self.export_path) {
-                Ok(b) => edit_doc::sha256_hex(&b) != *rec,
+                Ok(b) => edit_doc::sha256_hex(&b) != rec,
                 Err(e) => e.kind() != std::io::ErrorKind::NotFound,
             },
             // A first pre-record identifies the folder after a restart, but names no completed NIF.
@@ -1360,7 +1409,11 @@ impl NifEdit {
     /// folder change a new export record. Ruling E6-N: also pending when the record names another source, the
     /// installed NIF is not the one the record names, or a NIF of an undone edit is installed (all from disk).
     pub fn pending(&self) -> bool {
-        if self.stale_source() || self.needs_nif_repair() || self.undone_export() {
+        if self.stale_source()
+            || self.needs_nif_repair()
+            || self.undone_export()
+            || self.transfer_hash().is_some()
+        {
             return true;
         }
         let key = (self.rev, self.doc.ops.len());
@@ -1487,7 +1540,12 @@ impl NifEdit {
         if approved.is_some_and(|files| {
             !files.contains(&self.export_path)
                 || !files.contains(&record_path)
-                || (self.draft_unsaved() && !files.contains(&self.draft_path))
+                || (self.draft_unsaved()
+                    && (!files.contains(&self.draft_path)
+                        || self
+                            .kept_older
+                            .as_ref()
+                            .is_some_and(|k| !files.contains(&k.backup))))
         }) {
             return ExportOutcome::Blocked("Export would write files that Review did not list for this NIF. Open Review again.".into());
         }
@@ -1779,10 +1837,7 @@ impl NifEdit {
             return;
         }
         // Note GD27: unsaved until the write succeeds, so a failed save keeps the session touched
-        if let Err(e) = self
-            .prepare_kept_for_save()
-            .and_then(|()| self.save_draft())
-        {
+        if let Err(e) = self.save_draft(false) {
             self.held_failed();
             self.error = Some(e);
         }
@@ -1817,50 +1872,56 @@ impl NifEdit {
         let loser = self
             .kept_older
             .as_ref()
-            .is_some_and(|(p, h)| *p == path && *h == fp);
+            .is_some_and(|k| k.path == path && k.fp == fp);
         if modified <= std::time::SystemTime::now() && !(loser && self.plain_fp.is_some()) {
             return Ok(());
         }
         let ours = self.kept_autosave.as_ref() == Some(&path) && self.kept_fp.as_ref() == Some(&fp);
-        if !ours && !loser {
+        if ours {
+            // The draft's ID is how reopen finds this winner. Keep it at that name until the draft is durable.
+            #[cfg(windows)]
+            check_removable(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            return Ok(());
+        }
+        if !loser {
             return Err(format!(
                 "A newer kept autosave is at {}. Move it aside before saving these edits.",
                 path.display()
             ));
         }
-        if !self.move_aside(&path, "The kept autosave") {
-            return Err(self.error.take().unwrap_or_default());
-        }
-        if loser {
-            self.kept_older = None;
-        }
-        Ok(())
+        self.move_kept_older()
     }
 
     /// Ruling E6-F: the draft's write, never over bytes this session does not know as its own there (`draft_fp`):
     /// those are moved aside first (`free_unseen`), and nothing is written when that fails.
-    fn save_draft(&mut self) -> Result<(), String> {
+    fn save_draft(&mut self, allow_kept_fallback: bool) -> Result<(), String> {
+        self.prepare_kept_for_save()?;
+        let Err(why) = self.write_draft() else {
+            return Ok(());
+        };
+        if !allow_kept_fallback || self.project.is_none() {
+            return Err(why);
+        }
+        self.save_kept(&why)
+            .map_err(|e| format!("{why}; the autosave failed too: {e}"))?;
+        self.unsaved = false;
+        Ok(())
+    }
+
+    fn write_draft(&mut self) -> Result<(), String> {
         let path = self.draft_path.clone();
         let what = match self.project {
             Some(_) => "The edit document",
             None => "The autosave",
         };
-        if !self.free_unseen(&path, self.draft_fp.clone(), what) {
-            return Err(self.error.take().unwrap_or_default());
-        }
-        let fp = self.write_draft(&path)?;
+        self.free_unseen(&path, self.draft_fp.clone(), what)?;
+        let fp = match &self.project {
+            Some(p) => edit_doc::save_in(p, &path, &self.doc),
+            None => edit_doc::save(&path, &self.doc),
+        }?;
         self.draft_fp = Some(fp);
         self.draft_saved();
         Ok(())
-    }
-
-    /// The draft's own write: into the project (never re-creating a project folder that is gone), else the autosave.
-    /// Ok(the fingerprint written).
-    fn write_draft(&self, path: &Path) -> Result<String, String> {
-        match &self.project {
-            Some(p) => edit_doc::save_in(p, path, &self.doc),
-            None => edit_doc::save(path, &self.doc),
-        }
     }
 
     /// After the draft was written: the session is saved, the draft carries its id, and what the project draft makes
@@ -1879,13 +1940,13 @@ impl NifEdit {
         // ruling E6-D: the older kept autosave goes to `<sha>.<id>.<secs>.toml`; a failed move is tried by the next save
         // ruling E6-L: only while it still holds the bytes it lost with; other bytes there are not the session's. Ruling
         // E6-Q: those stay where they are and stay remembered, so the kept fallback never writes over them either
-        if let Some((k, fp)) = self.kept_older.take() {
-            let keep = match edit_doc::is_known(&k, Some(&fp)) {
-                true => k.is_file() && !self.move_aside(&k, "The kept autosave"),
-                false => true,
-            };
-            if keep {
-                self.kept_older = Some((k, fp));
+        if let Some(k) = &self.kept_older {
+            if edit_doc::is_known(&k.path, Some(&k.fp)) {
+                if !k.path.is_file() {
+                    self.kept_older = None;
+                } else if let Err(e) = self.move_kept_older() {
+                    self.error = Some(e);
+                }
             }
         }
         let plain = self.autosave.clone().zip(self.plain_fp.take());
@@ -1911,27 +1972,7 @@ impl NifEdit {
         {
             self.switch_save_attempts += 1;
         }
-        self.prepare_kept_for_save()
-            .inspect_err(|_| self.held_failed())?;
-        let draft_err = match self.save_draft() {
-            Ok(()) => return Ok(()),
-            Err(e) => e,
-        };
-        if self.project.is_none() {
-            self.held_failed();
-            return Err(draft_err); // the kept autosave would be beside it, in the folder that just failed
-        }
-        match self.save_kept(&draft_err) {
-            // ruling E6-K: whether the session may end is `durable()`'s answer after this save, not the save's
-            Ok(()) => {
-                self.unsaved = false;
-                Ok(())
-            }
-            Err(kept_err) => {
-                self.held_failed();
-                Err(format!("{draft_err}; the autosave failed too: {kept_err}"))
-            }
-        }
+        self.save_draft(true).inspect_err(|_| self.held_failed())
     }
 
     /// Writes the kept autosave `<sha>.<id>.toml` beside the plain autosave, never over bytes this session did not
@@ -1947,8 +1988,8 @@ impl NifEdit {
         let k = edit_doc::kept_autosave_path(dir, &self.data_path, id);
         // ruling E6-Q: the loser this session remembers at this name, as the cleanup does: replaced since, it is not
         // the session's to move or write over, and the write is refused
-        if let Some((_, fp)) = self.kept_older.as_ref().filter(|(at, _)| *at == k) {
-            if !edit_doc::is_known(&k, Some(fp)) {
+        if let Some(loser) = self.kept_older.as_ref().filter(|l| l.path == k) {
+            if !edit_doc::is_known(&k, Some(&loser.fp)) {
                 return Err(format!(
                     "{} holds edits of this NIF that this session did not open; they are left where they are",
                     k.display()
@@ -1959,9 +2000,7 @@ impl NifEdit {
             .kept_fp
             .clone()
             .filter(|_| self.kept_autosave.as_deref() == Some(k.as_path()));
-        if !self.free_unseen(&k, known, "The kept autosave") {
-            return Err(self.error.take().unwrap_or_default());
-        }
+        self.free_unseen(&k, known, "The kept autosave")?;
         // what is left at the name is this session's own bytes (replaced), or nothing (published, never replacing)
         let fp = match k.is_file() {
             true => edit_doc::save(&k, &self.doc)?,
@@ -1969,7 +2008,7 @@ impl NifEdit {
         };
         // ruling E6-Q2: the loser this write displaced (moved aside, or found unchanged and replaced) is retired; the
         // session's own (path, fingerprint) is what a later write here is checked against
-        if self.kept_older.as_ref().is_some_and(|(at, _)| *at == k) {
+        if self.kept_older.as_ref().is_some_and(|l| l.path == k) {
             self.kept_older = None;
         }
         self.held(&k);
@@ -2016,7 +2055,7 @@ impl NifEdit {
     /// Back in the session's own project after a failed switch (ruling r4-5): the draft is saved there and the
     /// session goes on as it was. False (the failed state stays) when that save fails too.
     pub(super) fn save_back_into_own_project(&mut self) -> bool {
-        if self.save_draft().is_err() {
+        if self.save_draft(false).is_err() {
             self.held_failed();
             return false;
         }
@@ -2142,52 +2181,74 @@ impl NifEdit {
     /// Notes GD19, GD25, ruling E6-F: before this session writes `path`, a file there that is not as it knows it
     /// (`known`: the fingerprint of the bytes it last loaded or wrote there; other bytes, an unreadable file, or a
     /// file where it knew none) is moved aside to `<stem>.<unix seconds>.toml` (named in Messages), never overwritten.
-    /// False (write nothing) when the move fails.
-    fn free_unseen(&mut self, path: &Path, known: Option<String>, what: &str) -> bool {
+    /// A draft that identifies the winning kept autosave stays in place until the atomic replacement.
+    fn free_unseen(
+        &mut self,
+        path: &Path,
+        known: Option<String>,
+        what: &str,
+    ) -> Result<(), String> {
         // a folder at the name is not moved: the write fails on it and destroys nothing
-        path.is_dir() || edit_doc::is_known(path, known.as_deref()) || self.move_aside(path, what)
+        if path.is_dir() || edit_doc::is_known(path, known.as_deref()) {
+            return Ok(());
+        }
+        self.keep_aside(path, what, None)
     }
 
-    /// Moves the file `path` to `<stem>.<unix seconds>.toml` beside it, naming it in the session's lines. False
-    /// (nothing written) when that fails; the reason is in `error`.
-    fn move_aside(&mut self, path: &Path, what: &str) -> bool {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        // Note GD26: the name is reserved with create_new (another instance's create of it fails), then renamed over
-        let mut s = secs;
+    fn move_kept_older(&mut self) -> Result<(), String> {
+        let mut k = self.kept_older.take().expect("a known kept loser");
+        if let Err(e) = self.keep_aside(&k.path, "The kept autosave", Some(&k.backup)) {
+            if k.backup.exists() {
+                k.backup = backup_name(&k.path); // the next Review can approve the new name
+            }
+            self.kept_older = Some(k);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Preserve the bytes under a reserved sibling name. A kept loser's name is the one offered in Review.
+    fn keep_aside(&mut self, path: &Path, what: &str, exact: Option<&Path>) -> Result<(), String> {
+        let keep_draft = self.kept_autosave.is_some() && path == self.draft_path;
+        let at_path = |e: std::io::Error| format!("{}: {e}", path.display());
+        #[cfg(windows)]
+        if keep_draft {
+            check_removable(path).map_err(at_path)?;
+        }
+        let mut names = backup_names(path);
         let to = loop {
-            let to = path.with_file_name(format!("{stem}.{s}.toml"));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&to)
-            {
+            let to = exact.map_or_else(|| names.next().expect("free timestamp"), Path::to_path_buf);
+            match std::fs::File::create_new(&to) {
                 Ok(_) => break to,
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => s += 1,
-                Err(e) => {
-                    self.error = Some(format!("{}: {e}", to.display()));
-                    return false;
+                Err(e) if exact.is_none() && e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    continue
                 }
+                Err(e) => return Err(format!("{}: {e}", to.display())),
             }
         };
-        match std::fs::rename(path, &to) {
-            Ok(()) => {
-                self.open_lines.push(format!(
-                    "{what} {} held edits of {} that this session did not open: kept as {}.",
-                    path.display(),
-                    self.data_path,
-                    to.display()
-                ));
-                true
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&to); // the empty reservation only
-                self.error = Some(format!("{}: {e}", path.display()));
-                false
-            }
+        let result = if keep_draft {
+            std::fs::read(path).and_then(|bytes| {
+                engine::dds::write_atomic(&to, &bytes)?;
+                self.draft_fp = Some(edit_doc::sha256_hex(&bytes));
+                Ok(())
+            })
+        } else {
+            std::fs::rename(path, &to)
+        };
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(&to); // the empty reservation only
+            return Err(at_path(e));
         }
+        self.open_lines.push(format!(
+            "{what} {} held edits of {} that this session did not open: kept as {}.",
+            path.display(),
+            self.data_path,
+            to.display()
+        ));
+        if keep_draft && !edit_doc::is_known(path, self.draft_fp.as_deref()) {
+            return Err(format!("{} changed during save", path.display()));
+        }
+        Ok(())
     }
 
     /// Note GD5 (c), GD11: a project is opened while this edit is touched and its draft is still the autosave, which
@@ -2232,7 +2293,7 @@ impl NifEdit {
             return Ok(None);
         };
         let theirs = picked.draft.map(|(d, _)| d);
-        self.kept_older = picked.kept_older;
+        self.kept_older = picked.kept_older.map(KeptLoser::new);
         let dest_id = theirs.as_ref().and_then(|d| d.id.as_ref());
         self.id_on_disk = dest_id.is_some();
         if let Some(id) = dest_id {
@@ -3521,6 +3582,7 @@ impl MeshesModel {
         vec![NifReviewRow {
             draft: e.draft_path.clone(),
             draft_unsaved: e.draft_unsaved(),
+            kept_backup: e.kept_older.as_ref().map(|k| k.backup.clone()),
             path: e.data_path.clone(),
             mod_name: e
                 .edit_mod

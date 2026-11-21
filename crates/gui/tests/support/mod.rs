@@ -260,6 +260,7 @@ pub fn nif_row(path: &str, foreign: Option<[u8; 32]>) -> sdc_gui::model::meshes:
         mod_name: "My Mod".into(),
         draft: Default::default(),
         draft_unsaved: false,
+        kept_backup: None,
         blocked: None,
         foreign,
         answer: None,

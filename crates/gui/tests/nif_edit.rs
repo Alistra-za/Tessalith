@@ -5645,7 +5645,7 @@ fn undo_to_zero_cannot_replace_a_drifted_nif_in_another_owners_folder() {
 }
 
 #[test]
-fn an_open_session_sees_the_new_owner_of_identical_installed_bytes() {
+fn an_open_session_sees_the_new_owner_when_the_record_mtime_changes() {
     let (d, mut a, _p) = saved_in_p();
     assert_eq!(export(&mut a), Ok(1));
     let original = std::fs::read(exported(&d)).unwrap();
@@ -5654,6 +5654,7 @@ fn an_open_session_sees_the_new_owner_of_identical_installed_bytes() {
     gloss(&mut b, 12.5);
     answer(&mut b, GuardChoice::Overwrite);
     assert_eq!(export(&mut b), Ok(1));
+    ahead(&nif_doc(&export_root(&d)), 3600);
     assert_eq!(std::fs::read(exported(&d)).unwrap(), original);
     gloss(&mut a, 13.5);
     a.set_nif_export_root(Some(export_root(&d))); // the app's next frame
@@ -8046,6 +8047,132 @@ fn a_carry_finishes_only_when_its_cleanup_did() {
     let mut m = restart(&d, &p);
     m.open_edit();
     assert_eq!(vals(&m), [12.5], "the carried ops load");
+}
+
+#[cfg(windows)]
+#[test]
+fn returning_to_the_project_of_a_failed_carry_preserves_both_drafts() {
+    let (d, mut m) = export_session();
+    let (p, k) = three_versions(&d, &mut m);
+    let plain = autosave(&d);
+    ahead(&k, 3600);
+    ahead(&draft(&p), 7200);
+    ahead(&plain, 10800);
+    let original = std::fs::read(draft(&p)).unwrap();
+    let carried = std::fs::read(&plain).unwrap();
+    let _lock = hold(&k, 1);
+    m.set_project_root(Some(&p));
+    assert!(review_row(&m).blocked.is_some());
+    m.set_project_root(Some(&project_folder(&d, "q")));
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, draft(&p));
+    m.set_project_root(Some(&p));
+    assert!(
+        std::fs::read(draft(&p)).unwrap() == original
+            && std::fs::read(&plain).ok() == Some(carried),
+        "returning to P replaced its draft or removed the plain autosave"
+    );
+    assert_eq!(doc_values(&k), [9.5]);
+    assert!(review_row(&m).blocked.is_some());
+}
+
+#[cfg(windows)]
+#[test]
+fn reopening_after_a_failed_draft_save_loads_the_winning_kept_edit() {
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+    ahead(&k, 3600);
+    assert_eq!(vals(&m), [9.5]);
+    let lock = hold(&draft(&p), 1);
+    export_fails(&mut m, "could not be saved");
+    drop(m);
+    drop(lock);
+    let mut m = restart(&d, &p);
+    m.open_edit();
+    assert_eq!(vals(&m), [9.5], "the newer kept edit still wins at reopen");
+    assert_eq!(doc_values(&k), [9.5]);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_locked_future_winner_stops_the_draft_before_a_new_edit_is_written() {
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+    ahead(&k, 3600);
+    let lock = hold(&k, 1);
+    gloss(&mut m, 13.5);
+    assert_eq!(
+        doc_values(&draft(&p)),
+        [7.5],
+        "the draft stays untouched until the winner can be removed"
+    );
+    assert_eq!(doc_values(&k), [9.5]);
+    drop(lock);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(doc_values(&draft(&p)), [9.5, 13.5]);
+    assert!(!k.exists());
+}
+
+#[test]
+fn a_project_moved_during_the_draft_write_can_still_find_its_kept_edit() {
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+    ahead(&k, 3600);
+    let moved = d.path().join("moved");
+    let (from, to) = (p.clone(), moved.clone());
+    set_write_hook(Some(Box::new(move |stage| {
+        if stage == "root checked" {
+            std::fs::rename(&from, &to).unwrap();
+        }
+    })));
+    let result = export(&mut m);
+    set_write_hook(None);
+    assert!(result.unwrap_err().contains("could not be saved"));
+    drop(m);
+    let mut m = restart(&d, &moved);
+    m.open_edit();
+    assert_eq!(
+        vals(&m),
+        [9.5],
+        "the draft still identifies its winning kept autosave"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_zero_op_overwrite_retries_after_the_locked_nif_is_released() {
+    let (d, mut m, _a) = saved_in_p();
+    assert_eq!(export(&mut m), Ok(1));
+    let installed = exported(&d);
+    let before = std::fs::read(&installed).unwrap();
+    let record = nif_doc(&export_root(&d));
+    let b = project_folder(&d, "b");
+    m.set_project_root(Some(&b));
+    m.set_nif_export_root(Some(d.path().join("B exports")));
+    gloss(&mut m, 14.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(m.undo_edit());
+    m.set_nif_export_root(Some(export_root(&d)));
+    answer(&mut m, GuardChoice::Overwrite);
+    let lock = hold(&installed, 1);
+    export_fails(&mut m, "Cannot write");
+    let pre = load(&record).unwrap().unwrap();
+    assert_eq!(pre.export.owner, Some(id_of(&b)));
+    assert_eq!(pre.export.sha256, Some(sha256_hex(&before)));
+    assert_eq!(std::fs::read(&installed).unwrap(), before);
+    drop(lock);
+    m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, sha(&before));
+    assert_eq!(export(&mut m), Ok(1), "retry the authorized zero-op write");
+    assert_eq!(
+        std::fs::read(&installed).unwrap(),
+        m.edit.as_ref().unwrap().out.as_slice()
+    );
+    let done = load(&record).unwrap().unwrap();
+    assert_eq!(done.id, Some(id_of(&b)));
+    assert!(done.ops.is_empty());
+    assert_eq!(
+        done.export.sha256,
+        Some(sha256_hex(&std::fs::read(installed).unwrap()))
+    );
 }
 
 /// Review round 5 (Critical "Make plain unwritable, request Q, restore plain, then choose writable P ...", Important
@@ -14351,6 +14478,7 @@ fn nif_review_rows_list_the_pending_edit() {
         NifReviewRow {
             draft: autosave(&d),
             draft_unsaved: false,
+            kept_backup: None,
             path: "meshes/x.nif".into(),
             mod_name: EDIT_MOD.into(),
             blocked: None,
@@ -14687,6 +14815,77 @@ fn queued_review_export_stops_when_a_kept_nif_disappears() {
         .notes
         .iter()
         .any(|s| s.contains("Open Review again.")));
+}
+
+#[test]
+fn review_export_creates_no_unlisted_backup_of_the_winning_kept_edit() {
+    let (_t, d, mut h) = review_app();
+    let p = draft(h.state().model.root.as_deref().unwrap());
+    h.state_mut().meshes.close_edit();
+    let doc = load(&p).unwrap().unwrap();
+    let k = kept(&d, doc.id.as_ref().unwrap());
+    save(&k, &with_value(doc, 9.5)).unwrap();
+    ahead(&k, 3600);
+    h.state_mut().meshes.open_edit();
+    assert_eq!(vals(&h.state().meshes), [9.5]);
+    h.run_steps(4);
+    let (_, out, bytes) = nif_out(&h);
+    export_from_review(&mut h);
+    assert_eq!(std::fs::read(out).unwrap(), bytes);
+    assert_eq!(doc_values(&p), [9.5]);
+    let writes = h.state().model.review_writes_at_open();
+    let listed = support::listed(&writes);
+    for backup in moved_aside_from(&k) {
+        assert!(
+            listed.iter().any(|w| w.path == backup),
+            "unlisted kept backup {}",
+            backup.display()
+        );
+    }
+}
+
+#[test]
+fn review_export_lists_the_backup_of_a_losing_kept_edit() {
+    let (_t, d, mut h) = review_app();
+    let p = draft(h.state().model.root.as_deref().unwrap());
+    h.state_mut().meshes.close_edit();
+    let doc = load(&p).unwrap().unwrap();
+    let k = kept(&d, doc.id.as_ref().unwrap());
+    save(&k, &with_value(doc.clone(), 8.5)).unwrap();
+    ahead(&k, 3600);
+    let plain = autosave(&d);
+    save(&plain, &with_value(doc, 9.5)).unwrap();
+    ahead(&plain, 7200);
+    h.state_mut().meshes.open_edit();
+    assert_eq!(vals(&h.state().meshes), [9.5]);
+    h.run_steps(4);
+    // A second process takes the offered name before the write. The next Review can offer another one.
+    let offered = h.state().model.nif_review_rows()[0]
+        .kept_backup
+        .clone()
+        .unwrap();
+    std::fs::write(&offered, b"already taken").unwrap();
+    assert!(
+        export(&mut h.state_mut().meshes).is_err(),
+        "a taken backup name needs a new Review"
+    );
+    assert_eq!(std::fs::read(&offered).unwrap(), b"already taken");
+    assert_eq!(doc_values(&k), [8.5]);
+    assert_eq!(doc_values(&plain), [9.5]);
+    h.run_steps(4);
+    export_from_review(&mut h);
+    let mut backups = moved_aside_from(&k);
+    backups.retain(|p| p != &offered);
+    assert_eq!(backups.len(), 1);
+    assert_eq!(doc_values(&backups[0]), [8.5]);
+    assert_eq!(doc_values(&p), [9.5]);
+    let writes = h.state().model.review_writes_at_open();
+    assert!(
+        support::listed(&writes)
+            .iter()
+            .any(|w| w.path == backups[0]),
+        "Review omitted the losing kept edit's backup"
+    );
 }
 
 #[test]

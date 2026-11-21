@@ -18,6 +18,7 @@ fn row(path: &str) -> NifReviewRow {
         mod_name: "My Mod".into(),
         draft: Default::default(),
         draft_unsaved: false,
+        kept_backup: None,
         blocked: None,
         foreign: None,
         answer: None,

@@ -143,6 +143,7 @@ pub const HOVER_COPY: &str = "A vanilla file a set borrows, copied so PGPatcher 
 pub const HOVER_NIF: &str = "The NIF with your edits.";
 pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
 pub const NIF_DRAFT_HOVER: &str = "Your NIF edit's draft. Export saves it first.";
+pub const NIF_BACKUP_HOVER: &str = "The older autosaved NIF edits are kept here.";
 pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
 /// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
 pub const HOVER_MARKED: &str = "It changes only if this export's new files change it.";
@@ -201,7 +202,12 @@ impl ReviewWrites {
     pub(crate) fn nif_paths(&self) -> Vec<PathBuf> {
         self.also_updated
             .iter()
-            .filter(|w| matches!(w.hover, HOVER_NIF | HOVER_NIF_RECORD | NIF_DRAFT_HOVER))
+            .filter(|w| {
+                matches!(
+                    w.hover,
+                    HOVER_NIF | HOVER_NIF_RECORD | NIF_DRAFT_HOVER | NIF_BACKUP_HOVER
+                )
+            })
             .map(|w| w.path.clone())
             .collect()
     }
@@ -954,6 +960,9 @@ impl AppModel {
             }
             if r.draft_unsaved {
                 put(r.draft.clone(), NIF_DRAFT_HOVER, false);
+                if let Some(p) = &r.kept_backup {
+                    put(p.clone(), NIF_BACKUP_HOVER, true);
+                }
             }
         }
         // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".
