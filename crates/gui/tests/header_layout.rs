@@ -25,6 +25,7 @@ const CONTROLS: [(Role, &str); 5] = [
 ];
 
 const MORE: &str = "More header items";
+const LONG_DESTINATION: &str = r"C:\Users\runneradmin\AppData\Local\Temp\a rather long folder name number 0\a rather long folder name number 1\mods\Landscape textures at full resolution";
 
 fn reachable_controls(h: &mut H, w: f32) {
     let panel = outer(h, "header");
@@ -207,6 +208,9 @@ fn readable_path_keeps_the_drive_and_the_last_folder() {
             r"C:\…\My Mod",
         ),
         (r"C:\export", r"C:\export"),
+        (r"C:\a\b", r"C:\a\b"),
+        (r"C:\é\b", r"C:\é\b"),
+        (r"C:\ab\b", r"C:\…\b"),
         (r"D:\Mods\StoneWork\sdc-out", r"D:\…\sdc-out"),
         ("C:/Users/Modder/mods/My Mod", "C:/…/My Mod"),
         (
@@ -357,7 +361,6 @@ fn assert_header_row(h: &H, w: f32, meshes: bool, project: bool) {
 #[test]
 fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves() {
     let d = tempfile::tempdir().unwrap();
-    let path = r"C:\Users\runneradmin\AppData\Local\Temp\a rather long folder name number 0\a rather long folder name number 1\mods\Landscape textures at full resolution";
     let chip_width = |h: &H| h.get_by_label_contains("Export to: ").rect().width();
     let floor = chip_width(&harness_with_destination(
         d.path(),
@@ -365,7 +368,7 @@ fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves()
         2400.0,
         false,
     ));
-    let mut h = harness_with_destination(d.path(), path, 2400.0, false);
+    let mut h = harness_with_destination(d.path(), LONG_DESTINATION, 2400.0, false);
     let full = chip_width(&h);
     let resize = |h: &mut H, w| {
         h.set_size(egui::vec2(w as f32, 800.0));
@@ -461,6 +464,10 @@ fn harness_with_destination(dir: &std::path::Path, path: &str, w: f32, meshes: b
 /// Find the first whole-pixel viewport width at which the reference header fits.
 fn first_fit(h: &mut H, fits: impl Fn(&H) -> bool) -> f32 {
     let (mut low, mut high) = (640, 1600);
+    h.set_size(egui::vec2(low as f32, 800.0)).run_steps(3);
+    assert!(!fits(h), "header already fits at {low}");
+    h.set_size(egui::vec2(high as f32, 800.0)).run_steps(3);
+    assert!(fits(h), "header still does not fit at {high}");
     while high - low > 1 {
         let mid = (low + high) / 2;
         h.set_size(egui::vec2(mid as f32, 800.0)).run_steps(3);
@@ -540,19 +547,21 @@ fn tools_stays_when_the_full_path_is_narrower_than_the_readable_form() {
 #[test]
 fn the_first_resize_frame_matches_the_settled_header_in_both_directions() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness_with_destination(d.path(), r"C:\Users\Modder\mods\x", 1600.0, false);
-    let w = first_fit(&mut h, tools_on_row);
-    h.set_size(egui::vec2(w, 800.0)).run_steps(3);
-    for (width, tools_visible) in [(w - 1.0, false), (w, true)] {
-        h.set_size(egui::vec2(width, 800.0)).step();
-        let first = (widgets(&h, "header"), painted_chip(&h));
-        h.run_steps(3);
-        assert_eq!(tools_on_row(&h), tools_visible, "at {width}");
-        assert_eq!(
-            first,
-            (widgets(&h, "header"), painted_chip(&h)),
-            "at {width}"
-        );
+    for path in [LONG_DESTINATION, r"C:\Users\Modder\mods\x"] {
+        let mut h = harness_with_destination(d.path(), path, 1600.0, false);
+        let w = first_fit(&mut h, tools_on_row);
+        h.set_size(egui::vec2(w, 800.0)).run_steps(3);
+        for (width, tools_visible) in [(w - 1.0, false), (w, true)] {
+            h.set_size(egui::vec2(width, 800.0)).step();
+            let first = (widgets(&h, "header"), painted_chip(&h));
+            h.run_steps(3);
+            assert_eq!(tools_on_row(&h), tools_visible, "{path} at {width}");
+            assert_eq!(
+                first,
+                (widgets(&h, "header"), painted_chip(&h)),
+                "{path} at {width}"
+            );
+        }
     }
 }
 

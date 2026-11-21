@@ -113,7 +113,7 @@
 - Tangent normal outputs in formats that drop Z start from unit length even with Keep. The texture panel locks **Normal base level** for those outputs and for Advanced Skin detail. To rebuild otherwise matching older outputs, run `sdc convert src --recursive --on-existing if-changed --ev --property coat_normal --property detail_normal`.
 - The header's **Review n files…** opens Review for the whole project. By default, exporting a set, group or selection opens Review for that selection. Press **Export** in Review to write the files.
 - Tick **Export without review next time** to skip Review when this project is ready and has only its regular outputs to write; the header button then reads **Export n files now**. Problems, undecided textures, pending NIF writes or edited PGPatcher JSON still bring you to Review. For a whole-project export, ticking **Also export** also opens Review. Turn the tick off in **Settings…** under **This project**.
-- Review lists the DDS and JSON outputs. **Also updated:** shows the other files the export touches, including project settings, records, borrowed copies and edited NIFs. Extra export folders get one entry each. Hover a path to see why it is listed and whether it depends on what the export writes.
+- Review lists the DDS and JSON outputs. A long JSON path is cut at the panel's edge. Hover it for the whole line. **Also updated:** shows the other files the export touches, including project settings, records, borrowed copies and edited NIFs. A long list is cut in the middle. Extra export folders get one entry each. Hover a path to see why it is listed and whether it depends on what the export writes.
 - Opening a folder with automatic type or alpha picks leaves **Save** off and lets you close without a save prompt. In a new project, **Write project files now** saves those picks straight away. They also go to disk with your next save or export.
 - The status line counts source files, planned textures and sets, for example “57 files → 68 textures (11 packed or generated) · 7 sets”. Export progress and results count the primary outputs together and report each extra export separately.
 - Launch Tessalith without a project to see **Open folder…** and any recent folders, even if you last used Meshes. Run `tessalith.exe <folder>` to open a project directly. Once the folder opens, the status line tells you what to do next.
@@ -129,7 +129,6 @@
 ### Added
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
-- In Review, a JSON line with a long path is cut at the panel's edge. Hover it for the whole line. **Also updated** is cut in the middle again.
 
 ## 3.0.0
 

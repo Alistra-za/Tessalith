@@ -29,6 +29,13 @@ fn sets_text(m: &AppModel) -> String {
     m.sets_doc.as_ref().unwrap().text()
 }
 
+#[test]
+fn toml_has_key_matches_the_assignment_name() {
+    assert!(!toml_has_key("export_folder = 'padding'", "add"));
+    assert!(toml_has_key("add = ['rock.png']", "add"));
+    assert!(toml_has_key("[[sets]]\n  add=['rock.png']", "add"));
+}
+
 /// Whether some set view holds `key`.
 fn in_a_view(m: &AppModel, key: &str) -> bool {
     set_views(m)
