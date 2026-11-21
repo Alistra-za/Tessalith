@@ -7500,6 +7500,32 @@ mod task9 {
     }
 
     #[test]
+    fn a_plain_autosave_matching_a_legacy_record_is_carried_into_the_project() {
+        let (d, mut m) = export_session();
+        let p = project_folder(&d, "p");
+        m.open_edit();
+        gloss(&mut m, 12.5);
+        let mut old = load(&autosave(&d)).unwrap().unwrap();
+        old.id = None;
+        old.export.sha256 = Some("a".repeat(64));
+        old.export.ops_hash = Some("b".repeat(64));
+        assert!(old.export.owner.is_none() && old.pending());
+        let record = nif_doc(&export_root(&d));
+        save(&record, &old).unwrap();
+        let bytes = std::fs::read(&record).unwrap();
+        assert!(!draft(&p).exists());
+
+        m.set_project_root(Some(&p));
+        assert!(
+            draft(&p).is_file(),
+            "the carry must write the project draft"
+        );
+        assert_eq!(doc_values(&draft(&p)), [12.5]);
+        assert!(!autosave(&d).exists());
+        assert_eq!(std::fs::read(record).unwrap(), bytes);
+    }
+
+    #[test]
     fn close_keeps_a_failed_revert_of_a_legacy_draft() {
         let (_d, mut m, p, _) = legacy(false);
         let parent = draft(&p).parent().unwrap().to_owned();
@@ -7608,6 +7634,56 @@ mod task9 {
             .also_updated
             .iter()
             .any(|w| w.path == path && w.marked));
+    }
+
+    #[test]
+    fn quick_export_repairs_its_partial_record_while_review_stays_open() {
+        let (_t, _d, mut h) = review_app();
+        let e = h.state().meshes.edit.as_ref().unwrap();
+        let rec = e.record_path.clone().unwrap();
+        let (owner, ops_hash) = (e.doc.id.clone(), e.doc.ops_hash());
+        let (_, nif, output) = nif_out(&h);
+        let old = with_value(e.doc.clone(), 17.5);
+        save(&rec, &old).unwrap();
+        let original = std::fs::read(&rec).unwrap();
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        let backup = review_row(&h.state().meshes).record_move_aside.unwrap();
+        assert!(!backup.exists());
+        let click = |h: &mut AppH| {
+            right_click_3d(h);
+            h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+                .click();
+            h.run_steps(4);
+            assert!(h.state().model.review.is_some());
+        };
+
+        h.state_mut().meshes.fail_record_write_after_nif_for_test();
+        click(&mut h);
+        assert!(h
+            .state()
+            .model
+            .messages
+            .entries()
+            .any(|e| e.text.contains("simulated final record write failure")));
+        let pre = load(&rec).unwrap().unwrap();
+        assert!(owner.is_some());
+        assert_eq!(pre.export.owner, owner);
+        assert_eq!(pre.ops, old.ops);
+        assert!(pre.export.sha256.is_none());
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(std::fs::read(nif).unwrap(), output);
+
+        click(&mut h);
+        let repaired = load(&rec).unwrap().unwrap();
+        assert_eq!(
+            repaired.export.sha256,
+            Some(sha256_hex(&output)),
+            "the second click must repair the record"
+        );
+        assert_eq!(repaired.export.ops_hash, Some(ops_hash));
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        assert_eq!(moved_aside_from(&rec), [backup]);
     }
 
     #[test]

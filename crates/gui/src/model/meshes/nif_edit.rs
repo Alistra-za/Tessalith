@@ -1621,7 +1621,7 @@ impl NifEdit {
         &mut self,
         overwrite: Option<[u8; 32]>,
         approved: Option<&[PathBuf]>,
-        move_aside: Option<&Path>,
+        reviewed_backups: &mut HashMap<String, PathBuf>,
     ) -> ExportOutcome {
         let Some(record_path) = self.record_path.clone() else {
             return ExportOutcome::Blocked(NO_EXPORT_FOLDER.into());
@@ -1641,6 +1641,7 @@ impl NifEdit {
         if let Some(why) = self.blocked.clone() {
             return ExportOutcome::Blocked(why);
         }
+        let move_aside = reviewed_backups.get(&self.data_path).map(PathBuf::as_path);
         if approved.is_some_and(|files| {
             !files.contains(&self.export_path)
                 || !files.contains(&record_path)
@@ -1740,6 +1741,8 @@ impl NifEdit {
             Ok(fp) => fp,
             Err(e) => return ExportOutcome::Blocked(e),
         };
+        // The pre-record is ours. A retry no longer needs the backup Review listed for its predecessor.
+        reviewed_backups.remove(&self.data_path);
         self.record_fp = Some((record_path.clone(), pre_fp.clone()));
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
             self.recheck_record(true);
@@ -2340,7 +2343,10 @@ impl NifEdit {
             false => edit_doc::load(draft),
         }?;
         let next = match (next, &self.record_path) {
-            (None, Some(record)) => edit_doc::load(record)?.filter(is_legacy_draft),
+            // Only a reopen can fall back to the export record. It cannot supply the project's own draft.
+            (None, Some(record)) if !project || with_plain => {
+                edit_doc::load(record)?.filter(is_legacy_draft)
+            }
             (next, _) => next,
         };
         if same_ops(
@@ -4083,7 +4089,7 @@ impl MeshesModel {
                 continue;
             };
             let before = e.materials();
-            let out = e.write_out(r.foreign, approved, r.record_move_aside.as_deref());
+            let out = e.write_out(r.foreign, approved, &mut self.move_aside_shown);
             let placement = e.placement.clone();
             self.after_export(before, &out);
             match out {
