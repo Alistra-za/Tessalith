@@ -7,7 +7,7 @@ use egui_kittest::Harness;
 use sdc_gui::model::meshes::MeshesModel;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::MeshesSettings;
-use sdc_gui::ui::header::elide_middle;
+use sdc_gui::ui::header::{elide_middle, readable_path};
 use sdc_gui::ui::State;
 use support::*;
 
@@ -195,6 +195,32 @@ fn elide_middle_keeps_the_drive_and_the_tail() {
     assert_eq!(elide_middle(r"C:\a\VeryLongFolderName", 10), "…olderName");
 }
 
+#[test]
+fn readable_path_keeps_the_drive_and_the_last_folder() {
+    for (path, expected) in [
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\mods\Landscape textures at full resolution",
+            r"C:\…\Landscape textures at full resolution",
+        ),
+        (
+            r"C:\Users\Modder\AppData\Local\Temp\mods\My Mod",
+            r"C:\…\My Mod",
+        ),
+        (r"C:\export", r"C:\export"),
+        (r"D:\Mods\StoneWork\sdc-out", r"D:\…\sdc-out"),
+        ("C:/Users/Modder/mods/My Mod", "C:/…/My Mod"),
+        (
+            r"C:\Mods\Landscape textures at full resolution\",
+            r"C:\…\Landscape textures at full resolution",
+        ),
+        (r"C:\", r"C:\"),
+    ] {
+        let readable = readable_path(path);
+        assert_eq!(readable, expected, "{path}");
+        assert_eq!(readable_path(&readable), readable, "{path}");
+    }
+}
+
 /// A4 (K2): one row: every control's rect holds Open's centre line, and they run left to right in the spec's order.
 #[test]
 fn the_header_is_one_row_in_the_spec_order() {
@@ -329,41 +355,136 @@ fn assert_header_row(h: &H, w: f32, meshes: bool, project: bool) {
 }
 
 #[test]
-fn long_destination_keeps_its_width_until_all_optional_controls_move() {
+fn long_destination_is_cut_to_its_last_folder_before_an_optional_control_moves() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.sets_doc.as_mut().unwrap().set_export_folder(
-        r"C:\Mods\Installed texture projects\High resolution landscape overhaul - mountains and snow"
-            .as_ref(),
-    );
-    let mut h = harness(m, 2400.0, false);
-    let normal = h.get_by_label_contains("Export to: ").rect().width();
-    let mut moved_one = false;
-    let mut shortened = false;
-    for w in (1000..=2150).rev().step_by(20) {
+    let path = r"C:\Users\runneradmin\AppData\Local\Temp\a rather long folder name number 0\a rather long folder name number 1\mods\Landscape textures at full resolution";
+    let chip_width = |h: &H| h.get_by_label_contains("Export to: ").rect().width();
+    let floor = chip_width(&harness_with_destination(
+        d.path(),
+        r"C:\…\Landscape textures at full resolution",
+        2400.0,
+        false,
+    ));
+    let mut h = harness_with_destination(d.path(), path, 2400.0, false);
+    let full = chip_width(&h);
+    let resize = |h: &mut H, w| {
         h.set_size(egui::vec2(w as f32, 800.0));
         h.run_steps(3);
-        let width = h.get_by_label_contains("Export to: ").rect().width();
-        let any_visible = h
-            .query_by_role_and_label(Role::ComboBox, "Preset")
-            .is_some()
-            || h.query_by_label("MO2…").is_some()
-            || h.query_by_label("Tools").is_some();
-        if any_visible {
-            assert!(
-                (width - normal).abs() < 0.5,
-                "at {w}: {width} vs full {normal} with an optional control still in the header"
-            );
-            moved_one |= h.query_by_label(MORE).is_some();
+    };
+    let widths = (900..=2400).rev().step_by(20);
+    let mut first_more = None;
+    let mut smallest_with_optional = full;
+    let mut cut_before_move = false;
+    let mut cut_after_all_moved = false;
+    for w in widths.clone() {
+        resize(&mut h, w);
+        let chip = chip_width(&h);
+        let more = h.query_by_label(MORE).is_some();
+        if more {
+            first_more.get_or_insert(w);
         } else {
-            h.get_by_label(MORE);
-            shortened |= width + 1.0 < normal;
+            cut_before_move |= chip < full - 1.0;
+        }
+        if h.query_by_role_and_label(Role::Button, "MO2…").is_some()
+            || h.query_by_role_and_label(Role::ComboBox, "Preset")
+                .is_some()
+        {
+            smallest_with_optional = smallest_with_optional.min(chip);
+        } else if more && h.query_by_role_and_label(Role::Button, "Tools").is_none() {
+            cut_after_all_moved |= chip < floor - 1.0;
         }
     }
+
+    let first_more = first_more.expect("the sweep reaches overflow");
+    let w0 = (first_more + 1..=2400)
+        .find(|&w| {
+            resize(&mut h, w);
+            h.query_by_label(MORE).is_none()
+        })
+        .expect("the wide header fits all controls");
+    let chip = chip_width(&h);
     assert!(
-        moved_one && shortened,
-        "exercise both movement and path shortening"
+        (floor - 0.5..=floor + 12.0).contains(&chip),
+        "at w0 {w0}: chip {chip}, floor {floor}, full {full}"
     );
+    resize(&mut h, w0 - 1);
+    h.get_by_label(MORE);
+    assert!(h.query_by_role_and_label(Role::Button, "Tools").is_none());
+    h.get_by_role_and_label(Role::Button, "MO2…");
+    h.get_by_role_and_label(Role::ComboBox, "Preset");
+    assert!(
+        smallest_with_optional >= floor - 0.5,
+        "chip {smallest_with_optional}, floor {floor}"
+    );
+    assert!(cut_before_move, "the path shortened before overflow");
+    assert!(
+        cut_after_all_moved,
+        "the path shrank below its readable form"
+    );
+
+    for w in widths.chain([1055]) {
+        resize(&mut h, w);
+        let open = h.get_by_label("Open").rect();
+        let chip = h.get_by_label_contains("Export to: ").rect();
+        if w >= 1055 || chip.y_range().contains(open.center().y) {
+            assert_header_row(&h, w as f32, false, true);
+        } else {
+            let save = h.get_by_label("Save").rect();
+            let export = h.get_by_label(&header_export_label(&h)).rect();
+            for r in [chip, save, export] {
+                assert!(
+                    r.top() > open.bottom() && (r.center().y - chip.center().y).abs() < 1.0,
+                    "at {w}: Open {open:?}, chip {chip:?}, Save {save:?}, Export {export:?}"
+                );
+            }
+            assert_no_overlap(&h, "header", w as f32);
+        }
+    }
+}
+
+fn harness_with_destination(dir: &std::path::Path, path: &str, w: f32, meshes: bool) -> H {
+    let mut m = opened(dir);
+    m.sets_doc
+        .as_mut()
+        .unwrap()
+        .set_export_folder(path.as_ref());
+    harness(m, w, meshes)
+}
+
+#[test]
+fn a_long_export_path_keeps_tools_mo2_and_preset_at_1440_and_1600() {
+    let d = tempfile::tempdir().unwrap();
+    let mut path = String::from(r"C:\Users\runneradmin\AppData\Local\Temp\");
+    for i in 0..4 {
+        path.push_str(&format!(r"a rather long folder name number {i}\"));
+    }
+    path.push_str("export");
+    for (w, meshes) in [
+        (1440.0, false),
+        (1600.0, false),
+        (1600.0, true),
+        (1440.0, true),
+        (1055.0, false),
+        (1055.0, true),
+    ] {
+        let h = harness_with_destination(d.path(), &path, w, meshes);
+        if w >= 1600.0 || (w == 1440.0 && !meshes) {
+            for (role, name) in [
+                (Role::Button, "Tools"),
+                (Role::Button, "MO2…"),
+                (Role::ComboBox, "Preset"),
+            ] {
+                assert!(
+                    h.query_by_role_and_label(role, name).is_some(),
+                    "{name} missing at {w} px, meshes {meshes}"
+                );
+            }
+            assert!(h.query_by_label(MORE).is_none());
+        }
+        assert_header_row(&h, w, meshes, true);
+        let chip = h.get_by_label(&format!("Export to: {path}")).rect();
+        assert!(chip.right() <= h.get_by_label("Save").rect().left());
+    }
 }
 
 #[test]
