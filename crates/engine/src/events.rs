@@ -3,6 +3,7 @@ use crate::codes::Code;
 use crate::config::Subtype;
 use crate::config::Target;
 use crate::policy::ResolvedJob;
+use crate::profile::{self, Stage as Timing};
 use crate::validate::ValidationSummary;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -266,7 +267,11 @@ impl Reporter {
         path: Option<&Path>,
         kind: EventKind,
     ) {
-        let _order = self.order.lock().unwrap_or_else(|e| e.into_inner());
+        let _order = {
+            let _span = profile::span(Timing::EventsWait);
+            self.order.lock().unwrap_or_else(|e| e.into_inner())
+        };
+        let _span = profile::span(Timing::Events);
         let ev = EngineEvent {
             schema: EVENT_SCHEMA,
             seq: self.seq.fetch_add(1, Ordering::SeqCst),

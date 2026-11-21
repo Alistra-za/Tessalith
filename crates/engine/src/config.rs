@@ -278,7 +278,7 @@ pub enum PackRecipe {
 }
 
 /// The serde string a unit enum variant serialises as (its id).
-fn serde_id<T: serde::Serialize>(v: T) -> String {
+pub(crate) fn serde_id<T: serde::Serialize>(v: T) -> String {
     serde_json::to_value(v)
         .unwrap()
         .as_str()

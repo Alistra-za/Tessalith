@@ -24,6 +24,7 @@ use crate::pack;
 use crate::pipeline::{process_file, FileError, FileTracker};
 use crate::policy::*;
 use crate::presets::*;
+use crate::profile::{self, Stage as Timing};
 use crate::session::{fill_cache_key, pack_cache_key, AnalysisCache, PackEntry};
 use crate::shader::{MeshAlpha, Shader, ShaderPick};
 use crate::suggest::{is_pbr_set, SuggestContext};
@@ -144,6 +145,7 @@ pub struct BatchRequest {
     pub dry_run: bool,
     /// GUI (DECISIONS AG91): counters the planner updates while it loads and resolves; nothing is emitted or written.
     pub plan_progress: Option<PlanProgress>,
+    pub profile: Option<crate::profile::Recorder>,
     /// GUI (v2 artist checks, check 3, DECISIONS Note CL20): measure each eligible texture's detail ratio during the
     /// run. `Off` for the CLI.
     pub low_detail: LowDetailMode,
@@ -217,6 +219,7 @@ impl BatchRequest {
             mem_budget: 0,
             dry_run: false,
             plan_progress: None,
+            profile: None,
             low_detail: LowDetailMode::Off,
             derive: None,
             skip_root: None,
@@ -294,6 +297,7 @@ impl BatchRequest {
             mem_budget,
             dry_run,
             plan_progress: _,
+            profile: _, // stage timing; not a planning input
             low_detail,
             derive,
             skip_root,
@@ -444,13 +448,21 @@ fn admit_all<T: Sync>(
 ) -> Vec<Option<Result<ResolvedJob, PlanFailure>>> {
     let slots: Vec<Mutex<Option<Result<ResolvedJob, PlanFailure>>>> =
         items.iter().map(|_| Mutex::new(None)).collect();
+    let join = profile::span(Timing::ScopeJoin);
     pool.in_place_scope(|scope| {
+        let _span = profile::span(Timing::Dispatch);
         for (item, slot) in items.iter().zip(&slots) {
             if cancel.is_cancelled() {
                 continue;
             }
-            let est = est(item);
-            budget.acquire(est);
+            let est = {
+                let _span = profile::span(Timing::PlanAdmitEstimate);
+                est(item)
+            };
+            {
+                let _span = profile::span(Timing::PlanAdmitWait);
+                budget.acquire(est);
+            }
             let admitted = Admitted(budget, est);
             let work = &work;
             #[cfg(feature = "test-hooks")]
@@ -475,6 +487,7 @@ fn admit_all<T: Sync>(
             });
         }
     });
+    drop(join);
     slots
         .into_iter()
         .map(|s| s.into_inner().unwrap_or_else(|e| e.into_inner()))
@@ -876,6 +889,33 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             .map_or(0, crate::bake::BakeJob::estimated_bytes)
 }
 
+/// Declared before the batch scope and its root span, so both close before the call ends,
+/// including when planning or conversion returns early.
+struct ProfileCall<'a> {
+    recorder: &'a profile::Recorder,
+    id: u32,
+    limit: u64,
+    peak: u64,
+}
+
+impl<'a> ProfileCall<'a> {
+    fn begin(req: &'a BatchRequest, kind: profile::CallKind) -> Option<Self> {
+        let recorder = req.profile.as_ref()?;
+        Some(Self {
+            recorder,
+            id: recorder.begin_call(kind, 0),
+            limit: 0,
+            peak: 0,
+        })
+    }
+}
+
+impl Drop for ProfileCall<'_> {
+    fn drop(&mut self) {
+        self.recorder.end_call(self.id, self.limit, self.peak);
+    }
+}
+
 /// The admission limit: `--mem-budget`, else half of physical memory (spec §5.9).
 fn budget_limit(req: &BatchRequest) -> u64 {
     if req.mem_budget > 0 {
@@ -886,10 +926,12 @@ fn budget_limit(req: &BatchRequest) -> u64 {
 }
 
 fn thread_pool(jobs: usize) -> Result<rayon::ThreadPool, EngineError> {
+    let _span = profile::span(Timing::PoolBuild);
     rayon::ThreadPoolBuilder::new()
         .num_threads(jobs)
         .thread_name(|i| format!("sdc-worker-{i}"))
         .build()
+        .inspect(|pool| profile::note_pool_threads(pool.current_num_threads()))
         .map_err(|e| EngineError::Fatal(format!("thread pool: {e}")))
 }
 
@@ -1010,6 +1052,7 @@ thread_local! {
 
 /// Hash recorded outputs in parallel, preserving plan order for the final existence check and reporting.
 fn classify_ready_jobs<'a>(
+    run_call: Option<u32>,
     plan: &'a Plan,
     existing: &BTreeMap<String, ManifestEntry>,
     pool: &rayon::ThreadPool,
@@ -1024,6 +1067,12 @@ fn classify_ready_jobs<'a>(
             .into_par_iter()
             .map(|job| {
                 let key = output_key(&req.output_root, &job.output);
+                let _job = req
+                    .profile
+                    .as_ref()
+                    .zip(run_call)
+                    .map(|(r, call)| r.enter_job(call, &key));
+                let _span = profile::span(Timing::Currency);
                 let recorded = existing.get(&key).map(|e| {
                     if req.on_existing == OnExisting::IfChanged
                         && !cancel.is_cancelled()
@@ -1121,10 +1170,11 @@ pub(crate) fn currency(
             }))
         })
     };
-    if !(passed
-        && same_sources()
-        && pack_roles_match(e, job)
-        && sha256_file(&job.input).is_ok_and(|h| h == e.source_sha256))
+    if !(passed && same_sources() && pack_roles_match(e, job) && {
+        let _span = profile::span(Timing::CurrencyHash);
+        sha256_file(&job.input)
+    }
+    .is_ok_and(|h| h == e.source_sha256))
     {
         return Currency::Stale;
     }
@@ -1750,8 +1800,25 @@ impl Engine {
         cancel: &CancelToken,
         cache: &AnalysisCache,
     ) -> Result<(Plan, Prepared, BTreeSet<String>, BTreeSet<String>), EngineError> {
+        let mut timing = ProfileCall::begin(req, profile::CallKind::Plan);
+        let _batch = timing.as_ref().map(|t| t.recorder.enter_batch(t.id));
+        let _span = profile::span(Timing::Plan);
         let p = self.prepare(req, rep, cancel)?;
         let (plan, pbr, f) = self.plan_sets(&p, None, rep, cancel, cache)?;
+        if let Some(t) = &mut timing {
+            t.limit = budget_limit(req);
+            t.peak = plan.peak_admitted_bytes;
+            t.recorder.note_request(
+                req.inputs.first().map(PathBuf::as_path),
+                &req.output_root,
+                req.jobs,
+                &plan.preset_id,
+                match plan.target {
+                    Target::Cs => "cs",
+                    Target::Vanilla => "vanilla",
+                },
+            );
+        }
         Ok((plan, p, pbr, f))
     }
 
@@ -1765,6 +1832,7 @@ impl Engine {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<Prepared, EngineError> {
+        let _span = profile::span(Timing::PlanPrepare);
         let _ = cancel; // nothing here checks it yet
         let Setup {
             registry,
@@ -1784,12 +1852,15 @@ impl Engine {
                 )));
             }
         }
-        let (mut files, unreadable) = discover_reporting(
-            &req.inputs,
-            &req.output_root,
-            req.recursive,
-            req.skip_root.as_deref(),
-        )
+        let (mut files, unreadable) = {
+            let _span = profile::span(Timing::PlanDiscover);
+            discover_reporting(
+                &req.inputs,
+                &req.output_root,
+                req.recursive,
+                req.skip_root.as_deref(),
+            )
+        }
         .map_err(|e| EngineError::Usage(format!("discover: {e}")))?;
         // F3b: `[inputs]` aliases rename files before anything reads their names.
         let read_as_warnings = match (&project_config, project_root(req)) {
@@ -2201,6 +2272,8 @@ impl Engine {
              source: Option<SourceStamp>,
              hints: crate::analyse::AnalyseHints|
              -> Result<(ResolvedJob, crate::analyse::Analysis, SourceInfo), LoadError> {
+                let _input = req.profile.as_ref().map(|r| r.enter_input(&f.path));
+                let _span = profile::span(Timing::PlanFile);
                 let enter = |st: Stage| {
                     stage.set(st);
                     #[cfg(feature = "test-hooks")]
@@ -2215,9 +2288,13 @@ impl Engine {
                         hit
                     }
                     None => {
-                        let (img, info, meta) = load_image_meta(&f.path)?;
+                        let (img, info, meta) = {
+                            let _span = profile::span(Timing::PlanLoad);
+                            load_image_meta(&f.path)?
+                        };
                         cache.count_loads(1);
                         enter(Stage::Analyse);
+                        let _span = profile::span(Timing::PlanAnalyse);
                         let mut a = analyse_with(&img, &info, hints);
                         a.dds_dxgi = meta.dds_dxgi;
                         a.dds_cube = meta.dds_cube;
@@ -2231,6 +2308,7 @@ impl Engine {
                                 cache.make_thumb(&img, &info),
                             );
                         }
+                        drop(_span);
                         drop(img);
                         drop(admitted);
                         (a, info)
@@ -2246,7 +2324,10 @@ impl Engine {
                     info: &info,
                 };
                 let gras_diffuse = gras.contains(&crate::shader::gras_key(&f.game_path, &f.output));
-                let mut job = resolve_file_with(&ctx, &facts, gras_diffuse);
+                let mut job = {
+                    let _span = profile::span(Timing::PlanResolve);
+                    resolve_file_with(&ctx, &facts, gras_diffuse)
+                };
                 job.provenance.insert("target".into(), target_src.clone());
                 job.source = source;
                 Ok((job, a, info))
@@ -2261,7 +2342,9 @@ impl Engine {
         if let Some(p) = &progress {
             p.total.store(work.len(), Ordering::Relaxed);
         }
+        let join = profile::span(Timing::ScopeJoin);
         pool.in_place_scope(|scope| {
+            let _span = profile::span(Timing::Dispatch);
             for (item, slot) in work.iter().zip(&slots) {
                 #[cfg(feature = "test-hooks")]
                 cancel_on_load_for_test(&item.1.path, cancel);
@@ -2275,8 +2358,16 @@ impl Engine {
                 // Taken before the read, so a change made while it is loaded is seen as a change too.
                 let source = SourceStamp::of(path);
                 let cached = source.is_some_and(|s| cache.file(path, s, hints).is_some());
-                let est = if cached { 0 } else { estimated_bytes(path) };
-                budget.acquire(est);
+                let est = if cached {
+                    0
+                } else {
+                    let _span = profile::span(Timing::PlanAdmitEstimate);
+                    estimated_bytes(path)
+                };
+                {
+                    let _span = profile::span(Timing::PlanAdmitWait);
+                    budget.acquire(est);
+                }
                 let admitted = Admitted(&budget, est);
                 let resolve_one = &resolve_one;
                 let progress = &progress;
@@ -2302,6 +2393,7 @@ impl Engine {
                 });
             }
         });
+        drop(join);
 
         // Pass-1 jobs, with the work index, analysis and source info each one needs to be re-resolved (6c).
         let mut pass1_jobs: Vec<ResolvedJob> = vec![];
@@ -2631,6 +2723,11 @@ impl Engine {
             },
             |c| &c.virtual_input.output,
             |c, admitted, stage| {
+                let _input = req
+                    .profile
+                    .as_ref()
+                    .map(|r| r.enter_input(&c.job.sources[0].path));
+                let _span = profile::span(Timing::PlanPack);
                 // The key includes every source's stamp, so an edited source misses the cache. A recipe
                 // without a key (a source with no stamp) is assembled every time and never stored.
                 let key = pack_cache_key(&c.job);
@@ -2789,6 +2886,8 @@ impl Engine {
             |(c, ..)| estimated_bytes(&c.target) + estimated_bytes(&c.fill.source.path),
             |(_, ji, ..)| jobs[*ji].output.as_path(),
             |&(c, ji, set, f), admitted, stage| {
+                let _input = req.profile.as_ref().map(|r| r.enter_input(&c.target));
+                let _span = profile::span(Timing::PlanFill);
                 let old = &jobs[ji];
                 // Fuzz-1a: against the set 6c resolved this member with.
                 let read = member_set(set, f, &f_sets);
@@ -2933,6 +3032,11 @@ impl Engine {
                 },
                 |c| &c.input.output,
                 |c, admitted, stage| {
+                    let _input = req
+                        .profile
+                        .as_ref()
+                        .map(|r| r.enter_input(&c.job.sources[0].path));
+                    let _span = profile::span(Timing::PlanDerive);
                     let (asm, mean_rough) = crate::derive::assemble::assemble_derived_rough(&c.job)
                         .map_err(PlanFailure::of_pack)?;
                     cache.count_loads(c.job.sources.len() as u64);
@@ -3374,7 +3478,7 @@ impl Engine {
             EngineError::Fatal(format!("manifest {}: {e}", manifest.path().display()))
         })?;
         let pool = thread_pool(plan.request.jobs)?;
-        let verdicts = classify_ready_jobs(plan, &existing, &pool, cancel)
+        let verdicts = classify_ready_jobs(None, plan, &existing, &pool, cancel)
             .into_iter()
             .take_while(|_| !cancel.is_cancelled())
             .map(|(job, key, recorded)| {
@@ -3401,6 +3505,10 @@ impl Engine {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
+        let mut timing = ProfileCall::begin(&plan.request, profile::CallKind::Run);
+        let _batch = timing.as_ref().map(|t| t.recorder.enter_batch(t.id));
+        let _span = profile::span(Timing::Run);
+        let run_call = timing.as_ref().map(|t| t.id);
         // Note HF9: a partial or excluding run covers the listed sets only, from its first event and count; an entry
         // with no set (an input duplicate) is a project-wide fact and stays.
         if let Some(only) = &plan.request.write_only {
@@ -3660,7 +3768,10 @@ impl Engine {
         let mut older_by_format: BTreeMap<Format, u32> = BTreeMap::new();
         let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
         let mut todo = vec![];
-        for (job, job_key, recorded) in classify_ready_jobs(&plan, &existing, &pool, cancel) {
+        for (job, job_key, recorded) in {
+            let _span = profile::span(Timing::RunClassify);
+            classify_ready_jobs(run_call, &plan, &existing, &pool, cancel)
+        } {
             if cancel.is_cancelled() {
                 summary.cancelled.push(job.input.clone());
                 continue;
@@ -3761,14 +3872,22 @@ impl Engine {
         // Admission runs on the calling thread (outside the pool) and only spawns admitted files, so no pool thread
         // ever blocks on the budget. A pool thread blocked in `acquire` while its nested band-parallel encode stole
         // another file's task could otherwise hold budget forever (deadlock).
+        let join = profile::span(Timing::ScopeJoin);
         pool.in_place_scope(|scope| {
+            let _span = profile::span(Timing::Dispatch);
             for &(job, ref preset, replace_existing) in &todo {
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
                     continue;
                 }
-                let est = job_bytes(job);
-                budget.acquire(est);
+                let est = {
+                    let _span = profile::span(Timing::RunAdmitEstimate);
+                    job_bytes(job)
+                };
+                {
+                    let _span = profile::span(Timing::RunAdmitWait);
+                    budget.acquire(est);
+                }
                 let admitted = Admitted(&budget, est);
                 if cancel.is_cancelled() {
                     drop(admitted);
@@ -3783,6 +3902,7 @@ impl Engine {
                         return;
                     }
                     run_one(
+                        run_call,
                         job,
                         req,
                         preset,
@@ -3795,6 +3915,11 @@ impl Engine {
                 });
             }
         });
+        drop(join);
+        if let Some(t) = &mut timing {
+            t.limit = budget.limit;
+            t.peak = budget.peak.load(Ordering::Relaxed);
+        }
         let mut summary = state.into_inner().unwrap_or_else(|e| e.into_inner());
         summary.cancelled.sort();
         for w in kept_warnings(&summary, &req.ev, &older_by_format, &older_by_subtype) {
@@ -3895,6 +4020,7 @@ fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
 /// left on disk without a record (review I1). A panic is reported at the last stage the file entered (review M10).
 #[allow(clippy::too_many_arguments)]
 fn run_one(
+    run_call: Option<u32>,
     job: &ResolvedJob,
     req: &BatchRequest,
     preset: &PresetRef,
@@ -3906,10 +4032,16 @@ fn run_one(
 ) {
     let (set, path) = (Some(job.set_key.as_str()), Some(job.input.as_path()));
     let key = output_key(&req.output_root, &job.output);
+    let _job = req
+        .profile
+        .as_ref()
+        .zip(run_call)
+        .map(|(r, call)| r.enter_job(call, &key));
     let emit = |kind: EventKind| rep.emit_job(Some(&key), set, path, kind);
     emit(EventKind::FileStarted);
     let tracker = FileTracker::default();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _span = profile::span(Timing::File);
         process_file(
             job,
             req,

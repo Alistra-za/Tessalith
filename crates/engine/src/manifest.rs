@@ -1,6 +1,7 @@
 //! Batch manifest (spec §3.6): one JSON Lines file per output root, last record per output wins.
 use crate::config::{NormalMips, Profile, RawMap, Subtype};
 use crate::presets::{PresetFile, PresetRegistry, Provenance};
+use crate::profile::{self, Stage as Timing};
 use crate::validate::ValidationSummary;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -467,7 +468,10 @@ impl Manifest {
     pub fn append(&self, r: &ManifestRecord) -> io::Result<()> {
         let mut line = serde_json::to_vec(r).map_err(io::Error::other)?;
         line.push(b'\n');
-        let _g = APPEND_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = {
+            let _span = profile::span(Timing::ManifestWait);
+            APPEND_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        };
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }

@@ -24,6 +24,7 @@ use crate::mips::build_chain_with;
 use crate::ops::{preprocess_with, Domain, SourceTransfer};
 use crate::pack::assemble::assemble;
 use crate::policy::{ResolvedJob, SourceStamp};
+use crate::profile::{self, Stage as Timing};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
 use crate::validate::{validate, ValidationInput, ValidationReport};
@@ -273,12 +274,21 @@ fn prepare_then<T>(
         }
     };
     enter(Stage::Load);
-    check_stamps(job)?;
-    let extra = after_stamps()?;
+    {
+        let _span = profile::span(Timing::StampCheck);
+        check_stamps(job)?
+    };
+    let extra = {
+        let _span = profile::span(Timing::HashSource);
+        after_stamps()?
+    };
     // DECISIONS DS10: a cube job builds its faces and mips in direction space.
     if let Some(cj) = &job.cube {
         return Ok((
-            crate::cube::run::prepare(job, cj, keep, cancel, tracker)?,
+            {
+                let _span = profile::span(Timing::CubePrepare);
+                crate::cube::run::prepare(job, cj, keep, cancel, tracker)?
+            },
             extra,
         ));
     }
@@ -286,27 +296,39 @@ fn prepare_then<T>(
     // so the two images are never held together.
     let lengths = match &job.bake {
         // `load_image`'s errors already name the `_n`.
-        Some(b) => Some(b.load_lengths().map_err(fail(Stage::Load))?),
+        Some(b) => Some(
+            {
+                let _span = profile::span(Timing::BakeLoad);
+                b.load_lengths()
+            }
+            .map_err(fail(Stage::Load))?,
+        ),
         None => None,
     };
     stop()?;
     let (mut img, mut info) = match (&job.pack, &job.derive) {
         (Some(pk), _) => {
             // The gray source fixed at plan time (Note M6), not `p.channels.grayscale_source` of the final profile.
+            let _span = profile::span(Timing::PackAssemble);
             let asm = assemble(pk, pk.gray).map_err(|e| fail(Stage::Load)(e.to_string()))?;
             (asm.image, asm.info)
         }
         // Note CN11: the recipe's image, encoded as any other.
         (None, Some(dj)) => {
+            let _span = profile::span(Timing::DeriveAssemble);
             let asm = crate::derive::assemble::assemble_derived(dj)
                 .map_err(|e| fail(Stage::Load)(e.to_string()))?;
             (asm.image, asm.info)
         }
-        (None, None) => load_image_as(&job.input, p.alpha.exr_straight)
-            .map_err(|e| fail(Stage::Load)(e.to_string()))?,
+        (None, None) => {
+            let _span = profile::span(Timing::Decode);
+            load_image_as(&job.input, p.alpha.exr_straight)
+        }
+        .map_err(|e| fail(Stage::Load)(e.to_string()))?,
     };
     // Note DY: the helper's channel becomes the alpha, as the plan analysed it (Ruling 11: a cube returned above).
     if let Some(f) = &job.fill {
+        let _span = profile::span(Timing::Fill);
         crate::helper::apply_fill(&mut img, &mut info, f).map_err(fail(Stage::Load))?;
     }
     let transfer = SourceTransfer::of(&info);
@@ -338,9 +360,11 @@ fn prepare_then<T>(
     // Complex grass builds each half's chain on its own (design §3.4); the stacked chain comes with its Work.
     let grass = p.subtype == Subtype::ComplexGrass;
     let (mut work, grass_chain) = if grass {
+        let _span = profile::span(Timing::Preprocess);
         let (w, c) = crate::grass::build(img, p, transfer).map_err(fail(Stage::Preprocess))?;
         (w, Some(c))
     } else {
+        let _span = profile::span(Timing::Preprocess);
         (preprocess_with(img, p, transfer), None)
     };
     stop()?;
@@ -348,7 +372,10 @@ fn prepare_then<T>(
     enter(Stage::Mipmaps);
     let mut chain = match grass_chain {
         Some(c) => c,
-        None => build_chain_with(&work, p, bake.as_ref()),
+        None => {
+            let _span = profile::span(Timing::Mips);
+            build_chain_with(&work, p, bake.as_ref())
+        }
     };
     drop(bake);
     // Audit 21: mip 0 is in `chain` now; nothing below reads `work.img` (`to_encoder_input` reads only
@@ -361,12 +388,16 @@ fn prepare_then<T>(
     let base_coverage = if grass {
         None
     } else {
+        let _span = profile::span(Timing::Coverage);
         apply_coverage(&mut chain, p, alpha_present, work.source_coverage)
     };
     // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the power-of-two size.
     let detail_ratio = (detail
         && crate::checks::low_detail_eligible(p, (chain[0].width, chain[0].height)))
-    .then(|| crate::checks::detail_ratio(&chain))
+    .then(|| {
+        let _span = profile::span(Timing::DetailCheck);
+        crate::checks::detail_ratio(&chain)
+    })
     .flatten();
     let dims: Vec<(u32, u32)> = chain.iter().map(|l| (l.width, l.height)).collect();
     let first_level = match keep {
@@ -382,10 +413,13 @@ fn prepare_then<T>(
     // Quantise clamps mip 0 (Task 31). These exact levels are encoded and handed to Validate (Task 35).
     let inputs: Vec<EncoderInput> = match keep {
         Keep::SourceOnly { .. } => vec![],
-        _ => chain[first_level..]
-            .iter()
-            .map(|l| to_encoder_input(l, &work, p))
-            .collect(),
+        _ => {
+            let _span = profile::span(Timing::Quantize);
+            chain[first_level..]
+                .iter()
+                .map(|l| to_encoder_input(l, &work, p))
+                .collect()
+        }
     };
     let chain = match keep {
         Keep::Encode => {
@@ -549,7 +583,10 @@ pub fn process_file(
     let (width, height) = prep.dims[0];
 
     enter(Stage::Compress);
-    let levels = encode_levels(&prep, p, cancel, rep, &key, set, path)?;
+    let levels = {
+        let _span = profile::span(Timing::Encode);
+        encode_levels(&prep, p, cancel, rep, &key, set, path)?
+    };
     // Mips per face: the header's count.
     let total = (prep.inputs.len() / prep.faces) as u32;
 
@@ -562,10 +599,13 @@ pub fn process_file(
         srgb,
         header: resolve_header(p.format, srgb, p.header),
     };
-    let bytes = if prep.faces == 6 {
-        dds_bytes_cube(&desc, &levels)
-    } else {
-        dds_bytes(&desc, &levels)
+    let bytes = {
+        let _span = profile::span(Timing::DdsAssemble);
+        if prep.faces == 6 {
+            dds_bytes_cube(&desc, &levels)
+        } else {
+            dds_bytes(&desc, &levels)
+        }
     }
     .map_err(|e| fail(Stage::Write)(e.to_string()))?;
     drop(levels);
@@ -574,14 +614,17 @@ pub fn process_file(
     enter(Stage::Validate);
     #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
     // only the test hook mutates the report
-    let mut report = validate(&ValidationInput {
-        bytes: &bytes,
-        profile: p,
-        encoder_input: Some(&prep.inputs),
-        base_coverage: prep.base_coverage,
-        source_peak: prep.source_peak,
-        expected_levels: Some(total),
-    });
+    let mut report = {
+        let _span = profile::span(Timing::Validate);
+        validate(&ValidationInput {
+            bytes: &bytes,
+            profile: p,
+            encoder_input: Some(&prep.inputs),
+            base_coverage: prep.base_coverage,
+            source_peak: prep.source_peak,
+            expected_levels: Some(total),
+        })
+    };
     // Test hook (Note DM, `test-hooks` only): record this output's encode-input hash for the encode-version guard.
     #[cfg(feature = "test-hooks")]
     if let Some(dir) = std::env::var_os("SDC_TEST_ENCODE_INPUT_DIR") {
@@ -591,48 +634,67 @@ pub fn process_file(
         let file = Path::new(&dir).join(format!("{}.json", key.replace('/', "~")));
         std::fs::write(file, json.to_string()).expect("encode input hook");
     }
+    profile::note_job(|| profile::JobNote {
+        input: job.input.clone(),
+        subtype: p.subtype.id(),
+        format: p.format.id(),
+        alpha_policy: crate::config::serde_id(p.alpha.policy),
+        packed: job.pack.is_some(),
+        baked: job.bake.is_some(),
+        width,
+        height,
+        levels: total,
+    });
     drop(prep);
     #[cfg(feature = "test-hooks")]
     force_validation_failure_for_test(job, &mut report);
     enter(Stage::Write);
-    let mut record = ManifestRecord {
-        schema: MANIFEST_SCHEMA,
-        ts: now_rfc3339(),
-        engine_version: ENGINE_VERSION.into(),
-        encode_version: Some(crate::manifest::encode_version(p.subtype).into()),
-        engine_commit: engine_commit().into(),
-        encoders: EncoderVersions::current(),
-        isa: dispatched_isa().into(),
-        preset: preset.clone(),
-        profile: p.clone(),
-        profile_sha256: profile_sha256(p).map_err(|e| fail(Stage::Write)(e.to_string()))?,
-        provenance: job.provenance.clone(),
-        source: job.input.to_string_lossy().replace('\\', "/"),
-        source_sha256,
-        sources,
-        output: output_key(&req.output_root, &job.output),
-        validation: report.summary.clone(),
-        bc1_model: Some(BC1_ENCODE_ID.into()),
-        shader: job.shader.clone(),
-        output_stamp: None,
-        copied_from: None,
+    let mut record = {
+        let _span = profile::span(Timing::ManifestRecord);
+        ManifestRecord {
+            schema: MANIFEST_SCHEMA,
+            ts: now_rfc3339(),
+            engine_version: ENGINE_VERSION.into(),
+            encode_version: Some(crate::manifest::encode_version(p.subtype).into()),
+            engine_commit: engine_commit().into(),
+            encoders: EncoderVersions::current(),
+            isa: dispatched_isa().into(),
+            preset: preset.clone(),
+            profile: p.clone(),
+            profile_sha256: profile_sha256(p).map_err(|e| fail(Stage::Write)(e.to_string()))?,
+            provenance: job.provenance.clone(),
+            source: job.input.to_string_lossy().replace('\\', "/"),
+            source_sha256,
+            sources,
+            output: output_key(&req.output_root, &job.output),
+            validation: report.summary.clone(),
+            bc1_model: Some(BC1_ENCODE_ID.into()),
+            shader: job.shader.clone(),
+            output_stamp: None,
+            copied_from: None,
+        }
     };
     stop()?;
 
     let write_error = |e: io::Error| fail(Stage::Write)(e.to_string());
-    if replace_existing {
-        write_atomic(&job.output, &bytes).map_err(write_error)?;
-    } else if !write_new_dds(&job.output, &bytes).map_err(write_error)? {
-        return Ok(None);
+    {
+        let _span = profile::span(Timing::Write);
+        if replace_existing {
+            write_atomic(&job.output, &bytes).map_err(write_error)?;
+        } else if !write_new_dds(&job.output, &bytes).map_err(write_error)? {
+            return Ok(None);
+        }
     }
     tracker.written.set(true);
     drop(bytes);
     // Note Y1: taken after the rename, so `if-changed` notices a replaced output. Any failure from here on removes
     // the output (`run_one`, `tracker.written`).
     record.output_stamp = SourceStamp::of(&job.output);
-    manifest
-        .append(&record)
-        .map_err(|e| fail(Stage::Write)(format!("manifest {}: {e}", manifest.path().display())))?;
+    {
+        let _span = profile::span(Timing::ManifestAppend);
+        manifest.append(&record)
+    }
+    .map_err(|e| fail(Stage::Write)(format!("manifest {}: {e}", manifest.path().display())))?;
     // `Warn`: listed with the file's warnings only; the record and its validation summary do not carry it.
     report.warnings.extend(low_detail);
     Ok(Some(FileOutcome {

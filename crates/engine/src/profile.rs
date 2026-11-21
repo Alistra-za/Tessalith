@@ -620,6 +620,19 @@ pub fn span(stage: Stage) -> Span {
     ctx.map_or(Span(None, PhantomData), |ctx| ctx.span(stage, 0))
 }
 
+/// The size Rayon actually built, including its environment overrides for an automatic pool.
+pub(crate) fn note_pool_threads(threads: usize) {
+    LOCAL.with_borrow(|local| {
+        if let Some(ctx) = local.stack.last() {
+            let mut data = ctx.rec.0.data.lock().unwrap();
+            // enter_batch numbers batch scopes down from u32::MAX.
+            if let Some(call) = data.calls.get_mut((u32::MAX - ctx.id) as usize) {
+                call.pool_threads = threads;
+            }
+        }
+    });
+}
+
 pub fn note_job(make: impl FnOnce() -> JobNote) {
     if let Some(ctx) = LOCAL.with_borrow(|local| local.stack.last().filter(|ctx| ctx.job).cloned())
     {

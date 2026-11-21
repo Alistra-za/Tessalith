@@ -7,6 +7,7 @@
 use crate::config::*;
 use crate::dilate::dilate_under_zero_alpha;
 use crate::image::{Rgba32F, SourceInfo};
+use crate::profile::{self, Stage as Timing};
 
 /// What the float values in a [`Work`] image mean; later stages key their filtering and quantising on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,12 +197,14 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
         }
     }
     if alpha_present && p.alpha_weighted_mips() {
+        let _span = profile::span(Timing::Dilate);
         dilate_under_zero_alpha(&mut img); // (4)
     }
     if p.color.content == ColorContent::Srgb
         && transfer == SourceTransfer::Stored
         && matches!(domain, Domain::LinearLight | Domain::Hdr)
     {
+        let _span = profile::span(Timing::SrgbDecode);
         for px in &mut img.px {
             for c in &mut px[..3] {
                 *c = srgb_to_linear(*c); // (5) RGB only
@@ -229,6 +232,7 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
         nonfinite_samples,
         source_coverage,
     };
+    let _span = profile::span(Timing::Resize);
     crate::resize::resize_work(&mut work, p); // (6)
     work
 }

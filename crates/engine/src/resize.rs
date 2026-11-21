@@ -9,6 +9,7 @@ use crate::config::{MipFilter, MipKeyword, MipLevels, Profile, ResizeMode, Subty
 use crate::image::Rgba32F;
 use crate::mips;
 use crate::ops::Work;
+use crate::profile::{self, Stage as Timing};
 use rayon::prelude::*;
 
 pub use texcore::image::pot_dims;
@@ -141,22 +142,45 @@ fn lerp_axis(img: &Rgba32F, n: u32, along_x: bool) -> Rgba32F {
         .collect();
     let (ow, oh) = if along_x { (n, h) } else { (w, n) };
     let mut out = Rgba32F::new(ow, oh, [0.0; 4]);
-    out.px
-        .par_chunks_mut(ow as usize)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let y = y as u32;
-            for (x, o) in (0..ow).zip(row) {
-                let (a, b, t) = if along_x {
-                    let (i0, i1, t) = taps[x as usize];
-                    (img.at(i0, y), img.at(i1, y), t)
-                } else {
-                    let (i0, i1, t) = taps[y as usize];
-                    (img.at(x, i0), img.at(x, i1), t)
-                };
-                *o = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
-            }
-        });
+    match profile::capture() {
+        None => out
+            .px
+            .par_chunks_mut(ow as usize)
+            .enumerate()
+            .for_each(|(y, row)| {
+                let y = y as u32;
+                for (x, o) in (0..ow).zip(row) {
+                    let (a, b, t) = if along_x {
+                        let (i0, i1, t) = taps[x as usize];
+                        (img.at(i0, y), img.at(i1, y), t)
+                    } else {
+                        let (i0, i1, t) = taps[y as usize];
+                        (img.at(x, i0), img.at(x, i1), t)
+                    };
+                    *o = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
+                }
+            }),
+        Some(cap) => {
+            let _span = profile::span(Timing::RowJoin);
+            out.px
+                .par_chunks_mut(ow as usize)
+                .enumerate()
+                .for_each(|(y, row)| {
+                    let _row = cap.span(Timing::ResizeRows);
+                    let y = y as u32;
+                    for (x, o) in (0..ow).zip(row) {
+                        let (a, b, t) = if along_x {
+                            let (i0, i1, t) = taps[x as usize];
+                            (img.at(i0, y), img.at(i1, y), t)
+                        } else {
+                            let (i0, i1, t) = taps[y as usize];
+                            (img.at(x, i0), img.at(x, i1), t)
+                        };
+                        *o = std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t);
+                    }
+                });
+        }
+    }
     out
 }
 

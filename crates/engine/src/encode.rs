@@ -4,6 +4,7 @@
 //! texels, so the bytes do not depend on the rayon thread count or on band scheduling.
 use crate::config::*;
 use crate::grass::{unit_err, CS_GRASS_THRESHOLD, GRASS_GUARD_MARGIN};
+use crate::profile::{self, Stage as Timing};
 use crate::quantize::EncoderInput;
 // BC1, BC3, BC4 and BC5 blocks come from `bcenc`, the Rust port of rgbcx, byte-equal to it (Note HY7). Its calls
 // below are written `bcenc::..`: the `encoders_sys` glob still holds rgbcx's functions of the same names.
@@ -307,7 +308,10 @@ fn encode_level_with(
         return if cancelled() {
             Err(Cancelled)
         } else {
-            Ok(pack_uncompressed(input, p.format))
+            Ok({
+                let _span = profile::span(Timing::EncodePack);
+                pack_uncompressed(input, p.format)
+            })
         };
     }
     // Set when any band is skipped, so its zero-filled output can never be returned, whatever the
@@ -322,19 +326,36 @@ fn encode_level_with(
     };
     let out = match input {
         EncoderInput::Ldr(px) => {
-            let blocks = gather_blocks(px, w, h);
+            let blocks = {
+                let _span = profile::span(Timing::EncodeGather);
+                gather_blocks(px, w, h)
+            };
             let (bw, bs) = (
                 w.div_ceil(4) as usize,
                 p.format.block_bytes().expect("block format"),
             );
             let mut out = vec![0u8; blocks.len() / BLOCK_TEXELS * bs];
-            out.par_chunks_mut(bw * bs)
-                .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
-                .for_each(|(o, b)| {
-                    if go() {
-                        encode_band(b, o, p);
-                    }
-                });
+            match profile::capture() {
+                None => out
+                    .par_chunks_mut(bw * bs)
+                    .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
+                    .for_each(|(o, b)| {
+                        if go() {
+                            encode_band(b, o, p);
+                        }
+                    }),
+                Some(cap) => {
+                    let _span = profile::span(Timing::RowJoin);
+                    out.par_chunks_mut(bw * bs)
+                        .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
+                        .for_each(|(o, b)| {
+                            if go() {
+                                let _row = cap.span(Timing::EncodeBand);
+                                encode_band(b, o, p);
+                            }
+                        });
+                }
+            }
             if p.subtype == Subtype::ComplexGrass
                 && p.format == Format::Bc7
                 && !skipped.load(Ordering::Relaxed)
@@ -347,13 +368,27 @@ fn encode_level_with(
             let (padded, pw, ph) = pad_hdr(px, w, h);
             let level = bc6h_level(p.encoder.effort);
             let mut out = vec![0u8; (pw / 4 * (ph / 4) * 16) as usize];
-            out.par_chunks_mut((pw / 4 * 16) as usize)
-                .zip(padded.par_chunks((pw * 4) as usize))
-                .for_each(|(o, rows)| {
-                    if go() {
-                        bc6h_compress_rows(rows, pw, 4, o, level);
-                    }
-                });
+            match profile::capture() {
+                None => out
+                    .par_chunks_mut((pw / 4 * 16) as usize)
+                    .zip(padded.par_chunks((pw * 4) as usize))
+                    .for_each(|(o, rows)| {
+                        if go() {
+                            bc6h_compress_rows(rows, pw, 4, o, level);
+                        }
+                    }),
+                Some(cap) => {
+                    let _span = profile::span(Timing::RowJoin);
+                    out.par_chunks_mut((pw / 4 * 16) as usize)
+                        .zip(padded.par_chunks((pw * 4) as usize))
+                        .for_each(|(o, rows)| {
+                            if go() {
+                                let _row = cap.span(Timing::EncodeBand);
+                                bc6h_compress_rows(rows, pw, 4, o, level);
+                            }
+                        });
+                }
+            }
             out
         }
     };
