@@ -123,7 +123,7 @@ To check which normals can follow a shader, Tessalith reads the recorded types, 
 
 - Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
 - Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->
-- Your own type or alpha changes, including Undo, [need a save](GUI-Main-Window.md#header). <!-- D:JY6 -->
+- Your own type or alpha changes, including Undo, [need a save](GUI-Main-Window.md#header).
 - Saving presets can give a recorded normal a different type for that pass. A normal can follow its set into PBR with suggestion acceptance off. Its Info row omits confidence. If ownership can't be recorded in `sdc-project.toml`, the suggested type stays. <!-- D:JS5 -->
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
 

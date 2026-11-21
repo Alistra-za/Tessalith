@@ -45,7 +45,7 @@ Read `57 files → 68 textures (11 packed or generated) · 7 sets` as files foun
 
 ## Settings tab
 
-**Settings…** opens in the current view, even with no folder open. In **Meshes**, docked Settings, Presets and the JSON editor cover the mesh list. **Back to meshes**, **Close** or **Pop out** reveals it again. While a tool covers Meshes, Undo acts on the tool. <!-- D:JY15 --> The top section belongs to the open folder; the lower one applies to every project. <!-- D:JI1 -->
+**Settings…** opens in the current view, even with no folder open. In **Meshes**, docked Settings, Presets and the JSON editor cover the mesh list. **Back to meshes**, **Close** or **Pop out** reveals it again. <!-- D:JY15 --> See [which edit Undo reverses over Meshes](GUI-NIF-Edit.md#pending-edits-undo-and-source-changes). The top section belongs to the open folder. The lower one applies to every project. <!-- D:JI1 -->
 
 ![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
 

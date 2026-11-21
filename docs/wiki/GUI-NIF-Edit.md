@@ -40,7 +40,7 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 **Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. A row in red did not apply, with the reason.
 
-**Undo.** With the NIF editor visible, **Undo NIF edit** and **Redo NIF edit** act on that NIF. Hover either for the step's full name. With a docked tool covering Meshes, the header, command palette and **Ctrl+Z** / **Ctrl+Y** act on the visible tool. <!-- D:JY13,JY15 -->
+**Undo.** With the NIF editor visible, **Undo NIF edit** and **Redo NIF edit** act on that NIF. Hover either for the step's full name. When a docked tool covers Meshes, the header, command palette and **Ctrl+Z** / **Ctrl+Y** use the shared project history. If your last project edit changed a texture, **Undo** in Settings reverses that texture edit. <!-- D:JY13,JY15 -->
 
 **Source changed.** If the source NIF changes on disk (a mod update), the edits are re-applied by name and role, not by position. The panel says "Source changed: N applied, M conflicts". A conflicting edit has **Take source** (drop your edit) and **Keep mine** (keep it on top of the new source).
 

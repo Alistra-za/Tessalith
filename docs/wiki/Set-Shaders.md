@@ -65,7 +65,8 @@ For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is co
 
 ### Turn it on
 
-- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, **Options** in Review, or a set's [Also export tab](GUI-Set-Editor.md#also-export-tab). While a tick is on, Export always opens Review.
+- Open your `cs` project. Under **Export to ▾**, tick **Also export as Vanilla** or **Also export as Complex material**, or both. You can also set these in whole-project Review under **Options** or in a set's [Also export tab](GUI-Set-Editor.md#also-export-tab).
+- Either tick opens Review for a whole-project export. A [set or group export](GUI-Review-and-Export.md#exporting-part-of-the-project) ignores both ticks and can start immediately if the selection is clean and **Export without review** is on.
 - **Saved as** `[export] also` in the project `sdc.toml`.
 - **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
