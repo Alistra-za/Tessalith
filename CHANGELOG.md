@@ -128,7 +128,7 @@
 
 ### Added
 
-- **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
+- **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
 
 ## 3.0.0
 

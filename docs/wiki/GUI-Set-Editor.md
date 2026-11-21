@@ -25,17 +25,17 @@ Click a reason to go to its fix:
 
 ## Output files
 
-In 2D, **Output files** lists this set’s planned DDS files, including slotless files and those displaced by a share or link. Each line uses the row title or filename. Hover for the full path. Paths outside the export folder always show in full. The closed header counts files on disk (“2 of 3 on disk”). Each has **Show in Explorer**. <!-- D:JR3 -->
+In 2D, **Output files** lists DDS files from the set’s slots and members, including slotless files and files displaced by a share or link. Labels use the row title or filename. Paths outside the export folder are absolute. Hover for the full path. The closed header counts files on disk (“2 of 3 on disk”). Those files have **Show in Explorer**. <!-- D:JR3 -->
 
 ## Slot rows
 
 Rows follow the shader’s PGPatcher slots in order (up to 8). An unusable filled slot stays amber. Hover for the reason. Set the cubemap with a slot command.
 
-The headings read “Slot”, “File” and, when a row has a format dropdown, “Format”. The Diffuse alpha dropdown adds “Alpha”. Hover a shortened format to read it in full. <!-- D:JR4 -->
+If any row has a format dropdown, the headings read **Slot**, **File** and **Format**. Diffuse’s alpha dropdown adds **Alpha**. Hover for the full format. <!-- D:JR4 -->
 
 Borrowing **Normal** makes [your roughness bake use the lender’s highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts. The slot can show another file. A lender can supply its own normal while displaying a borrowed one.
 
-When a PGPatcher entry or skin material uses a borrowed slot, **Problems** warns if none of those entries or materials uses your set’s own DDS. Export still writes your DDS. The row names the lender and, when known, each shared pack input’s owning set. <!-- D:LB -->
+When a PGPatcher entry or skin material uses a borrowed slot, **Problems** warns if no entry or material uses your own DDS. Export still writes it, and the warning can name a pack missing from **Output files**. The row names the lender and, when known, each shared pack input’s owning set. <!-- D:LB -->
 
 Remove the share or the own file, or drop the borrow. If a mesh or another mod uses the DDS, choose **Mark as intended** for this set and slot. <!-- D:LB -->
 
