@@ -2484,26 +2484,52 @@ pub fn check_named(name: &str, field: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Ids of every set whose Rmaos slot (`_rmaos`/`_rfaos`) holds an output another set's Rmaos slot holds too, owner
-/// and borrowers alike (M3b spec §3.3, v1 instruction; DECISIONS R7). The engine bakes no normal variance into a
-/// shared roughness and reports no missing companion for these sets. Empty off `cs`.
-pub fn shared_roughness(m: &AppModel) -> BTreeSet<String> {
+/// Local file read by this game slot, after borrows, JSON links and clears.
+fn slot_item(v: &SetView, slot: SlotKind) -> Option<&str> {
+    json_files(v).find_map(|file| match file {
+        JsonFile::Fill(kind, fill) if kind == slot => fill.item(),
+        JsonFile::Linked(n, link) if Some(n) == slot.game_slot() && link.kind == Some(slot) => {
+            link.item.as_deref()
+        }
+        _ => None,
+    })
+}
+
+/// The finished roughness outputs used by several sets, with the normal each set actually reads (Note LE).
+pub fn shared_roughness(m: &AppModel) -> Vec<engine::api::SharedRoughness> {
     if m.target != Target::Cs {
-        return BTreeSet::new();
+        return Vec::new();
     }
-    let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for v in views(m).iter() {
-        if let Some(item) = v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
-            users
-                .entry(item.to_string())
-                .or_default()
-                .push(v.id.clone());
+    let views = views(m);
+    let mut groups = BTreeMap::<_, Vec<_>>::new();
+    for v in views.iter() {
+        if let Some(item) = slot_item(v, SlotKind::Rmaos) {
+            groups.entry(item).or_default().push(v);
         }
     }
-    users
-        .into_values()
-        .filter(|ids| ids.len() > 1)
-        .flatten()
+    let root = m.sets_root();
+    let job = |item: &str| m.item(item)?.job.as_ref();
+    groups
+        .into_iter()
+        .filter(|(_, users)| users.len() > 1)
+        .filter_map(|(item, users)| {
+            let roughness = job(item)?;
+            let users = users
+                .into_iter()
+                .map(|v| {
+                    let normal = slot_item(v, SlotKind::Normal)
+                        .and_then(job)
+                        .map(|n| (set_id(&root, &n.set_key), n.input.clone()));
+                    (v.id.clone(), normal)
+                })
+                .collect();
+            Some(engine::api::SharedRoughness {
+                producer: set_id(&root, &roughness.set_key),
+                source: roughness.pack.is_none().then(|| roughness.input.clone()),
+                subtype: roughness.profile.subtype,
+                users,
+            })
+        })
         .collect()
 }
 
@@ -5031,6 +5057,19 @@ impl AppModel {
         self.batch_edit(&format!("Change {key}"), |m| m.set_json_value(set, key, v));
     }
 
+    /// A slot path can change the shared bake even when the saved borrow stays in place.
+    fn replan_shared_slot(&mut self, slot: Option<u8>) {
+        if !self.batch
+            && matches!(slot, Some(2 | 6))
+            && self
+                .last_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.shared_roughness != shared_roughness(self))
+        {
+            self.replan();
+        }
+    }
+
     /// A JSON value of set `set`. Material values do not plan; match fields do (P7).
     pub fn set_json_value(&mut self, set: &str, key: &str, v: Option<Value>) {
         if !self.sets_editable() {
@@ -5051,6 +5090,7 @@ impl AppModel {
         self.edit_docs(&format!("Change {key}"), merge, replan, move |_, d| {
             d.set_value(&s_id, &k, v)
         });
+        self.replan_shared_slot(slot);
     }
 
     /// A slot command (spec §4.2). A path is checked first; the reason comes back when it is refused. One step each
@@ -5120,6 +5160,9 @@ impl AppModel {
         self.edit_docs(&format!("Change {key}"), None, replan, move |_, d| {
             d.set_value(&id, &key, v)
         });
+        if !replan {
+            self.replan_shared_slot(Some(slot));
+        }
         Ok(())
     }
 

@@ -406,7 +406,7 @@ pub enum Answer {
 struct EngineInputs {
     set_edits: Vec<engine::sets::SetEdit>,
     output_paths: std::collections::BTreeMap<engine::sets::OutputKey, PathBuf>,
-    shared_roughness: std::collections::BTreeSet<String>,
+    shared_roughness: Vec<engine::api::SharedRoughness>,
     borrowed_normal: std::collections::BTreeMap<String, String>,
     set_shaders: std::collections::BTreeMap<String, engine::shader::Shader>,
     pinned_files: std::collections::BTreeSet<String>,
@@ -1690,7 +1690,7 @@ impl AppModel {
         let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
-        req.shared_roughness = sets::shared_roughness(self);
+        req.shared_roughness_groups = sets::shared_roughness(self);
         req.borrowed_normal = sets::borrowed_normal(self);
         req.set_shaders = sets::set_shaders(self);
         req.pinned_files = sets::pinned_files(self);
@@ -1926,7 +1926,7 @@ impl AppModel {
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
-            shared_roughness: req.shared_roughness.clone(),
+            shared_roughness: req.shared_roughness_groups.clone(),
             borrowed_normal: req.borrowed_normal.clone(),
             set_shaders: req.set_shaders.clone(),
             pinned_files: req.pinned_files.clone(),

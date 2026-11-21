@@ -20,6 +20,56 @@ pub(crate) const E: &str = "textures/e/cape";
 pub(crate) const B: &str = "textures/b/cape";
 
 #[test]
+fn shared_roughness_shows_why_it_skipped_the_bake() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_n", "_roughness"], ""),
+            (E, &["", "_n"], "[sets.borrow]\nslot6 = \"textures/b/cape\""),
+        ],
+    );
+    let row = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::SetSharedRoughnessNormal))
+        .expect("the producer has a Problems row")
+        .shown()
+        .into_owned();
+    assert!(
+        row.contains("roughness") && row.contains("different normal"),
+        "{row}"
+    );
+    m.edit_docs("Use the same normal", None, true, |_, s| {
+        s.set_borrow(E, 2, Some(B))
+    });
+    settle(&mut m);
+    let baked = |m: &AppModel| {
+        m.item("textures/b/cape_rmaos")
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .bake
+            .is_some()
+    };
+    assert!(baked(&m));
+    assert!(!sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .any(|p| p.code == Some(Code::SetSharedRoughnessNormal)));
+    m.set_json_value(E, "slot2", Some(json!(r"textures\external\other_n.dds")));
+    settle(&mut m);
+    assert!(!baked(&m), "an external normal overrides the saved borrow");
+    m.set_slot_command(E, 2, SlotCommand::RemoveSlotKey)
+        .unwrap();
+    settle(&mut m);
+    assert!(baked(&m));
+    m.set_slot_command(E, 2, SlotCommand::Path(r"textures\other_n.dds".into()))
+        .unwrap();
+    settle(&mut m);
+    assert!(!baked(&m));
+}
+
+#[test]
 fn the_borrowed_slot_warning_follows_edits() {
     let d = tempfile::tempdir().unwrap();
     let mut m = cape_packs(d.path(), true, false);

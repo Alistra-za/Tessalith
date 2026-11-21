@@ -137,6 +137,10 @@
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
 
+### Fixed
+
+- Shared roughness maps bake once when every set uses the same normal. Problems explains when the sets cannot share a bake.
+
 ## 3.0.0
 
 ### Main
