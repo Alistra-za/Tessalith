@@ -25,24 +25,28 @@ Click a reason to go to its fix:
 
 ## Output files
 
-In 2D, **Output files** lists this set’s planned DDS files, including a file a share or link displaced and files without slots. Other sets list their own files. Lines use the row title or file name. Paths outside the export folder show in full. Hover a path for its full spelling. The closed header counts files present now, such as “2 of 3 on disk”. **Show in Explorer** appears for each file on disk. <!-- D:JR3 -->
+In 2D, **Output files** lists this set’s planned DDS files, including slotless files and those displaced by a share or link. Each line uses the row title or filename. Hover for the full path. Paths outside the export folder always show in full. The closed header counts files on disk (“2 of 3 on disk”). Each has **Show in Explorer**. <!-- D:JR3 -->
 
 ## Slot rows
 
-One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
+Rows follow the shader’s PGPatcher slots in order (up to 8). An unusable filled slot stays amber. Hover for the reason. Set the cubemap with a slot command.
 
-A heading line names the columns ("Slot", "File", "Format") while a row has a format dropdown, and "Alpha" while the Diffuse row has one. A format value cut short in a narrow window shows in full on hover. <!-- D:JR4 -->
+The headings read “Slot”, “File” and, when a row has a format dropdown, “Format”. The Diffuse alpha dropdown adds “Alpha”. Hover a shortened format to read it in full. <!-- D:JR4 -->
 
-When you borrow the **Normal** slot, [your roughness bake uses the highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts from the lending set. The slot can show a different file. Even if the lending set shows a borrowed normal, it can lend you its own.
+Borrowing **Normal** makes [your roughness bake use the lender’s highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts. The slot can show another file. A lender can supply its own normal while displaying a borrowed one.
+
+When a PGPatcher entry or skin material uses a borrowed slot, **Problems** warns if none of those entries or materials uses your set’s own DDS. Export still writes your DDS. The row names the lender and, when known, each shared pack input’s owning set. <!-- D:LB -->
+
+Remove the share or the own file, or drop the borrow. If a mesh or another mod uses the DDS, choose **Mark as intended** for this set and slot. <!-- D:LB -->
 
 - Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
-- Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
+- Slot 7 takes `_cnr` or `_f`. With both, the red row lists each with a ✕ to remove it. Export warns “_cnr and _f both use slot 7”. Slot 3 treats `_g` and `_sk` the same way.
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
 - A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
 
-On an own or borrowed Diffuse or Normal row, **Match on this** is the link mark in the Flags column while the JSON panel shows. It matches meshes with that exact texture. For a linked row use [Matching](GUI-PGPatcher-JSON.md#matching) on the Material tab. <!-- D:JR1,JR4 -->
+With the JSON panel open, **Match on this** (the Flags link mark) matches meshes using that exact own or borrowed Diffuse or Normal texture. For a linked row use [Matching](GUI-PGPatcher-JSON.md#matching) on the Material tab. <!-- D:JR1,JR4 -->
 
-Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
+Drag a texture from Explorer onto a compatible row. The file must belong to the open folder. The row explains refusals. No files are copied. **Shader** lists the Mode’s shaders. **Auto** clears your pick. See [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
 `sdc.exe` doesn't read your shader pick. So when you pick **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map, Tessalith writes the types `sdc.exe` needs, in the same undo step:
 
