@@ -5574,3 +5574,57 @@ fn a_line_that_does_not_fit_is_cut_in_the_middle_and_names_every_file() {
     let drawn: usize = w.also_updated.iter().map(own).sum();
     assert!(drawn < w.also_updated.len(), "something is cut at 480");
 }
+
+#[test]
+fn a_long_json_path_stays_inside_the_review_footer() {
+    use sdc_gui::model::review::{DiskState, JsonKind};
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    support::choose_export(
+        &mut m,
+        d.path().join("a rather long folder name for the export"),
+    );
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.set_also_tick(AlsoTarget::Cm, true);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    m.open_review();
+    let line = m
+        .review_json()
+        .into_iter()
+        .find(|l| l.kind == JsonKind::PgPatcher)
+        .expect("the PBR set writes a PGPatcher JSON");
+    assert_eq!(line.state, DiskState::New);
+    let json_text = format!("{}: will be written", line.path.display());
+    let writes = m.review_writes();
+    let whole = &writes.whole;
+
+    let h = review_harness_at(m, egui::vec2(480.0, 864.0));
+    let right = h.ctx.content_rect().right();
+    let mut json = h
+        .query_all_by_role(Role::Label)
+        .filter(|n| n.accesskit_node().value().as_deref() == Some(json_text.as_str()));
+    let row = json
+        .next()
+        .expect("the JSON label names the whole path")
+        .rect();
+    assert!(json.next().is_none(), "the JSON label is unique");
+    assert!(
+        row.right() <= right + 0.5,
+        "JSON row {row:?} exceeds viewport {right}"
+    );
+
+    let also = h
+        .query_all_by_label_contains("Also updated: ")
+        .next()
+        .expect("the Also updated line is cut in the middle");
+    assert_eq!(
+        also.accesskit_node().value().as_deref(),
+        Some(whole.as_str())
+    );
+    let row = also.rect();
+    assert!(
+        row.right() <= right + 0.5,
+        "Also updated ellipsis {row:?} exceeds viewport {right}"
+    );
+}

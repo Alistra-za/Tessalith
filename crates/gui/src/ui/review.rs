@@ -860,7 +860,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                 }
                                 Footer::Json(l) => {
                                     let fallback = (!folder_chosen).then(|| m.export_root());
-                                    ui.label(json_line_text(l, fallback.as_deref()));
+                                    ui.add(egui::Label::new(json_line_text(l, fallback.as_deref())).truncate());
                                 }
                                 Footer::Also(w) => {
                                     also_updated_line(ui, w);
