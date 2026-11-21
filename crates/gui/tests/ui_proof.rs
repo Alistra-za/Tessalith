@@ -188,6 +188,7 @@ fn close_with_mesh_slot_draft(project_dirty: bool) {
         copy,
         "meshes/x.nif",
         None,
+        None,
         Some(&path),
     )
     .unwrap();
@@ -201,7 +202,7 @@ fn close_with_mesh_slot_draft(project_dirty: bool) {
         })
         .unwrap();
     edit.selection = Selection::Shape(shape.block);
-    edit.doc_path = blocker.join("slot-edit.toml");
+    edit.draft_path = blocker.join("slot-edit.toml");
     h.state_mut().meshes.edit = Some(edit);
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(3);

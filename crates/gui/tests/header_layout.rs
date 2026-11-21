@@ -838,11 +838,13 @@ fn keyboard_more_reaches_mo2_and_selects_a_preset() {
     press(&mut h, Key::ArrowDown);
     assert!(h.get_by_label("MO2…").is_focused());
     press(&mut h, Key::ArrowRight);
-    let scan = h.query_by_role_and_label(Role::Button, "Scan");
+    // Task 2 (E16) names the disabled Scan row for the missing instance.
+    let scan = h.get_by_role_and_label(Role::Button, "Scan: choose an instance first");
     assert!(
-        scan.is_some_and(|n| n.accesskit_node().is_disabled()),
+        scan.accesskit_node().is_disabled(),
         "Scan is disabled before choosing an instance"
     );
+    assert!(h.query_by_role_and_label(Role::Button, "Scan").is_none());
     press(&mut h, Key::ArrowLeft);
     assert!(h.get_by_label("MO2…").is_focused());
     press(&mut h, Key::ArrowDown);
