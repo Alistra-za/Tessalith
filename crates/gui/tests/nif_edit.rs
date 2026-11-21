@@ -5729,6 +5729,19 @@ fn a_first_pre_record_still_identifies_an_undone_partial_after_restart() {
     );
     assert_eq!(review_row(&m).blocked.as_deref(), Some(NIF_UNDONE));
     export_fails(&mut m, NIF_UNDONE);
+    assert!(!m.edit.as_ref().unwrap().history.can_redo());
+    let mut h = view(m);
+    h.run_steps(4);
+    assert!(
+        h.query_by_label("Reapply the NIF edit, then export again to save its record.")
+            .is_some(),
+        "the footer must offer reapply when the reopened edit has no redo history"
+    );
+    assert!(h.query_by_label_contains("Redo the NIF edit").is_none());
+    assert!(
+        h.query_by_label_contains("redo it and export").is_none(),
+        "the adjacent blocker must not prescribe redo either"
+    );
 }
 
 #[test]

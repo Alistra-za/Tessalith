@@ -53,8 +53,8 @@ pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Review {
-    /// Set by the header on first draw. Without a meshes model, Review itself holds the supplied backup names.
-    pub(crate) nif_backup_names: Option<BTreeMap<PathBuf, PathBuf>>,
+    /// Without a Meshes model, each opening record keeps the first backup name its row supplies.
+    pub(crate) nif_backup_names: Option<BTreeMap<PathBuf, Option<PathBuf>>>,
     pub options_open: bool,
     /// Open Options when an Also blocker appears, while allowing the user to close it afterward.
     pub(crate) also_blocked: bool,
@@ -990,7 +990,7 @@ impl AppModel {
                 .review
                 .as_ref()
                 .and_then(|review| review.nif_backup_names.as_ref())
-                .and_then(|names| names.get(&r.record));
+                .and_then(|names| names.get(&r.record)?.as_ref());
             if let Some(path) = frozen_backup.or(r.record_move_aside.as_ref()) {
                 put(WriteKind::Nif, path.clone(), NIF_MOVE_ASIDE_HOVER, false);
             }
@@ -1429,6 +1429,17 @@ impl AppModel {
     pub fn set_nif_review_rows(&mut self, rows: Vec<super::meshes::NifReviewRow>) {
         // Ruling 3c-49: `review_writes`' key reads this revision, not the rows.
         if self.nif_rows != rows {
+            if let Some(names) = self
+                .review
+                .as_mut()
+                .and_then(|r| r.nif_backup_names.as_mut())
+            {
+                for row in &rows {
+                    if let Some(slot @ None) = names.get_mut(&row.record) {
+                        slot.clone_from(&row.record_move_aside);
+                    }
+                }
+            }
             self.nif_rows_rev += 1;
         }
         self.nif_rows = rows;

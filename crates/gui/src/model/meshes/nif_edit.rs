@@ -302,7 +302,7 @@ pub const NIF_NOT_RECORDED: &str =
     "The exported NIF is not the one last recorded: Export this NIF writes these edits and their record again";
 /// Ruling E6-N: no ops, and the installed NIF holds an edit since undone; nothing is written for it.
 pub const NIF_UNDONE: &str =
-    "The exported NIF holds an edit that was undone: redo it and export to repair the export";
+    "The exported NIF holds an edit that was undone. Restore the edit before exporting again.";
 /// Ruling E6-S3: no ops (after edits), and an export of this NIF is installed with no record: nothing is written, and
 /// the words do not claim to know who wrote it.
 pub const NIF_INSTALLED_UNRECORDED: &str =
@@ -1386,7 +1386,11 @@ impl NifEdit {
 
     pub(crate) fn repair_note(&self) -> Option<&'static str> {
         if self.undone_export() {
-            Some("Redo the NIF edit, then export again to save its record.")
+            Some(if self.history.can_redo() {
+                "Redo the NIF edit, then export again to save its record."
+            } else {
+                "Reapply the NIF edit, then export again to save its record."
+            })
         } else if self.partial.is_some() {
             Some("The NIF is in place, but its record still needs to be saved. Export again to finish.")
         } else {

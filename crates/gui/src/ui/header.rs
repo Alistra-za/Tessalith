@@ -124,7 +124,7 @@ pub fn draw(
                 model
                     .nif_rows
                     .iter()
-                    .filter_map(|r| Some((r.record.clone(), r.record_move_aside.clone()?)))
+                    .map(|r| (r.record.clone(), r.record_move_aside.clone()))
                     .collect(),
             );
         }

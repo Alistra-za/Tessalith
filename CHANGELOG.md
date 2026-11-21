@@ -126,7 +126,7 @@
 - Marking a warning as intended takes it out of the count beside its file in **Files**. When all its warnings are marked, the row shows a grey `n marked` and **Has warnings** leaves the file out.
 - **Export details** in **Files** and in the Markdown report lists what the export did besides converting textures. **Notes** stays in **Problems**.
 - NIF edits are saved with the project. Export writes the edited NIF and its record to the chosen export folder. After a slider drag, **Export this NIF** checks the installed file again before asking for an overwrite. An unexported draft from an older version moves out of that folder on your next edit.
-- The NIF edit footer shows where the draft is saved. **Show in Explorer** selects the file. If you undo the last edit after its NIF was written but its record failed to save, the footer tells you to redo the edit before exporting.
+- The NIF edit footer shows where the draft is saved. **Show in Explorer** selects the file. If you undo the last edit after its NIF was written but its record failed to save, the footer tells you to use Redo if available or reapply the edit before exporting again.
 - **Edit** is a button beside the NIF's name. You can still click it to close an unsaved edit after a rescan drops its row. Long paths in the Meshes list and edit footer shorten in the middle so you can still read the file name.
 - Switching or closing projects ends the old NIF edit session once its changes are saved. The selected NIF can reopen with the other project's edits.
 - The Meshes list names the scan it shows and when the scan data was last written. The **Scan** row tells you which choice is missing. While scanning, the disabled folder pickers explain why they are unavailable.

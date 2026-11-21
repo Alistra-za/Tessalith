@@ -66,7 +66,7 @@ If Tessalith finds an unexported draft in the export folder, your next change mo
 
 ### After an export
 
-If the NIF was written but its record could not be saved, export again to finish. If you undid the last edit, click **Redo NIF edit** first. <!-- D:LD13 --> After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
+If the NIF was written but its record wasn’t saved, export again. If you undid the last edit, use **Redo NIF edit** first. If Redo is disabled, reapply the edit first. <!-- D:LD13 --> After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
 
 ### A file Tessalith did not write
 

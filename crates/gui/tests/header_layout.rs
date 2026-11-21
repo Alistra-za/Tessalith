@@ -1473,13 +1473,19 @@ fn meshes_bar_hidden_without_scan() {
 
 #[test]
 fn the_header_without_a_meshes_model_freezes_the_supplied_inventory() {
+    for late_backup in [false, true] {
+        check_standalone_backup(late_backup);
+    }
+}
+
+fn check_standalone_backup(late_backup: bool) {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened(&d.path().join("mod"));
     m.open_review();
     let mut row = support::nif_row("meshes/x.nif", None);
     let record = row.record.clone();
     let backup = record.with_extension("123.toml");
-    row.record_move_aside = Some(backup.clone());
+    row.record_move_aside = (!late_backup).then(|| backup.clone());
     m.set_nif_review_rows(vec![row.clone()]);
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
@@ -1490,6 +1496,13 @@ fn the_header_without_a_meshes_model_freezes_the_supplied_inventory() {
     h.run_steps(2);
     let captured = h.state().review_writes_at_open();
     assert!(captured.also_updated.iter().any(|w| w.path == record));
+    if late_backup {
+        assert!(!captured.also_updated.iter().any(|w| w.path == backup));
+        row.record_move_aside = Some(backup.clone());
+        h.state_mut().set_nif_review_rows(vec![row.clone()]);
+        h.run_steps(2);
+        h.get_by_label_contains(&backup.display().to_string());
+    }
     assert!(h
         .state()
         .review_writes()
@@ -1502,8 +1515,10 @@ fn the_header_without_a_meshes_model_freezes_the_supplied_inventory() {
     h.run_steps(2);
     let live = h.state().review_writes();
     assert!(
-        live.also_updated.iter().any(|w| w.path == backup),
-        "Review lost its opening backup name"
+        live.also_updated
+            .iter()
+            .any(|w| w.kind == sdc_gui::model::review::WriteKind::Nif && w.path == backup),
+        "Review lost its first known backup name (late backup: {late_backup})"
     );
     assert!(!live.also_updated.iter().any(|w| w.path == later));
     h.get_by_label_contains(&backup.display().to_string());
