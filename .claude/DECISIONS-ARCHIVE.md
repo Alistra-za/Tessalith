@@ -1114,6 +1114,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JL6, 2026-11-16)
 ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
 - **JA12 Re-encode every output is a one-shot item in Export to ▾ (controller ruling, Task 8 review).** It is a checkable item in the header's **Export to ▾** menu, below the Also export ticks, not a header checkbox: every user sees the default 1400 pt window at first launch, and a box in the header moved CD2's one-row threshold from about 1280 pt to about 1450 pt, so that window wrapped. The menu belongs to Export, which meets "beside Export"; the cost is one click to reach it. The header keeps CD1's Save/Export grouping and CD2's 1280 pt threshold. The item is off at start, never saved, greyed with no folder open, and the menu stays open on a tick (egui's `CloseOnClickOutside`, as for the Also export ticks). It turns itself off when an export pass starts with it ticked (one-shot, any export kind: **Export**, **Export set**, **Export group**), so a tick hidden in the closed menu never carries over to a later export. A tick during a running export applies to the next one.
 
+ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
+- **JA11 This plan's additions beyond the request.** `OnExisting::Reencode` (serde `reencode`) encodes every output that has a record again and keeps one without (`OUT-UNKNOWN-EXISTING`); the Also export treats it as `IfChanged` (the twin was just encoded, so its copy is redone). It backs the GUI's one-shot "Re-encode every output" item in the Export to ▾ menu (JA12), which does not use `Overwrite` because that replaces files Tessalith did not write. The CLI has no value for it; `--encoder-version` is a visible alias of `--ev`.
+
 ## Note JI — Settings tab, and no Advanced drawer (owner, 2026-11-15)
 
 ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
@@ -1674,7 +1677,7 @@ ARCHIVED (wording before the edit; superseded in part by Note JW3, 2026-11-20)
 
 ## Note FP — backlog batch B1: gui model fixes (main team, 2026-11-04)
 
-ARCHIVED (superseded by Note JY, 2026-11-20)
+ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
 - **FP3 Cancel does not keep the automatic types marked written (T36).** `cancel_open` clears `auto_written` of the history it restores, because the folder's documents were re-read (FI4) and the next plan records the types again. Test `open_cancel::cancel_does_not_keep_the_automatic_types_marked_written`.
 
 ## Note JL — egui 0.37 (main team, 2026-11-16)
