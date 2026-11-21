@@ -112,6 +112,12 @@ fn the_undecided_card_hovers_the_description_not_the_id() {
     h.run();
     h.run();
     assert!(h.query_by_label("What kind of texture is this?").is_some());
+    // The combo announces its current value: the label of the type it starts on.
+    let shown = h.get_by_label("Type for this texture").value();
+    assert_eq!(
+        shown.as_deref(),
+        Some(sdc_gui::model::labels::subtype_name(engine::config::Subtype::GenericData).as_str())
+    );
     let combo = h.get_by_label("Type for this texture").rect();
     h.get_by_label("Type for this texture").click();
     h.run();

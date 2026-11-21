@@ -15,6 +15,7 @@ use crate::model::fields::{
     WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
+use crate::model::labels::type_hover;
 use crate::model::{Answer, AppModel};
 use eframe::egui;
 use engine::codes::{Code, Warning};
@@ -1464,7 +1465,7 @@ fn subtype_decision(
                     ui.label(egui::RichText::new(heading).weak());
                     for st in members {
                         ui.selectable_value(&mut chosen, st, subtype_label(st))
-                            .on_hover_text(crate::model::labels::type_hover(st));
+                            .on_hover_text(type_hover(st));
                     }
                 }
             })
