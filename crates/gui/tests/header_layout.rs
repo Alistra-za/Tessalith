@@ -208,8 +208,8 @@ fn readable_path_keeps_the_drive_and_the_last_folder() {
             r"C:\…\My Mod",
         ),
         (r"C:\export", r"C:\export"),
-        (r"C:\a\b", r"C:\a\b"),
-        (r"C:\é\b", r"C:\é\b"),
+        (r"C:\a\b", r"C:\…\b"),
+        (r"C:\é\b", r"C:\…\b"),
         (r"C:\ab\b", r"C:\…\b"),
         (r"D:\Mods\StoneWork\sdc-out", r"D:\…\sdc-out"),
         ("C:/Users/Modder/mods/My Mod", "C:/…/My Mod"),
@@ -488,6 +488,16 @@ fn painted_chip(h: &H) -> String {
     let rect = h.get_by_label_contains("Export to: ").rect();
     assert!(!painted_elided(h, rect));
     painted_in(h, rect)
+}
+
+#[test]
+fn one_letter_folder_keeps_tools_when_the_cut_path_fits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut reference = harness_with_destination(d.path(), r"C:\…\b", 1600.0, false);
+    let w = first_fit(&mut reference, tools_on_row);
+    let h = harness_with_destination(d.path(), r"C:\W\b", w, false);
+    assert!(tools_on_row(&h), "Tools moved while C:\\…\\b fits at {w}");
+    assert_eq!(painted_chip(&h), r"Export to: C:\…\b ▾");
 }
 
 #[test]

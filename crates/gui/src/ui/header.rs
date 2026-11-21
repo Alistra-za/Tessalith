@@ -367,18 +367,16 @@ pub fn elide_middle(path: &str, max_chars: usize) -> String {
     format!("{head}{tail}")
 }
 
-/// Keep the drive and the whole last folder. Cut the middle only when the ellipsis saves characters.
+/// Replace any middle folders with an ellipsis, keeping the drive and the whole last folder.
+/// The header reserves the narrower rendered width of this form and the full path.
 pub fn readable_path(path: &str) -> String {
     let base = cut_base(path);
     let Some((drive, rest)) = base.split_once(['\\', '/']) else {
         return base.to_owned();
     };
-    let Some((middle, leaf)) = rest.rsplit_once(['\\', '/']) else {
+    let Some((_, leaf)) = rest.rsplit_once(['\\', '/']) else {
         return base.to_owned();
     };
-    if middle.chars().count() <= 1 {
-        return base.to_owned();
-    }
     let sep = &base[drive.len()..drive.len() + 1];
     format!("{drive}{sep}…{sep}{leaf}")
 }
