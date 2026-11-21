@@ -49,7 +49,7 @@ mod edit_extra;
 mod edit_fields;
 mod edit_panel;
 #[cfg(feature = "test-hooks")]
-pub use edit_panel::{draft_text_builds, layout_rects, EditPanelRects};
+pub use edit_panel::{draft_text_builds, layout_rects, writes_builds, EditPanelRects};
 mod skin_preview;
 mod txst_preview;
 use crate::model::meshes::skin_preview::has_skin_card;
@@ -262,7 +262,8 @@ pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
                     Some("Choose an MO2 instance, or scan a folder, then scan."),
                 ),
                 Some(ScanTarget::Mo2 { profile, .. })
-                    if profile.is_empty() || !m.profiles().contains(profile) =>
+                    if profile.is_empty()
+                        || !m.profiles().iter().any(|p| p.eq_ignore_ascii_case(profile)) =>
                 {
                     (
                         SCAN_NEEDS_PROFILE,
@@ -473,8 +474,8 @@ pub(super) fn fit_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: 
 /// a scan).
 fn widest_mod(ui: &egui::Ui, m: &MeshesModel, font: &egui::FontId) -> f32 {
     let key = ui.scope_id().with("meshes-mod-w");
-    let stamp = (m.scan_rev(), font.size.to_bits());
-    if let Some((s, w)) = ui.data_mut(|d| d.get_temp::<((u64, u32), f32)>(key)) {
+    let stamp = (m.mods_rev, font.clone(), ui.pixels_per_point().to_bits());
+    if let Some((s, w)) = ui.data_mut(|d| d.get_temp::<((u64, egui::FontId, u32), f32)>(key)) {
         if s == stamp {
             return w;
         }
@@ -615,11 +616,9 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
         }
     });
     // Review E16: the list names the scan it comes from; truncate() keeps the full line on hover and as the name.
-    if let Some(s) = m.scan_source() {
-        let line = crate::model::meshes::source_line(s);
-        if !line.is_empty() {
-            ui.add(egui::Label::new(egui::RichText::new(line).weak()).truncate());
-        }
+    let line = m.scan_source_line();
+    if !line.is_empty() {
+        ui.add(egui::Label::new(egui::RichText::new(line).weak()).truncate());
     }
     if m.selected_mod.is_none() && m.rows_loading() {
         ui.weak("Reading the scan…");
@@ -807,7 +806,11 @@ fn row_chips(
     if n.le_mesh {
         v.push((AMBER, "LE", "LE"));
     }
-    if let Some(b) = m.doc_badges.get(&n.path).copied() {
+    if let Some(b) = m
+        .doc_badges
+        .get(&crate::model::meshes::nif_edit::badge_key(&n.path))
+        .copied()
+    {
         let color = match b {
             DocBadge::Pending => AMBER,
             DocBadge::Exported => GREEN,

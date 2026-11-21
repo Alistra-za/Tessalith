@@ -1470,3 +1470,29 @@ fn meshes_bar_hidden_without_scan() {
     assert!(!panel_never_built(&h.ctx, "header"));
     assert!(panel_never_built(&h.ctx, "meshes-bar"));
 }
+
+#[test]
+fn the_header_without_a_meshes_model_freezes_the_supplied_inventory() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(&d.path().join("mod"));
+    m.open_review();
+    let row = support::nif_row("meshes/x.nif", None);
+    let record = row.record.clone();
+    m.set_nif_review_rows(vec![row]);
+    let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1280.0, 720.0))
+        .build_ui_state(sdc_gui::ui::draw, m);
+    h.run_steps(2);
+    let captured = h.state().review_writes_at_open();
+    assert!(captured.also_updated.iter().any(|w| w.path == record));
+    h.state_mut().set_nif_review_rows(vec![]);
+    h.run_steps(2);
+    assert_eq!(
+        h.state().review_writes_at_open(),
+        captured,
+        "frozen only once per opening"
+    );
+}

@@ -17,7 +17,7 @@ Your own choices in `sdc.toml` win over scan evidence.
 
 ## Choosing what to scan
 
-The scan source is behind the **MO2…** button in the header, on both the Textures and the Meshes view. **Scan** starts it, **Cancel** stops it. Until you choose an instance or a folder, the row reads **Scan: choose an instance first**. If the instance needs a profile, it reads **Scan: choose a profile first**. While scanning, hover the disabled **Choose…** or **Scan a folder…** for the reason. <!-- D:LD9 -->
+The scan source is behind the **MO2…** button in the header, on both the Textures and the Meshes view. **Scan** starts it, **Cancel** stops it. Until you choose an instance or a folder, the row reads **Scan: choose an instance first**. If no profile is selected or the selected profile is missing, it reads **Scan: choose a profile first**. While scanning, hover the disabled **Choose…** or **Scan a folder…** for the reason. <!-- D:LD9 -->
 
 ![The MO2… popup.](../img/gui/Mod-Scanning/mo2-popup.png)
 

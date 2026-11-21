@@ -2728,3 +2728,30 @@ fn the_winner_hover_shows_for_the_project_mods_own_losing_copy() {
         h.get_by_label("wins: B");
     }
 }
+
+#[test]
+fn final_wave_reloading_mod_names_updates_the_width() {
+    let (d, m) = scanned();
+    let mut h = harness(m);
+    h.run_steps(4);
+    let builds = sdc_gui::model::meshes::source_line_builds();
+    assert!(builds > 0);
+    h.run_steps(3);
+    assert_eq!(
+        builds,
+        sdc_gui::model::meshes::source_line_builds(),
+        "idle frames formatted the scan source"
+    );
+    let before = h.get_by_label("meshes/rock.nif").rect();
+    let rev = h.state().scan_rev();
+    rusqlite::Connection::open(d.path().join("scan.db")).unwrap()
+        .execute("UPDATE origin SET name = 'A very long mod folder name that needs more width' WHERE name = 'B'", []).unwrap();
+    h.state_mut().reload();
+    wait(h.state_mut());
+    h.run_steps(4);
+    assert_eq!(rev, h.state().scan_rev());
+    assert!(
+        h.get_by_label("meshes/rock.nif").rect().width() < before.width(),
+        "reload reused the old mod width"
+    );
+}

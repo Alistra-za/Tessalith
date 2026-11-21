@@ -35,6 +35,7 @@ pub(super) struct Act {
     pub open: Option<String>,
     /// Note GD2: the footer's Review… (the app opens Review).
     pub review: bool,
+    pub reveal: bool,
     /// Note GD18: the footer's Diff… (Some(true): open the Diff view) or the view's Close (Some(false)).
     pub diff: Option<bool>,
     /// A click or drag on a curve: the scene time the clock jumps to (it pauses, B3's `Clock::scrub`).
@@ -375,8 +376,8 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
         let n = lt.shader_type;
-        super::shared_hover(r, "shader-type", n, || {
-            format!("Shader type {n} in the NIF.")
+        super::shared_hover(r, "shader-type-edit", n, || {
+            format!("Shader type {n} in the NIF. Changing the type changes the trailer fields.")
         });
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {

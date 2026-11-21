@@ -70,7 +70,6 @@ pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
 pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let mut act = Act::default();
-    // The footer's Show in Explorer leaves its click under this key (and its text cache under a key derived from it).
     let reveal_id = ui.scope_id().with("meshes-edit-reveal-draft");
     // Note GD1: a worklist fix opens its tab; its field takes focus when its widget is drawn.
     if let Some((tab, field)) = m.nif_tab.take() {
@@ -228,13 +227,6 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             ),
             tabs_h,
         );
-    }
-    if ui.data_mut(|d| d.remove_temp::<bool>(reveal_id)).is_some() {
-        m.reveal_request = m
-            .edit
-            .as_ref()
-            .and_then(|e| e.draft_on_disk())
-            .map(std::path::Path::to_path_buf);
     }
     apply(m, act);
 }
@@ -473,6 +465,10 @@ fn export_block(
             }
         },
     );
+    if let Some(note) = e.repair_note() {
+        ui.add(egui::Label::new(note).truncate())
+            .on_hover_text(note);
+    }
     let mut list_h = 0.0;
     if let Some(lines) = diff {
         ui.horizontal(|ui| {
@@ -507,15 +503,11 @@ fn export_block(
     if !e.edit_mod.as_os_str().is_empty() {
         // The real destination (Note CI29), cut in the middle like the header's Export to; the full path on hover and
         // in the accessible name. MO2 joins `mods` with `/`: shown with `\` throughout.
-        let full = e.export_path.display().to_string().replace('/', "\\");
-        let data = e.data_path.replace('/', "\\");
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        let shown = fit_writes_line(ui, &font, &data, &full);
-        let name = format!("Writes {data} to {full}\n{WRITES_NOTE}");
-        let r = ui.add(egui::Label::new(shown).truncate());
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+        let text = writes_text(ui, reveal_id.with("writes"), e);
+        let r = ui.add(egui::Label::new(egui::WidgetText::from(text.shown.clone())).truncate());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text.name));
         r.on_hover_ui(|ui| {
-            ui.label(&name);
+            ui.label(&text.name);
         });
     }
     draft_and_review_row(ui, e, act, reveal_id);
@@ -568,7 +560,7 @@ fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, reveal_id
             });
             let r = r.on_disabled_hover_text(e.draft_off_reason().unwrap_or_default());
             if r.clicked() {
-                ui.data_mut(|d| d.insert_temp(reveal_id, true));
+                act.reveal = true;
             }
         },
     );
@@ -594,10 +586,16 @@ struct DraftFit {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
+    static WRITES_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static DRAFT_TEXT_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// How many times this thread built the saved line's text (a cache miss), for the cache's test.
+#[cfg(feature = "test-hooks")]
+pub fn writes_builds() -> usize {
+    WRITES_BUILDS.with(std::cell::Cell::get)
+}
+
 #[cfg(feature = "test-hooks")]
 pub fn draft_text_builds() -> usize {
     DRAFT_TEXT_BUILDS.with(std::cell::Cell::get)
@@ -658,10 +656,53 @@ fn draft_text(ui: &egui::Ui, id: egui::Id, path: &std::path::Path) -> DraftShown
 const WRITES_NOTE: &str =
     "The source file is never changed. Change the folder with Export to ▾ in the header.";
 
+struct WritesText {
+    data: String,
+    export: std::path::PathBuf,
+    width: f32,
+    scale: f32,
+    font: egui::FontId,
+    shown: std::sync::Arc<egui::RichText>,
+    name: String,
+}
+
+fn writes_text(ui: &egui::Ui, id: egui::Id, e: &NifEdit) -> std::sync::Arc<WritesText> {
+    let width = ui.available_width();
+    let scale = ui.ctx().pixels_per_point();
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    if let Some(text) = ui.data_mut(|d| d.get_temp::<std::sync::Arc<WritesText>>(id)) {
+        if text.data == e.data_path
+            && text.export == e.export_path
+            && text.width == width
+            && text.scale == scale
+            && text.font == font
+        {
+            return text;
+        }
+    }
+    let full = e.export_path.display().to_string().replace('/', "\\");
+    let data = e.data_path.replace('/', "\\");
+    let text = std::sync::Arc::new(WritesText {
+        data: e.data_path.clone(),
+        export: e.export_path.clone(),
+        width,
+        scale,
+        shown: std::sync::Arc::new(egui::RichText::new(fit_writes_line(
+            ui, &font, &data, &full,
+        ))),
+        name: format!("Writes {data} to {full}\n{WRITES_NOTE}"),
+        font,
+    });
+    ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    text
+}
+
 /// `Writes {data} to {export}` cut in the middle to the footer's width (review E23): the export path first, down to
 /// its first component, `…` and file name; the data path too when the line is still too wide. The text is measured
-/// with `fit_middle`'s layouts (a few per frame; egui's galley cache keeps the unchanged probes between frames).
+/// with `fit_middle`'s layouts only when the cached fit changes.
 fn fit_writes_line(ui: &egui::Ui, font: &egui::FontId, data: &str, export: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    WRITES_BUILDS.with(|n| n.set(n.get() + 1));
     let width = ui.available_width();
     let line = format!("Writes {data} to {export}");
     if text_width(ui, &line, font) <= width {
@@ -738,6 +779,13 @@ fn apply(m: &mut MeshesModel, act: Act) {
     }
     // A field that lost its focus to the Review… click committed its push or typed path (and flush) above this frame
     // (rule 7.5).
+    if act.reveal {
+        m.reveal_request = m
+            .edit
+            .as_ref()
+            .and_then(NifEdit::draft_on_disk)
+            .map(std::path::Path::to_path_buf);
+    }
     m.open_review_request |= act.review;
     match act.diff {
         Some(true) => {

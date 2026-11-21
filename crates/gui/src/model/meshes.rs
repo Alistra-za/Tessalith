@@ -414,9 +414,21 @@ pub struct ScanSource {
     pub written: Option<String>,
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static SOURCE_LINE_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "test-hooks")]
+pub fn source_line_builds() -> usize {
+    SOURCE_LINE_BUILDS.with(std::cell::Cell::get)
+}
+
 /// The line over the list: "From the scan of {root}. Scan data last written {written}."
 /// With no root only the second sentence; with no time only the first; with neither, no line.
 pub fn source_line(s: &ScanSource) -> String {
+    #[cfg(feature = "test-hooks")]
+    SOURCE_LINE_BUILDS.with(|n| n.set(n.get() + 1));
     let from = s.root.as_ref().map(|r| format!("From the scan of {r}."));
     let at = s
         .written
@@ -476,7 +488,7 @@ pub struct MeshesModel {
     pub target: Option<ScanTarget>,
     pub mods: Vec<ModRow>,
     /// What the list names as its scan; filled by `reload`, `None` while `mods` is empty.
-    scan_source: Option<ScanSource>,
+    scan_source: Option<(ScanSource, String)>,
     /// The mod picker (Note GC): `None` is "Any mod" (the winners); `Some` lists that mod's copies (`nifs`).
     pub selected_mod: Option<i64>,
     /// The picked mod's NIF copies, winning or not.
@@ -609,7 +621,9 @@ pub struct MeshesModel {
     pub nif_diff_view: Option<(String, Vec<String>)>,
     /// Note GD2: Review's Keep / Overwrite answers by lowercase data path, with the hash each was given for.
     nif_answers: HashMap<String, (export::GuardChoice, [u8; 32])>,
+    /// Record backups named when Review opened, consumed when their pre-record succeeds.
     move_aside_shown: HashMap<String, PathBuf>,
+    /// A Review or immediate export has captured its names. Closing Review clears them.
     move_asides_frozen: bool,
     /// Note GD2: the export path's state for the Review row (it reads the disk), keyed on `nif_edit::ForeignKey`.
     foreign_cache: std::cell::RefCell<nif_edit::ForeignCache>,
@@ -635,11 +649,12 @@ pub struct MeshesModel {
     /// JSON reads started so far (each is a new generation of the cached In game rows).
     pub pg_reads: u64,
     /// Completed scans so far: a rescan reads the JSON again and drops the cached In game rows (fix F5).
+    pub(crate) mods_rev: u64,
     scan_rev: u64,
 }
 
 impl MeshesModel {
-    /// Completed scans so far: it changes whenever the mods and rows can have (the key of the view's width cache).
+    /// Completed scans so far.
     pub fn scan_rev(&self) -> u64 {
         self.scan_rev
     }
@@ -745,6 +760,7 @@ impl MeshesModel {
             rx,
             pg: None,
             pg_reads: 0,
+            mods_rev: 0,
             scan_rev: 0,
         }
     }
@@ -876,9 +892,14 @@ impl MeshesModel {
         std::mem::take(&mut self.request)
     }
 
-    /// The scan the list comes from; `None` while there is no scan.
+    /// List caption formatted when the scan store is reloaded.
+    pub(crate) fn scan_source_line(&self) -> &str {
+        self.scan_source.as_ref().map_or("", |(_, text)| text)
+    }
+
+    /// The scan the list comes from, if one has been loaded.
     pub fn scan_source(&self) -> Option<&ScanSource> {
-        self.scan_source.as_ref()
+        self.scan_source.as_ref().map(|(source, _)| source)
     }
 
     pub fn scanning(&self) -> bool {
@@ -1111,16 +1132,24 @@ impl MeshesModel {
             return;
         };
         match store.mods() {
-            Ok(mods) => self.mods = mods,
+            Ok(mods) => {
+                self.mods = mods;
+                self.mods_rev += 1;
+            }
             Err(e) => {
                 self.error = Some(db_err(e));
                 return;
             }
         }
-        self.scan_source = (!self.mods.is_empty()).then(|| ScanSource {
-            root: scan_root(store),
-            written: self.store_path.as_deref().and_then(scan_written),
-        });
+        self.scan_source = (!self.mods.is_empty())
+            .then(|| ScanSource {
+                root: scan_root(store),
+                written: self.store_path.as_deref().and_then(scan_written),
+            })
+            .map(|source| {
+                let text = source_line(&source);
+                (source, text)
+            });
         self.refresh_doc_badges();
         self.refresh_placement();
         self.scan_ctrls.clear(); // the files may have changed too (T8)
@@ -1188,6 +1217,17 @@ impl MeshesModel {
             Ok(Ok((winners, losers))) => {
                 self.winners = Arc::new(winners);
                 self.losers = Arc::new(losers);
+                // A failed leave keeps the live edit and its preview. Its scan details still follow the new rows.
+                if let Some(copy) = self
+                    .selected_nif
+                    .filter(|_| self.edit.is_some() && self.store_settled())
+                {
+                    self.selected_info = self.find_row(copy).cloned();
+                    match self.find_pair(copy) {
+                        Ok(pair) => self.pair = pair,
+                        Err(e) => self.error = Some(e),
+                    }
+                }
             }
             Ok(Err(e)) => self.error = Some(e),
             Err(std::sync::mpsc::TryRecvError::Empty) => return true,

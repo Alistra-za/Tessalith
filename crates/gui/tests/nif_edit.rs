@@ -2707,14 +2707,14 @@ fn the_editing_line_describes_its_block_class() {
 }
 
 #[test]
-fn the_shader_type_combo_describes_its_number_and_nothing_more() {
+fn the_shader_type_combo_describes_its_number_and_trailer_change() {
     let h = face_tint_panel();
     assert_eq!(
         h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
             .accesskit_node()
             .description()
             .as_deref(),
-        Some("Shader type 4 in the NIF.")
+        Some("Shader type 4 in the NIF. Changing the type changes the trailer fields.")
     );
 }
 
@@ -5576,6 +5576,18 @@ fn a_restarted_cross_project_export_asks_again_after_the_final_write_failed() {
         );
         assert_eq!(live_row[0].blocked, None);
         if old_pre_record {
+            use sdc_gui::model::meshes::nif_edit::installed_reads;
+            let reads = (installed_reads(), load_count());
+            for value in [21.5, 22.5, 23.5] {
+                tick(&mut m, value);
+                m.nif_review_rows();
+            }
+            assert_eq!(
+                (installed_reads(), load_count()),
+                reads,
+                "a drag reread the old transfer record or installed NIF"
+            );
+            assert!(m.undo_edit());
             gloss(&mut m, 19.5);
             m.set_nif_export_root(Some(d.path().join("other export")));
             m.set_nif_export_root(Some(export_root(&d)));
@@ -7619,7 +7631,7 @@ mod task9 {
         assert_eq!(before, support::tree_hashes(&roots));
         answer(&mut m, GuardChoice::Overwrite);
         m.freeze_move_asides();
-        let aside = record_move_aside(&rec);
+        let aside = record_move_aside(&rec).unwrap();
         let mut model = export_review(&d);
         model.set_nif_review_rows(m.nif_review_rows());
         let writes = model.review_writes();
@@ -7694,7 +7706,7 @@ mod task9 {
         save(&rec, &with_value(e.doc.clone(), 17.5)).unwrap();
         h.state_mut().model.open_review();
         h.run_steps(4);
-        let aside = record_move_aside(&rec);
+        let aside = record_move_aside(&rec).unwrap();
         assert!(h
             .state()
             .model
@@ -7927,6 +7939,38 @@ mod task9 {
     }
 
     #[test]
+    fn final_wave_review_press_refuses_an_unlisted_draft_in_the_app() {
+        let (_t, _d, mut h) = review_app();
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        let draft = h.state().meshes.edit.as_ref().unwrap().draft_path.clone();
+        assert!(!h
+            .state()
+            .model
+            .review_writes()
+            .also_updated
+            .iter()
+            .any(|w| w.path == draft));
+        h.state_mut().model.export_from_review();
+        tick(&mut h.state_mut().meshes, 31.5);
+        let before = std::fs::read(&draft).unwrap();
+        assert!(h.state_mut().model.wait_idle(Duration::from_secs(60)));
+        h.run_steps(4);
+        assert_eq!(std::fs::read(&draft).unwrap(), before);
+        assert!(
+            h.state()
+                .meshes
+                .edit
+                .as_ref()
+                .unwrap()
+                .export_note
+                .as_ref()
+                .is_some_and(|(why, failed)| *failed && why.contains("Review did not list")),
+            "the app did not enforce the paths at the press"
+        );
+    }
+
+    #[test]
     fn opening_review_in_the_app_freezes_the_record_backup() {
         let (_t, _d, mut h) = review_app();
         let edit = h.state().meshes.edit.as_ref().unwrap();
@@ -7942,7 +7986,7 @@ mod task9 {
             }
         }
         assert!(h.state().model.review.is_some(), "the header opened Review");
-        let aside = record_move_aside(&rec);
+        let aside = record_move_aside(&rec).unwrap();
         let listed = |app: &sdc_gui::app::SdcApp| {
             app.model
                 .review_writes()
@@ -7971,6 +8015,37 @@ mod task9 {
         assert!(listed(h.state()));
         export_fails(&mut h.state_mut().meshes, "changed since Review opened");
         assert!(!aside.exists());
+        h.state_mut().model.close_review();
+        h.run_steps(4);
+        h.get_by_label("Textures view").click();
+        h.run_steps(4);
+        assert!(!sdc_gui::ui::header::meshes_view_active(&h.ctx));
+        let label = support::header_export_label(&h);
+        h.get_by_role_and_label(AkRole::Button, &label).click();
+        for _ in 0..4 {
+            h.step();
+            if h.state().model.review.is_some() {
+                break;
+            }
+        }
+        let fresh = record_move_aside(&rec).unwrap();
+        assert_ne!(fresh, aside);
+        assert!(h
+            .state()
+            .model
+            .review_writes_at_open()
+            .also_updated
+            .iter()
+            .any(|w| w.path == fresh));
+        h.get_by_label_contains(fresh.file_name().unwrap().to_str().unwrap());
+        assert!(h
+            .state()
+            .model
+            .review_writes()
+            .also_updated
+            .iter()
+            .any(|w| w.path == fresh));
+        assert_eq!(export(&mut h.state_mut().meshes), Ok(1));
     }
 
     #[test]
@@ -8017,7 +8092,7 @@ mod task9 {
         let first = rec.with_file_name(format!("{stem}.{secs}.toml"));
         let second = rec.with_file_name(format!("{stem}.{secs}-2.toml"));
         std::fs::write(first, b"existing").unwrap();
-        assert_eq!(record_move_aside(&rec), second);
+        assert_eq!(record_move_aside(&rec).unwrap(), second);
         m.freeze_move_asides();
         std::fs::write(&second, b"taken").unwrap();
         let out = export_root(&d);
@@ -8114,7 +8189,7 @@ mod task9 {
         let out = export_root(&d);
         let roots = [p.as_path(), out.as_path()];
         let before = support::tree_hashes(&roots);
-        let aside = record_move_aside(&rec);
+        let aside = record_move_aside(&rec).unwrap();
         let mut model = export_review(&d);
         m.freeze_move_asides();
         model.set_nif_review_rows(m.nif_review_rows());
@@ -8168,10 +8243,42 @@ mod task9 {
         assert_eq!(before, support::tree_hashes(&roots));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn final_wave_failed_pre_record_removes_its_backup() {
+        let (d, mut m, _, rec) = unseen();
+        m.freeze_move_asides();
+        let aside = record_move_aside(&rec).unwrap();
+        read_only(&rec, true);
+        let result = export(&mut m);
+        read_only(&rec, false);
+        assert!(result.is_err());
+        assert!(!exported(&d).exists());
+        assert!(!aside.exists(), "failed pre-record left its backup");
+        assert_eq!(export(&mut m), Ok(1));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn final_wave_legacy_cleanup_reports_the_saved_draft() {
+        let (d, mut m, p, _) = legacy(false);
+        let old = nif_doc(&export_root(&d));
+        let lock = hold(&old, 1);
+        tick(&mut m, 30.5);
+        let result = export(&mut m);
+        drop(lock);
+        assert!(draft(&p).is_file());
+        assert!(old.is_file());
+        let why = result.expect_err("failed cleanup must stop before the NIF");
+        assert!(why.contains("draft was saved"), "{why}");
+        assert!(!exported(&d).exists());
+        assert_eq!(export(&mut m), Ok(1));
+    }
+
     #[test]
     fn a_quick_export_moves_an_unseen_record_aside_without_review() {
         let (d, mut m, _, rec) = unseen();
-        let aside = record_move_aside(&rec);
+        let aside = record_move_aside(&rec).unwrap();
         m.quick_export();
         assert!(exported(&d).is_file());
         assert_eq!(doc_values(&aside), [17.5]);
@@ -9641,6 +9748,13 @@ fn no_export_folder_blocks_the_nif_row() {
         !nif_doc(&d.path().join("mods").join(EDIT_MOD)).exists(),
         "no default mod"
     );
+    let mut model = export_review(&d);
+    model.set_nif_review_rows(m.nif_review_rows());
+    assert!(model
+        .review_writes()
+        .also_updated
+        .iter()
+        .all(|w| w.kind != sdc_gui::model::review::WriteKind::Nif));
     export_fails(&mut m, NO_EXPORT_FOLDER);
     // a crash: the next session finds the autosave
     m.close_edit();
@@ -10179,14 +10293,29 @@ fn idle_frames_after_an_export_hash_nothing() {
         .as_ref()
         .unwrap();
     let probes = backup_probes();
-    let _ = record_move_aside(record);
+    let _ = record_move_aside(record).unwrap();
     assert!(backup_probes() > probes, "a sibling lookup is counted");
     let probes = backup_probes();
+    let loads = load_count();
+    let reads = sdc_gui::model::meshes::nif_edit::installed_reads();
+    let attempts = h.state().switch_save_attempts_for_test();
     for _ in 0..10 {
+        h.state_mut().set_project_root(None);
         let _ = h.state().nif_review_rows();
         h.state_mut().set_nif_export_root(root.clone());
         h.run_steps(1);
     }
+    assert_eq!(loads, load_count(), "idle switch read an edit document");
+    assert_eq!(
+        reads,
+        sdc_gui::model::meshes::nif_edit::installed_reads(),
+        "idle switch read the installed NIF"
+    );
+    assert_eq!(
+        attempts,
+        h.state().switch_save_attempts_for_test(),
+        "idle switch tried to save"
+    );
     assert_eq!(ops_hash_count() - n, 0, "no hash over ten idle frames");
     assert_eq!(
         backup_probes(),
@@ -16892,7 +17021,29 @@ fn under_the_limit_no_editor_widget_interacts_inside_the_footer() {
         }
         crossed += 1;
         // The footer is whole: its Close button still takes the click.
-        h.get_by_label("Close the diff").click();
+        // The accessibility bounds include clipped space. Hit the visible part after the resize settles.
+        let close = h.get_by_label("Close the diff");
+        let node = egui::accesskit::NodeId((u128::from(close.accesskit_node().id()) >> 64) as u64);
+        let hit = interact_rect_of(&h, node)
+            .expect("Close interaction")
+            .intersect(r.footer);
+        assert!(hit.is_positive(), "{hgt}: Close is clipped: {hit:?}");
+        let point = hit.center();
+        h.hover_at(point);
+        h.step();
+        h.event(egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.step();
+        h.event(egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
         h.run_steps(4);
         assert!(
             h.state().meshes.nif_diff_view.is_none(),
@@ -17552,4 +17703,316 @@ fn a_failed_switch_does_not_name_a_draft() {
         .get_by_label("Show in Explorer: the draft")
         .accesskit_node()
         .is_disabled());
+}
+
+#[test]
+fn final_wave_drag_reads_the_installed_file_once() {
+    use sdc_gui::model::meshes::nif_edit::installed_reads;
+    let (_d, mut m, p) = saved_in_p();
+    assert_eq!(export(&mut m), Ok(1));
+    tick(&mut m, 30.5);
+    m.nif_review_rows();
+    let before = installed_reads();
+    let reads = load_count();
+    for value in 31..41 {
+        tick(&mut m, value as f32);
+        m.set_project_root(Some(&p));
+        m.nif_review_rows();
+        m.quick_export_block();
+    }
+    assert_eq!(
+        reads,
+        load_count(),
+        "drag or idle project switch read edit documents"
+    );
+    assert_eq!(
+        installed_reads(),
+        before,
+        "an edit revision reread the installed NIF"
+    );
+}
+
+#[test]
+fn final_wave_plain_autosave_removal_is_listed() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    m.open_edit();
+    tick(&mut m, 20.5);
+    assert!(
+        review_row(&m).draft_removals.contains(&autosave(&d)),
+        "missing plain autosave from Review"
+    );
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(!autosave(&d).exists());
+}
+
+#[test]
+fn final_wave_live_and_disk_badges_share_the_game_path_key() {
+    let (_d, mut m, _p) = saved_in_p();
+    m.edit.as_mut().unwrap().data_path = r"Meshes\X.nif".into();
+    tick(&mut m, 33.0);
+    assert_eq!(
+        m.doc_badges,
+        m.pending_docs(),
+        "live and disk keys diverged"
+    );
+}
+
+#[test]
+fn final_wave_another_owners_record_does_not_mark_an_empty_draft_pending() {
+    let (d, mut m, p) = saved_in_p();
+    assert_eq!(export(&mut m), Ok(1));
+    let mut doc = load(&draft(&p)).unwrap().unwrap();
+    doc.id = Some("1234567890123456".into());
+    doc.ops.clear();
+    save(&draft(&p), &doc).unwrap();
+    assert_eq!(
+        badge_of(&m, "x.nif"),
+        None,
+        "another owner supplied the badge"
+    );
+    assert!(exported(&d).exists());
+}
+
+#[test]
+fn final_wave_partial_export_is_explained_in_the_edit_footer() {
+    let (_d, mut m, _p) = saved_in_p();
+    m.fail_record_write_after_nif_for_test();
+    export_fails(&mut m, "is in place, but its record");
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains("is in place, but its record");
+}
+
+#[test]
+fn final_wave_idle_footer_reuses_its_fitted_writes_line() {
+    use sdc_gui::ui::meshes::writes_builds;
+    let (_d, m, _p) = saved_in_p();
+    let mut h = view(m);
+    h.run_steps(4);
+    let before = writes_builds();
+    assert!(before > 0);
+    h.run_steps(5);
+    assert_eq!(
+        before,
+        writes_builds(),
+        "the footer fitted unchanged paths again"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn final_wave_an_inaccessible_sibling_is_not_offered_as_a_backup() {
+    use sdc_gui::model::meshes::nif_edit::record_move_aside;
+    let d = tempfile::tempdir().unwrap();
+    assert!(
+        record_move_aside(&d.path().join("invalid\u{1}record.toml")).is_err(),
+        "metadata error treated as a free backup name"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn final_wave_a_retained_edit_shows_the_reloaded_scan_details() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let lock = hold(&autosave(&d), 1);
+    tick(&mut m, 33.5);
+    let copy = m.selected_nif.unwrap();
+    rusqlite::Connection::open(d.path().join("scan.db"))
+        .unwrap()
+        .execute(
+            "UPDATE nif_copy SET problem = 'new scan problem' WHERE id = ?1",
+            [copy],
+        )
+        .unwrap();
+    m.reload();
+    let start = std::time::Instant::now();
+    while m.poll_rows() {
+        assert!(start.elapsed() < Duration::from_secs(60));
+        std::thread::yield_now();
+    }
+    assert!(m.edit.is_some(), "fixture must retain the unsaved session");
+    assert_eq!(
+        m.selected_row().unwrap().problem.as_deref(),
+        Some("new scan problem")
+    );
+    drop(lock);
+}
+
+#[test]
+fn final_wave_quick_export_reads_the_record_twice() {
+    let (_d, mut m, _p) = saved_in_p();
+    let before = load_count();
+    m.quick_export();
+    assert_eq!(m.quick_export_result, Some(Ok(1)));
+    assert_eq!(
+        load_count() - before,
+        2,
+        "one refresh, then one write-time load"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn final_wave_reveal_checks_the_draft_after_the_typed_path_is_saved() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    let (shape, _) = lit_shape(m.edit.as_ref().unwrap());
+    m.select_edit(Selection::Shape(shape));
+    gloss(&mut m, 12.5);
+    let mut h = view(m);
+    h.run_steps(3);
+    let field = "Diffuse path (slot 1)";
+    h.get_by_role_and_label(AkRole::TextInput, field).focus();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.get_by_role_and_label(AkRole::TextInput, field)
+        .type_text("textures\\typed.dds");
+    h.run_steps(1);
+    let lock = hold(&autosave(&d), 1);
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert!(
+        h.state().edit.as_ref().unwrap().draft_on_disk().is_none(),
+        "the field lost focus and its save failed"
+    );
+    assert!(
+        h.state().reveal_request.is_none(),
+        "queued a stale draft before the save"
+    );
+    drop(lock);
+}
+
+#[test]
+fn final_wave_export_consumes_a_saved_waiting_project_switch() {
+    let (d, mut m, p) = saved_in_p();
+    let q = project_folder(&d, "q");
+    let moved = d.path().join("moved");
+    std::fs::rename(&p, &moved).unwrap();
+    let blocker = d.path().join("nif-edits");
+    std::fs::write(&blocker, b"no fallback here").unwrap();
+    tick(&mut m, 34.5);
+    m.set_project_root(Some(&q));
+    assert!(review_row(&m).blocked.is_some());
+    std::fs::rename(moved, &p).unwrap();
+    std::fs::remove_file(blocker).unwrap();
+    m.edit.as_mut().unwrap().flush();
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, draft(&p));
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_path,
+        draft(&q),
+        "export left a completed switch pending"
+    );
+}
+
+#[test]
+fn final_wave_carrying_an_export_to_a_different_draft_id_requires_its_answer() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    make_old(&draft(&p));
+    let target_id = id_of(&p);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let path = nif_doc(&export_root(&d));
+    let before = std::fs::read(&path).unwrap();
+    let owner = load(&path).unwrap().unwrap().export.owner.unwrap();
+    assert_ne!(owner, target_id);
+    m.set_project_root(Some(&p));
+    assert_eq!(m.edit.as_ref().unwrap().doc.id.as_ref(), Some(&target_id));
+    tick(&mut m, 14.5);
+    assert!(review_row(&m).foreign.is_some());
+    export_fails(&mut m, NIF_UNANSWERED);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn final_wave_a_carry_reads_the_current_record_owner_when_adopting_an_id() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    make_old(&draft(&p));
+    let target_id = id_of(&p);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let path = nif_doc(&export_root(&d));
+    let mut record = load(&path).unwrap().unwrap();
+    assert_ne!(record.export.owner.as_ref(), Some(&target_id));
+    record.id = Some(target_id.clone());
+    record.export.owner = Some(target_id);
+    save(&path, &record).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    m.set_project_root(Some(&p));
+    tick(&mut m, 15.5);
+    assert_eq!(
+        review_row(&m).foreign,
+        None,
+        "the carry used the owner cached for the previous ID"
+    );
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        before,
+        "a carry must only read the export record"
+    );
+}
+
+#[test]
+fn final_wave_each_nif_recovery_path_invalidates_the_review_inventory() {
+    use sdc_gui::model::meshes::nif_edit::KeptBackup;
+    let (d, mut meshes, _) = saved_in_p();
+    tick(&mut meshes, 33.5);
+    let row = review_row(&meshes);
+    let mut model = export_review(&d);
+    let path = d.path().join("changed review path");
+    for field in [
+        "record",
+        "draft",
+        "removal",
+        "draft backup",
+        "kept backup",
+        "record backup",
+    ] {
+        model.set_nif_review_rows(vec![row.clone()]);
+        assert!(!model
+            .review_writes()
+            .also_updated
+            .iter()
+            .any(|w| w.path == path));
+        let mut changed = row.clone();
+        match field {
+            "record" => changed.record = path.clone(),
+            "draft" => changed.draft = path.clone(),
+            "removal" => changed.draft_removals.push(path.clone()),
+            "draft backup" => changed.draft_backup = Some(path.clone()),
+            "kept backup" => {
+                changed.kept_backup = Some(KeptBackup {
+                    path: path.clone(),
+                    last_error: None,
+                })
+            }
+            "record backup" => changed.record_move_aside = Some(path.clone()),
+            _ => unreachable!(),
+        }
+        model.set_nif_review_rows(vec![changed]);
+        assert!(
+            model
+                .review_writes()
+                .also_updated
+                .iter()
+                .any(|w| w.path == path && w.kind == sdc_gui::model::review::WriteKind::Nif),
+            "{field}"
+        );
+    }
 }

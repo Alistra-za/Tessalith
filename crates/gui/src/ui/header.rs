@@ -108,13 +108,13 @@ pub fn draw(
         // nested layout (a combo, a disabled scope) is moved whole by `fit`.
         ui.horizontal_wrapped(|ui| row(ui, model, scan.as_deref_mut()));
     });
-    if let Some((meshes, review)) = scan
-        .zip(model.review.as_mut())
-        .filter(|(_, r)| !r.nif_names_frozen)
-    {
-        meshes.freeze_move_asides();
+    // A header click can open Review in this frame. Freeze before the bottom panel paints its inventory.
+    if let Some(review) = model.review.as_mut().filter(|r| !r.nif_names_frozen) {
         review.nif_names_frozen = true;
-        model.set_nif_review_rows(meshes.nif_review_rows());
+        if let Some(meshes) = scan {
+            meshes.freeze_move_asides();
+            model.set_nif_review_rows(meshes.nif_review_rows());
+        }
         #[cfg(feature = "test-hooks")]
         model.capture_opening_writes();
     }

@@ -160,3 +160,15 @@ fn while_a_scan_runs_choose_and_scan_a_folder_say_why() {
         );
     }
 }
+
+#[test]
+fn a_profile_with_different_case_keeps_scan_enabled() {
+    let d = instance();
+    let mut m = model(d.path());
+    m.use_instance(d.path().to_path_buf(), "default".into());
+    let h = open_popup(m);
+    assert!(
+        h.query_by_label("Scan").is_some(),
+        "the profile exists with different case"
+    );
+}

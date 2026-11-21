@@ -120,9 +120,9 @@ impl DocBadge {
 }
 
 /// Read the working documents in a project or export folder. Timestamped backups have a different suffix.
-pub fn pending_docs(root: &Path, suffix: &str) -> Vec<EditDoc> {
+pub fn pending_docs(root: &Path, folder: &str) -> Vec<EditDoc> {
     let mut out = vec![];
-    let mut dirs = vec![root.join(suffix).join("nif-edits")];
+    let mut dirs = vec![root.join(folder).join("nif-edits")];
     while let Some(d) = dirs.pop() {
         let Ok(rd) = std::fs::read_dir(&d) else {
             continue;

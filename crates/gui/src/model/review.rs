@@ -53,6 +53,7 @@ pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Review {
+    /// The header captured this opening of Review before its first inventory was drawn.
     pub(crate) nif_names_frozen: bool,
     pub options_open: bool,
     /// Open Options when an Also blocker appears, while allowing the user to close it afterward.
@@ -152,9 +153,17 @@ pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or che
 /// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
 pub const HOVER_MARKED: &str = "It changes only if this export's new files change it.";
 
+/// Which writer can act on this path after Review. Display text is independent of this permission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteKind {
+    Nif,
+    Other,
+}
+
 /// E7: one file (or, with an Also tick, one folder) the export changes besides its outputs, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewWrite {
+    pub kind: WriteKind,
     pub path: PathBuf,
     pub hover: &'static str,
     /// Ruling 3c-50: whether the file changes is decided by what this run writes, so it may stay as it is.
@@ -206,17 +215,7 @@ impl ReviewWrites {
     pub(crate) fn nif_paths(&self) -> Vec<PathBuf> {
         self.also_updated
             .iter()
-            .filter(|w| {
-                matches!(
-                    w.hover,
-                    HOVER_NIF
-                        | HOVER_NIF_RECORD
-                        | NIF_DRAFT_HOVER
-                        | NIF_BACKUP_HOVER
-                        | NIF_MOVE_ASIDE_HOVER
-                        | NIF_LEGACY_HOVER
-                )
-            })
+            .filter(|w| w.kind == WriteKind::Nif)
             .map(|w| w.path.clone())
             .collect()
     }
@@ -912,8 +911,9 @@ impl AppModel {
         outputs.sort_by(|a, b| (&a.path, a.marked).cmp(&(&b.path, b.marked)));
         outputs.dedup_by(|a, b| a.path == b.path);
         let mut also: Vec<ReviewWrite> = vec![];
-        let mut put = |path: PathBuf, hover: &'static str, marked: bool| {
+        let mut put = |kind, path: PathBuf, hover: &'static str, marked: bool| {
             also.push(ReviewWrite {
+                kind,
                 path,
                 hover,
                 marked,
@@ -921,7 +921,12 @@ impl AppModel {
         };
         // `save()` first: `sdc.toml` when it holds unsaved edits.
         if let (Some(p), Some(_)) = (&self.project, self.pending_files_save()) {
-            put(p.path().to_path_buf(), HOVER_SDC_TOML, false);
+            put(
+                WriteKind::Other,
+                p.path().to_path_buf(),
+                HOVER_SDC_TOML,
+                false,
+            );
         }
         if let (Some(d), Some(r)) = (doc, &preview) {
             // `save()` writes unsaved edits; `save_record` writes the document's text after a record, which changes the
@@ -932,16 +937,23 @@ impl AppModel {
             };
             if d.needs_save() || recorded {
                 put(
+                    WriteKind::Other,
                     d.path().to_path_buf(),
                     HOVER_PROJECT_TOML,
                     run_copy_destination,
                 );
             } else if run_records && !d.read_only() {
-                put(d.path().to_path_buf(), HOVER_PROJECT_TOML, true);
+                put(
+                    WriteKind::Other,
+                    d.path().to_path_buf(),
+                    HOVER_PROJECT_TOML,
+                    true,
+                );
             }
             // `put_side` writes the sidecar only for a value it does not hold.
             if r.side_changed() || run_records {
                 put(
+                    WriteKind::Other,
                     d.sidecar_path(),
                     HOVER_GENERATED,
                     run_copy_destination || !r.side_changed(),
@@ -954,39 +966,45 @@ impl AppModel {
         if let Some(root) = &self.root {
             let planned = engine::discover::effective_output_root(root, &out);
             put(
+                WriteKind::Other,
                 planned.join("_sdc").join("manifest.jsonl"),
                 HOVER_MANIFEST,
                 true,
             );
         }
         for (c, marked) in copies {
-            put(c.components().collect(), HOVER_COPY, marked);
+            put(
+                WriteKind::Other,
+                c.components().collect(),
+                HOVER_COPY,
+                marked,
+            );
         }
         // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
         for r in self.nif_rows.iter().filter(|r| nif_row_written(r)) {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
-                put(p, HOVER_NIF, r.nif_matches);
+                put(WriteKind::Nif, p, HOVER_NIF, r.nif_matches);
             }
-            put(r.record.clone(), HOVER_NIF_RECORD, false);
+            put(WriteKind::Nif, r.record.clone(), HOVER_NIF_RECORD, false);
             if let Some(path) = &r.record_move_aside {
-                put(path.clone(), NIF_MOVE_ASIDE_HOVER, false);
+                put(WriteKind::Nif, path.clone(), NIF_MOVE_ASIDE_HOVER, false);
             }
             if r.draft_unsaved {
-                put(r.draft.clone(), NIF_DRAFT_HOVER, false);
+                put(WriteKind::Nif, r.draft.clone(), NIF_DRAFT_HOVER, false);
                 for path in &r.draft_removals {
-                    put(path.clone(), NIF_LEGACY_HOVER, true);
+                    put(WriteKind::Nif, path.clone(), NIF_LEGACY_HOVER, true);
                 }
                 if let Some(path) = &r.draft_backup {
-                    put(path.clone(), NIF_BACKUP_HOVER, false);
+                    put(WriteKind::Nif, path.clone(), NIF_BACKUP_HOVER, false);
                 }
                 if let Some(backup) = &r.kept_backup {
-                    put(backup.path.clone(), NIF_BACKUP_HOVER, true);
+                    put(WriteKind::Nif, backup.path.clone(), NIF_BACKUP_HOVER, true);
                 }
             }
         }
         // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".
         for f in also_folders {
-            put(f, HOVER_ALSO_FOLDER, true);
+            put(WriteKind::Other, f, HOVER_ALSO_FOLDER, true);
         }
         let unchosen = self
             .export_folder_chosen()
@@ -1439,6 +1457,7 @@ impl AppModel {
         self.nif_export_due.take()
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
     pub fn take_nif_export_due(&mut self) -> bool {
         self.take_reviewed_nif_export().is_some()
     }

@@ -4431,6 +4431,7 @@ fn list_of(
         also_updated: entries
             .iter()
             .map(|(p, hover, marked)| ReviewWrite {
+                kind: sdc_gui::model::review::WriteKind::Other,
                 path: p.to_path_buf(),
                 hover,
                 marked: *marked,
