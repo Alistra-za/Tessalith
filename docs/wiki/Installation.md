@@ -1,20 +1,47 @@
 # Installation
 
-For anyone installing the release zip: what to download, what Windows needs, where Tessalith keeps its files, and how to back up, reset or remove it. Building from source is in [CONTRIBUTING.md](https://github.com/Alistra-za/Tessalith/blob/main/CONTRIBUTING.md#build-from-source).
+If you make mods on Windows or Linux, you can run Tessalith from the Windows x64 zip. On Linux you'll need Wine. Building from source is in [CONTRIBUTING.md](https://github.com/Alistra-za/Tessalith/blob/main/CONTRIBUTING.md#build-from-source).
 
 ## Download and run
 
 1. Download `Tessalith-<version>-win-x64.zip` from the [Releases page](https://github.com/Alistra-za/Tessalith/releases). `SHA256SUMS.txt` beside it hashes the release if you want to check it.
 2. Unzip it anywhere. There's no installer, and nothing is registered with Windows.
-3. Double-click `tessalith.exe` for the GUI, or open a terminal in the folder and run `sdc`. Add the folder to your `PATH` to run `sdc` from anywhere.
+3. On Windows, double-click `tessalith.exe` for the GUI, or open a terminal in the folder and run `sdc`. Add the folder to your `PATH` to run `sdc` from anywhere.
 
 The exes aren't code-signed, so SmartScreen warns on the first run. Click **More info**, then **Run anyway**.
 
 ## What you need
 
-- **Windows 10 or 11, x64.** Linux and macOS don't work: the only build target is `x86_64-pc-windows-msvc`, and the 3D preview uses Direct3D 11.
-- **A GPU for the previews.** Without one the 2D and 3D previews are off and everything else works. The CLI needs none.
-- **Fonts.** Tessalith uses Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas, which ship with Windows. Letters they don't have, such as Chinese, Japanese or Korean in file names, come from the other fonts installed on Windows. If Segoe UI is missing or damaged, Tessalith uses Arial; if Arial is missing too, it looks for Noto Sans, DejaVu Sans and other common fonts; if it finds none, it uses its own built-in fonts and says so in the Messages tab. A missing font never stops it from starting.
+- **Windows 10 or 11, x64.** On Linux, follow [Run Tessalith through Wine](#run-tessalith-through-wine-on-linux). There is no native Linux or macOS build.
+- **Graphics for the previews.** Without a usable graphics device, the 2D and 3D previews are off and everything else works. The CLI needs none.
+- **Fonts.** Tessalith uses Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas, which ship with Windows. Letters they don't have, such as Chinese, Japanese or Korean in file names, come from the other fonts installed on Windows. You can leave Segoe UI out of your Wine prefix. Tessalith can use Arial or a Linux font such as Noto Sans or DejaVu Sans. If it can't find a suitable font, it starts with built-in fonts and tells you in **Messages**. <!-- D:JM1,JM2,JM5 -->
+
+## Run Tessalith through Wine on Linux
+
+1. Install Wine 11.0 and [Winetricks](https://github.com/Winetricks/winetricks) on x86-64 Linux. The 3D preview needs a working Vulkan driver for DXVK.
+2. In a terminal, create a separate 64-bit Wine prefix so the preview DLLs only affect Tessalith. Winetricks fetches `d3dcompiler_47.dll` from Microsoft's SDK and installs the 64-bit copy in `drive_c/windows/system32/` so the preview can compile Community Shaders.
+
+   ```sh
+   export WINEPREFIX="$HOME/.wine-tessalith"
+   WINEARCH=win64 wineboot -u
+   winetricks d3dcompiler_47
+   ```
+
+3. Get `dxvk-3.1.1.tar.gz` from the [DXVK 3.1.1 release](https://github.com/doitsujin/dxvk/releases/tag/v3.1.1) and unpack it. In the same terminal, change to the extracted folder containing `x64/`. Copy the two Direct3D 11 DLLs into the prefix's 64-bit system folder.
+
+   ```sh
+   cp --remove-destination x64/d3d11.dll x64/dxgi.dll "$WINEPREFIX/drive_c/windows/system32/"
+   ```
+
+4. To launch, open a terminal in the unzipped Tessalith folder. Select the prefix and tell Wine to load the three native DLLs. Run the last line for the GUI, or use `wine ./sdc.exe --help` for the CLI.
+
+   ```sh
+   export WINEPREFIX="$HOME/.wine-tessalith"
+   export WINEDLLOVERRIDES="d3d11,dxgi,d3dcompiler_47=n"
+   wine ./tessalith.exe
+   ```
+
+On Mesa's software Vulkan driver, the GUI opened a two-set project and drew its textures on the 3D preview sphere. Of 352 renderer tests, 349 passed. The run didn't cover a physical GPU on Linux or an export from a real project. [Wine test results](../research/render3d-backends.md#what-wine-did-on-linux)
 
 ## Where Tessalith keeps its files
 
