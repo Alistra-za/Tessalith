@@ -21,11 +21,13 @@ Click a row’s texture, set or file to open it. “Project” means the row has
 
 ## Problems and Notes
 
-The tab counts the two apart: `Problems (2) · Notes (67)` is 2 rows that need you and 67 that don't. <!-- D:JO3 -->
+**From the NIF you are editing (k)** groups its counted problems. Hover the tab for the NIF's share. <!-- D:JY9 -->
+
+`Problems (2) · Notes (67)` means two issues to check and 67 notes. <!-- D:JO3 -->
 
 - **A problem** is a row about an output that may be wrong or a file that isn't written. A set with one isn't ready ([what Ready means](GUI-Sets-Column.md#reading-a-set-card)). Check rows count here too, but never against Ready. <!-- D:JO1,JO5 -->
 - **A note** needs nothing from you: Tessalith used a default and the row says why that's fine (no metallic map, so the surface reads as not metal), you marked the row as intended, or a fix waits for the next export. Notes never count against Ready. <!-- D:JO1,JO2 -->
-- **Where notes show:** the list shows the problems, then the notes that have a button. The **Notes (67)** pill lists every note, or the set's notes while a set filter is on. <!-- D:JO3 -->
+- **Notes (67)** lists every note, or the selected set's notes under a set filter. The default list includes notes with buttons. <!-- D:JO3 -->
 - **Nothing left:** with no row at all the tab reads `Problems`. With only notes it reads `Problems (0) · Notes (67)`, and the list's first line reads "No problems. Notes (67) lists what Tessalith did for you." <!-- D:JO3 -->
 
 ## Rows and their fixes
@@ -40,9 +42,9 @@ A row you must act on has its fix as a button.
 | *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
 | *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
-| Warnings on a set | **Go to set** ([below](#go-to-set)). They never hold back Export or open Review. |
+| Warnings on a set | **Go to set** ([below](#go-to-set)). You can export with these warnings. They still bring up Review if you've opted to skip it on clean exports. |
 | A file's export warnings, after an export | Click the file. |
-| A note about a change Tessalith made for you | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
+| A note about an automatic change with its own Undo step | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
 | `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. On a file you already exported the row then reads *Rebuild Z is on for this file: export again to rewrite it*, a queued note with no button, until the next export. <!-- D:JO9 --> |
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
 | `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, or **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). For the set's packed output (`_rmaos`, `_rfaos`) there is no **Remove from set**: the row offers **Clear recipe** ([when](#clear-recipe)) and **Change shader…**, or **Change shader…** alone. <!-- D:JO15,JR10 --> |
@@ -83,11 +85,15 @@ A warning you checked and want to keep as it is (a `_flow` map you made small on
 
 Each click is one undo step. <!-- D:JO4 -->
 
-- **Where it's kept:** `[project] intended` in `sdc-project.toml`, by the row's code, where it is and its sentence. Renaming a set keeps its marks; deleting the set drops them. When the sentence changes (another file name, another number), the row shows again. <!-- D:JO4 -->
+- **Where it's kept:** `[project] intended` in `sdc-project.toml` records the code, location and sentence. Marks survive a set rename. Deleting the set drops them. A changed sentence shows again. <!-- D:JO4 -->
 - **Warnings and checks only:** blockers, questions and a file that failed validation in the last export have no mark. Fix those, or export again. <!-- D:JO4 -->
 - **Greyed** with no project open and while `sdc-project.toml` is read-only; the hover says why. <!-- D:JO4 -->
-- **No mark for a whole kind at once:** hide the kind instead ([Hiding kinds of row](#hiding-kinds-of-row)). <!-- D:JO4 -->
+- To hide a whole kind, use [Kinds ▾](#hiding-kinds-of-row). <!-- D:JO4 -->
+
+#### Reading marked warnings
+
 - **In hovers:** a tile's hover, a file's warnings in the **Files** tab and a set's check badge list marked rows last, under "Marked as intended:". <!-- D:JO4 -->
+- A marked warning drops out of the count beside its file in **Files**. If every warning is marked, the row shows a grey **n marked**. Hover it to read the warnings. **Has warnings** leaves that file out. <!-- D:JY18 -->
 
 ### Go to set
 
@@ -111,22 +117,22 @@ An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 
 ## What the GUI writes on its own
 
-When a plan settles, every sub-type taken from a High-confidence suggestion (including one the scanned meshes or a GRAS grass model gave it) and every alpha meaning taken from the meshes (also `remove`, an alpha they never read) is written to `sdc.toml` as a `[files]` entry, as if you had chosen it.
+After planning, Tessalith records High-confidence types and mesh-derived alpha policies in memory as `[files]` entries for `sdc.toml`. Mesh scans and GRAS grass models can supply the type. Meshes that ignore alpha can give it the `remove` policy.
 
 To check which normals can follow a shader, Tessalith reads the recorded types, file entries and slot locks once for the whole pass. <!-- D:JS5 -->
 
-- It is one undo step, `Set {n} types automatically` (`values` when an alpha meaning is among them), and one Info row with **Undo this change**.
-- These types alone, and the [switch off Advanced Skin](#sets-that-left-advanced-skin), don't count as your edits: no title dot, and no unsaved question on close, open or reload. <!-- D:JQ56 -->
-- A type you chose stays yours, and an Undo stays undone until the folder reopens.
-- If saving presets gives a recorded normal a different type, the preset’s change wins for that pass. A normal that only follows its set into PBR can do so with suggestion acceptance off. Its Info row makes no confidence claim. If Tessalith cannot record ownership of a PBR type in `sdc-project.toml`, it keeps the suggested type instead. <!-- D:JS5 -->
+- Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
+- Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->
+- Your own type or alpha changes, including Undo, [need a save](GUI-Main-Window.md#header). <!-- D:JY6 -->
+- Saving presets can give a recorded normal a different type for that pass. A normal can follow its set into PBR with suggestion acceptance off. Its Info row omits confidence. If ownership can't be recorded in `sdc-project.toml`, the suggested type stays. <!-- D:JS5 -->
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
 
 ### Sets that left Advanced Skin
 
-A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.md#suffixes)). When you open a project, or `sdc.toml` is read again, Tessalith clears a recorded `skin_albedo` on a set's diffuse when only such a map made the set skin. The set then takes the shader its other maps give. When that shader is PBR and the set has no roughness or metallic map, it warns that the PBR shader needs an `_rmaos`, like any PBR set without one. <!-- D:JQ8,JQ56 -->
+A `_fuzz` or `_sheen` map alone doesn't make a set Advanced Skin ([why](Texture-Types.md#suffixes)). On open or reload, Tessalith clears `skin_albedo` from a diffuse typed as skin on that evidence alone. The other maps determine the shader. A resulting PBR set without roughness or metallic warns about its missing `_rmaos`. <!-- D:JQ8,JQ56 -->
 
-- **The row** reads *{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)*. Hover it for one line per file, `{file}: skin albedo → {type}`, then the types recorded with it on other files, then *A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.* <!-- D:JQ19 -->
-- **Undo this change** sits on the row while the switch is the last step. The switch and the types recorded with it are one undo step. <!-- D:JQ17,JQ56 -->
+- The row names how many sets left Advanced Skin. Hover for each file, its change from skin albedo, and other types recorded in the same step. <!-- D:JQ19 -->
+- **Undo this change** sits on the row while the switch is the last step. The switch and the types recorded with it are one undo step. Opening the folder leaves it clean. Undoing the switch gives you an edit to save. <!-- D:JQ17,JQ56,JY6 -->
 - **An undone switch runs again** the next time `sdc.toml` is read. To keep a set skin, choose **Advanced Skin** as its shader in the set editor. <!-- D:JQ56 -->
 - **Not switched:** a set whose shader you picked, a set whose diffuse is pinned, a set with a written `packing.recipe`, a set that other skin maps or types keep skin ([which](Texture-Types.md#suffixes)), a set whose only fuzz map is shared in from another set, and every set while `sdc.toml` is read-only. <!-- D:JQ8,JQ20,JQ55 -->
 

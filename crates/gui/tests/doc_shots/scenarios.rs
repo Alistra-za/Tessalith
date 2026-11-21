@@ -27,6 +27,7 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("main_window", main_window),
     ("start_screen", start_screen),
     ("export_to_menu", export_to_menu),
+    ("tools_menu", tools_menu),
     ("settings_tab", settings_tab),
     ("problems_tab", problems_tab),
     ("tile_menu", tile_menu),
@@ -270,6 +271,14 @@ fn export_to_menu(dir: &Path) -> Frame {
     shot(&mut h, r.union(b))
 }
 
+/// GUI-Main-Window: the open project's Tools menu.
+fn tools_menu(dir: &Path) -> Frame {
+    let mut h = opened_with(dir, |_| {});
+    let r = reveal(&mut h, |h| h.get_by_label("Tools").click());
+    let b = h.get_by_label("Tools").rect();
+    shot(&mut h, r.union(b))
+}
+
 /// GUI-Main-Window: the Settings tab in front of the centre column (Note JI1).
 fn settings_tab(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
@@ -314,7 +323,8 @@ fn set_card_menu(dir: &Path) -> Frame {
 /// GUI-Review-and-Export: Review in the bottom panel.
 fn review_tab(dir: &Path) -> Frame {
     let mut h = opened_with(dir, |_| {});
-    let r = reveal(&mut h, |h| h.state_mut().model.open_review());
+    let r = reveal(&mut h, |h| button_starting(h, "Review ").click());
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
     shot(&mut h, r)
 }
 
@@ -618,7 +628,7 @@ fn main_window(dir: &Path) -> Frame {
         (3, tl(rect_of(&h, "Textures view"))),
         (4, tl(rect_starting(&h, Role::Button, "Export to"))),
         (5, tl(rect_of(&h, "Save"))),
-        // Export reads "Review N files" while Review would skip something (Note FB1).
+        // Review is the default even when every file is ready (Note JY2).
         (6, tl(rect_starting(&h, Role::Button, "Review "))),
         (7, tl(rect_starting(&h, Role::Button, "Undecided"))),
         (8, tl(tile)),

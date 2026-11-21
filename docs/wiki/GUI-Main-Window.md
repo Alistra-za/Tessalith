@@ -4,13 +4,13 @@ For anyone opening a first folder: how it opens, what the header and the Setting
 
 ## Opening a folder
 
-Click **Open folder** on the start screen, choose **Open > Open folder…**, pick one from **Recent** (the last 10), or drag a folder onto the window. A dropped file opens the folder that holds it. Tessalith reads the folder recursively and plans the conversion. Nothing is written to your textures.
+A launch without a project opens the **Textures** start screen. Click **Open folder…**, choose **Open** → **Open folder…**, pick one from **Recent** (the last 10), or drag a folder onto the window. A dropped file opens the folder that holds it. Tessalith reads the folder recursively and plans the conversion. Nothing is written to your textures.
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
-The columns appear once a folder is open, and the widths you dragged come back.
+Reopening a project restores the saved view and column widths. If Tessalith can't read a folder supplied at launch, the start screen stays open and the status line gives the path and reason. With no project, the header hides **Undo**, **Redo**, **Save** and the export button, and the bottom tabs stay hidden. In **Meshes** you can browse the MO2 list and open a texture folder from the banner. Pending NIF edits bring back **Undo**, **Redo**, **Review** and the bottom tabs so you can export the edits on their own. <!-- D:JY10 -->
 
-While it opens, a progress bar counts the files to plan and **Cancel** returns to the folder you had before, with its undo history. Thumbnails land when the whole plan does; settings stay off until then.
+While it opens, a progress bar counts the files to plan and **Cancel** returns to the folder you had before, with its undo history. When planning finishes, the thumbnails appear, settings become available and the status line gives one next step. It points first to **Undecided** for missing types, then **Problems**, then **Export to ▾** for a missing destination. If the project is ready, it names the header button to press. <!-- D:JY11 -->
 
 ### When `sdc.toml` is rejected
 
@@ -20,10 +20,12 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 
 ## Header
 
-- **Undo** and **Redo** go up to 200 steps (**Ctrl+Z**, **Ctrl+Y**). Undoing back to the last save clears the unsaved dot in the title.
+- **Undo** and **Redo** go up to 200 steps (**Ctrl+Z**, **Ctrl+Y**). Hover either button for the step it will apply.
 - **MO2…** picks the scan source: [Mod scanning](Mod-Scanning.md). **Preset** picks the preset the folder converts with and saves it as `preset` in `sdc.toml`; its last entry, **Presets…**, opens the **Presets** tab: [Presets and targets](Presets-and-Targets.md).
 - **Settings…** opens the [Settings tab](#settings-tab), where the Mode is set.
-- **Save** (**Ctrl+S**) writes `sdc.toml` and `sdc-project.toml`. **Export** is on [Review and Export](GUI-Review-and-Export.md#the-export-button).
+- **Save** (**Ctrl+S**) writes your project edits, including the value in the field you're typing in. A dot in the title means the project has edits to save. Type and alpha choices you make or undo need a save even if the value matches disk. For a new project with settings to write, **Write project files now** saves them before the first export. <!-- D:JY6 --> See [Review and Export](GUI-Review-and-Export.md#the-export-button) for the button beside **Save**.
+
+As the header narrows, look in **⋯** for **Tools ▾**, then **MO2…**, then **Preset**. **Settings…** stays in the header. The destination, save and export controls stay together when they wrap. <!-- D:JY13 --> If a restored window is larger than your GPU can display, Tessalith reduces its size and logs the adjustment. <!-- D:JY17 -->
 
 ### Export to
 
@@ -31,15 +33,19 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 
 ![The Export to menu.](../img/gui/GUI-Main-Window/export-to-menu.png)
 
-The menu also holds **Open export folder**, the checkable **Also export as Vanilla** and **Also export as Complex material** ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)), the checkable **Re-encode every output** ([Encoding every output again](GUI-Review-and-Export.md#encoding-every-output-again)) and, under `cs`, **PGPatcher JSON editor…** ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#the-json-editor)). With no project open it is a plain **More ▾**.
+Click **Choose export folder…** to set the destination. The picker starts in the first folder that exists among this project's destination, your last accepted export folder and the project folder (the most recent project's parent with no project open). The pickers for Also folders, target mod and saving a report start at the project folder or the most recent project's parent. <!-- D:JY14 --> **Open export folder** opens it in Explorer. If the button is grey, the reason appears beside its name. The two ticks here are **Also export as Vanilla** and **Also export as Complex material**. [What each folder holds](Set-Shaders.md#also-export-as-vanilla-and-cm).
+
+With a project open, **Tools ▾** holds **PGPatcher JSON editor…**, **Make marker cube…** and **Re-encode every output**. The JSON editor needs `cs` mode and a loaded sets document. With no project open, **Make marker cube…** is under **More ▾**. <!-- D:JY12 -->
+
+![Tools menu with the JSON editor, marker cube and one-export re-encode switch.](../img/gui/GUI-Main-Window/tools-menu.png)
 
 ### Status line and banner
 
-A dot in the window title means unsaved edits. The status line shows file and set counts, a VRAM estimate for the selection and the folder, and the progress of whatever runs. A banner appears under it when something needs you, such as a rejected `sdc.toml`. Everything it says is also kept in [Messages](GUI-Guide.md#messages).
+Read `57 files → 68 textures (11 packed or generated) · 7 sets` as files found on disk, textures planned, and sets with cards. The status line also gives a VRAM estimate for the selection and the folder, and shows progress during an export. <!-- D:JY8 --> A banner appears under it when something needs you, such as a rejected `sdc.toml`. Everything it says is also kept in [Messages](GUI-Guide.md#messages).
 
 ## Settings tab
 
-**Settings…** in the header opens the Settings tab in the centre column, beside the Presets tab. It works with no folder open, and **Pop out** gives it its own window. The top section belongs to the open folder; the lower one applies to every project. <!-- D:JI1 -->
+**Settings…** opens in the current view, even with no folder open. In **Meshes**, docked Settings, Presets and the JSON editor cover the mesh list. **Back to meshes**, **Close** or **Pop out** reveals it again. While a tool covers Meshes, Undo acts on the tool. <!-- D:JY15 --> The top section belongs to the open folder; the lower one applies to every project. <!-- D:JI1 -->
 
 ![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
 
@@ -52,6 +58,7 @@ These rows are saved in the open folder's files. With no folder open, the sectio
 | **Mode** | `target` in `sdc.toml`: `cs` or `vanilla`. The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
 | **Preset** | `preset` in `sdc.toml`, the same value as the header's **Preset**. |
 | **Export folder** (**Choose…**, **Open**) | The export folder in `sdc-project.toml`, the same value as [Export to ▾](#export-to). |
+| **Export without review** | Sets `[project] export_without_review` in `sdc-project.toml`. [When Tessalith still opens Review](GUI-Review-and-Export.md#the-export-button). |
 
 Mode and Preset save with **Save**, and are greyed while `sdc.toml` is read-only. The export folder saves at once, or with **Save** while `sdc-project.toml` has unsaved edits.
 

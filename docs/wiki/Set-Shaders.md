@@ -65,7 +65,7 @@ For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is co
 
 ### Turn it on
 
-- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, the **Also export as** column in Review, or a set's [Also export tab](GUI-Set-Editor.md#also-export-tab). While a tick is on, Export always opens Review.
+- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, **Options** in Review, or a set's [Also export tab](GUI-Set-Editor.md#also-export-tab). While a tick is on, Export always opens Review.
 - **Saved as** `[export] also` in the project `sdc.toml`.
 - **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
@@ -86,7 +86,7 @@ Three folders side by side, where `<project>` is the opened folder's name:
 
 ### Where the folders go
 
-In Review's **Also export as** column:
+Open **Options** in Review to set the destination and folder names.
 
 - **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder.
 - The three folder names: empty means the default name, shown as the hint.
@@ -101,7 +101,7 @@ In Review's **Also export as** column:
 
 ### The recipe
 
-The recipe is one box per `[export.legacy]` key, under **All sets in this project** in the [Also export tab](GUI-Set-Editor.md#also-export-tab) of any set; it applies to every set. Review's **Recipe settings…** opens that tab on a PBR set. <!-- D:JI2 --> Keys, defaults and ranges are on [Project config](Project-Config.md#export).
+The recipe is one box per `[export.legacy]` key, under **All sets in this project** in the [Also export tab](GUI-Set-Editor.md#also-export-tab) of any set; it applies to every set. In Review's **Options**, **Recipe settings…** opens the selected PBR set's tab. With another set selected, it opens the first unskipped PBR set, or the first PBR set if all are skipped. <!-- D:JI2,JY15 --> Keys, defaults and ranges are on [Project config](Project-Config.md#export).
 
 ### Files this export did not write
 
