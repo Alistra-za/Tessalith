@@ -160,8 +160,8 @@ Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doe
 
 ### Formats and mips
 
-- **Normal maps are never BC4 or BC5,** `skin_detail` aside: the game would decode Z as −1 and lose the alpha (`FMT-BC5-NORMAL`, blocking).
-- **Mips are renormalised to unit length.** In a PBR set the detail each mip loses goes into the roughness instead: [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). The keys are `mips.normal` and `mips.normal_base` ([Mipmaps](Project-Config.md#mipmaps)); why it's done is on [Research](Research.md#why-renormalise-normal-mips).
+- **Use XYZ storage for a base normal.** Skyrim reads Z from blue. BC5, RG8, BC4 and R8 discard Z and alpha, so `FMT-BC5-NORMAL` blocks conversion until acknowledged. The Advanced Skin loader accepts BC5 for [`skin_detail`](#detail-names).
+- **Normal mips default to unit length.** For deliberately short normals, see [Normal length by output](Project-Config.md#normal-length-by-output). A set can bake the spread of normal directions into its [roughness mips](Texture-Packing.md#variance-and-gloss-bake).
 
 ### Model-space normals (MSN)
 

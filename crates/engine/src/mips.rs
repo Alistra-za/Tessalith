@@ -1,7 +1,7 @@
 //! Float mip chain (spec §5.5). Box (the default) is recursive and unchanged; tent, Mitchell and Kaiser (S-mips-3)
 //! build each level's RGB directly from mip 0 with [`crate::filter::resample_rgb`], the kernel widened by the
 //! level's scale. How the two compose:
-//! - **Box:** the code path is unchanged; nothing new runs.
+//! - **Box:** recursive means, including the authored lengths of standalone kept normals.
 //! - **Non-box:** the box loop still runs, so the accumulation, alpha and the roughness and coat bakes are exactly
 //!   as for box. After `finalize` and before the bakes, RGB is overwritten by the direct resample and clamped to
 //!   the domain again (linear light [0, 1], HDR ≥ 0). Alpha always stays the recursive box.
@@ -16,10 +16,11 @@
 //!
 //! An *accumulation* chain is built by repeated box filtering of the unnormalised base; every output
 //! level is a *finalised* copy (√ back from squared roughness, renormalised vectors, clamps). Mip 0 is the base as
-//! authored, except a normal map's vectors, which are renormalised unless `mips.normal_base = keep` (DECISIONS R1); a
-//! vector chain accumulates from that written mip 0, so its lower levels and the variance bake see the stored vectors.
+//! authored except where `base_level` normalises its vectors. Advanced Skin detail and tangent normal outputs in
+//! formats that drop Z start at unit length even under Keep. Kept XYZ base and coat normals carry mean authored
+//! length separately from the vector mean (DECISIONS R1, LA).
 //! A `_cnr` with `mips.normal = renormalize_bake` (the default) widens its own coat roughness (alpha) from its own
-//! footprint lengths (DECISIONS R2); `mips.normal` is inert on every other sub-type here: the `_n` -> `_rmaos` bake
+//! mean unit directions (DECISIONS R2, LA3); `mips.normal` is inert on every other sub-type here: the `_n` -> `_rmaos` bake
 //! and the opt-in `normal` -> complex `_m` gloss bake (Note CL40) arrive through [`build_chain_with`].
 use crate::bake::{baked_roughness, variance_add, NormalVariance};
 use crate::config::*;
@@ -98,22 +99,18 @@ pub(crate) fn box_down(prev: &Rgba32F) -> Rgba32F {
 /// Per-axis area weights: destination texel `i` of `m` covers the source interval
 /// `[i*n/m, (i+1)*n/m)` of `n` texels; each source texel contributes its overlap length. Weights of
 /// one destination texel sum to 1.
+fn axis_footprint(i: u32, n: u32, m: u32) -> impl Iterator<Item = (u32, f64)> {
+    let (i, n, m) = (u64::from(i), u64::from(n), u64::from(m));
+    // Work in units of 1/m texel: destination covers [i*n, (i+1)*n), source j covers [j*m, (j+1)*m).
+    let (lo, hi) = (i * n, (i + 1) * n);
+    (lo / m..hi.div_ceil(m).min(n)).map(move |j| {
+        let overlap = hi.min((j + 1) * m) - lo.max(j * m);
+        (j as u32, overlap as f64 / n as f64)
+    })
+}
+
 fn axis_weights(n: u32, m: u32) -> Vec<Vec<(u32, f64)>> {
-    let (n64, m64) = (u64::from(n), u64::from(m));
-    (0..m64)
-        .map(|i| {
-            // Work in units of 1/m texel: destination covers [i*n, (i+1)*n), source j covers [j*m, (j+1)*m).
-            let (lo, hi) = (i * n64, (i + 1) * n64);
-            let first = lo / m64;
-            let last = hi.div_ceil(m64).min(n64);
-            (first..last)
-                .map(|j| {
-                    let overlap = hi.min((j + 1) * m64) - lo.max(j * m64);
-                    (j as u32, overlap as f64 / n64 as f64)
-                })
-                .collect()
-        })
-        .collect()
+    (0..m).map(|i| axis_footprint(i, n, m).collect()).collect()
 }
 
 /// Area-exact box step for any size (odd sizes included).
@@ -163,7 +160,7 @@ pub(crate) fn area_resample(prev: &Rgba32F, (w, h): (u32, u32), weighted: bool) 
 /// Rescale an RGB vector to unit length in place (spec §5.5). A zero `Normal` vector becomes flat +Z; a zero
 /// `_msn` vector stays zero (model space has no flat default).
 pub(crate) fn normalize_vector(px: &mut [f32; 4], domain: Domain) {
-    let len = (px[0] * px[0] + px[1] * px[1] + px[2] * px[2]).sqrt();
+    let len = vector_length(px);
     if len > 1e-8 {
         for c in &mut px[..3] {
             *c /= len;
@@ -173,16 +170,20 @@ pub(crate) fn normalize_vector(px: &mut [f32; 4], domain: Domain) {
     }
 }
 
+fn vector_length(px: &[f32; 4]) -> f32 {
+    (px[0] * px[0] + px[1] * px[1] + px[2] * px[2]).sqrt()
+}
+
 /// Mip 0 as stored (spec §5.4, DECISIONS R1): a normal map's base vectors at unit length unless
-/// `mips.normal_base = keep`; anything else as authored. A vector chain accumulates from this level, so the levels
-/// below and the variance bake's footprint lengths average the vectors the file stores (controller correction to R1).
-fn base_level(work: &Work, p: &Profile) -> Rgba32F {
+/// `mips.normal_base = keep` and the output supports that base. Other domains keep the authored values.
+/// Advanced Skin detail needs unit directions because CS reconstructs BC5 Z and normalizes BC7 RGB.
+fn base_level(work: &Work, p: &Profile, output: Subtype) -> Rgba32F {
     let mut out = work.img.clone();
-    if p.mips.normal_base == NormalBase::Renormalize
+    if (p.mips.normal_base == NormalBase::Renormalize || output.always_unit_base(p.format))
         && matches!(work.domain, Domain::Normal | Domain::Msn)
     {
         for px in &mut out.px {
-            normalize_vector(px, work.domain);
+            normalize_base_direction(px, work.domain, p.mips.normal_base);
         }
     }
     out
@@ -262,9 +263,9 @@ fn finalize(acc: &Rgba32F, work: &Work) -> Rgba32F {
 
 /// Finalised mip levels, level 0 first, in the Work's domain.
 ///
-/// Levels >= 1 are finalised and clamped (roughness √, vector renormalisation, domain clamps). Mip 0 is the base as
-/// authored, except a normal map's vectors, renormalised unless `mips.normal_base = keep` (DECISIONS R1); the
-/// consumer (Quantise, Task 31) clamps it for the target format.
+/// Under Keep, mip 0 retains authored vectors except for Advanced Skin detail and tangent normal outputs that
+/// drop Z. Lower mips carry mean authored length for kept XYZ base and coat normals. Other normal maps use unit
+/// vectors below mip 0. Quantisation clamps the stored values for the target format.
 pub fn build_chain(work: &Work, p: &Profile) -> Vec<Rgba32F> {
     build_chain_with(work, p, None)
 }
@@ -273,15 +274,138 @@ pub fn build_chain(work: &Work, p: &Profile) -> Vec<Rgba32F> {
 /// `(min(α² + add, 1))^¼`, α the footprint mean of r²; every other value is bit-identical to [`build_chain`].
 /// A `complex_material` bakes its gloss (G) instead (Note CL40, [`bake_gloss`]); `bake` is ignored on anything else.
 pub fn build_chain_with(work: &Work, p: &Profile, bake: Option<&NormalVariance>) -> Vec<Rgba32F> {
+    build_chain_for_output(work, p, bake, p.subtype)
+}
+
+pub(crate) fn keeps_normal_lengths(
+    p: &Profile,
+    output: Subtype,
+    domain: Domain,
+    levels: u32,
+) -> bool {
+    p.mips.normal_base == NormalBase::Keep
+        && levels > 1
+        && domain == Domain::Normal
+        && matches!(
+            output,
+            Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal | Subtype::CoatNormal
+        )
+        && stores_xyz(p.format)
+}
+
+fn kept_length(px: &[f32; 4]) -> f64 {
+    let [x, y, z, _] = px.map(f64::from);
+    (x * x + y * y + z * z).sqrt()
+}
+
+pub(crate) fn normalize_base_direction(px: &mut [f32; 4], domain: Domain, base: NormalBase) {
+    // A finite kept vector can overflow the f32 sum of squares. Preserve the default path's arithmetic.
+    if base == NormalBase::Keep && vector_length(px).is_infinite() {
+        let len = kept_length(px);
+        for c in &mut px[..3] {
+            *c = (f64::from(*c) / len) as f32;
+        }
+    } else {
+        normalize_vector(px, domain);
+    }
+}
+
+fn footprint_mean(
+    src: &Rgba32F,
+    (w, h): (u32, u32),
+    x: u32,
+    y: u32,
+    sample: impl Fn(usize) -> f64,
+) -> f64 {
+    let mut mean = 0.0;
+    for (cy, wy) in axis_footprint(y, src.height, h) {
+        for (cx, wx) in axis_footprint(x, src.width, w) {
+            mean += wy * wx * sample(cy as usize * src.width as usize + cx as usize);
+        }
+    }
+    mean
+}
+
+fn kept_normal_chain(base: &Rgba32F, levels: u32, coat: Option<f64>) -> Vec<Rgba32F> {
+    let mut out = Vec::with_capacity(levels as usize);
+    out.push(base.clone());
+    let mut coat_directions = coat.map(|clamp| {
+        let mut directions = base.clone();
+        for px in &mut directions.px {
+            normalize_base_direction(px, Domain::Normal, NormalBase::Keep);
+        }
+        (clamp, directions)
+    });
+    let mut acc = None;
+    // Half lengths fit the rolling f32 buffers even for a diagonal of f32::MAX components.
+    let mut half_lengths: Vec<f32> = Vec::new();
+    for _ in 1..levels {
+        let prev = acc.as_ref().unwrap_or(base);
+        let mut next = box_down(prev);
+        let size = (next.width, next.height);
+        let mut next_lengths = Vec::with_capacity(next.px.len());
+        let mut stored = next.clone();
+        for y in 0..next.height {
+            for x in 0..next.width {
+                let px = next.at_mut(x, y);
+                // An even box sums in f32 before dividing. Retry an overflowing component in f64.
+                for (channel, value) in px[..3].iter_mut().enumerate() {
+                    if !value.is_finite() {
+                        *value =
+                            footprint_mean(prev, size, x, y, |i| f64::from(prev.px[i][channel]))
+                                as f32;
+                    }
+                }
+                let half = if acc.is_none() {
+                    footprint_mean(prev, size, x, y, |i| kept_length(&prev.px[i]) * 0.5)
+                } else {
+                    footprint_mean(prev, size, x, y, |i| f64::from(half_lengths[i]))
+                };
+                next_lengths.push(half as f32);
+                let radius = 2.0 * half;
+                let len = kept_length(px);
+                let dest = stored.at_mut(x, y);
+                if len > 1e-8 {
+                    let max = f64::from(px[0].abs().max(px[1].abs()).max(px[2].abs()));
+                    let scale = (radius / len).min(1.0 / max);
+                    for c in 0..3 {
+                        dest[c] = (f64::from(px[c]) * scale) as f32;
+                    }
+                } else {
+                    dest[..3].copy_from_slice(&[0.0, 0.0, radius.min(1.0) as f32]);
+                }
+            }
+        }
+        half_lengths = next_lengths;
+        if let Some((clamp, directions)) = &mut coat_directions {
+            *directions = box_down(directions);
+            bake_coat(&mut stored, directions, *clamp);
+        }
+        out.push(stored);
+        acc = Some(next);
+    }
+    out
+}
+
+// A grass half uses a synthetic profile for filtering, but the stack owns its normal storage.
+pub(crate) fn build_chain_for_output(
+    work: &Work,
+    p: &Profile,
+    bake: Option<&NormalVariance>,
+    output: Subtype,
+) -> Vec<Rgba32F> {
     let n = level_count(work.img.width, work.img.height, &p.mips.levels);
+    let coat = coat_self_bake(p, work.domain, work.alpha_present);
+    if keeps_normal_lengths(p, output, work.domain, n) {
+        return kept_normal_chain(&work.img, n, coat);
+    }
     let weighted = weighted_rgb(work, p);
     let rough = bake.filter(|_| work.roughness_r_squared);
     let gloss = bake.filter(|_| p.subtype == Subtype::ComplexMaterial);
-    let coat = coat_self_bake(work, p);
     let filt = effective_filter(work, p);
     let mut out = Vec::with_capacity(n as usize);
     // Mip 0 stays as authored (Note HD1).
-    out.push(base_level(work, p));
+    out.push(base_level(work, p, output));
     // `acc` is the unnormalised accumulation level; the first step reads the base directly unless roughness needs
     // squaring, so the base is not cloned a second time.
     let mut acc: Option<Rgba32F> = None;
@@ -360,11 +484,11 @@ fn bake_gloss(level: &mut Rgba32F, index: usize, b: &NormalVariance) {
 
 /// `_cnr` self-bake (owner 2026-10-11, DECISIONS R2): the clamp `t` when a coat normal with
 /// `mips.normal = renormalize_bake` keeps a data alpha (its coat roughness), else `None`.
-fn coat_self_bake(work: &Work, p: &Profile) -> Option<f64> {
+pub(crate) fn coat_self_bake(p: &Profile, domain: Domain, alpha_present: bool) -> Option<f64> {
     (p.subtype == Subtype::CoatNormal
-        && work.domain == Domain::Normal
+        && domain == Domain::Normal
         && p.mips.normal == NormalMips::RenormalizeBake
-        && work.alpha_present
+        && alpha_present
         && p.alpha.policy == AlphaPolicy::Data)
         .then_some(p.mips.bake_clamp)
 }
@@ -374,7 +498,7 @@ fn coat_self_bake(work: &Work, p: &Profile) -> Option<f64> {
 /// so a flat coat normal keeps its alpha bit for bit.
 fn bake_coat(level: &mut Rgba32F, acc: &Rgba32F, clamp_t: f64) {
     for (px, a) in level.px.iter_mut().zip(&acc.px) {
-        let len = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        let len = vector_length(a);
         let add = variance_add(len, clamp_t);
         if add > 0.0 {
             px[3] = baked_roughness(px[3] * px[3], add);
@@ -452,6 +576,71 @@ mod tests {
     }
 
     #[test]
+    fn kept_coat_carries_length_and_bakes_only_direction_changes() {
+        let mut img = Rgba32F::new(4, 4, [0.0, 0.0, 0.9, 0.2]);
+        for y in 0..4 {
+            *img.at_mut(2, y) = [0.14, 0.0, 0.48, 0.3];
+            *img.at_mut(3, y) = [-0.14, 0.0, 0.48, 0.5];
+        }
+        let w = work(img, Domain::Normal, true);
+        let mut p = profile(Subtype::CoatNormal);
+        p.mips.normal_base = NormalBase::Keep;
+        let baked = build_chain(&w, &p);
+        p.mips.normal = NormalMips::Renormalize;
+        let plain = build_chain(&w, &p);
+        assert_eq!(plain[0], w.img);
+        assert_eq!(baked[0], w.img);
+        for level in 1..=2 {
+            for y in 0..plain[level].height {
+                for x in 0..plain[level].width {
+                    let (radius, alpha, add): (f32, f64, f64) = match (level, x) {
+                        (1, 0) => (0.9, 0.2, 0.0),
+                        (1, _) => (0.5, 0.4, 0.019647),
+                        _ => (0.7, 0.3, 0.009906),
+                    };
+                    let a = plain[level].at(x, y);
+                    let b = baked[level].at(x, y);
+                    assert!((a[2] - radius).abs() < 1e-6, "mip {level} x{x}: {a:?}");
+                    assert_eq!(&a[..2], &[0.0, 0.0]);
+                    assert_eq!(&a[..3], &b[..3]);
+                    assert!((f64::from(a[3]) - alpha).abs() < 1e-6);
+                    if add == 0.0 {
+                        assert_eq!(a[3], b[3]);
+                    } else {
+                        assert!((f64::from(b[3]) - (alpha.powi(4) + add).powf(0.25)).abs() < 1e-5);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn large_finite_kept_vectors_bake_from_their_unit_directions() {
+        // The signed components are finite, but their squares exceed f32::MAX.
+        let mut img = Rgba32F::new(4, 4, [0.5, 0.5, 1e20, 0.25]);
+        for y in 0..4 {
+            *img.at_mut(2, y) = [0.28e20, 0.5, 0.96e20, 0.25];
+            *img.at_mut(3, y) = [-0.28e20, 0.5, 0.96e20, 0.25];
+        }
+        let (work, mut coat) = coat(img.clone());
+        coat.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work, &coat);
+        let mut normal = profile(Subtype::PbrNormal);
+        normal.mips.normal_base = NormalBase::Keep;
+        let lengths =
+            crate::bake::lengths_from(img, crate::ops::SourceTransfer::Stored, &normal, None)
+                .unwrap();
+        let external = NormalVariance::new(lengths, (4, 4), 0.25).unwrap();
+        for (level, x, want) in [(1, 0, 0.0_f64), (1, 1, 0.019647), (2, 0, 0.009906)] {
+            let add = f64::from(external.add_at(level, x, 0));
+            let alpha = f64::from(chain[level].at(x, 0)[3]);
+            let want_alpha = (0.25_f64.powi(4) + want).powf(0.25);
+            assert!((add - want).abs() < 1e-6 && (alpha - want_alpha).abs() < 1e-5,
+                "mip {level} x{x}: external add {add} vs {want}, coat alpha {alpha} vs {want_alpha}");
+        }
+    }
+
+    #[test]
     fn renormalize_turns_the_coat_self_bake_off() {
         let mut img = Rgba32F::new(2, 1, [0.8, 0.5, 0.9, 0.4]);
         img.px[1] = [0.2, 0.5, 0.9, 0.2];
@@ -471,7 +660,56 @@ mod tests {
     }
 
     #[test]
-    fn the_chain_accumulates_mip_0_as_written() {
+    fn invalid_xy_keep_uses_a_unit_base_in_the_raw_chain() {
+        let mut img = Rgba32F::new(2, 1, [0.3, 0.0, 0.4, 0.25]);
+        img.px[1] = [-0.15, 0.0, 0.2, 0.75];
+        let w = work(img, Domain::Normal, true);
+        for st in [
+            Subtype::Normal,
+            Subtype::LandscapeNormal,
+            Subtype::PbrNormal,
+        ] {
+            let mut p = profile(st);
+            p.mips.normal_base = NormalBase::Keep;
+            for fmt in [Format::Bc5, Format::Rg8, Format::Bc4, Format::R8] {
+                p.format = fmt;
+                let chain = build_chain(&w, &p);
+                for (px, want) in [
+                    (chain[0].px[0], [0.6, 0.0, 0.8, 0.25]),
+                    (chain[0].px[1], [-0.6, 0.0, 0.8, 0.75]),
+                    (chain[1].px[0], [0.0, 0.0, 1.0, 0.5]),
+                ] {
+                    assert!(
+                        px.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6),
+                        "{st:?} {fmt:?}: {px:?}, expected {want:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn assert_texel(got: [f32; 4], want: [f32; 4]) {
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-5),
+            "{got:?}, expected {want:?}"
+        );
+    }
+
+    #[test]
+    fn kept_xy_base_normalizes_large_finite_vectors() {
+        let mut p = profile(Subtype::DetailNormal);
+        p.mips.normal_base = NormalBase::Keep;
+        p.format = Format::Bc5;
+        let w = work(
+            Rgba32F::new(1, 1, [3.0e30, 0.0, 4.0e30, 0.25]),
+            Domain::Normal,
+            true,
+        );
+        assert_texel(build_chain(&w, &p)[0].px[0], [0.6, 0.0, 0.8, 0.25]);
+    }
+
+    #[test]
+    fn kept_normal_mips_store_mean_base_length() {
         let mut img = Rgba32F::new(2, 1, [0.6, 0.0, 0.0, 1.0]);
         img.px[1] = [0.0, 0.0, 0.3, 1.0];
         let mut p = profile(Subtype::Normal);
@@ -484,13 +722,149 @@ mod tests {
         // Default: level 1 averages the written unit vectors (1,0,0) and (0,0,1).
         let v = renormalised[1].px[0];
         assert!((v[0] - h).abs() < 1e-5 && (v[2] - h).abs() < 1e-5, "{v:?}");
-        // keep: level 1 averages the authored vectors, (0.3, 0, 0.15) normalised (the pre-M4 chain).
+        // Keep the mean authored direction and the mean of the two base lengths.
         let len = (0.3f32 * 0.3 + 0.15 * 0.15).sqrt();
-        let v = kept[1].px[0];
-        assert!(
-            (v[0] - 0.3 / len).abs() < 1e-5 && (v[2] - 0.15 / len).abs() < 1e-5,
-            "{v:?}"
+        assert_texel(
+            kept[1].px[0],
+            [0.45 * 0.3 / len, 0.0, 0.45 * 0.15 / len, 1.0],
         );
+
+        let mut tile = Rgba32F::new(4, 4, [0.0, 0.0, 0.9, 0.1]);
+        for y in 0..4 {
+            *tile.at_mut(2, y) = [0.28, 0.0, 0.96, 0.3];
+            *tile.at_mut(3, y) = [-0.28, 0.0, 0.96, 0.7];
+        }
+        let w = work(tile, Domain::Normal, true);
+        for st in [
+            Subtype::Normal,
+            Subtype::LandscapeNormal,
+            Subtype::PbrNormal,
+        ] {
+            let mut p = profile(st);
+            p.mips.normal_base = NormalBase::Keep;
+            let chain = build_chain(&w, &p);
+            assert_eq!(chain[0], w.img);
+            for y in 0..2 {
+                assert_texel(chain[1].at(0, y), [0.0, 0.0, 0.9, 0.1]);
+                assert_texel(chain[1].at(1, y), [0.0, 0.0, 1.0, 0.5]);
+            }
+            assert_texel(chain[2].px[0], [0.0, 0.0, 0.95, 0.3]);
+        }
+    }
+
+    #[test]
+    fn kept_normal_mips_reduce_raw_vectors() {
+        let mut img = Rgba32F::new(8, 1, [0.0, 0.0, 0.3, 0.75]);
+        for group in img.px.as_chunks_mut::<4>().0 {
+            group[0] = [0.9, 0.0, 0.0, 0.0];
+            group[1] = [-0.3, 0.0, 0.0, 1.0];
+        }
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        for &[left, right] in chain[1].px.as_chunks::<2>().0 {
+            assert_texel(left, [0.6, 0.0, 0.0, 0.5]);
+            assert_texel(right, [0.0, 0.0, 0.3, 0.75]);
+        }
+        let component = 0.45 * std::f32::consts::FRAC_1_SQRT_2;
+        for level in &chain[2..] {
+            for &px in &level.px {
+                assert_texel(px, [component, 0.0, component, 0.625]);
+            }
+        }
+    }
+
+    #[test]
+    fn kept_normal_radius_is_capped_only_for_storage() {
+        let mut img = Rgba32F::new(4, 1, [0.0, 0.0, 1.0, 1.0]);
+        img.px[0] = [1.0, 1.0, 0.0, 1.0];
+        img.px[1] = [1.0, -0.5, 0.0, 1.0];
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        assert_texel(chain[1].px[0], [1.0, 0.25, 0.0, 1.0]);
+        let radius = (2.0f32.sqrt() + 1.25f32.sqrt() + 2.0) / 4.0;
+        let x = radius / 2.0625f32.sqrt();
+        assert_texel(chain[2].px[0], [x, 0.25 * x, x, 1.0]);
+    }
+
+    #[test]
+    fn finite_large_kept_normals_reach_the_component_cap() {
+        use crate::quantize::{stored_rgb, unorm8};
+
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        for (input, expected) in [
+            ([2e19, 0.0, 0.0, 1.0], [255, 128, 128]),
+            ([f32::MAX, -f32::MAX, 0.0, 1.0], [255, 0, 128]),
+        ] {
+            let w = work(Rgba32F::new(2, 2, input), Domain::Normal, true);
+            let px = build_chain(&w, &p)[1].px[0];
+            assert_eq!(stored_rgb(&px, w.domain).map(unorm8), expected, "{px:?}");
+            assert!(px[..3].iter().all(|c| (-1.0..=1.0).contains(c)), "{px:?}");
+        }
+    }
+
+    #[test]
+    fn zero_and_cancelling_kept_normals_keep_their_mean_lengths() {
+        let mut img = Rgba32F::new(4, 1, [0.0; 4]);
+        img.px[2] = [0.4, 0.0, 0.0, 0.25];
+        img.px[3] = [-0.4, 0.0, 0.0, 0.75];
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        assert_texel(chain[1].px[0], [0.0; 4]);
+        assert_texel(chain[1].px[1], [0.0, 0.0, 0.4, 0.5]);
+        assert_texel(chain[2].px[0], [0.0, 0.0, 0.2, 0.25]);
+    }
+
+    #[test]
+    fn odd_kept_normals_weight_lengths_by_overlap() {
+        let mut img = Rgba32F::new(5, 1, [0.0; 4]);
+        img.px[2] = [0.0, 0.0, 0.5, 1.0];
+        img.px[4] = [0.0, 0.0, 1.0, 0.5];
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        assert_texel(chain[1].px[0], [0.0, 0.0, 0.1, 0.2]);
+        assert_texel(chain[1].px[1], [0.0, 0.0, 0.5, 0.4]);
+        assert_texel(chain[2].px[0], [0.0, 0.0, 0.3, 0.3]);
+    }
+
+    #[test]
+    fn odd_kept_normals_use_recursive_footprints_at_mip_two() {
+        let mut img = Rgba32F::new(11, 1, [0.0, 0.0, 0.5, 0.0]);
+        img.px[4] = [1.0, 0.0, 0.0, 1.0];
+        let mut p = profile(Subtype::Normal);
+        p.mips.normal_base = NormalBase::Keep;
+        let chain = build_chain(&work(img, Domain::Normal, true), &p);
+        assert_eq!((chain[1].width, chain[2].width), (5, 2));
+        // Texel 4 has weight 3/11 in mip 1's middle cell, which has weight 1/5 in the right cell.
+        let weight = 3.0f32 / 55.0;
+        let z = (1.0 - weight) * 0.5;
+        let radius = weight + z;
+        let scale = radius / weight.hypot(z);
+        assert_texel(chain[2].px[1], [weight * scale, 0.0, z * scale, weight]);
+    }
+
+    #[test]
+    fn skin_detail_normals_stay_unit_in_both_base_modes() {
+        let w = work(
+            Rgba32F::new(2, 1, [0.0, 0.0, 0.5, 0.25]),
+            Domain::Normal,
+            true,
+        );
+        let mut p = profile(Subtype::SkinDetail);
+        for mode in [NormalBase::Renormalize, NormalBase::Keep] {
+            p.mips.normal_base = mode;
+            let bases = [Format::Bc5, Format::Bc7].map(|fmt| {
+                p.format = fmt;
+                let chain = build_chain(&w, &p);
+                assert_eq!(chain[1].px[0], [0.0, 0.0, 1.0, 0.25]);
+                chain[0].px[0]
+            });
+            assert_eq!(bases, [[0.0, 0.0, 1.0, 0.25]; 2], "BC5 and BC7 {mode:?}");
+        }
     }
 
     #[test]
@@ -709,8 +1083,13 @@ mod tests {
         let mut img = Rgba32F::new(2, 1, [0.0, 0.0, 0.0, 1.0]);
         img.px[0] = [1.0, 0.0, 0.0, 1.0];
         img.px[1] = [-1.0, 0.0, 0.0, 1.0];
-        let c = build_chain(&work(img, Domain::Msn, true), &profile(Subtype::Msn));
-        assert_eq!(&c[1].px[0][..3], &[0.0, 0.0, 0.0]);
+        let w = work(img, Domain::Msn, true);
+        let mut p = profile(Subtype::Msn);
+        for mode in [NormalBase::Renormalize, NormalBase::Keep] {
+            p.mips.normal_base = mode;
+            let c = build_chain(&w, &p);
+            assert_eq!(&c[1].px[0][..3], &[0.0, 0.0, 0.0]);
+        }
     }
 
     #[test]

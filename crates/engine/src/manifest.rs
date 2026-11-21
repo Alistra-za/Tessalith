@@ -32,11 +32,7 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::BacklightTint
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
-        | Subtype::Normal
-        | Subtype::LandscapeNormal
-        | Subtype::PbrNormal
         | Subtype::Msn
-        | Subtype::CoatNormal
         | Subtype::GenericData
         | Subtype::PbrEmissive
         | Subtype::HdrSky
@@ -47,7 +43,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::GenericTwoChannel
         | Subtype::SkinSk
         | Subtype::ProjectedNoise
-        | Subtype::DetailNormal
         | Subtype::ComplexGrass
         | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
@@ -55,14 +50,20 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
         // if-changed; move that arm if it is ever reported (Note HR6).
-        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
-            ENGINE_VERSION
-        }
-        // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
-        // A new sub-type in 3.0.0.
-        Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
-        // 3.0.0: the variance bake adds nothing to mip 0 (Note HD1).
-        Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => ENGINE_VERSION,
+        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
+        Subtype::SkinWet => "3.0.0",
+        // XY-only normal outputs need unit directions even with Keep (Note LA7).
+        Subtype::DetailNormal => ENGINE_VERSION,
+        // Advanced Skin detail needs a unit base even with Keep (Note LA6).
+        Subtype::SkinDetail => ENGINE_VERSION,
+        // Keep carries authored normal length and bakes angular spread (Note LA).
+        Subtype::Normal
+        | Subtype::LandscapeNormal
+        | Subtype::PbrNormal
+        | Subtype::CoatNormal
+        | Subtype::Rmaos
+        | Subtype::SkinRfaos
+        | Subtype::ComplexMaterial => ENGINE_VERSION,
     }
 }
 
@@ -601,20 +602,29 @@ mod tests {
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
-            // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`;
-            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1); a resized cutout keeps
-            // its source's coverage on the colour types a built-in layer makes a cutout (Note HR6).
+            // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
+            // 3.0.1 changes kept normal lengths, XY bases and the angular variance bake (LA).
+            // SkinWet stays at 3.0.0 because every writable format stores XYZ.
             let want = if matches!(
                 st,
-                Subtype::SkinWet
-                    | Subtype::SkinDetail
-                    | Subtype::Rmaos
-                    | Subtype::SkinRfaos
-                    | Subtype::ComplexMaterial
-                    | Subtype::Diffuse
+                Subtype::Diffuse
                     | Subtype::PbrAlbedo
                     | Subtype::UiSky
                     | Subtype::SkinAlbedo
+                    | Subtype::SkinWet
+            ) {
+                "3.0.0"
+            } else if matches!(
+                st,
+                Subtype::Normal
+                    | Subtype::LandscapeNormal
+                    | Subtype::PbrNormal
+                    | Subtype::Rmaos
+                    | Subtype::SkinDetail
+                    | Subtype::DetailNormal
+                    | Subtype::SkinRfaos
+                    | Subtype::ComplexMaterial
+                    | Subtype::CoatNormal
             ) {
                 ENGINE_VERSION
             } else {

@@ -259,10 +259,26 @@ Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a
 | `mips.levels` | `full`, `none`, or a count | `full`; `none` for `ui_sky` and under `interface` and `sky` folders | Number of mip levels. |
 | `mips.filter` | `box`, `tent`, `mitchell`, `kaiser` | `box` | Downsampling filter. Tent, Mitchell and Kaiser are for sRGB colour content. With `cutout`, `blend` or `cutout_blend` only `tent` is allowed: it weights each tap by alpha, and Mitchell and Kaiser ring at cutout edges. HDR textures without alpha weighting may use `box` or `tent`. An unscoped filter a texture can't use falls back to box with `CFG-FILTER-IGNORED`; a scoped one is `CFG-INVALID`. |
 | `mips.edge` | `wrap`, `clamp` | `wrap` | How tent, Mitchell and Kaiser read past the texture edge. Ignored by box. |
-| `mips.normal` | `renormalize`, `renormalize_bake` | `renormalize`; `renormalize_bake` for `coat_normal` | How normal-map mips are built. `renormalize_bake` also bakes the normal detail lost in each mip into the roughness stored in the same texture (the coat roughness of a `_cnr`). |
-| `mips.normal_base` | `renormalize`, `keep` | `renormalize` | Mip 0 of a normal map: stored at unit length, or as authored. |
+| `mips.normal` | `renormalize`, `renormalize_bake` | `renormalize`; `renormalize_bake` for `coat_normal` | Controls the [variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). On a `_cnr`, `renormalize_bake` widens coat roughness where the normal directions vary. |
+| `mips.normal_base` | `renormalize`, `keep` | `renormalize` | Normal length after resizing. See [Normal length by output](#normal-length-by-output). |
 | `mips.bake_clamp` | greater than 0, up to 1 | 0.25 | Limits how much roughness the variance bake can add (at most the square of this value). |
 | `mips.coverage` | `auto`, `on`, `off` | `auto` | Alpha-coverage preservation. Applies to `cutout`, `cutout_blend`, and `blend` with `encoder.bc1_alpha`; there `auto` and `on` both enable it. A resized texture is matched to its source's coverage, the largest mip included. |
+
+#### Normal length by output
+
+These rules apply to normal-map filtering. HDR outputs use the mip rules for their format.
+
+| Output | `renormalize` (default) | `keep` |
+|---|---|---|
+| `normal`, `landscape_normal`, `pbr_normal` | Unit vectors at every level. | Mip 0 keeps its authored vectors. Each lower mip takes the direction of the average vector and scales it to the average authored length of the texels it covers, up to what XYZ can hold. Use a format that stores XYZ, such as BC7. <!-- D:LA1,LA2 --> |
+| `coat_normal` (`_cnr`) | Unit vectors at every level. | With XYZ storage, the same length rule applies even when the coat roughness bake is off. <!-- D:LA3 --> |
+| Advanced Skin detail normal (`skin_detail`) | Unit vectors at every level. | Unit vectors at every level, including mip 0. BC5 is valid with Keep. <!-- D:LA6 --> |
+| Other XYZ normal maps, model-space normals and the normal half of complex grass | Renormalises each normal mip. | Keeps the full-size normal vectors only. Smaller normal mips still renormalise. <!-- D:LA2 --> |
+| Baked `_rmaos`, `_rfaos`, complex `_m` gloss and coat roughness | The bake reads the source normal's directions. | The bake reads unit directions regardless of the normal's base mode. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
+
+The first row includes a standalone PBR Grass normal and a derived legacy normal whose own profile selects Keep. A copied twin follows the output it copies. A size-capped preview can start at a lower mip.
+
+BC5, RG8, BC4 and R8 discard Z. Tangent normal outputs using these formats start from unit length under either base mode. The three base normals in the first row require XYZ storage with Keep. <!-- D:LA1,LA7 -->
 
 ### Format and size
 

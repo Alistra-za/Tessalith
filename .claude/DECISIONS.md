@@ -9,19 +9,19 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
-- Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS
+- Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS, LA
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS, JE, JQ, JR, JS, JW
-- Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW, JS
+- Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW, JS, LA
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU, HX, JY
-- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS, JY
-- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS, JZ, JY
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS, JY, LA
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS, JZ, JY, LA
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS, JH, JI, JN, JR, JS, JY
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX, JH, JI, JJ, JL, JO, JR, JT, JV, JY
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS, JA, JF, JI, JK, JL, JN, JO, JQ, JR, JT, JU, JS, JW, JY
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA
 
 ## Digest
 
@@ -47,7 +47,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Any colour data in a PBR set is `_SRGB`-tagged (including `_g`, `_f`). [Answers 5]
 - Two-channel BC5 is the default only for `_flow`; it stays selectable. [Answers 1]
 - No small-texture restriction on BC7. [Answers 7]
-- Normal length: renormalise, unless the set has an `_rmaos`/`_rfaos`, in which case the normal variance is baked into roughness. [Answers 6, R1, R6]
+- Normal length follows `mips.normal_base`. An eligible set bakes the angular spread of its normal into roughness. [Answers 6, R1, R6, LA2, LA3]
 - Alpha that must read 255 is removed before any mip or encode step (alpha policy `remove`). Every BC7 block whose input alpha is 255 throughout gets the lossless rotated-slot fix, so bc7e decodes alpha ≥ 254. [Answers 8, A]
 - CS treats smallest-mip alpha < 251/255 as complex material, so a decoded 254 is harmless. [A, BJ1]
 - Source alpha with minimum ≥ 251, or with texels below 251 that are only stray noise, is opaque; it resolves like constant 255. An explicit `alpha.policy` still wins. One alpha gate, 251, matching CS. [L, BJ1, FM34]
@@ -131,12 +131,12 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - `mips.edge` = `wrap` (default) or `clamp`; only the polyphase kernels read it. [S-mips-5]
 - An unscoped filter only affects colour maps, with a console message. [S-mips-13]
 - Normal, `_msn`, `_flow` and roughness chains are never alpha-weighted. [R11]
-- Normal mip 0 is renormalised by default (`mips.normal_base` = `renormalize` or `keep`). [R1]
+- `mips.normal_base` defaults to `renormalize`. With `keep`, XYZ tangent base and coat normals carry mean authored length through lower mips. Advanced Skin detail normals and tangent normal outputs in formats that drop Z start from unit length. [R1, LA2, LA3, LA6, LA7]
 - Power of two is automatic; `resize` is Half, Quarter or Eighth with a size floor, optionally relative to a slot of the set. [FM29, FM44]
 - Pack sources of different sizes are resized to a common size. [FM30]
 - `DIM-SMALL` and `DIM-FLOW-SMALL` test the post-resize size. [S-mips-7]
 - Complex grass: each half is mipped on its own and the levels stacked; the detection texel is re-encoded to stay exact. [X1, X2]
-- Resize runs at the end of `preprocess_with` (after the Hdr clamp; the pipeline and `BakeJob::load_lengths` both call it) with the effective mip filter and edge: box is area-exact, tent, Mitchell and Kaiser are polyphase on RGB; alpha is area box; alpha-weighted colour weighs area × alpha; roughness resizes on r²; normals, `_msn` and `_flow` resize as vectors, mip 0 renormalised unless `mips.normal_base = keep`. A growing axis is first enlarged bilinearly (texel centres, clamped edges); axes scale independently. [S-mips-6, W10, FM29]
+- Resize runs at the end of `preprocess_with` (after the Hdr clamp; the pipeline and `BakeJob::load_lengths` both call it) with the effective mip filter and edge: box is area-exact, tent, Mitchell and Kaiser are polyphase on RGB; alpha is area box; alpha-weighted colour weighs area × alpha; roughness resizes on r²; normals, `_msn` and `_flow` resize as vectors. Normal maps default to unit length at mip 0. Keep preserves the authored base except for Advanced Skin detail and tangent normal outputs that drop Z (LA6, LA7). A growing axis is first enlarged bilinearly (texel centres, clamped edges); axes scale independently. [S-mips-6, W10, FM29]
 - Coverage preservation passes exactly `k = round(p·n)` texels on every level ≥ 1 (level 0 too after a resize, Note HR6): those above the k-th largest alpha plus enough ties, split in a deterministic hierarchical Bayer order (no RNG; owner asked for the dither). `k = 0`, or a level with no positive alpha, keeps the box alpha; zero alpha is never raised. Remapped texels sit at least 2 codes clear of the threshold, saturating at the range ends (`alpha.threshold` 1–254). [R13]
 - A hair diffuse's default layer sets `alpha.policy = cutout`, so a user's `mips.filter = kaiser` or `mitchell` on it is `CFG-INVALID` at sub-type or file scope and falls back to box with `CFG-FILTER-IGNORED` when unscoped. [S-mips-0, S-mips-2, S-mips-13]
 - OPEN: the 13 GiB box peak at 16K and the single-threaded per-channel `powf` in Preprocess. [S-mips-11]
@@ -206,9 +206,9 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 
 ### Bake
 
-- The roughness member decodes its own `_n` and bakes its variance (clamp t = 0.25); footprint lengths are a box pyramid; a pair whose sizes do not line up (not powers of two of one aspect) bakes from the `_n` fitted to the member's size (Note HD2), so no size pair is refused. [E, R4, R5, HD2]
+- The roughness member decodes its own normal input and averages the post-resize unit directions in a box pyramid (default clamp t = 0.25). Equal sizes pair directly. For unequal sizes, a mismatched aspect or a non-power-of-two dimension requires fitting those directions to the member before reduction (HD2). [E, R4, R5, HD2, LA3]
 - The bake decision lives on the `_n` (`renormalize_bake`); shared roughness never bakes; a borrowed `_n` bakes the borrower's own roughness; a plain normal bakes in a PBR-set shader's set, and an explicit `mips.normal = renormalize` still opts out. [R6, R7, M4-final-1, JS2]
-- `_cnr` self-bakes its variance into coat roughness by default. [R2]
+- `_cnr` self-bakes angular spread into its data alpha (coat roughness) by default. Under Keep its RGB length is independent of that switch. [R2, LA3]
 - An 8-bit noise floor: a footprint with average length ≥ the floor bakes nothing. [M4-final-2]
 - sRGB roughness raises `TAG-CONTENT-MISMATCH` and does not bake. [R10]
 - The baked `_n` is recorded in the manifest sources with its decode settings, so `if-changed` sees it. [R12]
@@ -1095,7 +1095,7 @@ Engine fixes for trace-debug minors 26, 27, 28 and 40 and backlog R1. `golden` a
 ## Note HD — Variance bake: mip 0 and any size pair (owner, 2026-11-05)
 
 - **HD1 Nothing is added to mip 0 of any member (owner, 2026-11-05; amends R5's mip 0 at shift > 0).** Before, a member smaller than its `_n` (shift > 0) had its mip 0 widened by the `_n`'s lost detail; now mip 0 stays as authored, and mip 1 onward bake as before (`NormalVariance::add_at` returns 0 at level 0; `build_chain_with` makes no level-0 bake call). At shift <= 0 mip 0 was already untouched. The `Rmaos`, `SkinRfaos` and `ComplexMaterial` arms of `encode_version` move to 2.1.0, so each re-encodes once. The `_cnr` self-bake already starts at level 1. Test `bake::tests::nothing_is_added_to_mip_0_of_a_smaller_member`.
-- **HD2 The variance bake accepts an `_n` of any size and shape (owner, 2026-11-05; amends R5, CL40's size rule and S-mips-7's refusal).** For `Rmaos`, `SkinRfaos` and `ComplexMaterial`, a pair whose post-resize sizes are powers of two of one aspect keeps the level shift (`BakeJob.shift`, `fit: None`; its identity is unchanged). Any other pair (another aspect, or a size that stays non-power-of-two) bakes from `area_resample(written mip 0, member, false)` with `BakeJob.fit = Some(member size)` and shift 0: the mean of the written vectors over each member texel, not renormalised, then the usual length pyramid. The member's own chain has a level for every mip, so mip `m` of the member reads the `_n` footprint of the same UV area. Equal sizes always pair. The bake reaches members that have mips (HD5): an NPOT `_n` over a member with mips bakes, while an NPOT member keeps its size only with `mips.levels = "none"` (`resize::pot_exempt`) and so has no mips. `SET-BAKE-RATIO` is never raised again; its code and GUI sentence stay so an `allow` list naming it still loads (semver, DM8). A shared roughness slot and an sRGB member still never bake (R7, R10). Admission adds `w * h * 23` bytes for the fit's resample and pyramid. Tests in `bake/mod.rs`, `bake_plan.rs`, `bake_run.rs` and `gloss_bake.rs`.
+- **HD2 The variance bake accepts an `_n` of any size and shape (owner, 2026-11-05; amends R5, CL40's size rule and S-mips-7's refusal).** For `Rmaos`, `SkinRfaos` and `ComplexMaterial`, a pair whose post-resize sizes are powers of two of one aspect keeps the level shift (`BakeJob.shift`, `fit: None`; its identity is unchanged). Any other pair (another aspect, or a size that stays non-power-of-two) bakes from `area_resample(unit directions after resize, member, false)` with `BakeJob.fit = Some(member size)` and shift 0: average the unit directions over each member texel, then carry these vector means into the length pyramid without renormalising them (LA3). The member's own chain has a level for every mip, so mip `m` of the member reads the `_n` footprint of the same UV area. Equal sizes always pair. The bake reaches members that have mips (HD5): an NPOT `_n` over a member with mips bakes, while an NPOT member keeps its size only with `mips.levels = "none"` (`resize::pot_exempt`) and so has no mips. `SET-BAKE-RATIO` is never raised again; its code and GUI sentence stay so an `allow` list naming it still loads (semver, DM8). A shared roughness slot and an sRGB member still never bake (R7, R10). Admission adds `w * h * 23` bytes for the fit's resample and pyramid. Tests in `bake/mod.rs`, `bake_plan.rs`, `bake_run.rs` and `gloss_bake.rs`.
 - **HD3 Nothing is dropped from the mip tail (agent ruling, 2026-11-05; the owner suggested dropping tails, and there is no spare tail to drop).** The DDS chain length is unchanged and every member mip below 0 has a pyramid level: both chains halve each axis (floored at 1) and reach 1x1 together, so there is no spare tail to drop.
 - **HD4 No row or note says a bake was fitted (agent ruling, 2026-11-05).** `set_resolved.bake` shows the set baked, which is all the user needs. The fit assumes the `_n` and the member share UVs, as every borrowed `_n` already does.
 - **HD5 A member with one mip level does not bake (agent ruling from HD1, 2026-11-05).** HD1 leaves mip 0 as authored, so a member whose chain is only mip 0 (`mips.levels = "none"`, which also exempts it from the power-of-two resize, or `levels = 1`) would gain nothing. The planner gives it no `BakeJob` (`bake::plan::attach`), it does not record the `_n` as a source or decode it, and it does not make `set_resolved.bake` true. Test `a_member_with_no_mips_does_not_bake`.
@@ -2070,6 +2070,16 @@ The owner: "if a normal is only ever in a pbr set, its alpha should always be dr
 
 - **JZ1** The trial scored three-colour fits and solid blocks in packed endpoint order. No candidate met the quality rule. The shipped encoder keeps its legacy midpoint lookup (scored before the endpoint swap), rgbcx's NVIDIA table and the byte-exact default Dual path at (1, 1) (HY18). See the [midpoint measurements](../docs/research/encoder-benchmark.md#bc1-nvidia-three-colour-midpoint-2026-11-20-note-jz).
 - **JZ2** Adoption needs a separate owner instruction and a port to current main. Require fresh quality and speed results for each affected mode. Keep cutouts, perceptual, fast and BC3 on their legacy paths until each qualifies separately from plain BC1. For changed bytes, bump the affected `encode_version`, re-record the goldens and document the identity change in DECISIONS.
+
+## Note LA — Authored normal length through the mip chain (owner, 2026-11-20)
+
+- **LA1** A resolved `normal`, `landscape_normal` or `pbr_normal` with `mips.normal_base = keep` requires XYZ storage because BC5, RG8, BC4 and R8 discard Z. Resolve raises CFG-INVALID even for a one-level chain with FMT-BC5-NORMAL acknowledged. Raw chains start from unit directions under LA7. Under `if-changed`, the failed normal keeps its output and record. An eligible CS roughness member losing its sole normal reports SET-MISSING-COMPANION and rebuilds without the bake (JS2, JA1).
+- **LA2** In the Normal domain, these three standalone outputs with Keep store the direction `d` of the box-mean authored vector at radius `min(mean authored length, 1 / max(abs(d.x), abs(d.y), abs(d.z)))`. A mean vector of length at most 1e-8 uses +Z: zero inputs emit zero RGB, cancelling nonzero inputs emit +Z at the capped mean length. Only the emitted texel is capped. Larger footprints use the unrounded vector and length means with the same box weights as alpha, including recursive overlap on raw odd sizes. A standalone PBR Grass normal and a derived legacy normal use their resolved profiles, and a twin follows its producer. ComplexGrass and derived GrassStack keep base-only handling on the bottom half and the same detection verdict. SkinDetail follows LA6. Other outputs keep their chains, subject to the XY base rule in LA7.
+- **LA3** The roughness and explicit gloss bakes normalize each post-resize base texel before averaging or fitting (amends R1, R5 and HD2). A kept XYZ coat normal carries authored length through its RGB chain, and its active data-alpha self-bake averages unit directions separately. HD1 excludes mip 0, and the 0.999 noise floor, clamp and roughness-channel math still apply. R4's member-owned decode, R6/R7 and JS source selection, CL40's explicit opt-in and the R12 identity tuple (including `normal_base`) stand. A source's external bake toggle alone leaves its own profile hash unchanged. A one-level normal can supply a mipped member. Shared roughness, DDS inputs and one-level members gain no bake.
+- **LA4** The authored-length change sets the encode version to 3.0.1 for Normal, LandscapeNormal, PbrNormal, CoatNormal, Rmaos, SkinRfaos and ComplexMaterial (DM). Under JA1 and JA2, `if-changed` keeps an otherwise matching older output and its record until `--ev` covers that output. Omitting `mips.normal_base` still selects Renormalize.
+- **LA5** The GUI keeps the Normal base level row, its two choices and its normal-category lock. The row is locked for Advanced Skin detail (LA6) and for tangent normal outputs in formats that drop Z (LA7). Its help distinguishes the four XYZ outputs from base-only handling. Project-Config owns the option table, and the release entry gives the scoped JA commands.
+- **LA6** Advanced Skin detail normals start from unit length under both base modes (NL-14, amends LA2 and LA5 for SkinDetail). CS rebuilds BC5 Z from XY (`Lighting.hlsl:1686`), which would flatten detail encoded from a short vector, and normalizes the BC7 direction (`Lighting.hlsl:1690`). BC5 remains valid with project-wide Keep, and the SkinDetail encode-version arm is 3.0.1 (DM, JA2).
+- **LA7** Tangent normal outputs in BC5, RG8, BC4 or R8 start from unit directions under either base mode because these formats discard Z. Only the three base types in LA1 reject Keep at Resolve. DetailNormal joins the seven types in LA4 and SkinDetail in LA6 at encode version 3.0.1. SkinWet stays at 3.0.0 because all its writable formats store XYZ.
 
 ## Note JY — Export, Review, header and start (review E 3c; controller for the owner, 2026-11-16)
 

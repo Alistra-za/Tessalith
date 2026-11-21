@@ -1,7 +1,6 @@
 //! Normal-variance bake (spec §6.2, DECISIONS #6, Note R): a normal map's footprint length L → κ = (3L − L³)/(1 − L²)
 //! → v = 0.25/κ → α′² = saturate(α² + min(2v, t²)), r′ = (α′²)^¼ [MIP, Unity HDRP `CommonMaterial.hlsl`]. The
-//! footprint lengths come from a box pyramid of the `_n`'s mip 0 as written: unit length unless `mips.normal_base = keep`
-//! (DECISIONS R1, R5).
+//! footprint lengths come from box means of the resized normal's unit directions (DECISIONS LA3).
 pub mod plan;
 
 use crate::config::{MipKeyword, MipLevels, Profile};
@@ -83,7 +82,7 @@ pub struct LengthLevel {
 }
 
 /// Footprint lengths of a normal map for every level >= 1 of its full box chain (level `m` at index `m − 1`), from
-/// the `_n`'s mip 0 as written (the caller renormalises it unless `keep`; DECISIONS R1, R5). About 1.33 bytes per base texel.
+/// the unit directions supplied by the bake. About 1.33 bytes per base texel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LengthPyramid {
     /// Base width and height.
@@ -121,7 +120,7 @@ impl LengthPyramid {
         }
     }
 
-    /// The pyramid of a `base` that does not pair with a `member` of another shape or size: the mean of the written
+    /// The pyramid of a `base` that does not pair with a `member` of another shape or size: the mean of the unit
     /// vectors over each member texel, not renormalised, so the lengths mean the same as in [`build`](Self::build).
     pub fn fitted(base: &Rgba32F, member: (u32, u32)) -> LengthPyramid {
         LengthPyramid::build(&crate::mips::area_resample(base, member, false))
@@ -223,9 +222,7 @@ impl BakeJob {
         .expect("a tuple of plain config values serialises")
     }
 
-    /// Decode the `_n` as its own job does (spec §5.4), write its mip 0 as that job does (unit length unless
-    /// `mips.normal_base = keep`, DECISIONS R1) and keep only the footprint lengths of that written base. The image is
-    /// dropped before this returns (DECISIONS R4).
+    /// Decode the `_n` as its own job does and keep the footprint lengths of its unit directions (DECISIONS LA3).
     pub fn load_lengths(&self) -> Result<LengthPyramid, String> {
         let (img, info) = crate::load::load_image(&self.normal).map_err(|e| e.to_string())?;
         lengths_from(
@@ -261,8 +258,7 @@ impl BakeJob {
 }
 
 /// [`BakeJob::load_lengths`] on an image already decoded: preprocess `img` with the `_n`'s `normal_profile`,
-/// write mip 0 as the `_n`'s job does (unit length unless `mips.normal_base = keep`) and keep only the footprint
-/// lengths. The image is dropped before this returns.
+/// normalize the resized texels before any fit and keep only their directional footprint lengths.
 pub fn lengths_from(
     img: Rgba32F,
     transfer: crate::ops::SourceTransfer,
@@ -270,10 +266,8 @@ pub fn lengths_from(
     fit: Option<(u32, u32)>,
 ) -> Result<LengthPyramid, String> {
     let mut work = crate::ops::preprocess_with(img, normal_profile, transfer);
-    if normal_profile.mips.normal_base == crate::config::NormalBase::Renormalize {
-        for px in &mut work.img.px {
-            crate::mips::normalize_vector(px, work.domain);
-        }
+    for px in &mut work.img.px {
+        crate::mips::normalize_base_direction(px, work.domain, normal_profile.mips.normal_base);
     }
     Ok(match fit {
         Some(member) => LengthPyramid::fitted(&work.img, member),
@@ -387,6 +381,85 @@ mod tests {
             alpha.sqrt()
         } else {
             (alpha * alpha + add).min(1.0).powf(0.25)
+        }
+    }
+
+    #[test]
+    fn kept_normal_directions_are_normalized_before_fitting() {
+        let mut p = profile(Subtype::PbrNormal);
+        p.mips.normal_base = NormalBase::Keep;
+        let make = |side, sample: &dyn Fn(u32, u32) -> [f64; 3]| {
+            let mut img = Rgba32F::new(side, side, [0.5, 0.5, 0.5, 1.0]);
+            for y in 0..side {
+                for x in 0..side {
+                    for (c, v) in sample(x, y).into_iter().enumerate() {
+                        img.at_mut(x, y)[c] = (0.5 + 0.5 * v) as f32;
+                    }
+                }
+            }
+            img
+        };
+        let bake = |img, member, fit| {
+            let lengths = lengths_from(img, crate::ops::SourceTransfer::Stored, &p, fit).unwrap();
+            NormalVariance::new(lengths, member, 0.25).unwrap()
+        };
+        let add = |l: f64| 0.5 * (1.0 - l * l) / (3.0 * l - l.powi(3));
+        // Each pair has opposing tilts and unequal radii. Vary the angle along both axes.
+        let pair_z = |x: u32, y: u32| 0.94 + 0.008 * f64::from(x / 2 + y / 2);
+        let unequal = |x, y| {
+            let z = pair_z(x, y);
+            let tilt = (1.0 - z * z).sqrt();
+            let (dx, radius) = if x % 2 == 0 {
+                (tilt, 0.5)
+            } else {
+                (-tilt, 0.75)
+            };
+            [radius * dx, 0.0, radius * z]
+        };
+        for (size, fit) in [((8, 8), None), ((4, 4), None), ((4, 8), Some((4, 8)))] {
+            let nv = bake(make(8, &unequal), size, fit);
+            assert_eq!(nv.add_at(0, 0, 0), 0.0);
+            for level in 1..=2 {
+                for y in 0..size.1 >> level {
+                    for x in 0..size.0 >> level {
+                        let got = nv.add_at(level, x, y);
+                        let w = (8 / size.0) << level;
+                        let h = (8 / size.1) << level;
+                        // Unit X cancels within each pair. Average Z directly over the base footprint.
+                        let mut sum = 0.0;
+                        for sy in y * h..(y + 1) * h {
+                            for sx in x * w..(x + 1) * w {
+                                sum += pair_z(sx, sy);
+                            }
+                        }
+                        let want = add(sum / f64::from(w * h));
+                        assert!(
+                            close(got, want),
+                            "{size:?} mip {level} ({x},{y}): {got} vs {want}"
+                        );
+                    }
+                }
+            }
+        }
+        // The worked 4x4 example, including a zero texel's +Z fallback on the flat side.
+        for flat in [0.9, 0.0] {
+            let mixed = make(4, &|x, _| match x {
+                0 | 1 => [0.0, 0.0, flat],
+                2 => [0.28, 0.0, 0.96],
+                _ => [-0.28, 0.0, 0.96],
+            });
+            let nv = bake(mixed, (4, 4), None);
+            assert_eq!(nv.add_at(1, 0, 0), 0.0);
+            assert!(close(nv.add_at(1, 1, 0), add(0.96)));
+            assert!(close(nv.add_at(2, 0, 0), add(0.98)));
+        }
+        for z in [0.9991_f64, 0.9989] {
+            let tilt = (1.0 - z * z).sqrt();
+            let img = make(2, &|x, _| {
+                [if x == 0 { tilt } else { -tilt } * 0.5, 0.0, z * 0.5]
+            });
+            let got = bake(img, (2, 2), None).add_at(1, 0, 0);
+            assert!(close(got, if z >= 0.999 { 0.0 } else { add(z) }));
         }
     }
 

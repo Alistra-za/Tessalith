@@ -146,6 +146,333 @@ fn a_baked_member_is_rougher_and_records_its_normal() {
 }
 
 #[test]
+fn kept_bc5_coat_and_detail_write_unit_base_directions() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("short.png");
+    ImageBuffer::from_pixel(4, 4, Rgb([166u8, 128, 179]))
+        .save(&input)
+        .unwrap();
+    let red = ["coat_normal", "detail_normal"].map(|subtype| {
+        let mut req = BatchRequest::new(vec![input.clone()], d.path().join(subtype), Target::Cs);
+        req.allow.insert(engine::codes::Code::FmtBc5Normal);
+        req.overrides = [
+            &format!("file:*short.png.subtype={subtype}"),
+            "format=bc5",
+            "color.tag=unorm",
+            "alpha.policy=remove",
+            "mips.normal_base=keep",
+        ]
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .into();
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                req,
+                &Reporter::new(Arc::new(NullSink), "bc5"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        let job = &p.jobs[0];
+        assert_eq!(job.profile.subtype.id(), subtype);
+        assert_eq!(job.status, JobStatus::Ready, "{:?}", job.warnings);
+        let path = job.output.clone();
+        let (s, events) = run(p);
+        assert_eq!(s.converted, 1, "{events:?}");
+        let dds = read_dds(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(dds.format, Format::Bc5.pixel_format(false));
+        let (w, h, range) = &dds.levels[0];
+        let Decoded::Ldr(px) = decode_level(dds.format, *w, *h, &dds.data[range.clone()]).unwrap()
+        else {
+            panic!("expected BC5")
+        };
+        px[0][0]
+    });
+    // The short vector has X = 77/255. Its unit direction has X ≈ 0.599.
+    assert!(
+        red.iter().all(|r| r.abs_diff(204) <= 1),
+        "coat and detail mip 0 red: {red:?}"
+    );
+}
+
+#[test]
+fn kept_normal_dds_preserves_length_at_two_lower_levels() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("iron_n.png");
+    let source = ImageBuffer::from_fn(4, 4, |x, y| {
+        Rgba(match (x % 2, y / 2) {
+            (0, 0) => [173u8, 116, 137, 16],
+            (1, 0) => [108, 144, 140, 124],
+            (0, _) => [131, 117, 187, 210],
+            _ => [144, 132, 169, 250],
+        })
+    });
+    source.save(&input).unwrap();
+    let mut req = BatchRequest::new(vec![input], d.path().join("out"), Target::Cs);
+    req.overrides = [
+        "file:*iron_n.png.subtype=normal",
+        "file:*iron_n.png.format=rgba8",
+        "file:*iron_n.png.color.tag=unorm",
+        "file:*iron_n.png.mips.normal_base=keep",
+        "file:*iron_n.png.alpha.policy=data",
+    ]
+    .map(|s| engine::overrides::parse_set(s).unwrap())
+    .into();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "kept-normal");
+    let p = Engine::new()
+        .unwrap()
+        .plan(req, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(p.jobs.len(), 1);
+    let output = p.jobs[0].output.clone();
+    let (summary, events) = run(p);
+    assert_eq!(summary.converted, 1, "{events:#?}");
+    let dds = read_dds(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(dds.format, Format::Rgba8.pixel_format(false));
+    assert_eq!(dds.levels.len(), 3);
+    for (level, (w, h, range)) in dds.levels.iter().enumerate() {
+        let Decoded::Ldr(pixels) =
+            decode_level(dds.format, *w, *h, &dds.data[range.clone()]).unwrap()
+        else {
+            panic!("expected RGBA8")
+        };
+        assert_eq!((*w, *h), (4 >> level, 4 >> level));
+        let side = 1 << level;
+        for y in 0..*h {
+            for x in 0..*w {
+                let got = pixels[(y * w + x) as usize];
+                if level == 0 {
+                    assert_eq!(got, source.get_pixel(x, y).0);
+                    continue;
+                }
+                // Reference each footprint directly to the signed base samples.
+                let mut sum = [0.0; 3];
+                let mut radius = 0.0;
+                let mut alpha = 0.0;
+                for dy in 0..side {
+                    for dx in 0..side {
+                        let [r, g, b, a] = source.get_pixel(side * x + dx, side * y + dy).0;
+                        let v = [r, g, b].map(|c| f64::from(c) / 127.5 - 1.0);
+                        radius += v.iter().map(|c| c * c).sum::<f64>().sqrt();
+                        for i in 0..3 {
+                            sum[i] += v[i];
+                        }
+                        alpha += f64::from(a);
+                    }
+                }
+                let area = f64::from(side * side);
+                let scale = radius / area / sum.iter().map(|c| c * c).sum::<f64>().sqrt();
+                let [r, g, b] = sum.map(|c| ((c * scale + 1.0) * 127.5).round() as u8);
+                let want = [r, g, b, (alpha / area).round() as u8];
+                assert!(
+                    got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1),
+                    "mip {level} ({x},{y}): {got:?}, expected {want:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn keep_upgrade_obeys_encode_version_scope() {
+    use engine::codes::Code;
+    use engine::manifest::{encode_version, output_key};
+    use engine::overrides::parse_set;
+
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("iron_n.png");
+    ImageBuffer::from_pixel(8, 8, Rgb([160u8, 112, 192]))
+        .save(&input)
+        .unwrap();
+    let engine = Engine::new().unwrap();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "keep-upgrade");
+    let resolve = |out: &str, base: Option<&str>, ev| {
+        let mut req = BatchRequest::new(vec![input.clone()], d.path().join(out), Target::Cs);
+        req.on_existing = OnExisting::IfChanged;
+        req.ev = ev;
+        req.overrides = [
+            "file:*iron_n.png.subtype=normal",
+            "file:*iron_n.png.format=rgba8",
+            "file:*iron_n.png.color.tag=unorm",
+        ]
+        .map(|s| parse_set(s).unwrap())
+        .into();
+        if let Some(base) = base {
+            req.overrides
+                .push(parse_set(&format!("file:*iron_n.png.mips.normal_base={base}")).unwrap());
+        }
+        engine.plan(req, &rep, &CancelToken::default()).unwrap()
+    };
+    let keep = |ev| resolve("out", Some("keep"), ev);
+    let seed = keep(EvScope::Off);
+    assert_eq!(seed.jobs.len(), 1);
+    let job = &seed.jobs[0];
+    assert_eq!(job.profile.subtype, Subtype::Normal);
+    assert_eq!(job.profile.mips.normal_base, NormalBase::Keep);
+    let output = job.output.clone();
+    let key = output_key(&seed.request.output_root, &output);
+    let manifest = Manifest::at(&seed.request.output_root);
+    let (s, events) = run(seed);
+    assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+    let kept_dds = std::fs::read(&output).unwrap();
+    let mut record = manifest.read().unwrap()[&key].raw.clone();
+    // Normal's encode-version arm before the Keep mip-chain change.
+    record["encode_version"] = "2.0.0".into();
+    let older = format!("{record}\n");
+    std::fs::write(manifest.path(), &older).unwrap();
+
+    for ev in [
+        EvScope::Off,
+        EvScope::matching(vec!["diffuse".parse().unwrap()]).unwrap(),
+    ] {
+        let (s, events) = run(keep(ev));
+        assert_eq!((s.converted, s.up_to_date, s.kept_older_encode), (0, 1, 1));
+        assert!(events
+            .iter()
+            .any(|e| matches!(&e.kind, EventKind::Warning(w)
+            if w.code == Code::OutKeptOlderEncode && w.data["by_subtype"]["normal"] == 1)));
+        assert_eq!(std::fs::read_to_string(manifest.path()).unwrap(), older);
+        assert_eq!(std::fs::read(&output).unwrap(), kept_dds);
+    }
+    let matching = EvScope::matching(vec!["normal".parse().unwrap()]).unwrap();
+    let (s, events) = run(keep(matching.clone()));
+    assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+    assert_eq!(
+        manifest.read().unwrap()[&key].encode_version.as_deref(),
+        Some(encode_version(Subtype::Normal))
+    );
+    let (s, _) = run(keep(matching));
+    assert_eq!((s.converted, s.up_to_date, s.kept_older_encode), (0, 1, 0));
+
+    let encode = |out, base| {
+        let p = resolve(out, base, EvScope::Off);
+        let path = p.jobs[0].output.clone();
+        let (s, events) = run(p);
+        assert_eq!((s.converted, s.validation_failed), (1, 0), "{events:#?}");
+        std::fs::read(path).unwrap()
+    };
+    let explicit = encode("explicit", Some("renormalize"));
+    assert_ne!(explicit, kept_dds);
+    assert_eq!(encode("omitted", None), explicit);
+}
+
+#[test]
+fn acknowledged_bc5_keep_fails_before_if_changed() {
+    use engine::codes::{Code, Severity};
+    use engine::manifest::output_key;
+    use engine::overrides::parse_set;
+
+    let d = tempfile::tempdir().unwrap();
+    let normal = bumpy_n(d.path(), 32, 0.0);
+    let rough = rmaos(d.path(), 32);
+    let resolve = |root: &str, base: &str, bake_off: bool| {
+        let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join(root), Target::Cs);
+        req.on_existing = OnExisting::IfChanged;
+        req.accept = AcceptSuggestions::High;
+        req.allow.insert(Code::FmtBc5Normal);
+        req.overrides = [
+            "file:*iron_n.png.subtype=pbr_normal",
+            "file:*iron_n.png.format=bc5",
+            "file:*iron_n.png.color.tag=unorm",
+            &format!("file:*iron_n.png.mips.normal_base={base}"),
+        ]
+        .into_iter()
+        .map(|s| parse_set(s).unwrap())
+        .collect();
+        if bake_off {
+            req.overrides
+                .push(parse_set("file:*iron_n.png.mips.normal=renormalize").unwrap());
+        }
+        let rep = Reporter::new(Arc::new(VecSink::default()), "bc5-keep");
+        Engine::new()
+            .unwrap()
+            .plan(req, &rep, &CancelToken::default())
+            .unwrap()
+    };
+    let seed = || {
+        let mut p = resolve("out", "renormalize", false);
+        assert_eq!(p.jobs.len(), 2);
+        for j in &mut p.jobs {
+            assert_eq!(j.status, JobStatus::Ready, "{:?}", j.warnings);
+            if j.input == normal {
+                assert_eq!(j.profile.format, Format::Bc5);
+                j.profile.mips.normal_base = NormalBase::Keep;
+            } else {
+                assert_eq!(j.input, rough);
+                let bake = j.bake.as_mut().unwrap();
+                assert_eq!(bake.normal, normal);
+                bake.normal_profile.mips.normal_base = NormalBase::Keep;
+            }
+        }
+        p
+    };
+    let p = seed();
+    let out = &d.path().join("out");
+    let normal_out = p
+        .jobs
+        .iter()
+        .find(|j| j.input == normal)
+        .unwrap()
+        .output
+        .clone();
+    let rough_out = p
+        .jobs
+        .iter()
+        .find(|j| j.input == rough)
+        .unwrap()
+        .output
+        .clone();
+    let normal_key = output_key(out, &normal_out);
+    let rough_key = output_key(out, &rough_out);
+    let (s, events) = run(p);
+    assert_eq!((s.converted, s.validation_failed), (2, 0), "{events:#?}");
+    assert_eq!(run(seed()).0.up_to_date, 2);
+    let manifest = Manifest::at(out);
+    let before = manifest.load().unwrap();
+    let stamp = SourceStamp::of(&normal_out).unwrap();
+    let bytes = std::fs::read(&normal_out).unwrap();
+    let baked = std::fs::read(&rough_out).unwrap();
+    assert_eq!(before[&normal_key].output_stamp, Some(stamp));
+    assert_eq!(before[&rough_key].sources.len(), 1);
+    assert!(before[&rough_key].sources[0].path.ends_with("iron_n.png"));
+
+    let p = resolve("out", "keep", false);
+    let n = p.jobs.iter().find(|j| j.input == normal).unwrap();
+    assert_eq!(
+        n.status,
+        JobStatus::Error {
+            codes: vec![Code::CfgInvalid]
+        }
+    );
+    let r = p.jobs.iter().find(|j| j.input == rough).unwrap();
+    assert!(r.bake.is_none());
+    assert!(r
+        .warnings
+        .iter()
+        .any(|w| w.code == Code::SetMissingCompanion && w.severity == Severity::Info));
+    let (s, events) = run(p);
+    assert_eq!(
+        (s.failed, s.converted, s.up_to_date, s.validation_failed),
+        (1, 1, 0, 0),
+        "{events:#?}"
+    );
+    assert!(events.iter().any(|e| e.job.as_ref() == Some(&normal_key) &&
+        matches!(&e.kind, EventKind::FileFailed { stage: Stage::Resolve, error } if error.contains("CFG-INVALID"))));
+    let after = manifest.load().unwrap();
+    assert_eq!(std::fs::read(&normal_out).unwrap(), bytes);
+    assert_eq!(SourceStamp::of(&normal_out), Some(stamp));
+    assert_eq!(after[&normal_key], before[&normal_key]);
+    assert!(after[&rough_key].sources.is_empty());
+    let plain = resolve("plain", "renormalize", true);
+    let r = plain.jobs.iter().find(|j| j.input == rough).unwrap();
+    assert!(r.bake.is_none());
+    let reference = r.output.clone();
+    assert_eq!(run(plain).0.converted, 2);
+    let rewritten = std::fs::read(rough_out).unwrap();
+    assert_ne!(rewritten, baked);
+    assert_eq!(rewritten, std::fs::read(reference).unwrap());
+}
+
+#[test]
 fn a_two_to_one_normal_leaves_mip_0_as_authored() {
     // Note HD1: the bake adds nothing to mip 0, even at shift 1.
     let d = tempfile::tempdir().unwrap();
@@ -205,11 +532,9 @@ fn a_stale_fit_fails_instead_of_baking() {
     );
 }
 
-/// Controller correction to R1: the bake reads the `_n`'s mip 0 as written. A uniformly short flat `_n` (|n| = 0.5,
-/// every texel pointing up) adds no roughness under the default `renormalize`, and adds roughness under `keep`.
 #[test]
-fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
-    let mean_mip_1 = |base: Option<NormalBase>| {
+fn flat_short_normal_adds_no_roughness_in_either_base_mode() {
+    let levels = |base: Option<NormalBase>| {
         let d = tempfile::tempdir().unwrap();
         let n = d.path().join("in/iron_n.png");
         std::fs::create_dir_all(n.parent().unwrap()).unwrap();
@@ -219,6 +544,7 @@ fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
             .unwrap();
         let r = rmaos(d.path(), 32);
         let mut p = plan(d.path(), &r, &n, base.is_some(), false);
+        p.jobs[0].profile.format = Format::Rgba8;
         if let Some(b) = base {
             p.jobs[0]
                 .bake
@@ -229,16 +555,130 @@ fn a_uniformly_short_flat_normal_adds_roughness_only_under_keep() {
                 .normal_base = b;
         }
         assert_eq!(run(p).0.converted, 1);
-        mean_r(d.path(), 1)
+        [0, 1, 2].map(|level| mean_r(d.path(), level))
     };
-    let plain = mean_mip_1(None);
-    let default = mean_mip_1(Some(NormalBase::Renormalize));
-    let keep = mean_mip_1(Some(NormalBase::Keep));
-    assert!(
-        (default - plain).abs() < 1.0,
-        "default {default} vs unbaked {plain}"
-    );
-    assert!(keep > plain + 2.0, "keep {keep} vs unbaked {plain}");
+    let plain = levels(None);
+    assert_eq!(plain, [100.0; 3]);
+    for base in [NormalBase::Renormalize, NormalBase::Keep] {
+        assert_eq!(levels(Some(base)), plain, "{base:?}");
+    }
+}
+
+#[test]
+fn keep_bake_changes_only_angular_roughness() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("in");
+    let dir = input.join("textures/pbr");
+    std::fs::create_dir_all(&dir).unwrap();
+    ImageBuffer::from_fn(8, 8, |x, _| {
+        Rgb([
+            if x < 4 {
+                128u8
+            } else if x % 2 == 0 {
+                146
+            } else {
+                109
+            },
+            128,
+            189,
+        ])
+    })
+    .save(dir.join("iron_n.png"))
+    .unwrap();
+    for name in ["iron_rmaos.png", "skin_rfaos.png"] {
+        ImageBuffer::from_fn(8, 8, |x, y| Rgba([40u8, x as u8 * 17, 225, y as u8 * 13]))
+            .save(dir.join(name))
+            .unwrap();
+    }
+    let outputs = |base, mode| {
+        let out = d.path().join(format!("{base}-{mode}"));
+        let mut req = BatchRequest::new(vec![input.clone()], out.clone(), Target::Cs);
+        req.recursive = true;
+        req.accept = AcceptSuggestions::High;
+        req.on_existing = OnExisting::IfChanged;
+        req.borrowed_normal
+            .insert("textures/pbr/skin".into(), "textures/pbr/iron".into());
+        req.overrides = [
+            "format=rgba8",
+            "color.tag=unorm",
+            "file:**/iron_n.png.subtype=pbr_normal",
+            "file:**/skin_rfaos.png.subtype=skin_rfaos",
+            &format!("file:**/iron_n.png.mips.normal_base={base}"),
+            &format!("file:**/iron_n.png.mips.normal={mode}"),
+        ]
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .into();
+        let resolve = || {
+            Engine::new()
+                .unwrap()
+                .plan(
+                    req.clone(),
+                    &Reporter::new(Arc::new(NullSink), "rough"),
+                    &CancelToken::default(),
+                )
+                .unwrap()
+        };
+        let p = resolve();
+        let members = [Subtype::Rmaos, Subtype::SkinRfaos].map(|st| {
+            let j = p.jobs.iter().find(|j| j.profile.subtype == st).unwrap();
+            assert_eq!(
+                j.bake.as_ref().map(|b| &b.normal),
+                (mode == "renormalize_bake").then_some(&dir.join("iron_n.png"))
+            );
+            let source = j.bake.as_ref().map(|b| {
+                assert_eq!(
+                    serde_json::to_value(b.normal_profile.mips.normal_base).unwrap(),
+                    base
+                );
+                engine::manifest::SourceRef {
+                    bake: Some(b.identity_sha256()),
+                    ..engine::manifest::SourceRef::of(&dir.join("iron_n.png")).unwrap()
+                }
+            });
+            (j.output.clone(), source)
+        });
+        let (s, ev) = run(p);
+        assert_eq!(s.converted, 3, "{ev:#?}");
+        assert_eq!(run(resolve()).0.up_to_date, 3);
+        let manifest = Manifest::at(&out).load().unwrap();
+        members.map(|(path, source)| {
+            let key = engine::manifest::output_key(&out, &path);
+            assert_eq!(
+                manifest[&key].sources,
+                source.as_slice(),
+                "{key} {base} {mode}"
+            );
+            let f = read_dds(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(f.format, Format::Rgba8.pixel_format(false));
+            [0, 1, 2].map(|level: usize| {
+                let (w, h, r) = &f.levels[level];
+                let Decoded::Ldr(px) = decode_level(f.format, *w, *h, &f.data[r.clone()]).unwrap()
+                else {
+                    panic!("expected RGBA8");
+                };
+                px
+            })
+        })
+    };
+    let plain = outputs("keep", "renormalize");
+    let unit = outputs("renormalize", "renormalize_bake");
+    let kept = outputs("keep", "renormalize_bake");
+    for member in 0..2 {
+        for level in 0..=2 {
+            let width = 8 >> level;
+            for (i, px) in kept[member][level].iter().enumerate() {
+                let off = &plain[member][level][i];
+                let reference = &unit[member][level][i];
+                assert_eq!(&px[1..], &off[1..]);
+                if level == 0 || i % width < width / 2 {
+                    assert_eq!(px, off, "member {member} mip {level} texel {i}");
+                } else {
+                    assert!(reference[0] > off[0]);
+                    assert_eq!(px, reference, "member {member} mip {level} texel {i}");
+                }
+            }
+        }
+    }
 }
 
 #[test]

@@ -70,7 +70,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback, or change the sub-type or target. |
-| `CFG-INVALID` | error | A value outside its range, or a combination that can't be honoured (`legacy` header on BC7 or `_SRGB`, a bad swizzle, a bad filter scope). In a config, preset or rule the file is refused outright; reached after layering, that one file fails. | Fix the value. |
+| `CFG-INVALID` | error | A value is outside its range or settings conflict (legacy header on BC7 or `_SRGB`, bad swizzle or filter scope). A config, preset or rule with an invalid value is refused. After layering, only the affected file fails. On `normal`, `landscape_normal` or `pbr_normal`, `mips.normal_base = "keep"` conflicts with BC5, RG8, BC4 or R8 even if you acknowledge `FMT-BC5-NORMAL`. <!-- D:LA1 --> | Fix the invalid value. For Keep, choose XYZ storage such as BC7, or set `mips.normal_base = "renormalize"`. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config.md#mipmaps) this texture can't use; it uses box. | Scope the filter to colour maps, or ignore. |
 | `CFG-PRESET-SKIPPED` | warning | A user preset file failed to load ([presets](Presets-and-Targets.md#checking-and-installing)). | Fix the file. When another preset already declares its suffix aliases, the Problems row has **Remove aliases from {id}**. |
@@ -99,7 +99,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `SET-MISSING-COMPANION` | info | A roughness bake lacks a usable normal, or its normal lacks a roughness companion. A lender skips the missing-roughness Info when its normal supplies a borrower with an eligible roughness member. Also raised for an `_msn` without `_s` (except Eye) or a `_flow` without `_n`. <!-- D:R8,JS2 --> | Add the companion or ignore the Info. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
-| `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
+| `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the companion's original image. |
 | `SET-BAKE-RATIO` | warning | Tessalith no longer raises it. A size difference from the `_n` does not by itself prevent the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
 | `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |

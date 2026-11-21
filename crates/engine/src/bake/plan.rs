@@ -206,11 +206,11 @@ fn missing_borrowed_normal(cx: &BakeCtx, owner: &TextureSet, j: &mut ResolvedJob
     );
 }
 
-/// Why a `pbr_normal` has no roughness member to bake into (spec §6.3, DECISIONS R8).
+/// Why the selected normal has no roughness member to bake into (DECISIONS R8, JS2).
 fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut ResolvedJob) {
     if let Some(f) = member_file(cx, set, InputKind::Dds, is_roughness_suffix) {
         let msg = format!(
-            "the set's roughness member is only a DDS ({}): DDS members do not bake, so the normal is renormalised only",
+            "the set's roughness member is only a DDS ({}), so there is no roughness bake. Supply the original image.",
             f.path.display()
         );
         note(j, Code::SetCompanionDds, msg, Some(&f.path));
@@ -219,7 +219,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
     match sibling_outside(&j.input, is_roughness_suffix, outside, cx.aliases) {
         Some((p, true)) => {
             let msg = format!(
-                "the set's roughness member is only a DDS ({}) and is not in this batch: the normal is renormalised only",
+                "the set's roughness member is only a DDS ({}) and is not in this batch, so there is no roughness bake. Supply the original image.",
                 p.display()
             );
             note(j, Code::SetCompanionDds, msg, Some(&p));
@@ -229,7 +229,7 @@ fn missing_roughness(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut 
         None => note(
             j,
             Code::SetMissingCompanion,
-            "no _rmaos or _rfaos in this PBR set: the normal is renormalised only".into(),
+            "no _rmaos or _rfaos in this set, so there is no roughness bake".into(),
             None,
         ),
     }
@@ -459,7 +459,7 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         let members = roughness_members(jobs, idx);
         match (normal, members.is_empty()) {
             (None, true) => {}
-            // M3b spec §3.3 (v1 instruction, DECISIONS R7): a shared roughness renormalises only, silently.
+            // A shared roughness skips the bake silently (DECISIONS R7).
             _ if shared => {}
             (None, false) => match owner.and_then(|o| cx.sets.iter().find(|s| &s.key == o)) {
                 Some(os) => {

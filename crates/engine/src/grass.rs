@@ -7,7 +7,7 @@ use crate::analyse::{code8, CS_COMPLEX_GATE_CODE};
 use crate::config::*;
 use crate::coverage::preserve_coverage;
 use crate::image::Rgba32F;
-use crate::mips::build_chain;
+use crate::mips::build_chain_for_output;
 use crate::ops::{preprocess_with, Domain, SourceTransfer, Work};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use schemars::JsonSchema;
@@ -100,11 +100,11 @@ pub(crate) fn build(
     let (tp, bp) = (half_profile(p, false), half_profile(p, true));
     let tw = preprocess_with(top, &tp, transfer);
     let bw = preprocess_with(bottom, &bp, transfer);
-    let mut tc = build_chain(&tw, &tp);
+    let mut tc = build_chain_for_output(&tw, &tp, None, p.subtype);
     if tw.alpha_present && tp.coverage_enabled() {
         preserve_coverage(&mut tc, tp.alpha.threshold, tp.alpha.compare);
     }
-    let bc = build_chain(&bw, &bp);
+    let bc = build_chain_for_output(&bw, &bp, None, p.subtype);
     // Both half chains and the stacked chain are live together; `api::job_bytes` admits the extra chain (Note BB).
     let chain = tc
         .iter()
@@ -188,6 +188,7 @@ fn half_profile(p: &Profile, bottom: bool) -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mips::build_chain;
     use crate::presets::PresetRegistry;
 
     fn profile() -> Profile {
@@ -218,6 +219,18 @@ mod tests {
 
     fn codes(l: &Rgba32F) -> Vec<[u8; 4]> {
         l.px.iter().map(|q| q.map(code8)).collect()
+    }
+
+    #[test]
+    fn raw_xy_grass_keeps_the_short_bottom_normal_at_mip_zero() {
+        let mut p = profile();
+        p.format = Format::Bc5;
+        p.mips.normal_base = NormalBase::Keep;
+        let mut src = source(2);
+        src.px[4..].fill([0.5, 0.5, 0.75, 1.0]);
+        let (_, chain) = build(src, &p, SourceTransfer::Stored).unwrap();
+        assert_eq!(codes(&chain[0])[4], [128, 128, 191, 255]);
+        assert_eq!(codes(&chain[1])[1], [128, 128, 255, 255]);
     }
 
     /// R6: one level per half level, ending at 1 x 2.
@@ -264,6 +277,58 @@ mod tests {
                 assert_eq!(code8(q[3]), 12, "level {l}");
             }
         }
+    }
+
+    #[test]
+    fn kept_grass_keeps_a_short_base_and_unit_lower_normals() {
+        let mut p = profile();
+        p.mips.normal_base = NormalBase::Keep;
+        let mut src = Rgba32F::new(32, 64, [0.5, 0.5, 1.0, 12.0 / 255.0]);
+        src.px[..32 * 32].fill([1.0; 4]);
+        // The short patch touches the seam but leaves the CS detection corner intact.
+        for y in 32..34 {
+            for x in 0..2 {
+                *src.at_mut(x, y) = [0.5, 0.5, 0.75, (16 + x * 8) as f32 / 255.0];
+            }
+        }
+        let (_, chain) = build(src, &p, SourceTransfer::Stored).unwrap();
+        let base = &chain[0];
+        assert_eq!(base.at(0, 32).map(code8), [128, 128, 191, 16]);
+        assert_eq!(base.at(1, 33).map(code8), [128, 128, 191, 24]);
+        assert_eq!(base.at(0, 63).map(code8), [128, 128, 255, 12]);
+        let f = facts(base).unwrap();
+        assert!(f.corner_err < CS_GRASS_THRESHOLD - GRASS_GUARD_MARGIN);
+        assert!(f.bottom_unit_share >= GRASS_UNIT_SHARE);
+        for level in &chain[1..] {
+            let (top, bottom) = level.px.split_at(level.px.len() / 2);
+            assert!(top.iter().all(|px| *px == [1.0; 4]));
+            for px in bottom {
+                assert_eq!([px[0], px[1], px[2]].map(code8), [128, 128, 255]);
+            }
+        }
+        assert_eq!(code8(chain[1].at(0, 16)[3]), 20);
+        assert_eq!(code8(chain[2].at(0, 8)[3]), 14);
+
+        // The detector reads the BC7-decoded base corner.
+        let input = EncoderInput::Ldr(codes(base));
+        let encoded = crate::encode::encode_level(&input, 32, 64, &p, &Default::default()).unwrap();
+        let desc = crate::dds::DdsDesc {
+            width: 32,
+            height: 64,
+            format: p.format,
+            srgb: p.srgb_tag(),
+            header: crate::dds::resolve_header(p.format, p.srgb_tag(), p.header),
+        };
+        let bytes = crate::dds::dds_bytes(&desc, &[encoded]).unwrap();
+        let report = crate::validate::validate(&crate::validate::ValidationInput {
+            bytes: &bytes,
+            profile: &p,
+            encoder_input: Some(std::slice::from_ref(&input)),
+            base_coverage: None,
+            source_peak: None,
+            expected_levels: Some(1),
+        });
+        assert!(report.summary.passed, "{:?}", report.warnings);
     }
 
     /// Each half is exactly what the existing path gives that half on its own: diffuse (with coverage preservation,
