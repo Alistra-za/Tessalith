@@ -459,7 +459,7 @@ fn stop_sharing_removes_the_line() {
     idle(&mut m);
     assert!(share_line(&m, B).is_empty());
     // The emptied key goes with the line.
-    assert!(!sets_text(&m).contains("share"), "{}", sets_text(&m));
+    assert!(!toml_has_key(&sets_text(&m), "share"), "{}", sets_text(&m));
     assert!(!sets_text(&m).contains(AO), "{}", sets_text(&m));
     assert!(!holds(&m, RMAOS, AO));
     assert!(view(&m, B).shared_helpers.is_empty());

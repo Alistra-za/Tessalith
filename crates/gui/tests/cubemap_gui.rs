@@ -1038,11 +1038,7 @@ mod marker {
                 .with_size(egui::vec2(1400.0, 900.0))
                 .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model);
             h.run();
-            if menu == "Tools" {
-                support::open_tools(&mut h);
-            } else {
-                h.get_by_label(menu).click();
-            }
+            h.get_by_label(menu).click();
             h.run();
             h.get_by_label("Make marker cube…").click();
             h.run();

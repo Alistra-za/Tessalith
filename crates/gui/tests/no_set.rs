@@ -91,7 +91,7 @@ fn removing_a_member_puts_it_in_no_set() {
     assert_eq!(no_set(&m), [NORMAL]);
     assert!(m.is_no_set(NORMAL));
     assert!(!in_a_view(&m, NORMAL), "no view holds it");
-    assert!(!sets_text(&m).contains("remove"), "{}", sets_text(&m));
+    assert!(!toml_has_key(&sets_text(&m), "remove"), "{}", sets_text(&m));
     // A moved-in member: its `add` line goes too.
     let odd = "landscape/odd.png";
     let id = m.drop_new_set(odd).unwrap();
@@ -100,7 +100,7 @@ fn removing_a_member_puts_it_in_no_set() {
     m.remove_member(&id, odd).expect("removed");
     idle(&mut m);
     assert!(no_set(&m).iter().any(|k| k == odd));
-    assert!(!sets_text(&m).contains("add"), "{}", sets_text(&m));
+    assert!(!toml_has_key(&sets_text(&m), "add"), "{}", sets_text(&m));
     // The only member of an automatic set (today refused).
     m.remove_member("landscape/leaf", LEAF).expect("removed");
     idle(&mut m);
