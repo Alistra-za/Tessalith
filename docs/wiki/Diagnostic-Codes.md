@@ -160,7 +160,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 
 ## Also export
 
-Raised only by Also export ([GUI or `[export] also`](Set-Shaders.md#also-export-as-vanilla-and-cm)).
+Raised only by [Also export](Set-Shaders.md#also-export-as-vanilla-and-cm), from the GUI or `[export] also`.
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
