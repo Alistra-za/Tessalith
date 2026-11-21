@@ -53,6 +53,7 @@ pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Review {
+    pub(crate) nif_names_frozen: bool,
     pub options_open: bool,
     /// Open Options when an Also blocker appears, while allowing the user to close it afterward.
     pub(crate) also_blocked: bool,
@@ -145,7 +146,7 @@ pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
 pub const NIF_DRAFT_HOVER: &str = "Your NIF edit's draft. Export saves it first.";
 pub const NIF_BACKUP_HOVER: &str = "The older autosaved NIF edits are kept here.";
 const NIF_LEGACY_HOVER: &str =
-    "The old draft is removed after the edits are saved in their new location.";
+    "Tessalith removes this file after saving its edits in the project draft.";
 pub const NIF_MOVE_ASIDE_HOVER: &str = "Edits not yet exported that were saved in this folder. They are kept under this name, not overwritten.";
 pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
 /// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
@@ -964,7 +965,7 @@ impl AppModel {
         // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
         for r in self.nif_rows.iter().filter(|r| nif_row_written(r)) {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
-                put(p, HOVER_NIF, false);
+                put(p, HOVER_NIF, r.nif_matches);
             }
             put(r.record.clone(), HOVER_NIF_RECORD, false);
             if let Some(path) = &r.record_move_aside {
@@ -972,7 +973,7 @@ impl AppModel {
             }
             if r.draft_unsaved {
                 put(r.draft.clone(), NIF_DRAFT_HOVER, false);
-                if let Some(path) = &r.legacy_removal {
+                for path in &r.draft_removals {
                     put(path.clone(), NIF_LEGACY_HOVER, true);
                 }
                 if let Some(path) = &r.draft_backup {

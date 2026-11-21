@@ -7500,6 +7500,155 @@ mod task9 {
     }
 
     #[test]
+    fn close_keeps_a_failed_revert_of_a_legacy_draft() {
+        let (_d, mut m, p, _) = legacy(false);
+        let parent = draft(&p).parent().unwrap().to_owned();
+        std::fs::remove_dir(&parent).unwrap();
+        std::fs::write(&parent, b"cannot create the draft here").unwrap();
+        assert_eq!(vals(&m), [12.5]);
+        m.edit_with(|e| e.revert(0));
+        assert!(vals(&m).is_empty());
+        assert!(!draft(&p).exists());
+        m.close_edit();
+        assert!(m.edit.is_some(), "Close would reopen the legacy op");
+        std::fs::remove_file(&parent).unwrap();
+        m.close_edit();
+        assert!(m.edit.is_none());
+        m.open_edit();
+        assert!(vals(&m).is_empty(), "the saved revert survives reopen");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_locked_winning_plain_autosave_stops_before_displacing_the_draft() {
+        let (d, mut m, p) = saved_in_p();
+        m.close_edit();
+        let plain = autosave(&d);
+        save(
+            &plain,
+            &with_value(load(&draft(&p)).unwrap().unwrap(), 17.5),
+        )
+        .unwrap();
+        ahead(&plain, 3600);
+        m.open_edit();
+        assert_eq!(vals(&m), [17.5]);
+        let lock = hold(&plain, 1);
+        let roots = [p.as_path(), plain.parent().unwrap()];
+        let before = support::tree_hashes(&roots);
+        gloss(&mut m, 13.5);
+        assert_eq!(
+            support::tree_hashes(&roots),
+            before,
+            "neither file may move before the winner can be removed"
+        );
+        assert!(review_row(&m).draft_unsaved);
+        drop(lock);
+        let during_write = plain.clone();
+        let mut lock = None;
+        set_write_hook(Some(Box::new(move |stage| {
+            if stage == "root checked" && lock.is_none() {
+                lock = Some(hold(&during_write, 1));
+            }
+        })));
+        gloss(&mut m, 14.5);
+        set_write_hook(None);
+        assert_eq!(doc_values(&draft(&p)), [17.5, 13.5, 14.5]);
+        assert!(review_row(&m).draft_unsaved, "cleanup must be retried");
+        gloss(&mut m, 15.5);
+        assert!(!plain.exists(), "retry still owns the winning plain file");
+        m.close_edit();
+        m.open_edit();
+        assert_eq!(vals(&m), [17.5, 13.5, 14.5, 15.5]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_draft_saves_leave_no_record_backups_on_retry() {
+        let (d, mut m, p, _) = unseen();
+        tick(&mut m, 40.5);
+        let _lock = hold(&draft(&p), 1);
+        let out = export_root(&d);
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        for _ in 0..2 {
+            export_fails(&mut m, "edits could not be saved");
+            assert_eq!(
+                support::tree_hashes(&roots),
+                before,
+                "failed prerequisite left a backup"
+            );
+        }
+    }
+
+    #[test]
+    fn equal_installed_bytes_still_ask_and_review_marks_the_nif() {
+        let (d, mut m, p, rec) = unseen();
+        let out = export_root(&d);
+        let path = exported(&d);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &*m.edit.as_ref().unwrap().out).unwrap();
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        export_fails(&mut m, NIF_UNANSWERED);
+        assert_eq!(before, support::tree_hashes(&roots));
+        answer(&mut m, GuardChoice::Overwrite);
+        m.freeze_move_asides();
+        let aside = record_move_aside(&rec);
+        let mut model = export_review(&d);
+        model.set_nif_review_rows(m.nif_review_rows());
+        let writes = model.review_writes();
+        assert_eq!(export(&mut m), Ok(1));
+        let after = support::tree_hashes(&roots);
+        assert_eq!(before[&path], after[&path]);
+        assert_ne!(before[&rec], after[&rec]);
+        assert_eq!(before[&rec], after[&aside]);
+        let diff = support::compare_listing(&writes, &before, &after, None, &Default::default());
+        assert!(diff.violations.is_empty(), "{:?}", diff.violations);
+        assert!(writes
+            .also_updated
+            .iter()
+            .any(|w| w.path == path && w.marked));
+    }
+
+    #[test]
+    fn two_quick_export_clicks_keep_the_open_reviews_backup_name() {
+        let (_t, _d, mut h) = review_app();
+        let e = h.state().meshes.edit.as_ref().unwrap();
+        let rec = e.record_path.clone().unwrap();
+        save(&rec, &with_value(e.doc.clone(), 17.5)).unwrap();
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        let aside = record_move_aside(&rec);
+        assert!(h
+            .state()
+            .model
+            .review_writes()
+            .also_updated
+            .iter()
+            .any(|w| w.path == aside));
+        std::fs::write(&aside, b"occupied").unwrap();
+        let before = support::tree_hashes(&[rec.parent().unwrap()]);
+        for attempt in 1..=2 {
+            right_click_3d(&mut h);
+            h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+                .click();
+            h.run_steps(4);
+            assert!(h.state().model.review.is_some());
+            assert_eq!(
+                support::tree_hashes(&[rec.parent().unwrap()]),
+                before,
+                "quick click {attempt}"
+            );
+            assert!(h
+                .state()
+                .model
+                .messages
+                .entries()
+                .any(|e| e.text.contains("changed since Review opened")));
+        }
+    }
+
+    #[test]
     fn an_old_draft_in_the_export_folder_moves_at_the_next_save() {
         let (d, mut m, p, _) = legacy(false);
         let record = nif_doc(&export_root(&d));
@@ -7614,6 +7763,57 @@ mod task9 {
         }
     }
 
+    // Cache a parse failure, then repair the bytes without changing the cache's length or timestamp.
+    fn repair_partial_record(h: &mut AppH) {
+        let path = h
+            .state()
+            .meshes
+            .edit
+            .as_ref()
+            .unwrap()
+            .record_path
+            .clone()
+            .unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, vec![0xff; bytes.len()]).unwrap();
+        make_old(&path);
+        h.run_steps(3);
+        assert!(review_row(&h.state().meshes)
+            .blocked
+            .unwrap()
+            .contains("cannot be read"));
+        let modified = path.metadata().unwrap().modified().unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        h.run_steps(3);
+        assert!(
+            review_row(&h.state().meshes).blocked.is_some(),
+            "the metadata cache still holds the blocker"
+        );
+    }
+
+    #[test]
+    fn review_refreshes_a_repaired_record_with_unchanged_metadata() {
+        let (_t, _d, mut h) = review_app();
+        let m = &mut h.state_mut().meshes;
+        m.fail_record_write_after_nif_for_test();
+        export_fails(m, "is in place");
+        repair_partial_record(&mut h);
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        assert_eq!(
+            h.state().model.nif_review_rows()[0].blocked,
+            None,
+            "Review rereads the record"
+        );
+        h.get_by_label_contains("its record could not be saved");
+    }
+
     #[test]
     fn partial_export_shows_its_repair_in_review_and_the_foreign_hover() {
         let (_t, _d, mut h) = review_app();
@@ -7622,8 +7822,20 @@ mod task9 {
         export_fails(m, "is in place");
         assert_eq!(m.quick_export_note(), Some(NIF_NOT_RECORDED));
         assert_eq!(chip_of(m, "x.nif"), Some(DocBadge::Pending));
-        m.close_edit();
-        m.open_edit();
+        repair_partial_record(&mut h);
+        right_click_3d(&mut h);
+        assert!(
+            !is_disabled(&h, EXPORT_THIS_NIF),
+            "the menu rereads the repaired record"
+        );
+        h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+            .hover();
+        h.run_steps(TOOLTIP_STEPS);
+        h.get_by_label(NIF_NOT_RECORDED);
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        h.state_mut().meshes.close_edit();
+        h.state_mut().meshes.open_edit();
         h.run_steps(4);
         right_click_3d(&mut h);
         let button = h
@@ -7645,8 +7857,15 @@ mod task9 {
         let rec = edit.record_path.clone().unwrap();
         let old = with_value(edit.doc.clone(), 17.5);
         save(&rec, &old).unwrap();
-        h.state_mut().model.open_review();
-        h.run_steps(4);
+        let label = support::header_export_label(&h);
+        h.get_by_role_and_label(AkRole::Button, &label).click();
+        for _ in 0..4 {
+            h.step();
+            if h.state().model.review.is_some() {
+                break;
+            }
+        }
+        assert!(h.state().model.review.is_some(), "the header opened Review");
         let aside = record_move_aside(&rec);
         let listed = |app: &sdc_gui::app::SdcApp| {
             app.model
@@ -7656,6 +7875,12 @@ mod task9 {
                 .any(|w| w.path == aside)
         };
         assert!(listed(h.state()));
+        assert!(
+            h.query_all_by_label_contains(aside.file_name().unwrap().to_str().unwrap())
+                .next()
+                .is_some(),
+            "the first drawn inventory names the backup"
+        );
         assert!(
             h.state()
                 .model
@@ -7675,7 +7900,10 @@ mod task9 {
     #[test]
     fn a_recovered_draft_backup_is_listed_before_export() {
         let (d, mut m) = export_session();
-        let (p, _) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+        let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+        // The scan store, its autosaves, the project and the export folder all live under this root.
+        let roots = [d.path()];
+        let before = support::tree_hashes(&roots);
         m.freeze_move_asides();
         let mut model = export_review(&d);
         model.set_nif_review_rows(m.nif_review_rows());
@@ -7685,6 +7913,16 @@ mod task9 {
         assert_eq!(backups.len(), 1);
         assert_eq!(doc_values(&backups[0]), [7.5]);
         assert!(writes.also_updated.iter().any(|w| w.path == backups[0]));
+        assert!(!k.exists());
+        let diff = support::compare_listing(
+            &writes,
+            &before,
+            &support::tree_hashes(&roots),
+            Some(d.path()),
+            &Default::default(),
+        );
+        assert!(diff.violations.is_empty(), "{:?}", diff.violations);
+        assert!(writes.also_updated.iter().any(|w| w.path == k && w.marked));
     }
 
     #[test]
@@ -7791,6 +8029,7 @@ mod task9 {
         assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
         m.close_edit();
         assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+        assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Exported));
     }
 
     #[test]
@@ -9854,12 +10093,30 @@ fn idle_frames_after_an_export_hash_nothing() {
     h.run_steps(2);
     let _ = h.state().nif_review_rows();
     let n = ops_hash_count();
+    use sdc_gui::model::meshes::nif_edit::{backup_probes, record_move_aside};
+    let record = h
+        .state()
+        .edit
+        .as_ref()
+        .unwrap()
+        .record_path
+        .as_ref()
+        .unwrap();
+    let probes = backup_probes();
+    let _ = record_move_aside(record);
+    assert!(backup_probes() > probes, "a sibling lookup is counted");
+    let probes = backup_probes();
     for _ in 0..10 {
         let _ = h.state().nif_review_rows();
         h.state_mut().set_nif_export_root(root.clone());
         h.run_steps(1);
     }
     assert_eq!(ops_hash_count() - n, 0, "no hash over ten idle frames");
+    assert_eq!(
+        backup_probes(),
+        probes,
+        "no backup-name probe over ten idle frames"
+    );
     gloss(h.state_mut(), 13.5);
     assert_eq!(review_row(h.state()).blocked, None);
     assert!(ops_hash_count() > n, "an edit is hashed again");
@@ -14983,7 +15240,8 @@ fn nif_review_rows_list_the_pending_edit() {
             record_move_aside: None,
             draft_backup: None,
             export_note: None,
-            legacy_removal: None,
+            draft_removals: vec![],
+            nif_matches: false,
             path: "meshes/x.nif".into(),
             mod_name: EDIT_MOD.into(),
             blocked: None,

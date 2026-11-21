@@ -100,14 +100,24 @@ fn set_title(ctx: &egui::Context, title: String) {
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
-    scan: Option<&mut crate::model::meshes::MeshesModel>,
+    mut scan: Option<&mut crate::model::meshes::MeshesModel>,
 ) {
     set_title(ui.ctx(), window_title(model));
     super::panel_ids::top(ui, "header").show(ui, |ui| {
         // AG126: the row wraps in a narrow window instead of drawing controls on top of each other. A group that is one
         // nested layout (a combo, a disabled scope) is moved whole by `fit`.
-        ui.horizontal_wrapped(|ui| row(ui, model, scan));
+        ui.horizontal_wrapped(|ui| row(ui, model, scan.as_deref_mut()));
     });
+    if let Some((meshes, review)) = scan
+        .zip(model.review.as_mut())
+        .filter(|(_, r)| !r.nif_names_frozen)
+    {
+        meshes.freeze_move_asides();
+        review.nif_names_frozen = true;
+        model.set_nif_review_rows(meshes.nif_review_rows());
+        #[cfg(feature = "test-hooks")]
+        model.capture_opening_writes();
+    }
     status(ui, model);
 }
 

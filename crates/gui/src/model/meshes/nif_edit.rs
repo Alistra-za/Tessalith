@@ -321,7 +321,8 @@ pub const NO_CLEANUP: &str =
 #[derive(Debug, Clone, PartialEq)]
 pub struct NifReviewRow {
     pub export_note: Option<String>,
-    pub legacy_removal: Option<PathBuf>,
+    pub draft_removals: Vec<PathBuf>,
+    pub nif_matches: bool,
     pub record: PathBuf,
     pub record_move_aside: Option<PathBuf>,
     pub draft_backup: Option<PathBuf>,
@@ -345,7 +346,13 @@ pub(super) type ForeignKey = (
     u64,
     bool,
 );
-pub(super) type ForeignCache = Option<(ForeignKey, Result<Option<[u8; 32]>, String>)>;
+#[derive(Clone, Copy, Default)]
+pub(super) struct InstalledNif {
+    foreign: Option<[u8; 32]>,
+    matches_output: bool,
+}
+
+pub(super) type ForeignCache = Option<(ForeignKey, Result<InstalledNif, String>)>;
 
 /// `NifEdit::pending_cache`: (rev, op count, the export record's ops hash) and the pending state for them.
 type PendingKey = (u64, usize, Option<String>, bool);
@@ -722,7 +729,11 @@ fn backup_names(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    (secs..).map(move |s| path.with_file_name(format!("{stem}.{s}.toml")))
+    (secs..).map(move |s| {
+        #[cfg(feature = "test-hooks")]
+        BACKUP_PROBES.with(|n| n.set(n.get() + 1));
+        path.with_file_name(format!("{stem}.{s}.toml"))
+    })
 }
 
 fn backup_name(path: &Path) -> PathBuf {
@@ -739,6 +750,8 @@ pub fn record_move_aside(record: &Path) -> PathBuf {
     let stem = record.file_stem().unwrap_or_default().to_string_lossy();
     (1u64..)
         .map(|n| {
+            #[cfg(feature = "test-hooks")]
+            BACKUP_PROBES.with(|n| n.set(n.get() + 1));
             let suffix = if n == 1 {
                 String::new()
             } else {
@@ -956,6 +969,37 @@ fn present(f: &Path) -> (bool, Option<String>) {
     }
 }
 
+/// Delete only the bytes this session adopted or backed up.
+fn remove_known(path: &Path, fp: &str) -> Result<(), String> {
+    if edit_doc::fingerprint(path)?.as_deref() == Some(fp) {
+        match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("{}: {e}", path.display()));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn disk_badge(draft: Option<EditDoc>, record: Option<EditDoc>) -> Option<DocBadge> {
+    match draft {
+        Some(mut d) => {
+            d.export = record.map(|r| r.export).unwrap_or_default();
+            DocBadge::of(&d)
+        }
+        None => record.as_ref().and_then(DocBadge::of),
+    }
+}
+
+fn is_legacy_draft(doc: &EditDoc) -> bool {
+    doc.export.owner.is_none()
+        && match doc.export.sha256 {
+            Some(_) => doc.pending(),
+            None => !doc.ops.is_empty(),
+        }
+}
+
 /// The same ops in the same order; their statuses are worked out again on every apply, so they are not compared.
 fn same_ops(a: &[DocOp], b: &[DocOp]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.op == y.op)
@@ -1036,14 +1080,9 @@ impl NifEdit {
             Some(p) => edit_doc::load_fp(p)?,
             None => None,
         };
-        let old = record.as_ref().filter(|(r, _)| {
-            saved.is_none()
-                && r.export.owner.is_none()
-                && match r.export.sha256 {
-                    Some(_) => r.pending(),
-                    None => !r.ops.is_empty(),
-                }
-        });
+        let old = record
+            .as_ref()
+            .filter(|(r, _)| saved.is_none() && is_legacy_draft(r));
         let legacy = old.filter(|(r, _)| r.export.sha256.is_none());
         let legacy_fp = legacy.map(|(_, fp)| fp.clone());
         let legacy = legacy.and(record_path.clone());
@@ -1608,7 +1647,7 @@ impl NifEdit {
                 || move_aside.is_some_and(|p| !files.iter().any(|f| f == p))
                 || (self.draft_unsaved()
                     && (!files.contains(&self.draft_path)
-                        || self.legacy_removal().is_some_and(|p| !files.contains(p))
+                        || self.draft_removals().any(|p| !files.contains(p))
                         || self
                             .draft_backup
                             .as_ref()
@@ -1648,33 +1687,44 @@ impl NifEdit {
         {
             return ExportOutcome::Blocked(self.record_changed_since_review());
         }
-        match foreign_hash(
+        match installed_nif(
             &path,
+            &out,
             completed_nif_hash(&pre, &self.doc.ops),
             self.partial.as_deref(),
             pre.export.owner.is_some() && pre.export.owner != self.doc.id,
         ) {
             Err(e) => return ExportOutcome::Blocked(e),
-            Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
+            Ok(installed) if installed.foreign.is_some() && installed.foreign != overwrite => {
+                return ExportOutcome::Foreign
+            }
             Ok(_) => {}
         }
-        if let Some(to) = move_aside {
-            if let Err(e) = self.free_unseen(&record_path, None, "The edit document", Some(to)) {
-                return ExportOutcome::Blocked(e);
-            }
-        }
+        let backup_notice = match move_aside {
+            Some(to) => match self.keep_aside(&record_path, "The edit document", Some(to)) {
+                Ok(notice) => Some(notice),
+                Err(why) => return ExportOutcome::Blocked(why),
+            },
+            None => None,
+        };
         // the draft first, when a drag was not flushed: the NIF is written from what the draft holds, and not at all
         // when the draft cannot be saved (ruling E6-E)
         if self.draft_unsaved() {
             self.unsaved = true;
             self.save();
             if self.draft_unsaved() {
-                let why = self.error.take().unwrap_or_default();
+                let mut why = self.error.take().unwrap_or_default();
+                if let Some((to, fp)) = move_aside.zip(previous_fp.as_deref()) {
+                    if let Err(e) = remove_known(to, fp) {
+                        why.push_str(&format!(". Could not remove the record backup: {e}"));
+                    }
+                }
                 return ExportOutcome::Blocked(format!(
                     "the edits could not be saved, so nothing was exported: {why}"
                 ));
             }
         }
+        self.open_lines.extend(backup_notice);
         // The final record supplies the new owner's document ID. Until then its hash belongs to the previous owner.
         if pre.export.owner != self.doc.id {
             pre.id = None;
@@ -1986,6 +2036,26 @@ impl NifEdit {
     /// Ruling E6-F: the draft's write, never over bytes this session does not know as its own there (`draft_fp`):
     /// those are moved aside first (`free_unseen`), and nothing is written when that fails.
     fn save_draft(&mut self, allow_kept_fallback: bool) -> Result<(), String> {
+        if let (Some(_), Some(plain)) = (&self.project, &self.autosave) {
+            let at_path = |e| format!("{}: {e}", plain.display());
+            match std::fs::metadata(plain) {
+                Ok(m)
+                    if m.is_file()
+                        && m.modified().map_err(at_path)? > std::time::SystemTime::now() =>
+                {
+                    if !edit_doc::is_known(plain, self.plain_fp.as_deref()) {
+                        return Err(format!(
+                            "A newer autosave is at {}. Move it aside before saving these edits.",
+                            plain.display()
+                        ));
+                    }
+                    #[cfg(windows)]
+                    check_removable(plain).map_err(at_path)?;
+                }
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(at_path(e)),
+                _ => {}
+            }
+        }
         self.prepare_kept_for_save()?;
         let Err(why) = self.write_draft() else {
             return self.draft_saved();
@@ -2058,18 +2128,19 @@ impl NifEdit {
                 }
             }
         }
-        let plain = self.autosave.clone().zip(self.plain_fp.take());
-        let kept = self.kept_autosave.take().zip(self.kept_fp.take());
-        for (f, fp) in plain.into_iter().chain(kept) {
-            if !edit_doc::is_known(&f, Some(&fp)) {
-                continue;
-            }
-            if let Err(e) = std::fs::remove_file(&f) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    self.error = Some(format!("{}: {e}", f.display()));
+        for (path, known) in [
+            (self.autosave.as_ref(), &mut self.plain_fp),
+            (self.kept_autosave.as_ref(), &mut self.kept_fp),
+        ] {
+            if let (Some(f), Some(fp)) = (path, known.as_deref()) {
+                if let Err(why) = remove_known(f, fp) {
+                    self.unsaved = true;
+                    return Err(why);
                 }
+                *known = None;
             }
         }
+        self.kept_autosave = None;
         Ok(())
     }
 
@@ -2267,13 +2338,18 @@ impl NifEdit {
                 None => Ok(p.doc),
             }),
             false => edit_doc::load(draft),
+        }?;
+        let next = match (next, &self.record_path) {
+            (None, Some(record)) => edit_doc::load(record)?.filter(is_legacy_draft),
+            (next, _) => next,
         };
-        let other = || Err("it would load other edits".to_string());
-        match next {
-            Ok(Some(d)) if same_ops(&d.ops, &self.doc.ops) => Ok(()),
-            Ok(None) if self.doc.ops.is_empty() => Ok(()),
-            Ok(_) => other(),
-            Err(e) => Err(e),
+        if same_ops(
+            next.as_ref().map_or(&[], |d| d.ops.as_slice()),
+            &self.doc.ops,
+        ) {
+            Ok(())
+        } else {
+            Err("it would load other edits".into())
         }
     }
 
@@ -2303,7 +2379,9 @@ impl NifEdit {
         if path.is_dir() || edit_doc::is_known(path, known.as_deref()) {
             return Ok(());
         }
-        self.keep_aside(path, what, exact)
+        let notice = self.keep_aside(path, what, exact)?;
+        self.open_lines.push(notice);
+        Ok(())
     }
 
     fn record_changed_since_review(&self) -> String {
@@ -2320,27 +2398,36 @@ impl NifEdit {
         .then(|| record_move_aside(&self.draft_path))
     }
 
-    fn legacy_removal(&self) -> Option<&PathBuf> {
+    fn draft_removals(&self) -> impl Iterator<Item = &PathBuf> {
         self.legacy
             .as_ref()
             .filter(|path| self.record_path.as_ref() != Some(path))
+            .into_iter()
+            .chain(
+                self.kept_autosave
+                    .as_ref()
+                    .filter(|_| self.kept_fp.is_some()),
+            )
     }
 
     fn move_kept_older(&mut self) -> Result<(), String> {
         let mut k = self.kept_older.take().expect("a known kept loser");
-        if let Err(e) = self.keep_aside(&k.path, "The kept autosave", Some(&k.backup.path)) {
-            if k.backup.path.exists() {
-                k.backup.path = backup_name(&k.path); // the next Review can approve the new name
+        match self.keep_aside(&k.path, "The kept autosave", Some(&k.backup.path)) {
+            Ok(notice) => self.open_lines.push(notice),
+            Err(e) => {
+                if k.backup.path.exists() {
+                    k.backup.path = backup_name(&k.path); // the next Review can approve the new name
+                }
+                k.backup.last_error = Some(e.clone());
+                self.kept_older = Some(k);
+                return Err(e);
             }
-            k.backup.last_error = Some(e.clone());
-            self.kept_older = Some(k);
-            return Err(e);
         }
         Ok(())
     }
 
     /// Preserve the bytes under a reserved sibling name. A kept loser's name is the one offered in Review.
-    fn keep_aside(&mut self, path: &Path, what: &str, exact: Option<&Path>) -> Result<(), String> {
+    fn keep_aside(&self, path: &Path, what: &str, exact: Option<&Path>) -> Result<String, String> {
         let keep_draft = self.kept_autosave.is_some() && path == self.draft_path;
         let keep_record = self.record_path.as_deref() == Some(path);
         let at_path = |e: std::io::Error| format!("{}: {e}", path.display());
@@ -2376,16 +2463,15 @@ impl NifEdit {
             let _ = std::fs::remove_file(&to); // the empty reservation only
             return Err(at_path(e));
         }
-        self.open_lines.push(format!(
+        if copied_fp.is_some_and(|fp| !edit_doc::is_known(path, Some(&fp))) {
+            return Err(format!("{} changed during save", path.display()));
+        }
+        Ok(format!(
             "{what} {} held edits of {} that this session did not open: kept as {}.",
             path.display(),
             self.data_path,
             to.display()
-        ));
-        if copied_fp.is_some_and(|fp| !edit_doc::is_known(path, Some(&fp))) {
-            return Err(format!("{} changed during save", path.display()));
-        }
-        Ok(())
+        ))
     }
 
     /// Note GD5 (c), GD11: a project is opened while this edit is touched and its draft is still the autosave, which
@@ -3092,26 +3178,26 @@ fn completed_nif_hash<'a>(record: &'a EditDoc, ops: &[DocOp]) -> Option<&'a str>
     record.export.sha256.as_deref()
 }
 
-/// Note GP10: what an export finds at `path`: None when the file is absent or Tessalith's own (its hash is `last`, the
-/// NIF the record names, or `partial`, the NIF a partial export wrote, ruling E6-I); Some(its SHA-256) otherwise;
-/// Err when it cannot be read. Ruling E6-S2: a present NIF the record does not name needs its Overwrite answer even
-/// when its bytes equal the export's (no equal-output shortcut; "never a silent replace").
-fn foreign_hash(
+/// E6-S2: equal output bytes affect Review's file inventory. Ownership still decides the Overwrite question.
+fn installed_nif(
     path: &Path,
+    output: &[u8],
     last: Option<&str>,
     partial: Option<&str>,
     other_owner: bool,
-) -> Result<Option<[u8; 32]>, String> {
+) -> Result<InstalledNif, String> {
     match std::fs::read(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(InstalledNif::default()),
         Err(e) => Err(format!("Cannot read {}: {e}", path.display())),
         Ok(b) => {
             let h: [u8; 32] = Sha256::digest(&b).into();
             let hex = hex::encode(h);
-            match !other_owner && (last == Some(hex.as_str()) || partial == Some(hex.as_str())) {
-                true => Ok(None),
-                false => Ok(Some(h)),
-            }
+            let ours =
+                !other_owner && (last == Some(hex.as_str()) || partial == Some(hex.as_str()));
+            Ok(InstalledNif {
+                foreign: (!ours).then_some(h),
+                matches_output: b == output,
+            })
         }
     }
 }
@@ -3130,6 +3216,12 @@ fn next_key() -> u64 {
 #[cfg(feature = "test-hooks")]
 thread_local! {
     static CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static BACKUP_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(feature = "test-hooks")]
+pub fn backup_probes() -> usize {
+    BACKUP_PROBES.with(std::cell::Cell::get)
 }
 
 /// How many `refresh_blocked` calls this thread made (Note GP8's test: one per change).
@@ -3473,6 +3565,17 @@ impl MeshesModel {
             {
                 self.switch_attempts_done += e.switch_save_attempts;
             }
+            if e.project.is_some() || !e.edit_mod.as_os_str().is_empty() {
+                let draft = edit_doc::load(&e.draft_path).ok().flatten();
+                let record = e
+                    .record_path
+                    .as_ref()
+                    .and_then(|p| edit_doc::load(p).ok().flatten());
+                match disk_badge(draft, record) {
+                    Some(badge) => self.doc_badges.insert(e.data_path.clone(), badge),
+                    None => self.doc_badges.remove(&e.data_path),
+                };
+            }
             self.messages.append(&mut e.open_lines);
             if let Some(err) = e.error {
                 self.error = Some(err);
@@ -3706,13 +3809,14 @@ impl MeshesModel {
             return vec![];
         };
         let mut blocked = e.blocked.clone();
-        let foreign = match e.export_path.as_os_str().is_empty() {
-            true => None,
+        let installed = match e.export_path.as_os_str().is_empty() {
+            true => InstalledNif::default(),
             false => self.disk_state(e).unwrap_or_else(|why| {
                 blocked.get_or_insert(why);
-                None
+                InstalledNif::default()
             }),
         };
+        let foreign = installed.foreign;
         let mut answer = None;
         if let (Some(f), Some((c, h))) = (
             foreign,
@@ -3732,7 +3836,8 @@ impl MeshesModel {
                 .filter(|(_, failed)| *failed)
                 .map(|(note, _)| note.clone())
                 .or_else(|| e.needs_nif_repair().then(|| NIF_NOT_RECORDED.to_owned())),
-            legacy_removal: e.legacy_removal().cloned(),
+            draft_removals: e.draft_removals().cloned().collect(),
+            nif_matches: installed.matches_output,
             record: e.record_path.clone().unwrap_or_default(),
             record_move_aside: self.move_aside_shown.get(&e.data_path).cloned(),
             draft_backup: e.draft_backup.clone(),
@@ -3752,9 +3857,8 @@ impl MeshesModel {
         }]
     }
 
-    /// The export path of `e` as the export would find it: None when absent or Tessalith's own, Some(SHA-256) when
-    /// Tessalith did not write it, Err when it cannot be read.
-    fn disk_state(&self, e: &NifEdit) -> Result<Option<[u8; 32]>, String> {
+    /// Cache ownership and byte equality from the same read of the installed NIF.
+    fn disk_state(&self, e: &NifEdit) -> Result<InstalledNif, String> {
         let meta = std::fs::metadata(&e.export_path)
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
@@ -3778,8 +3882,9 @@ impl MeshesModel {
             e.rev,
             e.other_owner(),
         );
-        let v = foreign_hash(
+        let v = installed_nif(
             &e.export_path,
+            &e.out,
             e.record_sha.as_deref(),
             e.partial.as_deref(),
             e.other_owner(),
@@ -3921,12 +4026,12 @@ impl MeshesModel {
         approved: Option<&[PathBuf]>,
     ) -> Result<usize, String> {
         self.foreign_cache.take(); // check again at write time
+        let keep_snapshot = self.move_asides_frozen && approved.is_none();
         if self.move_asides_frozen {
             self.refresh_export_record();
         } else {
             self.freeze_move_asides();
         }
-        self.move_asides_frozen = false;
         // ruling E6-S3: what the Export read then is said before the rows are filtered on pending edits: a record that
         // cannot be read, or (with no ops, after edits) an installed NIF with no record. Nothing is written for it.
         let mut refused: Option<(String, String)> = None;
@@ -3996,7 +4101,10 @@ impl MeshesModel {
                 }
             }
         }
-        self.move_aside_shown.clear();
+        if !keep_snapshot {
+            self.move_asides_frozen = false;
+            self.move_aside_shown.clear();
+        }
         match skipped.is_empty() {
             true => Ok(written),
             false => Err(format!("NIF edits skipped: {}", skipped.join("; "))),
@@ -4066,14 +4174,13 @@ impl MeshesModel {
             })
             .collect();
         let mut badges = HashMap::new();
-        for mut draft in self.project_root.iter().flat_map(|p| docs(p, "_sdc")) {
+        for draft in self.project_root.iter().flat_map(|p| docs(p, "_sdc")) {
             let key = draft
                 .source
                 .data_path
                 .replace('\\', "/")
                 .to_ascii_lowercase();
-            draft.export = records.remove(&key).map(|r| r.export).unwrap_or_default();
-            if let Some(badge) = DocBadge::of(&draft) {
+            if let Some(badge) = disk_badge(Some(draft), records.remove(&key)) {
                 badges.insert(key, badge);
             }
         }
