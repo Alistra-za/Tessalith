@@ -16,6 +16,279 @@ use support::*;
 
 const LEAF: &str = "arch/leaf";
 
+pub(crate) const E: &str = "textures/e/cape";
+pub(crate) const B: &str = "textures/b/cape";
+
+#[test]
+fn the_borrowed_slot_warning_follows_edits() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(d.path(), true, false);
+    let check = |m: &mut AppModel, n| {
+        settle(m);
+        assert_eq!(unused_rows(m).len(), n);
+    };
+    check(&mut m, 0);
+    m.edit_docs("Borrow slot 6", None, true, |_, s| {
+        s.set_borrow(E, 6, Some(B))
+    });
+    check(&mut m, 1);
+    m.undo();
+    check(&mut m, 0);
+    m.redo();
+    check(&mut m, 1);
+    m.edit_docs("Remove share", None, true, |_, s| s.remove_share(E, AO));
+    check(&mut m, 0);
+    m.undo();
+    check(&mut m, 1);
+}
+pub(crate) const A: &str = "textures/a/cape";
+pub(crate) const AO: &str = "textures/a/cape_ao.png";
+
+pub(crate) fn normal_borrow(dir: &std::path::Path) -> AppModel {
+    let mut m = crate::sets_model::rock02_opened(dir, false, true);
+    m.edit_docs("Borrow normal", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    settle(&mut m);
+    m
+}
+
+#[test]
+fn a_borrowed_slot_over_an_own_normal_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = normal_borrow(dir.path());
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 1, "one row for the displaced normal");
+    for text in ["Slot 2", "landscape/rock02", "rock01_normal.png"] {
+        assert!(rows[0].shown().contains(text), "{}", rows[0].shown());
+    }
+}
+
+#[test]
+fn a_borrowed_height_over_an_own_height_pack_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_p"], ""),
+            (
+                E,
+                &["", "_height"],
+                "slot4 = false\n[sets.borrow]\nslot4 = \"textures/b/cape\"",
+            ),
+        ],
+    );
+    let p = m.item("textures/e/cape_p").expect("packed height");
+    assert_eq!(p.status, sdc_gui::model::items::ItemStatus::Ready);
+    let path = p.job.as_ref().unwrap().output.clone();
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 1, "one row for the displaced height");
+    assert!(rows[0].shown().contains("Slot 4"));
+    let doc = fresh_document(&mut m, "height");
+    assert_eq!(
+        disk_set(&doc, r"e\cape.dds")["slot4"],
+        json!(r"textures\pbr\b\cape_p.dds")
+    );
+    assert!(path.is_file());
+    assert_eq!(cape_view(&m, E).settings.get("slot4"), Some(&json!(false)));
+}
+
+#[test]
+fn two_own_normals_under_one_borrow_name_one_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_n"], ""),
+            ("textures/e/silk", &["_n"], ""),
+            (
+                E,
+                &["", "_n"],
+                "add = [\"textures/e/silk_n.png\"]\n[sets.borrow]\nslot2 = \"textures/b/cape\"",
+            ),
+        ],
+    );
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 1, "one row for both displaced normals");
+    assert!(
+        rows[0].shown().contains("cape_n.dds"),
+        "{}",
+        rows[0].shown()
+    );
+    assert!(rows[0].shown().contains("and 1 more"));
+    assert!(rows[0].detail.as_deref().unwrap().contains("silk_n.dds"));
+}
+
+pub(crate) fn settle(m: &mut AppModel) {
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+}
+
+pub(crate) fn cape_project(dir: &std::path::Path, sets: &[(&str, &[&str], &str)]) -> AppModel {
+    let mut doc = String::new();
+    let mut decisions = Vec::new();
+    for &(id, tails, settings) in sets {
+        doc.push_str(&format!(
+            "[[sets]]\nid = \"{id}\"\nshader = \"pbr\"\n{settings}\n"
+        ));
+        for tail in tails {
+            let key = format!("{id}{tail}.png");
+            let path = dir.join(&key);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let normal = matches!(*tail, "_n" | "_normal");
+            image::RgbImage::from_fn(64, 64, |x, _| {
+                image::Rgb(if normal {
+                    [128, 128, 255]
+                } else {
+                    [(4 * x) as u8; 3]
+                })
+            })
+            .save(path)
+            .unwrap();
+            let subtype = match *tail {
+                "" => Subtype::PbrAlbedo,
+                "_n" | "_normal" => Subtype::PbrNormal,
+                "_p" => Subtype::Height,
+                "_cnr" => Subtype::CoatNormal,
+                "_f" => Subtype::PbrFuzz,
+                "_rmaos" => Subtype::Rmaos,
+                _ => continue,
+            };
+            decisions.push((key, subtype));
+        }
+    }
+    std::fs::write(dir.join("sdc-project.toml"), doc).unwrap();
+    let mut m = opened_as_the_app(dir.to_owned(), dir.join("export"));
+    for (key, subtype) in decisions {
+        m.decide(&key, Answer::Subtype(subtype));
+        if subtype == Subtype::PbrNormal {
+            m.decide(&key, Answer::Green(GreenConvention::Directx));
+        }
+    }
+    settle(&mut m);
+    m
+}
+
+pub(crate) fn cape_packs(dir: &std::path::Path, share: bool, borrow: bool) -> AppModel {
+    let mut settings = String::new();
+    if share {
+        settings.push_str(&format!("share = [\"{AO}\"]\n"));
+    }
+    settings.push_str(&format!("[sets.borrow]\nslot2 = \"{B}\"\n"));
+    if borrow {
+        settings.push_str(&format!("slot6 = \"{B}\"\n"));
+    }
+    cape_project(
+        dir,
+        &[
+            (A, &["", "_n", "_roughness", "_ao"], ""),
+            (B, &["", "_n", "_roughness"], ""),
+            (E, &[""], &settings),
+        ],
+    )
+}
+
+pub(crate) fn unused_rows(m: &AppModel) -> Vec<sdc_gui::model::bottom::Problem> {
+    sdc_gui::model::bottom::problems(m)
+        .iter()
+        .filter(|p| p.code == Some(Code::SetSlotBorrowedUnused))
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn cape_view(m: &AppModel, id: &str) -> SetView {
+    views(m).iter().find(|v| v.id == id).unwrap().clone()
+}
+
+#[test]
+fn a_borrowed_slot_over_an_own_pack_warns() {
+    use sdc_gui::model::{
+        bottom::{set_ready, At, Level},
+        items::ItemKind,
+        nav::SlotTarget,
+    };
+    let baseline = tempfile::tempdir().unwrap();
+    let base = cape_packs(baseline.path(), false, true);
+    assert!(set_ready(&base, &cape_view(&base, E)));
+    assert!(unused_rows(&base).is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    let e = cape_view(&m, E);
+    for id in [A, B] {
+        assert!(cape_view(&m, id).members.contains(&format!("{id}_rmaos")));
+        assert_eq!(
+            set_ready(&base, &cape_view(&base, id)),
+            set_ready(&m, &cape_view(&m, id))
+        );
+    }
+    assert!(
+        matches!(e.slots.get(&SlotKind::Rmaos), Some(SlotFill::Borrowed { from, item }) if from == B && item == "textures/b/cape_rmaos")
+    );
+    assert!(!e
+        .members
+        .iter()
+        .any(|k| m.item(k).is_some_and(|i| i.kind == ItemKind::Packed)));
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 1, "one row for the hidden pack");
+    let row = &rows[0];
+    assert_eq!(
+        row.at,
+        At::Set {
+            key: e.key.clone(),
+            id: E.into()
+        }
+    );
+    assert_eq!(row.level, Level::Warning);
+    assert_eq!(
+        sdc_gui::model::code_text::row_class(Code::SetSlotBorrowedUnused),
+        sdc_gui::model::code_text::RowClass::Problem
+    );
+    assert!(row.in_worklist());
+    assert_eq!((&row.fix, &row.second_fix), (&None, &None));
+    assert_eq!(row.target, Some(SlotTarget::Slot(SlotKind::Rmaos)));
+    for part in ["Slot 6", B, "cape_rmaos.dds", AO, "shares"] {
+        assert!(row.shown().contains(part), "{}", row.shown());
+    }
+    assert!(row
+        .detail
+        .as_deref()
+        .unwrap()
+        .contains("mark this row as intended"));
+    assert!(!set_ready(&m, &e));
+    let own: Vec<_> = m.producers[&e.key]
+        .iter()
+        .filter(|p| p.kind == Some(SlotKind::Rmaos))
+        .collect();
+    assert_eq!(own.len(), 1);
+    assert!(own[0].ready);
+    assert_eq!(own[0].sources, [AO]);
+    let output = own[0].output.clone();
+    let doc = fresh_document(&mut m, "cape");
+    assert_eq!(
+        disk_set(&doc, r"e\cape.dds")["slot6"],
+        json!(r"textures\pbr\b\cape_rmaos.dds")
+    );
+    assert!(output.is_file(), "{output:?}");
+    let mut h = harness(m);
+    h.run_steps(4);
+    let badges: Vec<_> = h
+        .query_all_by_label("⚠ 1")
+        .map(|node| node.rect().center())
+        .collect();
+    assert!(
+        badges.into_iter().any(|at| {
+            h.hover_at(at);
+            h.run_steps(4);
+            h.query_by_label_contains("SET-SLOT-BORROWED-UNUSED")
+                .is_some()
+                && h.query_by_label_contains("Slot 6 uses textures/b/cape's file")
+                    .is_some()
+                && h.query_by_label_contains("mark this row as intended")
+                    .is_some()
+        }),
+        "the card badge explains the displaced file"
+    );
+}
+
 fn assert_command_refuses_borrow(
     m: &mut AppModel,
     item: &str,
@@ -2422,7 +2695,7 @@ const REC_LEAF: &str = "textures/n/leaf";
 
 /// Ruling 3b-F9: a PBR-picked no-albedo set `textures/n/leaf` (`_n` only) whose TXST record names the height
 /// `textures/h/hgt_p.dds`, which the set `textures/h/hgt` writes, so the record borrows it into slot 4.
-fn record_height_project(dir: &std::path::Path) -> AppModel {
+pub(crate) fn record_height_project(dir: &std::path::Path) -> AppModel {
     for f in ["textures/n/leaf_n.png", "textures/h/hgt_p.png"] {
         let p = dir.join(f);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();

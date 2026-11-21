@@ -6,6 +6,215 @@ use support::*;
 
 const ROCK: &str = "landscape/rock01";
 
+#[test]
+fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
+    use crate::slot_links::{
+        cape_packs, cape_project, cape_view, record_height_project, unused_rows, A, B, E,
+    };
+    use sdc_gui::model::pbr_export::{export_blocks, written_json_entries};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    let mut unexpected = Vec::new();
+    for (name, key, value) in [
+        ("W2 link", "slot6", json!(r"textures\pbr\b\cape_rmaos.dds")),
+        ("W2 clear", "slot6", json!("")),
+        ("W2 lock", "lock_rmaos", json!(true)),
+        (
+            "W4 own explicit slot",
+            "slot8",
+            json!(r"textures\e\cape_rmaos.dds"),
+        ),
+    ] {
+        m.set_json_value(E, key, Some(value));
+        idle(&mut m);
+        if !unused_rows(&m).is_empty() {
+            unexpected.push(name);
+        }
+        m.set_json_value(E, key, None);
+        idle(&mut m);
+    }
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert!(unused_rows(&m).is_empty(), "Vanilla");
+    let dir = tempfile::tempdir().unwrap();
+    let m = record_height_project(dir.path());
+    assert!(views(&m).iter().any(|v| v.filled.contains_key(&4)));
+    assert!(unused_rows(&m).is_empty(), "TXST fill");
+
+    let dir = tempfile::tempdir().unwrap();
+    let m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_cnr"], ""),
+            (E, &["", "_f"], "[sets.borrow]\nslot7 = \"textures/b/cape\""),
+        ],
+    );
+    assert!(export_blocks(&m)
+        .iter()
+        .any(|p| p.text.contains("both use slot 7")));
+    assert!(unused_rows(&m).is_empty(), "different slot 7 kinds");
+
+    let dir = tempfile::tempdir().unwrap();
+    let m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_cnr"], ""),
+            (
+                E,
+                &["_f", "_cnr"],
+                "[sets.borrow]\nslot7 = \"textures/b/cape\"",
+            ),
+        ],
+    );
+    let slot = written_json_entries(&m)
+        .into_iter()
+        .find(|(v, _)| v.id == E)
+        .unwrap()
+        .1;
+    assert!(slot.slots[&7].ends_with("cape_f.dds"), "Fuzz wins slot 7");
+    assert_eq!(
+        sdc_gui::model::pbr_export::entries_by_set(&m)[&cape_view(&m, E).key]
+            .winners
+            .get(&7),
+        Some(&SlotKind::Fuzz)
+    );
+    assert!(unused_rows(&m).is_empty(), "W2 winner");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_roughness"], ""),
+            (
+                E,
+                &["", "_rmaos"],
+                "[sets.borrow]\nslot6 = \"textures/b/cape\"",
+            ),
+        ],
+    );
+    m.edit_docs("Invalid data weighting", None, true, |p, _| {
+        p.set_file_value(
+            "textures/e/cape_rmaos.png",
+            "encoder.perceptual",
+            &json!(true),
+        );
+    });
+    idle(&mut m);
+    assert!(
+        matches!(&m.item("textures/e/cape_rmaos.png").unwrap().status,
+        sdc_gui::model::items::ItemStatus::Error(codes) if codes.contains(&engine::codes::Code::FmtPerceptualData))
+    );
+    assert!(unused_rows(&m).is_empty(), "W3 error job");
+
+    for (x, path, case) in [
+        (
+            "mod_a/textures/x/cape",
+            r"textures\m2\y_rmaos.dds",
+            "W4 mod root",
+        ),
+        (
+            "textures/pbr/x/cape",
+            r"pbr\x\cape_rmaos.dds",
+            "W4 path spelling",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = if x.starts_with("mod_a") {
+            "[sets.borrow]\nslot6 = \"textures/b/cape\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"X\"\nslot6 = \"textures/m2/y_rmaos.dds\""
+        } else {
+            "[sets.borrow]\nslot6 = \"textures/b/cape\""
+        };
+        let tails: &[&str] = if x.starts_with("mod_a") {
+            &["_roughness"]
+        } else {
+            &["", "_roughness"]
+        };
+        let mut m = cape_project(
+            dir.path(),
+            &[
+                (B, &["", "_roughness"], ""),
+                (x, tails, settings),
+                (A, &[""], ""),
+            ],
+        );
+        m.set_json_value(A, "slot6", Some(json!(path)));
+        idle(&mut m);
+        let own = m.item(&format!("{x}_rmaos")).unwrap().job.as_ref().unwrap();
+        if x.starts_with("mod_a") {
+            assert!(
+                own.output.ends_with("mod_a/textures/m2/y_rmaos.dds"),
+                "{:?}",
+                own.output
+            );
+        }
+        if !unused_rows(&m).is_empty() {
+            unexpected.push(case);
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let x = "textures/x/cape";
+    let y = "textures/y/cape";
+    let mut m = cape_project(
+        dir.path(),
+        &[
+            (B, &["", "_roughness"], ""),
+            (
+                x,
+                &["", "_roughness"],
+                "[sets.borrow]\nslot6 = \"textures/b/cape\"",
+            ),
+            (y, &["_n"], "[sets.borrow]\nslot6 = \"textures/x/cape\""),
+        ],
+    );
+    let entry = written_json_entries(&m)
+        .into_iter()
+        .find(|(v, _)| v.id == y)
+        .unwrap()
+        .1;
+    assert_eq!(
+        entry.slots.get(&6).map(String::as_str),
+        Some(r"textures\x\cape_rmaos.dds"),
+        "{entry:?}"
+    );
+    if !unused_rows(&m).is_empty() {
+        unexpected.push("W4 chained reader and borrower with no own file");
+    }
+    assert!(unexpected.is_empty(), "{unexpected:?}");
+    let blocks = export_blocks(&m);
+    if blocks.is_empty() {
+        export_through(&mut m);
+        idle(&mut m);
+        let doc: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(pgp_json_path(&m)).unwrap()).unwrap();
+        let written = doc["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["match1"] == r"y\cape.dds")
+            .unwrap();
+        assert_eq!(written["slot6"], json!(r"textures\x\cape_rmaos.dds"));
+    } else {
+        assert!(
+            blocks
+                .iter()
+                .all(|b| b.set_id == y && b.text.contains("which has no output path")),
+            "{blocks:?}"
+        );
+        eprintln!("Existing chained-export blocks: {blocks:?}");
+    }
+    m.set_json_value(y, "slot6", Some(json!("")));
+    idle(&mut m);
+    let rows = unused_rows(&m);
+    assert_eq!(
+        rows.len(),
+        1,
+        "clearing the chained reader leaves x's pack unused"
+    );
+    assert!(
+        matches!(&rows[0].at, sdc_gui::model::bottom::At::Set {key, ..} if key == &cape_view(&m, x).key)
+    );
+}
+
 /// `pbr_ready` with a new set from leaf (pbr_albedo, Vanilla target) that borrows rock01's normal; returns the model,
 /// that set's id, and the normal's key.
 fn leaf_borrows_normal(dir: &std::path::Path) -> (sdc_gui::model::AppModel, String, String) {
@@ -1294,7 +1503,11 @@ fn a_shared_normal_bakes_the_borrowers_own_rmaos() {
 
 /// `pbr_opened` with a second PBR set, `landscape/rock02`: its albedo, with its own `rock02_rmaos.png` when `rmaos`,
 /// and its own `rock02_n.png` (a PBR normal, DirectX green) when `normal`.
-fn rock02_opened(dir: &std::path::Path, rmaos: bool, normal: bool) -> sdc_gui::model::AppModel {
+pub(crate) fn rock02_opened(
+    dir: &std::path::Path,
+    rmaos: bool,
+    normal: bool,
+) -> sdc_gui::model::AppModel {
     use engine::config::{GreenConvention, Subtype};
     use image::{ImageBuffer, Rgb, Rgba};
     use sdc_gui::model::Answer;

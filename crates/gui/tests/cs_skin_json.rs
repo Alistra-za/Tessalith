@@ -14,6 +14,40 @@ use std::path::Path;
 use std::time::Duration;
 use support::session;
 
+#[test]
+fn a_skin_set_warns_only_for_the_slots_its_material_reads() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for f in ["a_n.png", "b_n.png"] {
+        colour(&r, f);
+    }
+    let mut m = skin_project(d.path(), "textures/x", &["a", "b"]);
+    let (a, b) = (id_of(&m, "x/a"), id_of(&m, "x/b"));
+    for f in ["textures/x/a_n.png", "textures/x/b_n.png"] {
+        m.decide(
+            f,
+            sdc_gui::model::Answer::Green(engine::config::GreenConvention::Directx),
+        );
+    }
+    m.edit_docs("Borrow controls and normal", None, true, |_, s| {
+        s.set_borrow(&a, 6, Some(&b));
+        s.set_borrow(&a, 2, Some(&b));
+    });
+    idle(&mut m);
+    let v = view(&m, &a);
+    for kind in [SlotKind::Normal, SlotKind::Rmaos] {
+        assert!(matches!(v.slots.get(&kind), Some(SlotFill::Borrowed { from, .. }) if from == &b));
+    }
+    let rows = crate::slot_links::unused_rows(&m);
+    assert_eq!(rows.len(), 1, "skin reads controls only");
+    assert!(rows[0].shown().contains("Slot 6"));
+    export_and_wait(&mut m);
+    let j = read_json(&out(&m, "textures/x/a.csskin.json"));
+    assert_eq!(j["textures"]["controls"], json!("textures/x/b_rfaos.dds"));
+    assert!(j["textures"].get("normal").is_none());
+}
+
 fn grey(dir: &Path, name: &str) {
     ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
         .save(dir.join(name))

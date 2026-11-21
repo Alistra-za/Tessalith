@@ -347,10 +347,48 @@ fn without_slot_commands(s: &Settings) -> Settings {
 
 /// `json_entries` less the sets whose entry the statics rule drops (design §5.1): what the written file holds.
 pub fn written_json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
-    json_entries(m)
-        .into_iter()
-        .filter(|(v, _)| writes_entry(m, v))
-        .collect()
+    let mut out = Vec::new();
+    for_written_entry(m, |v, entry| out.push((v.clone(), entry.input)));
+    out
+}
+
+pub struct WrittenEntry {
+    pub input: EntryInput,
+    pub winners: BTreeMap<u8, SlotKind>,
+}
+
+/// Every effective entry and its winning fills, including readers outside the run scope.
+pub fn entries_by_set(m: &AppModel) -> Arc<BTreeMap<String, WrittenEntry>> {
+    super::cached(
+        m,
+        |c| {
+            c.written_entries
+                .as_ref()
+                .filter(|(rev, _)| *rev == m.evidence_rev)
+                .map(|(_, entries)| entries.clone())
+        },
+        |c, entries| c.written_entries = Some((m.evidence_rev, entries)),
+        || {
+            let mut entries = BTreeMap::new();
+            for_written_entry(m, |v, e| {
+                entries.insert(super::bottom::scope_key(v).to_owned(), e);
+            });
+            Arc::new(entries)
+        },
+    )
+}
+
+fn for_written_entry(m: &AppModel, mut visit: impl FnMut(&SetView, WrittenEntry)) {
+    if m.target != Target::Cs {
+        return;
+    }
+    let views = super::sets::views(m);
+    let (_, paths) = engine_inputs(m);
+    let roots = super::sets::output_roots(m);
+    for v in views.iter().filter(|v| writes_entry(m, v)) {
+        let (input, winners) = entry_for(v, &views, &paths, m, &roots);
+        visit(v, WrittenEntry { input, winners });
+    }
 }
 
 const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [

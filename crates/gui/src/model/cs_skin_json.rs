@@ -108,7 +108,7 @@ pub enum SkinSkip {
 }
 
 /// The JSON's texture slots and the set slots that fill them.
-const SLOTS: [(&str, SlotKind); 3] = [
+pub(super) const SLOTS: [(&str, SlotKind); 3] = [
     ("controls", SlotKind::Rmaos),
     ("wet", SlotKind::SkinWet),
     ("detail", SlotKind::SkinDetail),
@@ -118,19 +118,19 @@ const SLOTS: [(&str, SlotKind); 3] = [
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlanRow {
     id: String,
-    key: String,
+    pub(super) key: String,
     json: PathBuf,
     diffuse: PathBuf,
     material: SkinMaterial,
     /// (slot, output path) of each texture named in `material`, for the on-disk check at finish.
-    outputs: Vec<(&'static str, PathBuf)>,
+    pub(super) outputs: Vec<(&'static str, PathBuf)>,
     /// Textures left out for want of a game path.
     notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Plan {
-    rows: Vec<PlanRow>,
+    pub(super) rows: Vec<PlanRow>,
     /// (set id, set key, why).
     skips: Vec<(String, String, SkinSkip)>,
 }
@@ -266,7 +266,7 @@ fn build_plan(m: &AppModel) -> Plan {
     p
 }
 
-fn plan(m: &AppModel) -> Arc<Plan> {
+pub(super) fn plan(m: &AppModel) -> Arc<Plan> {
     super::cached(
         m,
         |c| c.cs_skin.clone(),
