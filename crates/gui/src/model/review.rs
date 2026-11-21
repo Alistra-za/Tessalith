@@ -8,7 +8,7 @@ use super::{
     Continue, ExportPress, ItemStatus,
 };
 use engine::api::{CancelToken, PreviewVerdict};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -53,8 +53,8 @@ pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Review {
-    /// The header captured this opening of Review before its first inventory was drawn.
-    pub(crate) nif_names_frozen: bool,
+    /// Set by the header on first draw. Without a meshes model, Review itself holds the supplied backup names.
+    pub(crate) nif_backup_names: Option<BTreeMap<PathBuf, PathBuf>>,
     pub options_open: bool,
     /// Open Options when an Also blocker appears, while allowing the user to close it afterward.
     pub(crate) also_blocked: bool,
@@ -986,7 +986,12 @@ impl AppModel {
                 put(WriteKind::Nif, p, HOVER_NIF, r.nif_matches);
             }
             put(WriteKind::Nif, r.record.clone(), HOVER_NIF_RECORD, false);
-            if let Some(path) = &r.record_move_aside {
+            let frozen_backup = self
+                .review
+                .as_ref()
+                .and_then(|review| review.nif_backup_names.as_ref())
+                .and_then(|names| names.get(&r.record));
+            if let Some(path) = frozen_backup.or(r.record_move_aside.as_ref()) {
                 put(WriteKind::Nif, path.clone(), NIF_MOVE_ASIDE_HOVER, false);
             }
             if r.draft_unsaved {

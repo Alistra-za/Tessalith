@@ -109,11 +109,24 @@ pub fn draw(
         ui.horizontal_wrapped(|ui| row(ui, model, scan.as_deref_mut()));
     });
     // A header click can open Review in this frame. Freeze before the bottom panel paints its inventory.
-    if let Some(review) = model.review.as_mut().filter(|r| !r.nif_names_frozen) {
-        review.nif_names_frozen = true;
+    if let Some(review) = model
+        .review
+        .as_mut()
+        .filter(|r| r.nif_backup_names.is_none())
+    {
         if let Some(meshes) = scan {
             meshes.freeze_move_asides();
+            review.nif_backup_names = Some(Default::default());
             model.set_nif_review_rows(meshes.nif_review_rows());
+        } else {
+            // The standalone draw can receive NIF rows through AppModel without their originating MeshesModel.
+            review.nif_backup_names = Some(
+                model
+                    .nif_rows
+                    .iter()
+                    .filter_map(|r| Some((r.record.clone(), r.record_move_aside.clone()?)))
+                    .collect(),
+            );
         }
         #[cfg(feature = "test-hooks")]
         model.capture_opening_writes();

@@ -874,7 +874,7 @@ fn chips_cell(ui: &mut egui::Ui, m: &MeshesModel, n: &NifRow, origin: &str) {
 
 fn detail(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let row = m.selected_row().cloned();
-    if row.is_none() && m.shapes.is_empty() {
+    if row.is_none() && m.edit.is_none() && m.shapes.is_empty() {
         ui.centered_and_justified(|ui| ui.label("Select a NIF."));
         return;
     }
@@ -942,15 +942,17 @@ fn head_cap(ui: &egui::Ui, anim: bool) -> f32 {
 
 /// The title, the warnings and the In game / Source toggle above the 3D view.
 fn detail_head(ui: &mut egui::Ui, m: &mut MeshesModel, row: Option<&NifRow>) {
-    if let Some(n) = row {
+    if let Some(path) = row
+        .map(|n| &n.path)
+        .or_else(|| m.edit.as_ref().map(|e| &e.data_path))
+    {
         let editing = m.edit.is_some();
         let mut toggle = false;
         egui::Sides::new().shrink_left().truncate().show(
             ui,
             |ui| {
                 ui.add(
-                    egui::Label::new(egui::RichText::new(display_path(&n.path)).heading())
-                        .truncate(),
+                    egui::Label::new(egui::RichText::new(display_path(path)).heading()).truncate(),
                 );
             },
             |ui| {
@@ -973,6 +975,8 @@ fn detail_head(ui: &mut egui::Ui, m: &mut MeshesModel, row: Option<&NifRow>) {
                 m.shapes_col |= m.edit.is_some();
             }
         }
+    }
+    if let Some(n) = row {
         if n.le_mesh {
             ui.colored_label(AMBER, LE_WARNING);
         }

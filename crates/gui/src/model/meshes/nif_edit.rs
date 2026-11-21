@@ -345,7 +345,11 @@ struct LegacyTransfer {
 }
 
 /// A completed edit also refreshes a timestamp-preserving replacement. Drag ticks reuse the installed digest.
-type ForeignKey = (PathBuf, Option<(u64, Option<std::time::SystemTime>)>, u64);
+type ForeignKey = (
+    PathBuf,
+    Option<(u64, Option<std::time::SystemTime>)>,
+    Option<u64>,
+);
 #[derive(Clone, Copy, Default)]
 pub(super) struct InstalledNif {
     foreign: Option<[u8; 32]>,
@@ -1381,7 +1385,9 @@ impl NifEdit {
     }
 
     pub(crate) fn repair_note(&self) -> Option<&'static str> {
-        if self.partial.is_some() {
+        if self.undone_export() {
+            Some("Redo the NIF edit, then export again to save its record.")
+        } else if self.partial.is_some() {
             Some("The NIF is in place, but its record still needs to be saved. Export again to finish.")
         } else {
             self.needs_nif_repair().then_some(
@@ -3980,15 +3986,17 @@ impl MeshesModel {
 
     /// Cache ownership and byte equality from the same read of the installed NIF.
     fn disk_state(&self, e: &NifEdit) -> Result<InstalledNif, String> {
-        let meta = std::fs::metadata(&e.export_path)
-            .ok()
-            .map(|m| (m.len(), m.modified().ok()));
+        let meta = file_meta(&e.export_path);
+        // A digest read on the last drag tick expires at release even if the edit revision stays the same.
+        let committed_rev = e.drag.is_none().then_some(e.rev);
         let mut cache = self.foreign_cache.borrow_mut();
         if !cache.as_ref().is_some_and(|((path, stamp, rev), _)| {
-            path == &e.export_path && *stamp == meta && (*rev == e.rev || e.drag.is_some())
+            path == &e.export_path
+                && *stamp == meta
+                && (committed_rev.is_none() || *rev == committed_rev)
         }) {
             *cache = Some((
-                (e.export_path.clone(), meta, e.rev),
+                (e.export_path.clone(), meta, committed_rev),
                 installed_hash(&e.export_path),
             ));
         }

@@ -9,7 +9,7 @@ For mod authors tuning a mesh, the Meshes view lets you edit its shader, alpha a
 
 ## Editing a NIF
 
-Click the **Edit** button beside the selected NIF's name. Click it again to close the panel. <!-- D:LD8 --> The panel shows the NIF's data path and source. In the mesh list, **Edit pending** marks edits to export, **Edited** marks an unchanged export and **Edit conflict** marks a conflict. Tessalith skips copies from an `sdc NIF Edits` folder or a folder that holds the export record for that NIF, so you edit the source mesh. <!-- D:GQ3 -->
+Click the **Edit** button beside the selected NIF's name. Click it again to close the panel. If a rescan drops the row, **Edit** stays beside the name so you can retry the save and close. <!-- D:LD8 --> The panel shows the NIF's data path and source. In the mesh list, **Edit pending** marks edits to export, **Edited** marks an unchanged export and **Edit conflict** marks a conflict. Tessalith skips copies from an `sdc NIF Edits` folder or a folder that holds the export record for that NIF, so you edit the source mesh. <!-- D:GQ3 -->
 
 **Cards.** In edit mode the shape cards get a **Root** card first, then one card per shape. Click a card's header to select it; the tabs below edit it, and a line under the tab strip names it (“Editing: BodyMesh”). Hover the name for its NIF block type. <!-- D:LD10 --> **Show only this shape** hides the other shapes in the 3D view. A change to the shader type, a flag, the alpha or a texture path shows on its card at once.
 
@@ -66,7 +66,7 @@ If Tessalith finds an unexported draft in the export folder, your next change mo
 
 ### After an export
 
-If the NIF was written but its record could not be saved, the footer tells you to export again. <!-- D:LD13 --> After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
+If the NIF was written but its record could not be saved, export again to finish. If you undid the last edit, click **Redo NIF edit** first. <!-- D:LD13 --> After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
 
 ### A file Tessalith did not write
 

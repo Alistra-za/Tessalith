@@ -17789,6 +17789,85 @@ fn final_wave_partial_export_is_explained_in_the_edit_footer() {
 }
 
 #[test]
+fn follow_up_undo_after_a_first_partial_export_explains_redo_in_the_footer() {
+    let (d, mut m, _p) = saved_in_p();
+    m.fail_record_write_after_nif_for_test();
+    export_fails(&mut m, "is in place, but its record");
+    assert!(exported(&d).is_file());
+    assert!(m.undo_edit());
+    assert_eq!(m.quick_export_block().as_deref(), Some(NIF_UNDONE));
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label("Redo the NIF edit, then export again to save its record.");
+    assert!(h
+        .query_by_label_contains("Export again to finish.")
+        .is_none());
+    assert!(h.state_mut().redo_edit());
+    h.run_steps(2);
+    h.get_by_label_contains("Export again to finish.");
+}
+
+#[test]
+fn follow_up_quick_export_rechecks_the_installed_nif_after_drag_release() {
+    let (d, mut m, _p) = saved_in_p();
+    assert_eq!(export(&mut m), Ok(1));
+    let path = exported(&d);
+    let recorded = std::fs::read(&path).unwrap();
+    let foreign = vec![0xff; recorded.len()];
+    std::fs::write(&path, &foreign).unwrap();
+    let stamp = path.metadata().unwrap().modified().unwrap();
+    tick(&mut m, 33.5);
+    assert_eq!(review_row(&m).foreign, Some(sha(&foreign)));
+    std::fs::write(&path, recorded).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(stamp)
+        .unwrap();
+    m.edit.as_mut().unwrap().flush();
+    m.quick_export();
+    assert_eq!(
+        m.quick_export_result,
+        Some(Ok(1)),
+        "the recorded file needs no answer"
+    );
+    assert!(!m.open_review_request);
+}
+
+#[cfg(windows)]
+#[test]
+fn follow_up_close_retries_the_held_edit_after_its_row_disappears() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let lock = hold(&autosave(&d), 1);
+    tick(&mut m, 33.5);
+    rusqlite::Connection::open(d.path().join("scan.db"))
+        .unwrap()
+        .execute(
+            "DELETE FROM nif_copy WHERE id = ?1",
+            [m.selected_nif.unwrap()],
+        )
+        .unwrap();
+    m.reload();
+    let start = std::time::Instant::now();
+    while m.poll_rows() {
+        assert!(start.elapsed() < Duration::from_secs(60));
+        std::thread::yield_now();
+    }
+    assert!(m.selected_row().is_none());
+    assert!(m.edit.is_some());
+    let mut h = view(m);
+    h.run_steps(3);
+    drop(lock);
+    h.get_by_role_and_label(AkRole::Button, "Edit").click();
+    h.run_steps(3);
+    assert!(h.state().edit.is_none(), "Close must retry the save");
+    assert!(doc_values(&autosave(&d)).contains(&33.5));
+}
+
+#[test]
 fn final_wave_idle_footer_reuses_its_fitted_writes_line() {
     use sdc_gui::ui::meshes::writes_builds;
     let (_d, m, _p) = saved_in_p();
