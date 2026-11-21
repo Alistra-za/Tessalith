@@ -7,6 +7,33 @@ use support::*;
 const ROCK: &str = "landscape/rock01";
 
 #[test]
+fn own_explicit_slot_reads_the_hidden_pack_in_a_separate_also_folder() {
+    use crate::slot_links::{cape_packs, cape_view, unused_rows, E};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(&dir.path().join("Mod"), true, true);
+    let also = dir.path().join("also");
+    m.set_also_location(&also);
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    idle(&mut m);
+
+    let pack = m.producers[&cape_view(&m, E).key]
+        .iter()
+        .find(|p| p.kind == Some(SlotKind::Rmaos))
+        .unwrap();
+    let slot = r"textures\pbr\e\cape_rmaos.dds";
+    assert_eq!(
+        pack.output,
+        also.join("Mod PBR/textures/pbr/e/cape_rmaos.dds")
+    );
+    assert_eq!(unused_rows(&m).len(), 1);
+    m.set_json_value(E, "slot8", Some(json!(slot)));
+    idle(&mut m);
+    let rows = unused_rows(&m);
+    assert!(rows.is_empty(), "slot 8 reads the hidden pack: {rows:?}");
+}
+
+#[test]
 fn no_borrowed_slot_warning_where_the_file_is_used_or_not_written() {
     use crate::slot_links::{cape_packs, cape_project, cape_view, unused_rows, A, B, E};
     use sdc_gui::model::bottom::At;

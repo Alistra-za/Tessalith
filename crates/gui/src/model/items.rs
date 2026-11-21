@@ -133,10 +133,9 @@ pub struct Producer {
 impl Producer {
     pub(super) fn project(&mut self, m: &super::AppModel, roots: &[PathBuf; 2]) {
         // A displaced pack can land under textures/pbr without an entry in slot_paths.
-        let landed = self
-            .output
-            .strip_prefix(&roots[1])
-            .ok()
+        let landed = roots
+            .iter()
+            .find_map(|root| self.output.strip_prefix(root).ok())
             .map(|rel| super::txst_map::game_key(&rel.to_string_lossy()))
             .filter(|path| path.starts_with("textures/"));
         self.game_key = super::sets::projected_job_slot(
