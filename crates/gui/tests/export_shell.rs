@@ -2448,6 +2448,37 @@ fn the_click_reads_the_export_blockers_fresh() {
     assert!(m.review.is_some(), "the overlap blocker opens Review");
 }
 
+#[test]
+fn a_scoped_overlap_refusal_refreshes_the_whole_project_header() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let out = d.path().join("safe");
+    let target = d.path().join("target mod");
+    let link = d.path().join("export link");
+    std::fs::create_dir(&out).unwrap();
+    std::fs::create_dir(&target).unwrap();
+    dir_link(&link, &out);
+    support::choose_export(&mut m, link.clone());
+    m.set_target_mod(Some(target.clone())).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    assert_eq!(m.header_export_text(), "Export 4 files now");
+
+    std::fs::rename(&link, d.path().join("old link")).unwrap();
+    dir_link(&link, &target);
+    let a = key_of(&m, "g/a");
+    m.export_sets([a.clone()].into(), "Export set g/a".into());
+    assert!(m.review.is_some() && m.export.running.is_none());
+    assert!(m.export_scope().unwrap().keys.contains(&a));
+    assert!(m.review_gate().is_err());
+    let label = m.header_export_text();
+    let hover = sdc_gui::ui::header::export_hover(&m);
+    assert_eq!(
+        (label.as_str(), hover.as_str()),
+        ("Review 4 files…", "4 files, 1 problem")
+    );
+}
+
 /// Round 4, ruling 3c-36 (re-review B5): the header's whole-project disk read (the PGPatcher line and the
 /// `sdc.toml` writability, which prepares the whole project's JSON) comes only after the gate's cheap checks pass. A
 /// scoped Review on a project with no export folder chosen fails at that check and reads nothing; a clean one reads

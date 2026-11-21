@@ -437,14 +437,16 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
     )
 }
 
-/// E3 (rulings 3c-27, 3c-34): forget the cached `export_blocks` list, so the next read builds it from the disk as it
-/// is now, and what was derived from it: the Problems list copies its rows (`bottom::problems`), and the flagged keys
-/// read that list. A write decision calls it; nothing per frame does.
+/// A write decision refreshes the on-disk overlap check for both scopes. Problems copies the blocker rows,
+/// flagged counts them, and the whole-project header caches both counts (3c-167).
 pub(super) fn drop_blocks(m: &AppModel) {
-    let mut c = m.view_cache().borrow_mut();
-    c.blocks = None;
-    c.problems = None;
-    c.flagged = None;
+    for cache in [&m.views, &m.whole_views] {
+        let mut c = cache.borrow_mut();
+        c.blocks = None;
+        c.problems = None;
+        c.flagged = None;
+    }
+    m.whole_cache.take();
 }
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
