@@ -48,7 +48,7 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | Suffix | Suggested sub-type | Confidence |
 |---|---|---|
 | none, or `_d` | `diffuse`; `pbr_albedo` in a PBR set; `skin_albedo` in an Advanced skin set; `landscape_diffuse` when a folder in the path is named `landscape`; `ui_sky` under `interface` or `sky` folders; `hdr_sky` for a float source under `sky` | High (`hdr_sky` Medium) |
-| `_n` | `normal`, `pbr_normal` in a PBR set, or `landscape_normal` under a `landscape` folder. See [Picking a shader for a normal](GUI-Set-Editor.md#picking-a-shader-for-a-normal). | High |
+| `_n` | `normal`, `pbr_normal` in a PBR set, or `landscape_normal` under a `landscape` folder. See [Picking a shader for a normal](Set-Shaders.md#picking-a-shader-for-a-normal). | High |
 | `_msn` | `msn` (model-space normal) | High |
 | `_s` | `msn_specular` when the set has `_msn`; `pbr_subsurface` in a PBR set; otherwise `subsurface_tint` | High, High, Low |
 | `_m`, `_em`, `_envmask` | `envmask`; `complex_material` when the alpha minimum is below 251 | High for both |

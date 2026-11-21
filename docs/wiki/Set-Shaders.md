@@ -59,6 +59,12 @@ A `_fuzz` or `_sheen` map picks no shader before rule 11: another map, such as a
 
 In the GUI, a format or tag the new type forbids is reset ([Texture settings](GUI-Texture-Panel.md#how-edits-are-saved)).
 
+### Picking a shader for a normal
+
+The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. When a normal follows its set’s shader, Tessalith changes its settings only if the entry controls one input. The same check applies to **Keep alpha**, a shader pick, the diffuse’s **Switch** and **Revert**, and **Reset all**.
+
+If a cube face is read through `wall.png.tga`, recording its type can also mark `wall.png` as a cubemap. A mesh scan can write an alpha setting for `wall.png` that also applies to `wall.png.tga`. If the second file is a shared normal, **Remove** can drop its alpha without a **Keep alpha** row, as before this release. <!-- D:JS5,JS6 -->
+
 ## Also export as Vanilla and CM
 
 For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is converted from its albedo, `_n`, `_rmaos` (or raw roughness, metallic and AO maps) and `_p`; every other texture is copied from the PBR folder, or encoded when the copy would differ.

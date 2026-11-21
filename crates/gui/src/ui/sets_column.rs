@@ -1487,7 +1487,14 @@ fn warning_tooltip(rows: &[(&str, &Warning)]) -> String {
     let mut lines: Vec<String> = rows
         .iter()
         .take(TIP_LINES)
-        .map(|(file, w)| format!("{file}: {} {}", w.code.as_str(), w.message))
+        .map(|(file, w)| {
+            let mut line = format!("{file}: {} {}", w.code.as_str(), w.message);
+            if w.code == engine::codes::Code::SetSlotBorrowedUnused {
+                line.push('\n');
+                line.push_str(&crate::model::code_text::borrowed_detail(w));
+            }
+            line
+        })
         .collect();
     if rows.len() > TIP_LINES {
         lines.push(format!("… and {} more", rows.len() - TIP_LINES));
@@ -2093,6 +2100,7 @@ pub fn draw(
         .collect();
     // One fetch per frame: each drawn card asks `set_ready_in`, not `problems()` (Task 6).
     let flagged = crate::model::bottom::flagged(model);
+    let unused = crate::model::sets::borrowed_unused(model);
     // A card's dot, and (worst of its members) a header's.
     let status_of = |v: &SetView| {
         if blocked.contains(&v.id) {
@@ -2313,6 +2321,7 @@ pub fn draw(
                         id,
                     };
                     let out = pill(
+                        &unused,
                         ui,
                         model,
                         &flagged,
@@ -2884,6 +2893,7 @@ fn insertion_y(from: usize, to: usize, r: egui::Rect) -> Option<f32> {
 
 #[allow(clippy::too_many_arguments)]
 fn pill(
+    unused: &crate::model::sets::WarningsBySet,
     ui: &mut egui::Ui,
     model: &AppModel,
     flagged: &Flagged,
@@ -2951,10 +2961,13 @@ fn pill(
                     };
                     // Review E4: `counts_for`, as the tiles; each `At` is built only for a card member or set
                     // with warnings.
-                    let set_at = (!v.set_warnings.is_empty()).then(|| At::Set {
-                        key: v.key.clone(),
-                        id: v.id.clone(),
-                    });
+                    let set_at =
+                        (!v.set_warnings.is_empty() || unused.contains_key(&v.key)).then(|| {
+                            At::Set {
+                                key: v.key.clone(),
+                                id: v.id.clone(),
+                            }
+                        });
                     let rows: Vec<(&str, &Warning)> = v
                         .members
                         .iter()
@@ -2968,8 +2981,7 @@ fn pill(
                                 .map(move |w| (i.name.as_str(), w))
                         })
                         .chain(set_at.iter().flat_map(|at| {
-                            v.set_warnings
-                                .iter()
+                            crate::model::sets::all_set_warnings(v, unused)
                                 .filter(|w| counts_for(model, at, w))
                                 .map(|w| (v.id.as_str(), w))
                         }))
@@ -4873,6 +4885,18 @@ mod tests {
     use super::*;
     use egui_kittest::kittest::{NodeT, Queryable};
     use engine::codes::Code;
+
+    #[test]
+    fn a_card_hover_lists_the_first_ten_warnings() {
+        let warnings: Vec<_> = (1..=12)
+            .map(|i| Warning::new(Code::ChanNotGray, format!("warning {i}")))
+            .collect();
+        let rows: Vec<_> = warnings.iter().map(|w| ("member", w)).collect();
+        let tip = warning_tooltip(&rows);
+        assert_eq!(tip.lines().count(), 11);
+        assert!(tip.lines().nth(9).unwrap().ends_with("warning 10"));
+        assert!(tip.ends_with("… and 2 more"));
+    }
 
     #[test]
     fn an_image_drag_is_found_and_placed() {

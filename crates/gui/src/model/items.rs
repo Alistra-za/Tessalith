@@ -118,8 +118,44 @@ pub struct SetItem {
     pub warnings: Vec<Warning>,
 }
 
+/// A plan job kept before item keys are de-duplicated, including packs hidden by a shared first source.
+#[derive(Debug, Clone)]
+pub struct Producer {
+    pub kind: Option<super::sets::SlotKind>,
+    pub ready: bool,
+    pub output: PathBuf,
+    pub sources: Vec<String>,
+    pub game_key: Option<String>,
+    pub output_key: engine::sets::OutputKey,
+    game_path: String,
+}
+
+impl Producer {
+    pub(super) fn project(&mut self, m: &super::AppModel, roots: &[PathBuf; 2]) {
+        // A displaced pack can land under textures/pbr without an entry in slot_paths.
+        let landed = roots
+            .iter()
+            .find_map(|root| self.output.strip_prefix(root).ok())
+            .map(|rel| super::txst_map::game_key(&rel.to_string_lossy()))
+            .filter(|path| path.starts_with("textures/"));
+        self.game_key = super::sets::projected_job_slot(
+            m,
+            roots,
+            &self.output,
+            landed.as_deref().unwrap_or(&self.game_path),
+            Some(&self.output_key),
+        )
+        .map(|path| path.to_ascii_lowercase());
+    }
+
+    pub(super) fn packed(&self) -> bool {
+        matches!(self.output_key, engine::sets::OutputKey::Packed { .. })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlanView {
+    pub producers: BTreeMap<String, Vec<Producer>>,
     pub input_count: usize,
     pub target: Target,
     /// The preset the batch resolved from (the request, the configs, or the target's default).
@@ -269,6 +305,7 @@ impl PlanView {
     pub fn build(plan: &Plan, events: &[EngineEvent], session: &Session, root: &Path) -> PlanView {
         let out_root = &plan.request.output_root;
         let mut items = vec![];
+        let mut producers = BTreeMap::<String, Vec<Producer>>::new();
         // Note DY16: a file with a helper report is one Helper item; its own raw job and its pack-source item are not.
         let helper_paths: std::collections::HashSet<&Path> =
             plan.helpers.iter().map(|h| h.path.as_path()).collect();
@@ -276,6 +313,34 @@ impl PlanView {
         // Note HF1 (GY1 guard): a no-set file never waits for a type, so no question, set or count is made of it.
         // The engine keeps it waiting (a suggestion there would be recorded into `[files]`) and never writes it.
         for job in &plan.jobs {
+            let packed = job.pack.is_some();
+            let key = if let Some(pk) = &job.pack {
+                packed_key(root, job, pk.kind)
+            } else {
+                key_of(root, &job.input)
+            };
+            let producer_key = match &job.pack {
+                Some(pack) => engine::sets::OutputKey::Packed {
+                    set: engine::sets::set_id(out_root, &job.set_key),
+                    suffix: pack.kind.suffix().into(),
+                },
+                None => engine::sets::OutputKey::File(key.clone()),
+            };
+            producers
+                .entry(job.set_key.clone())
+                .or_default()
+                .push(Producer {
+                    kind: super::sets::slot_kind(job.profile.subtype),
+                    ready: matches!(job.status, JobStatus::Ready),
+                    output: job.output.clone(),
+                    sources: job.pack.as_ref().map_or_else(
+                        || vec![key.clone()],
+                        |p| p.sources.iter().map(|s| key_of(root, &s.path)).collect(),
+                    ),
+                    output_key: producer_key,
+                    game_path: job.game_path.clone(),
+                    game_key: None,
+                });
             if matches!(job.status, JobStatus::PackingInput { .. })
                 && helper_paths.contains(job.input.as_path())
             {
@@ -286,12 +351,6 @@ impl PlanView {
                     .extend(job.warnings.iter().cloned());
                 continue;
             }
-            let packed = job.pack.is_some();
-            let key = if let Some(pk) = &job.pack {
-                packed_key(root, job, pk.kind)
-            } else {
-                key_of(root, &job.input)
-            };
             let status = match &job.status {
                 JobStatus::Ready => ItemStatus::Ready,
                 JobStatus::Unresolved { .. } | JobStatus::Blocked { .. } => {
@@ -513,6 +572,7 @@ impl PlanView {
             }
         }
         PlanView {
+            producers,
             input_count: events
                 .iter()
                 .filter(|e| matches!(e.kind, EventKind::FileDiscovered { .. }))

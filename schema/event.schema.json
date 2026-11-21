@@ -386,6 +386,7 @@
         "SET-COMPANION-DDS",
         "SET-BAKE-RATIO",
         "SET-EDIT-STALE",
+        "SET-SLOT-BORROWED-UNUSED",
         "SUG-LOW-CONFIDENCE",
         "SUG-CONTRADICTION",
         "VAL-ALPHA-GUARANTEE",

@@ -105,6 +105,8 @@ codes! {
     // Never raised since Note HD2; kept so an `allow` list naming it still loads.
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
     SetEditStale = "SET-EDIT-STALE" => Info,
+    // The set still writes its own file for a slot supplied by another set.
+    SetSlotBorrowedUnused = "SET-SLOT-BORROWED-UNUSED" => Warning,
     SugLowConfidence = "SUG-LOW-CONFIDENCE" => Blocking,
     SugContradiction = "SUG-CONTRADICTION" => Warning,
     ValAlphaGuarantee = "VAL-ALPHA-GUARANTEE" => Error,
@@ -258,7 +260,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 93);
+        assert_eq!(Code::ALL.len(), 94);
         assert_eq!(Code::OutKeptOlderEncode.severity(), Severity::Info);
         assert_eq!(Code::OutKeptLowerTarget.severity(), Severity::Info);
         assert_eq!(

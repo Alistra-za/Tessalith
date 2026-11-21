@@ -19,6 +19,64 @@ const ROCK: &str = "landscape/rock01.png";
 const DDS: &str = "landscape/plate.dds";
 const WAIT: &str = "Wait for the plan to finish";
 
+#[test]
+fn the_borrowed_slot_warning_follows_partial_plans() {
+    use crate::slot_links::{normal_borrow, unused_rows};
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path().join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    for tail in ["", "_n"] {
+        image::RgbImage::from_pixel(64, 64, image::Rgb([128, 128, 255]))
+            .save(r.join(format!("rock03{tail}.png")))
+            .unwrap();
+    }
+    let mut m = normal_borrow(dir.path());
+    m.decide("landscape/rock03.png", Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(
+        "landscape/rock03_n.png",
+        Answer::Subtype(Subtype::PbrNormal),
+    );
+    m.decide(
+        "landscape/rock03_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    m.edit_docs("Borrow second normal", None, true, |_, s| {
+        s.set_borrow("landscape/rock03", 2, Some("landscape/rock02"));
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let rows = unused_rows(&m);
+    assert_eq!(rows.len(), 2, "both displaced normals warn");
+    let other = rows
+        .into_iter()
+        .find(|p| matches!(&p.at, At::Set{id, ..} if id == "landscape/rock03"))
+        .unwrap();
+    m.hold_plan_results = true;
+    m.edit_docs("Blocking normal format", None, true, |p, _| {
+        p.set_file_value("landscape/rock01_normal.png", "header", &json!("dx10"));
+        p.set_file_value("landscape/rock01_normal.png", "format", &json!("rgb8"));
+    });
+    let (mut partials, full) = collect(&mut m, 1, 1);
+    let WorkerMsg::Partial {
+        result: Ok((partial, scope)),
+        ..
+    } = &mut partials[0]
+    else {
+        panic!("expected a partial plan");
+    };
+    let At::Set { key, .. } = &other.at else {
+        panic!("expected a set row")
+    };
+    // Deliver a partial for the edited set with a stray producer entry for the other borrower.
+    scope.remove(key);
+    partial.sets.retain(|s| &s.key != key);
+    partial.items.retain(|i| i.set_key.as_ref() != Some(key));
+    partial.producers.insert(key.clone(), Vec::new());
+    deliver(&mut m, partials);
+    assert_eq!(unused_rows(&m).as_slice(), std::slice::from_ref(&other));
+    finish(&mut m, full);
+    assert_eq!(unused_rows(&m), [other]);
+}
+
 /// The support fixture plus `extra`, opened with its export folder chosen, then holding plan results.
 fn open(dir: &Path, extra: impl FnOnce(&Path)) -> AppModel {
     let root = mod_folder(dir);

@@ -310,10 +310,17 @@ pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     has_mark_of(m, w.code) && marked_code(m, at, w)
 }
 
+fn borrowed_mark_key(at: &At, w: &engine::codes::Warning) -> IntendedKey {
+    intended_key(at, w.code.as_str(), &format!("slot {}", w.data["slot"]))
+}
+
 fn marked_code(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
         return false;
     };
+    if w.code == Code::SetSlotBorrowedUnused {
+        return doc.is_intended(&borrowed_mark_key(at, w));
+    }
     let job = if follows_job(w.code) {
         job_at(m, at)
     } else {
@@ -994,9 +1001,23 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
+    let unused = sets::borrowed_unused(m);
     for v in views.iter() {
-        for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
+        for w in sets::all_set_warnings(v, &unused).filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
+            if w.code == Code::SetSlotBorrowedUnused {
+                let target = sets::SlotKind::ALL
+                    .into_iter()
+                    .find(|k| Some(k.suffix()) == w.data["kind"].as_str())
+                    .map(SlotTarget::Slot);
+                out.push(Problem {
+                    target,
+                    mark: Some(borrowed_mark_key(&at, w)),
+                    detail: Some(code_text::borrowed_detail(w)),
+                    ..row(Level::Warning, at, w.message.clone(), Some(w.code))
+                });
+                continue;
+            }
             let shader = || Some(Fix::ChangeShader(v.id.clone()));
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.

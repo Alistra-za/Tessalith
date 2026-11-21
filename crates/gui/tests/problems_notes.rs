@@ -7,6 +7,74 @@ use engine::codes::Warning;
 use sdc_gui::model::AppModel;
 use support::*;
 
+#[test]
+fn the_borrowed_slot_warning_marks_by_set_and_slot() {
+    use crate::slot_links::{cape_packs, cape_view, settle, unused_rows, A, AO, E};
+    use sdc_gui::model::{
+        bottom::{counts_for, set_ready},
+        sets::borrowed_unused,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = cape_packs(dir.path(), true, true);
+    let row = |m: &AppModel| {
+        let rows = unused_rows(m);
+        assert_eq!(rows.len(), 1);
+        rows.into_iter().next().unwrap()
+    };
+    let before = row(&m);
+    m.mark_intended(before.mark.clone().unwrap(), true, "slot 6");
+    let key = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .intended()
+        .into_iter()
+        .next()
+        .unwrap();
+    assert_eq!(key.subject, "set:textures/e/cape");
+    assert_eq!(key.sentence, "slot 6");
+    assert!(row(&m).intended && !row(&m).in_worklist());
+    let e = cape_view(&m, E);
+    assert!(set_ready(&m, &e));
+    let warnings = borrowed_unused(&m);
+    assert!(
+        !counts_for(&m, &before.at, &warnings[&e.key][0]),
+        "marked warning leaves the badge"
+    );
+    let output = m.producers[&e.key]
+        .iter()
+        .find(|p| p.kind == Some(sdc_gui::model::sets::SlotKind::Rmaos))
+        .unwrap()
+        .output
+        .clone();
+    export_through(&mut m);
+    settle(&mut m);
+    assert!(output.is_file());
+    m.edit_docs("Change lender", None, true, |_, s| {
+        s.set_borrow(E, 6, Some(A))
+    });
+    settle(&mut m);
+    let changed = row(&m);
+    assert_ne!(before.shown(), changed.shown());
+    assert!(changed.intended);
+    m.edit_docs("Remove share", None, true, |_, s| s.remove_share(E, AO));
+    settle(&mut m);
+    assert!(unused_rows(&m).is_empty());
+    assert!(m.sets_doc.as_ref().unwrap().is_intended(&key));
+    m.undo();
+    settle(&mut m);
+    assert!(row(&m).intended);
+    m.rename_set(E, "textures/e/cloth").unwrap();
+    settle(&mut m);
+    let renamed = row(&m);
+    assert!(renamed.intended);
+    let key = renamed.mark.unwrap();
+    assert_eq!(key.subject, "set:textures/e/cloth");
+    assert!(m.sets_doc.as_ref().unwrap().is_intended(&key));
+    m.mark_intended(key, false, "slot 6");
+    assert!(row(&m).in_worklist());
+}
+
 fn harness_at(model: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -140,7 +208,7 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .iter()
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
-    assert_eq!(engine::codes::Code::ALL.len(), 93);
+    assert_eq!(engine::codes::Code::ALL.len(), 94);
     assert_eq!(notes, 22);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),

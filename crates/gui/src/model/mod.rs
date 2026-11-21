@@ -2,6 +2,7 @@
 pub mod also;
 pub mod auto_flags;
 mod auto_record;
+mod borrowed_unused;
 pub mod bottom;
 pub mod bulk;
 pub mod checks;
@@ -504,6 +505,8 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
     /// `cs_skin_json::skin_json_plan`'s plan.
     pub cs_skin: Option<Arc<cs_skin_json::Plan>>,
+    written_entries: Option<(u64, Arc<BTreeMap<String, pbr_export::WrittenEntry>>)>,
+    borrowed_unused: Option<(u64, Arc<sets::WarningsBySet>)>,
 }
 
 /// The replies `poll` drops as stale, counted for tests (backlog L54).
@@ -767,6 +770,7 @@ pub struct AppModel {
     pub items: Vec<TextureItem>,
     input_count: usize,
     pub sets: Vec<SetItem>,
+    pub producers: BTreeMap<String, Vec<items::Producer>>,
     /// The export folder `sets` were planned with (audit 08c-3): set ids strip it, also while a re-plan for a new
     /// export folder runs. `None` before the first plan.
     sets_root: Option<PathBuf>,
@@ -1238,6 +1242,7 @@ impl AppModel {
             nif_rows_rev: 0,
             rename_cache: Default::default(),
             sets: vec![],
+            producers: BTreeMap::new(),
             sets_root: None,
             slot_paths: BTreeMap::new(),
             pending_slot_paths: BTreeMap::new(),
@@ -1500,6 +1505,7 @@ impl AppModel {
         self.check_state.plans_applied += 1;
         self.invalidate_views();
         self.sets.clear();
+        self.producers.clear();
         self.sets_root = None;
         self.also_written = None;
         self.unmatched_keys.clear();
@@ -3640,6 +3646,7 @@ impl AppModel {
         self.invalidate_views();
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
+        self.producers = self.project_producers(view.producers);
         self.rekey_scope(old_root.as_deref());
         self.rekey_selected_and_filtered_sets(old_root.as_deref(), filter_names_an_id);
         // Note HQ6: after the output root lands, since the game paths are read under it.
@@ -3756,8 +3763,12 @@ impl AppModel {
     /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
     /// `last_inputs`); the full plan lands behind it and replaces everything. It keeps the sub-types before the chain
     /// (`keep_type_base`), since the partial can be the first plan after an edit.
-    fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+    fn apply_partial(&mut self, mut view: PlanView, scope: &BTreeSet<String>) {
         self.keep_type_base();
+        self.producers.retain(|set, _| !scope.contains(set));
+        view.producers.retain(|set, _| scope.contains(set));
+        let producers = self.project_producers(view.producers);
+        self.producers.extend(producers);
         let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));
         let expanded_in_scope = self
             .expanded
@@ -3798,6 +3809,17 @@ impl AppModel {
         if expanded_in_scope {
             self.preview_after_plan();
         }
+    }
+
+    fn project_producers(
+        &self,
+        mut producers: BTreeMap<String, Vec<items::Producer>>,
+    ) -> BTreeMap<String, Vec<items::Producer>> {
+        let roots = sets::output_roots(self);
+        for p in producers.values_mut().flatten() {
+            p.project(self, &roots);
+        }
+        producers
     }
 
     /// Note FI1: a DDS tile with no image takes the cached one when its stamp matches; the rest are decoded on one

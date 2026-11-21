@@ -3,6 +3,49 @@
 use engine::codes::Code;
 use engine::config::{AlphaPolicy, Target};
 
+pub(super) fn borrowed_line(data: &serde_json::Value, packed: bool) -> String {
+    let output = std::path::Path::new(data["output"].as_str().unwrap_or_default());
+    let name = output.file_name().unwrap_or_default().to_string_lossy();
+    let n = data["slot"].as_u64().unwrap_or_default();
+    let lender = data["lender"].as_str().unwrap_or_default();
+    let count = data["more"].as_array().map_or(0, Vec::len);
+    let more = if count == 0 {
+        String::new()
+    } else {
+        format!(" and {count} more")
+    };
+    let sources = data["causes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let source = c["source"].as_str().unwrap_or_default();
+            match (c["shared"] == true, c["set"].as_str()) {
+                (true, Some(owner)) => format!("{source}, which this set shares from {owner}"),
+                (true, None) => format!("{source}, which this set shares"),
+                (false, _) => source.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let how = if packed { "packed from" } else { "from" };
+    format!("Slot {n} uses {lender}'s file, but this set still writes its own {name}{more}, {how} {sources}.")
+}
+
+pub(crate) fn borrowed_detail(w: &engine::codes::Warning) -> String {
+    let mut detail = String::from("Remove the share or the own file, or drop the borrow. If a mesh or another mod uses the file, mark this row as intended.");
+    for path in w.data["more"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.as_str())
+    {
+        detail.push('\n');
+        detail.push_str(path);
+    }
+    detail
+}
+
 /// A mode's `sdc.toml` name (`target = "cs"`), as the header, the Settings tab and the unmatched-entries row (Note JI6)
 /// show it.
 pub fn target_name(t: Target) -> &'static str {
@@ -50,6 +93,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         DimTooLarge => "This texture is larger than the format allows — resize it",
         SetCompanionDds => "A companion file of this set is a DDS and can't be combined — use its original image",
         SetBakeRatio => "The maps of this set differ a lot in size — use matching sizes",
+        SetSlotBorrowedUnused => "This set borrows a slot and still writes its own file for it.",
         SugLowConfidence => "Tessalith isn't sure what this alpha means — choose what it means",
         SugContradiction => "The file name and the contents point to different types. Set the right one.",
         ValAlphaGuarantee => "The written alpha doesn't keep its guarantee — check the alpha settings",
@@ -137,6 +181,7 @@ pub fn row_class(code: Code) -> RowClass {
         | DimFlowSmall
         | SetCompanionDds
         | SetBakeRatio
+        | SetSlotBorrowedUnused
         | SugContradiction
         | ValCoverage
         | ValMComplexMargin
@@ -359,6 +404,7 @@ fn names_its_map(code: Code) -> bool {
             | Code::PackConflict
             | Code::PackUnusedInput
             | Code::ShaderExtraMap
+            | Code::SetSlotBorrowedUnused
             | Code::ShaderMissingMap
     )
 }

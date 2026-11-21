@@ -23,6 +23,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub(crate) use super::borrowed_unused::all_set_warnings;
+pub use super::borrowed_unused::{borrowed_unused, WarningsBySet};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SlotKind {
     Diffuse,
@@ -3028,13 +3031,26 @@ pub(crate) fn projected_slot(
     key: Option<&OutputKey>,
 ) -> Option<String> {
     let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
-    if it.job_key.is_empty() || !roots.iter().any(|root| job.output.starts_with(root)) {
+    if it.job_key.is_empty() {
+        return None;
+    }
+    projected_job_slot(m, roots, &job.output, &job.game_path, key)
+}
+
+pub(super) fn projected_job_slot(
+    m: &AppModel,
+    roots: &[PathBuf; 2],
+    output: &Path,
+    game_path: &str,
+    key: Option<&OutputKey>,
+) -> Option<String> {
+    if !roots.iter().any(|root| output.starts_with(root)) {
         return None;
     }
     let game = key
         .and_then(|k| m.slot_paths.get(k))
         .map(PathBuf::as_path)
-        .unwrap_or_else(|| Path::new(&job.game_path));
+        .unwrap_or_else(|| Path::new(game_path));
     let mut path: PathBuf = game
         .components()
         .filter(|c| *c != std::path::Component::CurDir)
@@ -3047,7 +3063,7 @@ pub(crate) fn projected_slot(
     {
         return None;
     }
-    path.set_file_name(job.output.file_name()?);
+    path.set_file_name(output.file_name()?);
     Some(path.to_string_lossy().replace('/', "\\"))
 }
 
@@ -5323,15 +5339,10 @@ pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKe
     if item.kind != ItemKind::Packed {
         return Some(OutputKey::File(item.key.clone()));
     }
-    let suffix = recipe_suffix(item)?;
     // Ruling 3b-F6: the producing set is the one the packed output is a member of, also when a borrow holds the slot
     // its card would fill.
-    let set = views
-        .iter()
-        .find(|v| v.members.contains(&item.key))?
-        .id
-        .clone();
-    Some(OutputKey::Packed { set, suffix })
+    let set = views.iter().find(|v| v.members.contains(&item.key))?;
+    member_output_key(set, item)
 }
 
 /// The member's source set is already known in the picker and the slot index.

@@ -276,30 +276,18 @@ pub(crate) fn writes_entry(m: &AppModel, v: &SetView) -> bool {
 /// entry the statics rule drops, which the 3D preview simulates (`written_json_entries` is what the file holds).
 /// Ruling 3b-F9: such a set's stored `slotN` commands change nothing, so its candidate leaves them out.
 pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
-    if m.target != Target::Cs {
-        return vec![];
-    }
-    let (_, paths) = engine_inputs(m);
-    let views = set_views(m);
-    let roots = super::sets::output_roots(m);
-    views
-        .iter()
-        // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
-        .filter(|v| exports_json(m, v))
-        .map(|full| {
-            let entry = candidate_input(m, full, &views, &paths, &roots);
-            (full.clone(), entry)
-        })
-        .collect()
+    let mut out = Vec::new();
+    for_json_entry(m, exports_json, |v, e| out.push((v.clone(), e.input)));
+    out
 }
 
-pub(super) fn candidate_input(
+pub(super) fn candidate_entry(
     m: &AppModel,
     full: &SetView,
     views: &[SetView],
     paths: &BTreeMap<OutputKey, PathBuf>,
     roots: &[PathBuf; 2],
-) -> EntryInput {
+) -> WrittenEntry {
     let bare;
     let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
     let v = if commands && !writes_entry(m, full) {
@@ -311,7 +299,8 @@ pub(super) fn candidate_input(
     } else {
         full
     };
-    entry_for(v, views, paths, m, roots).0
+    let (input, winners) = entry_for(v, views, paths, m, roots);
+    WrittenEntry { input, winners }
 }
 
 fn entry_for(
@@ -347,10 +336,51 @@ fn without_slot_commands(s: &Settings) -> Settings {
 
 /// `json_entries` less the sets whose entry the statics rule drops (design §5.1): what the written file holds.
 pub fn written_json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
-    json_entries(m)
-        .into_iter()
-        .filter(|(v, _)| writes_entry(m, v))
-        .collect()
+    let mut out = Vec::new();
+    for_json_entry(m, writes_entry, |v, e| out.push((v.clone(), e.input)));
+    out
+}
+
+pub struct WrittenEntry {
+    pub input: EntryInput,
+    pub winners: BTreeMap<u8, SlotKind>,
+}
+
+/// Every effective entry and its winning fills, including readers outside the run scope.
+pub fn entries_by_set(m: &AppModel) -> Arc<BTreeMap<String, WrittenEntry>> {
+    super::cached(
+        m,
+        |c| {
+            c.written_entries
+                .as_ref()
+                .filter(|(rev, _)| *rev == m.evidence_rev)
+                .map(|(_, entries)| entries.clone())
+        },
+        |c, entries| c.written_entries = Some((m.evidence_rev, entries)),
+        || {
+            let mut entries = BTreeMap::new();
+            for_json_entry(m, writes_entry, |v, e| {
+                entries.insert(super::bottom::scope_key(v).to_owned(), e);
+            });
+            Arc::new(entries)
+        },
+    )
+}
+
+fn for_json_entry(
+    m: &AppModel,
+    include: fn(&AppModel, &SetView) -> bool,
+    mut visit: impl FnMut(&SetView, WrittenEntry),
+) {
+    if m.target != Target::Cs {
+        return;
+    }
+    let views = super::sets::views(m);
+    let (_, paths) = engine_inputs(m);
+    let roots = super::sets::output_roots(m);
+    for v in views.iter().filter(|v| include(m, v)) {
+        visit(v, candidate_entry(m, v, &views, &paths, &roots));
+    }
 }
 
 const NEEDS: [(Feature, SlotKind, &str, &str); 3] = [

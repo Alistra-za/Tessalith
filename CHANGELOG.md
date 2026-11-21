@@ -126,6 +126,10 @@
 - Marking a warning as intended takes it out of the count beside its file in **Files**. When all its warnings are marked, the row shows a grey `n marked` and **Has warnings** leaves the file out.
 - **Export details** in **Files** and in the Markdown report lists what the export did besides converting textures. **Notes** stays in **Problems**.
 
+### Added
+
+- **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
+
 ## 3.0.0
 
 ### Main
