@@ -1,4 +1,4 @@
-"""Renders the per-effect True PBR balls on the Specular-Reference wiki page (docs/img/pbr-effects/*.png).
+"""Renders the per-effect True PBR balls on the PBR-Reference wiki page (docs/img/pbr-effects/*.png).
 
   py -3.13 -I tools/pbr-balls.py [--out docs/img/pbr-effects] [--size 128]
 

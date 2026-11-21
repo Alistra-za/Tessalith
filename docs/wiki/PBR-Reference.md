@@ -1,4 +1,4 @@
-# Specular reference (F0)
+# PBR reference: specular (F0) and effects
 
 For mod authors building a True PBR material for Community Shaders (CS): the F0 of common materials, the albedo colour of metals, and what every PBR effect does and which map drives it. F0 is the share of light a surface reflects head-on.
 
