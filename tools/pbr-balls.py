@@ -13,6 +13,7 @@ material set-up and coat/fuzz/subsurface reads of Lighting.hlsl, GetParallaxCoor
 leaves out: shadows (parallax, contact and world shadows), cubemaps (a made-up sky stands in), wetness, vertex
 colours, skylighting and CS's Glints2023 NDF (a random sparkle field per texel cell stands in). So the balls are
 approximations for comparing effects with each other, not in-game captures. All textures are procedural.
+The unreleased examples use PBR2Test1's cs2/Common/PBR.hlsli and PBRMath.hlsli from nif/p-cs-pbr2.
 """
 import argparse
 import pathlib
@@ -135,6 +136,32 @@ def micro_shadow(ao, nl):
 def microfacet(r, f0, nl, nv, nh, vh):
     f = f_schlick(f0, vh)
     return (d_ggx(r, nh) * vis_smith_joint_approx(r, nv, nl))[..., None] * f, f
+
+
+def fuzz_layer(n, v, light, rough, color, weight, back_tint):
+    """Tree B's directional albedo and linearly transformed cosine (LTC) for fuzz."""
+    nv = np.clip(dot(n, v), EPS_DOT, 1.0)
+    r = np.clip(rough, 0.01, 1.0)
+    s = r * (0.0206607 + 1.58491 * r) / (0.0379424 + r * (1.32227 + r))
+    m = r * (-0.193854 + r * (-1.14885 + r * (1.7932 - 0.95943 * r**2))) / (0.046391 + r)
+    o = r * (0.000654023 + (-0.0207818 + 0.119681 * r) * r) / (1.26264 + r * (-1.92021 + r))
+    share = sat(weight * (np.exp(-0.5 * ((nv - m) / s)**2) / (s * np.sqrt(2 * PI)) + o))
+    tangent = norm(v - n * nv[..., None])
+    a = (2.58126 * nv + 0.813703 * r) * r / (1 + 0.310327 * nv**2 + 2.60994 * nv * r)
+    b = np.sqrt(1 - nv) * (r - 1) * r**3 / (0.0000254053 + 1.71228 * nv - 1.71506 * nv * r + 1.34174 * r**2)
+    lz = dot(light, n)
+    lx = a * dot(light, tangent)
+    ly = a * dot(light, np.cross(n, tangent))
+
+    def lobe(z):
+        length_sq = (lx + b * z)**2 + ly**2 + z**2
+        return (np.maximum(z, 0) / PI * (a / np.maximum(length_sq, 1e-10))**2)[..., None]
+
+    sheen = share[..., None] * color
+    direct = lobe(lz)
+    if back_tint is not None:
+        direct = direct + back_tint * lobe(-lz)
+    return (1 - share)[..., None], sheen, sheen * direct * LIGHT_COLOR
 
 
 # ---------------------------------------------------------------- environment stand-ins
@@ -265,6 +292,10 @@ def render(size, m):
 
     # Material set-up (Lighting.hlsl, TRUE_PBR material block).
     rough = np.clip(rough, 0.04, 1.0)
+    if "leaf2" in flags:
+        dy, dx = np.gradient(n, axis=(0, 1))
+        variance = 0.25 * (dot(dx, dx) + dot(dy, dy))
+        rough = sat(rough**4 + np.minimum(2 * variance, 0.18))**0.25
     f0 = lerp(spec[..., None], albedo, metal[..., None])
     base = albedo * (1 - metal[..., None])
 
@@ -314,6 +345,9 @@ def render(size, m):
             fwd = np.exp2(sat(-vl) * p - p)
             back = sat(nl * thick + (1 - thick)) * 0.5
             sss = lerp(back, 1.0, fwd) * (1 - thick)
+        if "subsurface2" in flags:
+            a, b = env_brdf(rough, nv)
+            kd = 1 - sat(f0 * a[..., None] + b[..., None])
         transmission += sc * sss[..., None] * lc / PI * kd
     elif "coat" in flags:
         cv, cl = v, lit_dir
@@ -355,6 +389,36 @@ def render(size, m):
     lobe_d *= multi_bounce_ao(base, ao)
     lobe_s *= specular_occlusion(nv_i, rough * rough, ao)[..., None]
 
+    back_tint = None
+    if "thin" in flags:
+        # A visible face of a sheet at each point on the ball. The opposite face receives its own sky light.
+        opacity = m["subsurface_opacity"]
+        scatter = np.array(m["subsurface_color"]) * (1 - opacity)
+        back = scatter * m["balance"]
+        front = scatter * (1 - m["balance"])
+        back_tint = back * (1 - sat(4 * dot(geo_n, ll)))[..., None]
+        spec_weight = m["thin_specular"]
+        lobe_s = spec_weight * sat(f0 * a[..., None] + b[..., None])
+        remaining = 1 - lobe_s
+        lobe_d = base * opacity * remaining
+        diffuse = (lc / PI * sat(nl_raw) * opacity)[..., None] * remaining
+        back_light = sat(-nl_raw) * (1 - sat(4 * dot(geo_n, ll)))
+        transmission = (front * sat(nl_raw)[..., None] + sat(base * (1 - opacity) + back) * back_light[..., None]) * lc / PI
+        transmission += front * ambient(n) + back * ambient(-n)
+        transmission *= remaining
+        alpha_sq = rough**4
+        masking = nl * np.sqrt(alpha_sq + (1 - alpha_sq) * nv**2) + nv * np.sqrt(alpha_sq + (1 - alpha_sq) * nl**2)
+        specular = (spec_weight * lc * sat(nl_raw) * d_ggx(rough, nh) * 0.5 / np.maximum(masking, 1e-6))[..., None] * f
+
+    if "fuzz2" in flags:
+        r = m["fuzz_roughness_fn"](uv)
+        through, sheen, direct = fuzz_layer(n, vv, ll, r, np.array(m["fuzz_color"]), m["fuzz_weight"], back_tint)
+        diffuse *= through
+        transmission *= through
+        specular = specular * through + direct
+        lobe_d = lobe_d * through + sheen * ao[..., None]
+        lobe_s *= through
+
     # Composite (Lighting.hlsl, TRUE_PBR colour block).
     direct_d = diffuse * base
     if "coloured" in flags:
@@ -365,6 +429,7 @@ def render(size, m):
     if "emissive_fn" in m:
         color += m["emissive_fn"](uv)
 
+    assert np.isfinite(color[inside]).all(), "non-finite lighting on the sphere"
     img = np.where(inside[..., None], linear_to_srgb8(tonemap(color)), BG)
     pil = Image.fromarray(img.astype(np.uint8), "RGB")
     return pil.resize((size, size), Image.Resampling.BOX)
@@ -378,6 +443,8 @@ def glint_specular(m, rough, f0, nl, nv, nh, vh, h_ts, uv):
     j2 = hash2(cell[..., 0], cell[..., 1], 2.0)
     slope = (np.stack([j1, j2], axis=-1) - 0.5) * 2.0 * rough[..., None]
     hs = h_ts[..., :2] / np.maximum(h_ts[..., 2:3], 1e-3)
+    if "glint_projection" in m:
+        hs = h_ts[..., :2] if m["glint_projection"] == "xy" else h_ts[..., :1]
     sigma = m["glint_roughness"]
     sparkle = np.exp(-np.sum((hs - slope) ** 2, axis=-1) / (2 * sigma * sigma))
     d = d_ggx(rough, nh)
@@ -406,6 +473,9 @@ def sunk_tiles(p):
 
 
 COAT = {"flags": {"coat"}, "coat_strength": 1.0, "coat_roughness": 0.15, "coat_f0": 0.04}
+FUZZ2 = {"flags": {"fuzz2"}, "fuzz_color": (0.6, 0.6, 0.6), "fuzz_weight": 1.0}
+THIN = {"flags": {"thin"}, "subsurface_color": (0.95, 0.25, 0.12), "subsurface_opacity": 0.2, "balance": 0.75, "thin_specular": 0.5}
+GLINT = {"flags": {"glint"}, "roughness": 0.35, "glint_cells": 40.0, "glint_roughness": 0.02}
 
 BALLS = {
     "baseline": {},
@@ -424,7 +494,16 @@ BALLS = {
     "coat-parallax-regular": dict(COAT, albedo_fn=tile_albedo, parallax=sunk_tiles, displacement_scale=3.0),
     "coat-parallax-inner": dict(COAT, flags={"coat", "interlayer"}, albedo_fn=tile_albedo, parallax=sunk_tiles, displacement_scale=3.0),
     "fuzz": {"flags": {"fuzz"}, "fuzz_color": (0.6, 0.6, 0.6), "fuzz_weight": 1.0},
-    "glint": {"flags": {"glint"}, "roughness": 0.35, "glint_cells": 40.0, "glint_roughness": 0.02},
+    "glint": GLINT,
+    "subsurface-2": {"flags": {"subsurface", "subsurface2"}, "subsurface_color": (0.95, 0.25, 0.12), "subsurface_opacity": 0.2},
+    "thin-front": THIN,
+    "thin-back": dict(THIN, roughness=0.55 * 0.35, thin_specular=1.0),
+    "foliage-2": dict(THIN, flags={"thin", "leaf2"}, subsurface_color=(0.35, 0.9, 0.15)),
+    "fuzz-2": dict(FUZZ2, fuzz_roughness_fn=lambda p: 0.55),
+    "fuzz-2-mapped": dict(FUZZ2, fuzz_roughness_fn=lambda p: np.where(np.floor(p[..., 1] * 2) % 2, 0.8, 0.2)),
+    "fuzz-2-thin": dict(THIN | FUZZ2, flags={"thin", "fuzz2"}, fuzz_roughness_fn=lambda p: 0.4),
+    "glint-x": dict(GLINT, glint_projection="x"),
+    "glint-xy": dict(GLINT, glint_projection="xy"),
 }
 
 

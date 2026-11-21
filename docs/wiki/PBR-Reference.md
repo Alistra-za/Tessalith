@@ -2,6 +2,8 @@
 
 For mod authors building a True PBR material for Community Shaders (CS): the F0 of common materials, the albedo colour of metals, and what every PBR effect does and which map drives it. F0 is the share of light a surface reflects head-on.
 
+**Unreleased:** CS PBR 2.0 is not released. Tessalith writes CS 1.x PBR today, including [PGPatcher settings](GUI-PGPatcher-JSON.md) and [CS PBR records](PBR-Landscape.md#cs-pbr-records).
+
 Jump to: [PBR effects](#pbr-effects), [coat vs vanilla multilayer](#coat-vs-vanilla-multilayer-parallax), [inner-layer parallax](#inner-layer-parallax-vs-regular-parallax), [Non-metals](#non-metals), [Metals](#metals).
 
 ## Setting F0 on a True PBR set
@@ -19,6 +21,14 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 
 What each True PBR effect does in Community Shaders. The files in your set turn most of them on ([which file turns on what](GUI-PGPatcher-JSON.md#your-textures-turn-features-on)), and some can't go together ([which](GUI-PGPatcher-JSON.md#features-that-cant-go-together)). Landscape reads only a few of them ([PBR Landscape](PBR-Landscape.md#pbr-landscape-sets)); skin has its own shader ([Advanced skin](PBR-Landscape.md#advanced-skin)).
 
+**Unreleased:** The proposed material file is JSON under `Data\materials`, loose or in a BSA. Put its path (for example `materials\cloth\felt.csm`) in the NIF's `BSLightingShaderProperty` name. A `csm` key in `PBRTextureSets/<EDID>.json` or `PBRMaterialObjects/<EDID>.json` takes priority over the mesh path. Other fields in that record override the material.
+
+**Unreleased:** Use `"Version": 1` for the `.csm` format and `PBREnabled` for True PBR. Omitted fields inherit from `RootMaterialPath` and then the NIF. An empty texture path clears that slot. An unreadable or invalid material falls back to the NIF. Write colours as `#rrggbb`.
+
+**Unreleased:** The earlier PBR2Test1 build recognizes shader type 21 on meshes and type 22 for runtime landscape. A shape with only the 1.x PBR flag renders vanilla there. The later `.csm` proposal uses the material path to identify a PBR mesh.
+
+**Unreleased:** In PBR2Test1, a TXST record can override the mesh with `thinSurface`, `foliage`, `subsurfaceBalance`, `thinSurfaceSpecularWeight`, `thinSurfaceBackSpecularWeight`, `thinSurfaceBackRoughnessScale`, `fuzzRoughness` and `fuzzRoughnessTexture`. Shape extra data named `PBRThinSurface` or `PBRFuzz` overrides the record.
+
 ### Which map drives each effect
 
 Each setting multiplies its channel, so a white channel gives you the setting as you typed it. Formats and sRGB flags are in [Texture types](Texture-Types.md#sub-types-what-each-file-becomes).
@@ -26,15 +36,31 @@ Each setting multiplies its channel, so a white channel gives you the setting as
 | Slot | File | Channel | Effect | Setting that scales it |
 |---|---|---|---|---|
 | 1 | albedo | RGB | Base colour | - |
+| **Unreleased:** 1 | `DiffuseTexture` | RGB | Required base colour. All `.csm` texture paths are relative to `Data\textures`. | - |
 | 2 | `_n` | RGB | Normal | - |
+| **Unreleased:** 2 | `NormalTexture` | RGB | Required normal map | `ModelSpaceNormals` selects model-space normals. |
 | 3 | `_g` | RGB | Emissive | **Emissive colour**, **Emissive scale** |
+| **Unreleased:** 3 | `GlowTexture` | RGB | A glow map enables emission. | `EmittanceColor` (or `ExternalEmittance` for the game's colour), `EmittanceMult` |
 | 4 | `_p` | R | Parallax | **Displacement scale** |
+| **Unreleased:** 4 | `DisplacementTexture` | R, G | R keeps height. With `PBRFuzzRoughnessTexture` on, G supplies fuzz roughness. Keep both channels in the DDS, e.g. BC5. | `PBRDisplacementTextureScale` scales height only. |
 | 6 | `_rmaos` | R, G, B, A | Roughness, metallic, AO, specular | **Roughness scale** (R), **Specular level** (A) |
+| **Unreleased:** 6 | `RmaosTexture` | RGBA | Required RMAOS map | `PBRRoughnessScale` (R), `PBRSpecularLevel` (A) |
 | 7 | `_cnr` | RGB, A | Coat normal, coat roughness | **Coat roughness** (A) |
+| **Unreleased:** 7 | `Features1Texture` (coat) | RGB, A | RGB tilts the coat with `PBRTwoLayerCoatNormal` on. Alpha scales its roughness. | `PBRTwoLayerCoatRoughness` |
 | 7 | `_f` | RGB, A | Fuzz colour, fuzz weight | **Fuzz colour**, **Fuzz weight** |
+| **Unreleased:** 7 | `Features1Texture` (fuzz) | RGB, A | `PBRFuzzEnabled` | `PBRFuzzColor`, `PBRFuzzWeight` |
 | 8 | `_s` | RGB, A | Subsurface colour, thickness | **Subsurface colour**, **Subsurface opacity** |
+| **Unreleased:** 8 | `Features0Texture` (subsurface) | RGB, A | `PBRSubsurfaceEnabled`. On a thin sheet without this map, the base colour tints the scatter. | `PBRSubsurfaceColor`, `PBRSubsurfaceOpacity` |
 | 8 | `_s` with **Multilayer (coat)** on | RGB, A | Coat colour, coat strength | **Coat colour**, **Coat strength** |
+| **Unreleased:** 8 | `Features0Texture` (coat) | RGB, A | `PBRTwoLayerColoredCoat` uses RGB for the tint. Alpha masks the coat strength. | `PBRTwoLayerCoatColor`, `PBRTwoLayerCoatStrength` |
 | - | none | - | Glint | the four **Glint settings** |
+| **Unreleased:** - | none | - | `PBRGlintEnabled` | `PBRGlintScreenSpaceScale`, `PBRGlintLogMicrofacetDensity`, `PBRGlintMicrofacetRoughness`, `PBRGlintDensityRandomization` |
+
+**Unreleased:** The `.csm` also carries UV tiling (`TileU`, `TileV`), offset (`UOffset`, `VOffset`) and scale (`UScale`, `VScale`). `Alpha` multiplies the mesh alpha. To see it, the NIF needs alpha blending or testing.
+
+**Unreleased:** Set shader flags with `TwoSided`, `Decal`, `DynamicDecal`, `VertexColors`, `CastShadows`, `ReceiveShadows`, `ZBufferTest` and `ZBufferWrite`. The mesh supplies the vertex colours.
+
+**Unreleased:** With linear lighting, CS checks the projected diffuse texture's sRGB flag before decoding its colour. This applies to the overlay colour on a projected material object.
 
 ### What each effect looks like
 
@@ -47,19 +73,30 @@ Each ball adds one effect to the baseline ball, or to the ball its tip names. `t
 | ![Dark grey ball reflecting the sky](../img/pbr-effects/metallic.png) | Metallic | Bare metal: no diffuse colour, and the reflection takes the albedo colour. | Paint 0 or 255; values between are for blends such as rust on steel. Metal colours: [Metals](#metals). |
 | ![Grey ball with brighter reflections](../img/pbr-effects/specular.png) | Specular | How much a non-metal reflects head-on (F0). | Ball: 0.17 (diamond). Values: [Setting F0](#setting-f0-on-a-true-pbr-set). |
 | ![Grey ball with bevelled tiles](../img/pbr-effects/normal.png) | Normal | Small dents and bevels that catch light without extra geometry. | DirectX green: [Green direction](Texture-Types.md#green-direction). |
+| **Unreleased:** - | Terrain Blending | Where a mesh sinks into terrain, the buried part shades progressively more like the ground. | CS tilts its normal up and samples local shadows at the visible surface. |
 | ![Grey ball with dark grout lines](../img/pbr-effects/ao.png) | AO | Cracks and corners that ambient light can't reach. | CS dims ambient light and reflections with it; direct light only where the AO is dark and the light comes in low. Keep AO out of the albedo, or cavities go dark twice. |
 | ![Tiled ball whose tiles stand out from the grout](../img/pbr-effects/parallax.png) | Parallax | Real depth: raised parts hide what is behind them as you move. | The normal ball plus a `_p`. Needs CS's Extended Materials parallax on. Height rules: [Height maps](Texture-Types.md#height-maps). |
 | ![Grey ball with glowing orange runes](../img/pbr-effects/emissive.png) | Emissive | Light the surface gives off: embers, glowing runes. | Unaffected by lighting. Above 1.0 needs a float source: [Texture types](Texture-Types.md#which-files-tessalith-reads). |
 | ![Pinkish ball, redder on the shadow side](../img/pbr-effects/subsurface.png) | Subsurface | Light that enters skin, wax or marble, scatters, and comes out tinted. | Lights the shadow side and glows when the light is behind. Strength is 1 - **Subsurface opacity** × `_s` alpha: opacity 1 with a white alpha turns it off. |
+| **Unreleased:** ![Pink ball with tinted shadows](../img/pbr-effects/subsurface-2.png) | Subsurface | The base reflection takes its share of light before the rest scatters through the material. | Same colour and opacity as the subsurface ball. The share depends on roughness, F0 and view angle. |
+| **Unreleased:** ![Thin sheet shaded from the front](../img/pbr-effects/thin-front.png) ![Same sheet showing a sharper highlight on the back](../img/pbr-effects/thin-back.png) | Thin surface | For paper or cloth, `PBRThinSurfaceEnabled` turns the shading normal towards you on either face. With subsurface on, `PBRThinSurfaceSubsurfaceBalance` sends scattered light to the lit side at 0 and through to the opposite side at 1. Ambient light reaches both. | Front (left) and back (right), balance 0.75. `PBRThinSurfaceSpecularWeight` is 0.5 on the front. `PBRThinSurfaceBackSpecularWeight` is 1 and `PBRThinSurfaceBackRoughnessScale` is 0.35 on the back. Use `TwoSided` to draw both faces. |
 | ![Ball with a green glow only on the side away from the light](../img/pbr-effects/foliage.png) | Foliage subsurface | Thin leaves lit from behind. | Only light from behind comes through. CS uses this on Tree Anim meshes and the standard subsurface on all others: [Subsurface](GUI-PGPatcher-JSON.md#subsurface). |
+| **Unreleased:** ![Green leaf material with light scattered on both sides](../img/pbr-effects/foliage-2.png) | Foliage | Leaves use thin-surface shading. Low opacity lets more light through canopy shadows. Rapid changes in the normal soften the highlight. | Tree Anim plus subsurface selects foliage in PBR2Test1. Other meshes can use its foliage flag. The `.csm` draft has no foliage key. |
 | ![Matte grey ball with a sharp highlight on top](../img/pbr-effects/coat.png) | Coat | A clear layer on top: varnish, lacquer, glaze, ice. | Adds a second reflection and dims the base under it. **Coat specular level** is the coat's F0: take it from [Non-metals](#non-metals). The sky reflection keeps the base roughness; only lights get the coat's sharp highlight. |
 | ![Blue ball with a sharp highlight](../img/pbr-effects/coat-colour.png) | Coat diffuse | A coloured coat: enamel, stained varnish. | The coat ball with a blue **Coat colour**. Without **Coat diffuse**, **Coat colour** and `_s` RGB do nothing. At **Coat strength** 1 you see almost only the coat colour. |
 | ![Grey ball with a broken-up highlight](../img/pbr-effects/coat-normal.png) | Coat normal | A coat with its own surface, such as drips or orange peel. | The coat ball plus a `_cnr`. Only the coat's highlight from lights follows `_cnr`, and with **Coat parallax** the ray bending too. Without it the coat uses `_n`. |
 | ![Tiled ball under a glossy coat](../img/pbr-effects/coat-parallax-regular.png) ![The same tiles sunk under the coat](../img/pbr-effects/coat-parallax-inner.png) | Coat parallax | The base seen through a thick clear layer: inlay under resin, a floor under ice. | The coat ball with tiled albedo and one `_p`: left regular parallax, right **Coat parallax**. The hard shadow edge on the right is real: the coat bends light onto the base right up to that edge. [How they differ](#inner-layer-parallax-vs-regular-parallax). |
 | ![Grey ball with a bright sheen on its edge](../img/pbr-effects/fuzz.png) | Fuzz | Fibres that catch light at grazing angles, as on velvet or felt. | **Fuzz weight** 0 keeps the normal reflection, 1 is all sheen. The sheen's width follows roughness. |
+| **Unreleased:** ![Grey ball with a soft fibre sheen](../img/pbr-effects/fuzz-2.png) ![Bands of fine and broad sheen](../img/pbr-effects/fuzz-2-mapped.png) | Fuzz roughness | Low values look like fine fibres, high values like dust. The sheen takes light from the base. | Left uses `PBRFuzzRoughness` 0.55. Right uses 0.2 and 0.8 in `_p` green. With the texture switch off, a negative value follows base roughness and the fuzz mask replaces that share of the base reflection. |
+| **Unreleased:** ![Thin pink cloth with fuzz](../img/pbr-effects/fuzz-2-thin.png) | Fuzz on thin cloth | Fibres catch light reflected off the face and light passing through from behind. | The thin front face with fuzz roughness 0.4. |
 | ![Grey ball with sparkles in its highlight](../img/pbr-effects/glint.png) | Glint | Sparkling flakes: snow, sand, frost, mica. | No texture. Nothing sparkles until **Log microfacet density** is above 1.1. This ball uses random flakes, not CS's glint model. |
+| **Unreleased:** ![Flakes sampled along one direction](../img/pbr-effects/glint-x.png) ![Flakes sampled along both directions](../img/pbr-effects/glint-xy.png) | Glint direction | Which flakes flash depends on both directions across the surface. Glints can also catch light on a thin sheet. | Same random flakes and light. Left uses the 1.x direction input, right the 2.0 input. Glint and fuzz are mutually exclusive. |
+
+**Unreleased:** `ANISO_LIGHTING` affects vanilla highlights in PBR2Test1. True PBR uses its own reflection model. The `.csm` has no anisotropy switch or direction map.
 
 **Hair** has no ball. It swaps the reflection model for a strand model meant for hair cards, ignores the specular level (it uses a fixed hair IOR of 1.55), and shows nothing useful on a sphere.
+
+**Unreleased:** `PBRHairMarschner` selects the strand model. Use it on its own.
 
 ### Coat vs vanilla multilayer parallax
 
@@ -69,6 +106,7 @@ The two are opposite: they put your main texture on different layers.
 
 - **Vanilla multilayer parallax:** your diffuse, `_n` and env map are the top layer. The `_i` inner layer is under it, seen where the diffuse alpha is low, and shifted by the view angle and the inner thickness.
 - **CS True PBR coat:** your albedo, `_n` and `_rmaos` are the bottom layer. `_s` and `_cnr` describe the layer on top: its colour, strength, normal and roughness.
+- **Unreleased:** `PBRTwoLayerEnabled` puts the coat above the base. Set its F0 with `PBRTwoLayerCoatSpecularLevel`. Coat excludes subsurface, thin surface, fuzz and glint.
 
 ### Inner-layer parallax vs regular parallax
 
@@ -80,6 +118,7 @@ Both read the same `_p`. They differ in what moves and which grey sits on the su
 - **Coat parallax:** white touches the coat and black is deepest, so nothing rises above the coat. A mostly white `_p` is normal here ([neutral heights](Texture-Types.md#height-maps)).
 - **What moves:** only the base. The coat (`_s`, `_cnr`) stays on the mesh.
 - **Bent rays:** view and light rays bend where they enter the coat, more with a higher **Coat specular level** and **Coat strength**, and shadows on the base use the bent light.
+- **Unreleased:** `PBRTwoLayerInterlayerParallax` needs the coat and a displacement map. Keep height in R. The coat stays on the mesh while the view into the base shifts. Both parallax modes refine the first height crossing using the last sampled height, which can shift a relief edge slightly.
 
 ## Non-metals
 
