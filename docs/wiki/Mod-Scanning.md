@@ -17,7 +17,7 @@ Your own choices in `sdc.toml` win over scan evidence.
 
 ## Choosing what to scan
 
-The scan source is behind the **MO2…** button in the header, on both the Textures and the Meshes view. **Scan** starts it, **Cancel** stops it.
+The scan source is behind the **MO2…** button in the header, on both the Textures and the Meshes view. **Scan** starts it, **Cancel** stops it. Until you choose an instance or a folder, the row reads **Scan: choose an instance first**. If the instance needs a profile, it reads **Scan: choose a profile first**. While scanning, hover the disabled **Choose…** or **Scan a folder…** for the reason. <!-- D:LD9 -->
 
 ![The MO2… popup.](../img/gui/Mod-Scanning/mo2-popup.png)
 
@@ -51,7 +51,7 @@ The **Meshes** tab shows what the scan found. **Scan details** on the scan row l
 
 ### Finding a mesh
 
-The NIFs column lists every mesh path once, with the copy that wins in game. Hover a row's chips for the details.
+The NIFs column names the scan behind the list, for example “From the scan of G:\Acherus. Scan data last written 2026-11-10.” The date is the last write to the scan database. The NIFs column lists every mesh path once, with the copy that wins in game. Hover a row's chips for the details. Long paths shorten in the middle. Hover a path to read it in full. <!-- D:LD7,LD9 -->
 
 - **Search paths and mods** matches the path or mod name. ASCII case doesn't matter, `\` reads as `/` and a leading `meshes/` is ignored.
 - **Any mod** picks one mod and lists all of its copies, including the ones that lose. PGPatcher's output mod isn't offered.
