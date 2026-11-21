@@ -35,6 +35,7 @@ pub mod pack;
 pub(crate) mod pipeline;
 pub mod policy;
 pub mod presets;
+pub mod profile;
 pub mod quantize;
 pub mod reports;
 pub mod resize;
