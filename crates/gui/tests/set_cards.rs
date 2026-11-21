@@ -1265,7 +1265,7 @@ fn the_long_badge_text_is_on_the_pill_hover() {
     h.run();
     h.get_by_label_contains(BADGE_PBR_LANDSCAPE_PGP_ONLY);
     // The recipe and missing-entry lines follow on the same hover.
-    h.get_by_label_contains("rmaos: run");
+    h.get_by_label_contains("PBR RMAOS: run");
     h.get_by_label_contains("no file matches landscape/notes.txt");
 }
 

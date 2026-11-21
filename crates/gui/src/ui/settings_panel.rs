@@ -1464,12 +1464,17 @@ fn subtype_decision(
                     ui.label(egui::RichText::new(heading).weak());
                     for st in members {
                         ui.selectable_value(&mut chosen, st, subtype_label(st))
-                            .on_hover_text(st.id());
+                            .on_hover_text(crate::model::labels::type_hover(st));
                     }
                 }
             })
             .response;
-        super::name_input(r, "Texture type");
+        super::helper_panel::named(
+            &r,
+            egui::Role::ComboBox,
+            "Type for this texture",
+            Some(&subtype_label(chosen)),
+        );
     };
     let confirm = match left {
         Some(left) => {

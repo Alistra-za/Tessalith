@@ -624,7 +624,7 @@ pub fn pill_hover(model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) -
             .map(|m| format!("no file matches {}", m.text())),
     );
     for r in &v.recipes {
-        let mut l = format!("{}: {}", r.subtype.id(), status_text(r.status).0);
+        let mut l = format!("{}: {}", subtype_name(r.subtype), status_text(r.status).0);
         if let Some(reason) = &r.reason {
             l.push_str(&format!(" ({reason})"));
         }
