@@ -119,11 +119,10 @@ impl DocBadge {
     }
 }
 
-/// Each edit document under `<edit_mod>\.sdc\nif-edits` with a badge, keyed by its source data path (the NIF list's
-/// path). A document that does not load is skipped.
-pub fn pending_docs(edit_mod: &Path) -> Vec<(String, DocBadge)> {
+/// Read the working documents in a project or export folder. Timestamped backups have a different suffix.
+pub fn pending_docs(root: &Path, suffix: &str) -> Vec<EditDoc> {
     let mut out = vec![];
-    let mut dirs = vec![edit_mod.join(".sdc").join("nif-edits")];
+    let mut dirs = vec![root.join(suffix).join("nif-edits")];
     while let Some(d) = dirs.pop() {
         let Ok(rd) = std::fs::read_dir(&d) else {
             continue;
@@ -137,9 +136,7 @@ pub fn pending_docs(edit_mod: &Path) -> Vec<(String, DocBadge)> {
                 dirs.push(p);
             } else if t.is_file() && p.to_string_lossy().ends_with(".sdc-nifedit.toml") {
                 if let Ok(Some(doc)) = edit_doc::load(&p) {
-                    if let Some(b) = DocBadge::of(&doc) {
-                        out.push((doc.source.data_path.clone(), b));
-                    }
+                    out.push(doc);
                 }
             }
         }

@@ -613,7 +613,7 @@ fn the_badge_scan_reads_a_document_with_clip_ops() {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, clip_only_text()).unwrap();
     assert_eq!(
-        pending_docs(d.path()),
+        scanned_badges(d.path()),
         vec![("meshes/x.nif".to_string(), DocBadge::Pending)]
     );
 }
@@ -4208,6 +4208,13 @@ fn badge_of(m: &MeshesModel, name: &str) -> Option<DocBadge> {
         .map(|(_, b)| b)
 }
 
+fn scanned_badges(root: &Path) -> Vec<(String, DocBadge)> {
+    pending_docs(root, ".sdc")
+        .into_iter()
+        .filter_map(|d| DocBadge::of(&d).map(|b| (d.source.data_path, b)))
+        .collect()
+}
+
 /// The chip the session keeps current in memory (`doc_badges`): it follows the draft, which is not in the export folder.
 fn chip_of(m: &MeshesModel, name: &str) -> Option<DocBadge> {
     m.doc_badges
@@ -4397,6 +4404,11 @@ fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
     m.close_edit();
     let record = std::fs::read(nif_doc(&export_root(&d))).unwrap();
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    assert_eq!(
+        badge_of(&m, "x.nif"),
+        Some(DocBadge::Exported),
+        "the closed NIF's disk chip reads the record"
+    );
     m.open_edit();
     let e = m.edit.as_ref().unwrap();
     assert_eq!(*e.source, src);
@@ -4627,7 +4639,7 @@ fn pending_walk_does_not_follow_directory_links() {
         .status
         .success();
     assert!(ok && link.is_dir(), "the junction was made");
-    let found = pending_docs(d.path());
+    let found = scanned_badges(d.path());
     assert_eq!(found, vec![("meshes/x.nif".to_string(), DocBadge::Pending)]);
     std::fs::remove_dir(&link).unwrap(); // the junction only, never its target
 }
@@ -5595,10 +5607,18 @@ fn another_owners_record_with_unexported_ops_stays_protected() {
     let b = project_folder(&d, "b");
     m.set_project_root(Some(&b));
     gloss(&mut m, 13.5);
+    m.freeze_move_asides();
+    let backup = review_row(&m).record_move_aside.unwrap();
+    std::fs::write(&backup, b"already occupied").unwrap();
     m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, sha(&nif));
-    export_fails(&mut m, "holds other edits");
+    export_fails(&mut m, "changed since Review opened");
     assert_eq!(load(&path).unwrap().unwrap(), edited);
     assert_eq!(std::fs::read(exported(&d)).unwrap(), nif);
+    m.freeze_move_asides();
+    let backup = review_row(&m).record_move_aside.unwrap();
+    m.set_nif_answer("meshes/x.nif", GuardChoice::Overwrite, sha(&nif));
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(load(&backup).unwrap().unwrap(), edited);
 }
 
 #[test]
@@ -7457,6 +7477,391 @@ fn saved_in_p() -> (tempfile::TempDir, MeshesModel, std::path::PathBuf) {
     gloss(&mut m, 12.5);
     assert_eq!(doc_values(&draft(&p)), [12.5], "premise: saved in P");
     (d, m, p)
+}
+
+mod task9 {
+    use super::*;
+    use sdc_gui::model::meshes::nif_edit::record_move_aside;
+    use std::path::PathBuf;
+
+    fn legacy(exported: bool) -> (tempfile::TempDir, MeshesModel, PathBuf, EditDoc) {
+        let (d, mut m, p) = saved_in_p();
+        m.close_edit();
+        let mut old = load(&draft(&p)).unwrap().unwrap();
+        old.id = None;
+        if exported {
+            old.export.sha256 = Some("a".repeat(64));
+            old.export.ops_hash = Some("b".repeat(64));
+        }
+        save(&nif_doc(&export_root(&d)), &old).unwrap();
+        std::fs::remove_file(draft(&p)).unwrap();
+        m.open_edit();
+        (d, m, p, old)
+    }
+
+    #[test]
+    fn an_old_draft_in_the_export_folder_moves_at_the_next_save() {
+        let (d, mut m, p, _) = legacy(false);
+        let record = nif_doc(&export_root(&d));
+        assert_eq!(vals(&m), [12.5]);
+        gloss(&mut m, 13.5);
+        assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+        assert!(!record.exists());
+        assert!(m.messages.contains(&format!(
+            "Moved the edits of meshes\\x.nif from {} to {}.",
+            record.display(),
+            draft(&p).display()
+        )));
+    }
+
+    #[test]
+    fn an_old_exported_draft_keeps_its_record() {
+        let (d, mut m, p, old) = legacy(true);
+        assert_eq!(vals(&m), [12.5]);
+        gloss(&mut m, 13.5);
+        assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+        assert_eq!(
+            load(&nif_doc(&export_root(&d))).unwrap().unwrap().export,
+            old.export
+        );
+    }
+
+    #[test]
+    fn badges_read_drafts_and_records() {
+        let (d, m, p) = saved_in_p();
+        let mut rec = load(&draft(&p)).unwrap().unwrap();
+        rec.source.data_path = "meshes/y.nif".into();
+        rec.export.sha256 = Some("a".repeat(64));
+        rec.export.ops_hash = Some(rec.ops_hash());
+        save(
+            &doc_path(&export_root(&d), &rec.source.data_path).unwrap(),
+            &rec,
+        )
+        .unwrap();
+        assert_eq!(
+            badge_of(&m, "x.nif").map(DocBadge::chip),
+            Some("Edit pending")
+        );
+        assert_eq!(badge_of(&m, "y.nif").map(DocBadge::chip), Some("Edited"));
+        let record = nif_doc(&export_root(&d));
+        rec.source.data_path = "meshes/x.nif".into();
+        save(&record, &rec).unwrap();
+        assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+        save(&draft(&p), &with_value(rec, 9.5)).unwrap();
+        assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    }
+
+    #[test]
+    fn a_pre_record_is_never_taken_as_an_old_draft() {
+        let (d, mut m, _p) = saved_in_p();
+        let e = export_root(&d);
+        m.fail_record_write_after_nif_for_test();
+        export_fails(&mut m, "is in place");
+        m.close_edit();
+        m.set_project_root(None);
+        m.open_edit();
+        assert!(vals(&m).is_empty());
+        gloss(&mut m, 13.5);
+        assert!(nif_doc(&e).is_file());
+        assert!(pick_source(
+            &[copy_at(&e, "out", 9)],
+            Path::new("elsewhere"),
+            "meshes/x.nif"
+        )
+        .is_none());
+        // A transfer pre-record can retain pending ops from its predecessor.
+        m.close_edit();
+        let mut pre = load(&nif_doc(&e)).unwrap().unwrap();
+        pre.ops = load(&autosave(&d)).unwrap().unwrap().ops;
+        std::fs::remove_file(autosave(&d)).unwrap();
+        save(&nif_doc(&e), &pre).unwrap();
+        m.open_edit();
+        assert!(
+            vals(&m).is_empty(),
+            "the owner identifies a transfer pre-record with ops"
+        );
+    }
+
+    fn unseen() -> (tempfile::TempDir, MeshesModel, PathBuf, PathBuf) {
+        let (d, m, p) = saved_in_p();
+        let rec = nif_doc(&export_root(&d));
+        save(&rec, &with_value(load(&draft(&p)).unwrap().unwrap(), 17.5)).unwrap();
+        (d, m, p, rec)
+    }
+
+    #[test]
+    fn zero_ops_and_no_record_refuse_even_after_reopen_or_replacement() {
+        for partial in [false, true] {
+            let (d, mut m, _) = saved_in_p();
+            if partial {
+                m.fail_record_write_after_nif_for_test();
+                export_fails(&mut m, "is in place");
+            } else {
+                assert_eq!(export(&mut m), Ok(1));
+            }
+            assert!(m.undo_edit());
+            std::fs::remove_file(nif_doc(&export_root(&d))).unwrap();
+            if partial {
+                std::fs::write(exported(&d), b"changed externally").unwrap();
+            } else {
+                m.close_edit();
+                m.open_edit();
+            }
+            let out = export_root(&d);
+            let before = support::tree_hashes(&[&out]);
+            export_fails(&mut m, NIF_INSTALLED_UNRECORDED);
+            assert_eq!(before, support::tree_hashes(&[&out]));
+        }
+    }
+
+    #[test]
+    fn partial_export_shows_its_repair_in_review_and_the_foreign_hover() {
+        let (_t, _d, mut h) = review_app();
+        let m = &mut h.state_mut().meshes;
+        m.fail_record_write_after_nif_for_test();
+        export_fails(m, "is in place");
+        assert_eq!(m.quick_export_note(), Some(NIF_NOT_RECORDED));
+        assert_eq!(chip_of(m, "x.nif"), Some(DocBadge::Pending));
+        m.close_edit();
+        m.open_edit();
+        h.run_steps(4);
+        right_click_3d(&mut h);
+        let button = h
+            .get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
+            .rect()
+            .center();
+        h.hover_at(button);
+        h.run_steps(TOOLTIP_STEPS);
+        h.get_by_label_contains("Open Review to answer Keep or Overwrite for the installed NIF");
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        h.get_by_label_contains(NIF_NOT_RECORDED);
+    }
+
+    #[test]
+    fn opening_review_in_the_app_freezes_the_record_backup() {
+        let (_t, _d, mut h) = review_app();
+        let edit = h.state().meshes.edit.as_ref().unwrap();
+        let rec = edit.record_path.clone().unwrap();
+        let old = with_value(edit.doc.clone(), 17.5);
+        save(&rec, &old).unwrap();
+        h.state_mut().model.open_review();
+        h.run_steps(4);
+        let aside = record_move_aside(&rec);
+        let listed = |app: &sdc_gui::app::SdcApp| {
+            app.model
+                .review_writes()
+                .also_updated
+                .iter()
+                .any(|w| w.path == aside)
+        };
+        assert!(listed(h.state()));
+        assert!(
+            h.state()
+                .model
+                .review_writes_at_open()
+                .also_updated
+                .iter()
+                .any(|w| w.path == aside),
+            "the inventory snapshot is the one the app showed on the opening frame"
+        );
+        make_old(&rec);
+        h.run_steps(4);
+        assert!(listed(h.state()));
+        export_fails(&mut h.state_mut().meshes, "changed since Review opened");
+        assert!(!aside.exists());
+    }
+
+    #[test]
+    fn a_recovered_draft_backup_is_listed_before_export() {
+        let (d, mut m) = export_session();
+        let (p, _) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+        m.freeze_move_asides();
+        let mut model = export_review(&d);
+        model.set_nif_review_rows(m.nif_review_rows());
+        let writes = model.review_writes();
+        assert_eq!(export(&mut m), Ok(1));
+        let backups = moved_aside_from(&draft(&p));
+        assert_eq!(backups.len(), 1);
+        assert_eq!(doc_values(&backups[0]), [7.5]);
+        assert!(writes.also_updated.iter().any(|w| w.path == backups[0]));
+    }
+
+    #[test]
+    fn a_taken_record_backup_name_stops_before_any_write() {
+        let (d, mut m, p, rec) = unseen();
+        make_old(&rec);
+        let secs = rec
+            .metadata()
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let stem = rec.file_stem().unwrap().to_str().unwrap();
+        let first = rec.with_file_name(format!("{stem}.{secs}.toml"));
+        let second = rec.with_file_name(format!("{stem}.{secs}-2.toml"));
+        std::fs::write(first, b"existing").unwrap();
+        assert_eq!(record_move_aside(&rec), second);
+        m.freeze_move_asides();
+        std::fs::write(&second, b"taken").unwrap();
+        let out = export_root(&d);
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        export_fails(&mut m, "changed since Review opened");
+        assert_eq!(before, support::tree_hashes(&roots));
+    }
+
+    #[test]
+    fn saving_a_migrated_draft_keeps_a_changed_legacy_file() {
+        let (d, mut m, p, old) = legacy(false);
+        let rec = nif_doc(&export_root(&d));
+        save(&rec, &with_value(old, 17.5)).unwrap();
+        gloss(&mut m, 13.5);
+        assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+        assert_eq!(doc_values(&rec), [17.5]);
+    }
+
+    #[test]
+    fn review_lists_the_old_document_removed_after_switching_export_folders() {
+        let (d, mut m, p, _) = legacy(false);
+        let original = export_root(&d);
+        let old = nif_doc(&original);
+        let next = project_folder(&d, "next-export");
+        m.set_nif_export_root(Some(next.clone()));
+        let mut model = export_review(&d);
+        model.set_export_folder(next.clone());
+        m.freeze_move_asides();
+        model.set_nif_review_rows(m.nif_review_rows());
+        let writes = model.review_writes();
+        assert!(
+            writes.also_updated.iter().any(|w| w.path == old),
+            "Review omitted the old document"
+        );
+        let roots = [original.as_path(), next.as_path(), p.as_path()];
+        let before = support::tree_hashes(&roots);
+        assert_eq!(export(&mut m), Ok(1));
+        assert!(!old.exists());
+        let diff = support::compare_listing(
+            &writes,
+            &before,
+            &support::tree_hashes(&roots),
+            None,
+            &Default::default(),
+        );
+        assert!(diff.violations.is_empty(), "{:?}", diff.violations);
+    }
+
+    #[test]
+    fn a_taken_draft_backup_is_reported_on_the_pending_row() {
+        let (d, mut m) = export_session();
+        let (p, _) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+        m.freeze_move_asides();
+        let offered = review_row(&m).draft_backup.unwrap();
+        std::fs::write(&offered, b"taken").unwrap();
+        assert!(export(&mut m).is_err());
+        let mut model = export_review(&d);
+        model.set_nif_review_rows(m.nif_review_rows());
+        model.open_review();
+        let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .with_size(egui::vec2(1400.0, 900.0))
+            .build_ui_state(sdc_gui::ui::review::tab, model);
+        h.run_steps(4);
+        h.get_by_label_contains("The draft changed since Review opened.");
+        assert_eq!(doc_values(&draft(&p)), [7.5]);
+        assert_eq!(std::fs::read(&offered).unwrap(), b"taken");
+        assert!(!exported(&d).exists());
+        m.freeze_move_asides();
+        assert_eq!(export(&mut m), Ok(1));
+        assert_eq!(doc_values(&draft(&p)), [9.5]);
+    }
+
+    #[test]
+    fn refreshing_the_record_updates_the_live_repair_chip() {
+        let (d, mut m, _) = saved_in_p();
+        assert_eq!(export(&mut m), Ok(1));
+        assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Exported));
+        std::fs::write(exported(&d), b"external NIF").unwrap();
+        m.refresh_export_record();
+        assert!(m.edit.as_ref().unwrap().pending());
+        assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
+        m.close_edit();
+        assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
+    }
+
+    #[test]
+    fn nif_review_lists_every_file_the_export_changes() {
+        let (d, mut m, p, rec) = unseen();
+        let out = export_root(&d);
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        let aside = record_move_aside(&rec);
+        let mut model = export_review(&d);
+        m.freeze_move_asides();
+        model.set_nif_review_rows(m.nif_review_rows());
+        let writes = model.review_writes();
+        assert!(writes.also_updated.iter().any(|w| w.path == aside && w.hover ==
+            "Edits not yet exported that were saved in this folder. They are kept under this name, not overwritten."));
+        assert_eq!(export(&mut m), Ok(1));
+        assert_eq!(doc_values(&aside), [17.5]);
+        let after = support::tree_hashes(&roots);
+        let diff = support::compare_listing(&writes, &before, &after, None, &Default::default());
+        assert!(diff.violations.is_empty(), "{:?}", diff.violations);
+        assert_eq!(
+            diff.changed,
+            support::listed(&writes)
+                .into_iter()
+                .map(|w| w.path)
+                .collect()
+        );
+    }
+
+    #[test]
+    fn a_record_rewritten_after_review_opened_stops_its_export() {
+        let (d, mut m, p, rec) = unseen();
+        m.freeze_move_asides();
+        make_old(&rec);
+        let out = export_root(&d);
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        export_fails(
+            &mut m,
+            "The edit file beside meshes\\x.nif changed since Review opened. Open Review again.",
+        );
+        assert_eq!(before, support::tree_hashes(&roots));
+    }
+
+    #[test]
+    fn replacing_a_draft_after_review_cannot_create_an_unlisted_backup() {
+        let (d, mut m, p) = saved_in_p();
+        tick(&mut m, 40.5);
+        m.freeze_move_asides();
+        assert!(review_row(&m).draft_backup.is_none());
+        save(
+            &draft(&p),
+            &with_value(load(&draft(&p)).unwrap().unwrap(), 17.5),
+        )
+        .unwrap();
+        let out = export_root(&d);
+        let roots = [p.as_path(), out.as_path()];
+        let before = support::tree_hashes(&roots);
+        export_fails(&mut m, "draft changed since Review opened");
+        assert_eq!(before, support::tree_hashes(&roots));
+    }
+
+    #[test]
+    fn a_quick_export_moves_an_unseen_record_aside_without_review() {
+        let (d, mut m, _, rec) = unseen();
+        let aside = record_move_aside(&rec);
+        m.quick_export();
+        assert!(exported(&d).is_file());
+        assert_eq!(doc_values(&aside), [17.5]);
+        assert_eq!(m.quick_export_result.take(), Some(Ok(1)));
+    }
 }
 
 /// Review round 4 (Critical "Rename P to P2 ..." and Important "deny metadata access ...", ruling E6-P): a leave is
@@ -14574,6 +14979,11 @@ fn nif_review_rows_list_the_pending_edit() {
             draft: autosave(&d),
             draft_unsaved: false,
             kept_backup: None,
+            record: nif_doc(&export_root(&d)),
+            record_move_aside: None,
+            draft_backup: None,
+            export_note: None,
+            legacy_removal: None,
             path: "meshes/x.nif".into(),
             mod_name: EDIT_MOD.into(),
             blocked: None,

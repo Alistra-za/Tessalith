@@ -609,6 +609,8 @@ pub struct MeshesModel {
     pub nif_diff_view: Option<(String, Vec<String>)>,
     /// Note GD2: Review's Keep / Overwrite answers by lowercase data path, with the hash each was given for.
     nif_answers: HashMap<String, (export::GuardChoice, [u8; 32])>,
+    move_aside_shown: HashMap<String, PathBuf>,
+    move_asides_frozen: bool,
     /// Note GD2: the export path's state for the Review row (it reads the disk), keyed on `nif_edit::ForeignKey`.
     foreign_cache: std::cell::RefCell<nif_edit::ForeignCache>,
     /// Note GD1: a worklist fix's tab and field for the edit panel, taken when it draws.
@@ -726,6 +728,8 @@ impl MeshesModel {
             export_running: false,
             nif_diff_view: None,
             nif_answers: HashMap::new(),
+            move_aside_shown: HashMap::new(),
+            move_asides_frozen: false,
             foreign_cache: Default::default(),
             nif_tab: None,
             no_problems: Arc::default(),
@@ -1450,6 +1454,7 @@ impl MeshesModel {
             self.project_on = self.project_seen.get(r).copied().unwrap_or(true);
         }
         self.switch_project(root);
+        self.refresh_doc_badges();
     }
 
     /// Note GH3 (owner O11 (a)): the opened folder's output game paths (`textures/…`, lower case, `/`), `rev` bumped

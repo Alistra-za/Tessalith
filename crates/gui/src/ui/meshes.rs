@@ -916,6 +916,9 @@ fn detail(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Note GH9 (Q1): a plain right-click on the frame while a NIF edit is open. egui opens a context menu only on a
     // secondary click, not a drag, so the right-drag orbit and the Shift+right-drag sun are untouched.
     if let Some(r) = image.filter(|_| m.edit.is_some()) {
+        if r.secondary_clicked() {
+            m.refresh_export_record();
+        }
         r.context_menu(|ui| quick_export_menu(ui, m));
     }
 }
@@ -1060,9 +1063,11 @@ fn quick_export_menu(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let r = ui.add_enabled(block.is_none(), egui::Button::new("Export this NIF"));
     let r = match &block {
         Some(why) => r.on_disabled_hover_text(why),
-        None if m.quick_export_asks() => r.on_hover_text(
-            "The file on disk was not written by Tessalith: opens Review to answer Keep or Overwrite",
-        ),
+        None if m.quick_export_asks() => r.on_hover_text(if m.quick_export_note().is_some() {
+            "The installed NIF differs from its record. Open Review to answer Keep or Overwrite for the installed NIF."
+        } else {
+            "The file on disk was not written by Tessalith: opens Review to answer Keep or Overwrite"
+        }),
         // ruling E6-N: on, and it is the repair of an installed NIF that is not the recorded one
         None => r.on_hover_text(
             m.quick_export_note()

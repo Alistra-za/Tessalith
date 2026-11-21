@@ -304,6 +304,9 @@ fn nif_row_text(
     let mut t = r.path.clone();
     if let Some(why) = r.kept_backup.as_ref().and_then(|b| b.last_error.as_ref()) {
         t.push_str(&format!(" · Last backup failed ({why})"));
+    } else if let Some(note) = &r.export_note {
+        t.push_str(" · ");
+        t.push_str(note);
     }
     if !r.mod_name.is_empty() {
         t.push_str(&format!(" · {}", r.mod_name));

@@ -49,6 +49,7 @@ pub struct SdcApp {
     sent_cap: Option<(u32, f32)>,
     uploaded: Uploaded,
     was_focused: bool,
+    review_was_open: bool,
     /// The NIF editor keeps its own buffer while a shell question owns keyboard focus.
     paused_mesh_focus: Option<(u64, egui::Id)>,
     /// Waits out 2 s after the layout changed before `gui.toml` is written (AG19).
@@ -93,6 +94,7 @@ impl SdcApp {
             sent_cap: None,
             uploaded: Uploaded::default(),
             was_focused: true,
+            review_was_open: false,
             paused_mesh_focus: None,
             layout_save: Default::default(),
             layout_probe: None,
@@ -454,8 +456,17 @@ impl eframe::App for SdcApp {
             self.model.centre_over_meshes = false;
             self.meshes.show_nif_diff(&path);
         }
+        let opening_review = self.model.review.is_some() && !self.review_was_open;
+        if opening_review {
+            self.meshes.freeze_move_asides();
+        }
+        self.review_was_open = self.model.review.is_some();
         self.model
             .set_nif_review_rows(self.meshes.nif_review_rows());
+        #[cfg(feature = "test-hooks")]
+        if opening_review {
+            self.model.capture_opening_writes();
+        }
         self.model.set_nif_problems(self.meshes.nif_problems());
         let scanning = self.meshes.scanning();
         self.meshes.poll();

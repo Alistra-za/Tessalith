@@ -719,6 +719,13 @@ fn review_has_no_half_size_or_stale_group() {
             draft: Default::default(),
             draft_unsaved: false,
             kept_backup: None,
+            record: d
+                .path()
+                .join(r"export\.sdc\nif-edits\meshes\a.nif.sdc-nifedit.toml"),
+            record_move_aside: None,
+            draft_backup: None,
+            export_note: None,
+            legacy_removal: None,
             blocked: None,
             foreign: None,
             answer: None,
@@ -730,6 +737,13 @@ fn review_has_no_half_size_or_stale_group() {
             draft: Default::default(),
             draft_unsaved: false,
             kept_backup: None,
+            record: d
+                .path()
+                .join(r"export\.sdc\nif-edits\meshes\b.nif.sdc-nifedit.toml"),
+            record_move_aside: None,
+            draft_backup: None,
+            export_note: None,
+            legacy_removal: None,
             blocked: Some("conflicts are open".into()),
             foreign: None,
             answer: None,

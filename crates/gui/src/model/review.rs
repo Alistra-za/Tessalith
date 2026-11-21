@@ -144,6 +144,9 @@ pub const HOVER_NIF: &str = "The NIF with your edits.";
 pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
 pub const NIF_DRAFT_HOVER: &str = "Your NIF edit's draft. Export saves it first.";
 pub const NIF_BACKUP_HOVER: &str = "The older autosaved NIF edits are kept here.";
+const NIF_LEGACY_HOVER: &str =
+    "The old draft is removed after the edits are saved in their new location.";
+pub const NIF_MOVE_ASIDE_HOVER: &str = "Edits not yet exported that were saved in this folder. They are kept under this name, not overwritten.";
 pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
 /// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
 pub const HOVER_MARKED: &str = "It changes only if this export's new files change it.";
@@ -205,7 +208,12 @@ impl ReviewWrites {
             .filter(|w| {
                 matches!(
                     w.hover,
-                    HOVER_NIF | HOVER_NIF_RECORD | NIF_DRAFT_HOVER | NIF_BACKUP_HOVER
+                    HOVER_NIF
+                        | HOVER_NIF_RECORD
+                        | NIF_DRAFT_HOVER
+                        | NIF_BACKUP_HOVER
+                        | NIF_MOVE_ASIDE_HOVER
+                        | NIF_LEGACY_HOVER
                 )
             })
             .map(|w| w.path.clone())
@@ -517,10 +525,13 @@ impl AppModel {
         // E7: the list Review opens with reads the disk as it is now, not a second-old answer.
         self.review_writes_cache.take();
         #[cfg(feature = "test-hooks")]
-        {
-            let w = self.review_writes();
-            *self.review_writes_open.borrow_mut() = Some(w);
-        }
+        self.capture_opening_writes();
+    }
+
+    /// Model-only opens capture here too. The app completes its opening frame after freezing the NIF rows.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn capture_opening_writes(&self) {
+        *self.review_writes_open.borrow_mut() = Some(self.review_writes());
     }
 
     /// Tests: the list of files Review showed when it opened (E7), kept after Review's Export takes `review`.
@@ -955,11 +966,18 @@ impl AppModel {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
                 put(p, HOVER_NIF, false);
             }
-            if let Ok(p) = super::meshes::edit_doc::doc_path(&out, &r.path) {
-                put(p, HOVER_NIF_RECORD, false);
+            put(r.record.clone(), HOVER_NIF_RECORD, false);
+            if let Some(path) = &r.record_move_aside {
+                put(path.clone(), NIF_MOVE_ASIDE_HOVER, false);
             }
             if r.draft_unsaved {
                 put(r.draft.clone(), NIF_DRAFT_HOVER, false);
+                if let Some(path) = &r.legacy_removal {
+                    put(path.clone(), NIF_LEGACY_HOVER, true);
+                }
+                if let Some(path) = &r.draft_backup {
+                    put(path.clone(), NIF_BACKUP_HOVER, false);
+                }
                 if let Some(backup) = &r.kept_backup {
                     put(backup.path.clone(), NIF_BACKUP_HOVER, true);
                 }
