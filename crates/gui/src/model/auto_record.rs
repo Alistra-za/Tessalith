@@ -54,7 +54,8 @@ fn file_name(key: &str) -> &str {
     key.rsplit(['/', '\\']).next().unwrap_or(key)
 }
 
-/// Ends the row's hover when a sub-type was set (Note FI11, A17), after a blank line.
+/// Ends the row's hover, after a blank line, only when a first automatic sub-type was set, not a guarded retype such
+/// as a normal follow (Note FI11, A17).
 const HIGH_CONFIDENCE: &str = "Tessalith sets a type on its own only when the evidence is clear: a known file ending such as _n, the folder it is in, or the meshes and grass that use it. Anything less sure stays Undecided for you.";
 
 /// Fuzz-8: ends the switch row's hover.
@@ -710,10 +711,12 @@ impl AppModel {
             let typed = writes[..decisions]
                 .iter()
                 .any(|w| w.field == "subtype" && w.only_if.is_none());
+            // Distinct file names in recording order; same-named files in different folders read as one name.
+            let mut seen = HashSet::new();
             let mut files: Vec<&str> = Vec::new();
             for (key, _) in &lines {
                 let name = file_name(key);
-                if !files.contains(&name) {
+                if seen.insert(name) {
                     files.push(name);
                 }
             }

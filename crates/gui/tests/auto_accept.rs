@@ -146,9 +146,9 @@ fn undo_after_the_same_normal_type_is_recorded_again_still_prompts() {
 
 const CONFIDENCE: &str = "Tessalith sets a type on its own only when the evidence is clear: a known file ending such as _n, the folder it is in, or the meshes and grass that use it. Anything less sure stays Undecided for you.";
 
-/// Note FI11 (A17, D15): the row's hover names files and types in words and explains High confidence.
+/// Note FI11 (A17, D15): the row's hover names files and types in words and says when Tessalith decides on its own.
 #[test]
-fn the_automatic_row_explains_high_confidence() {
+fn the_automatic_row_says_when_tessalith_decides() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
     rgb(&root, "a/rock_n.png", [128, 128, 255]);
@@ -625,8 +625,22 @@ fn a_mixed_recording_names_three_files_and_counts_the_rest() {
         .unwrap_or_else(|| panic!("{}", row.text));
     let list = list.strip_suffix(", and 1 more").expect(&row.text);
     let names: Vec<_> = list.split(", ").collect();
-    assert_eq!(names.len(), 3, "{}", row.text);
     let detail = row.detail.expect("hover");
+    // Recording order (the hover's per-file lines are in it), not sorted by name: the first three of the four.
+    let mut in_order: Vec<&str> = Vec::new();
+    for l in detail.split("\n\n").next().unwrap().lines() {
+        if let Some((f, _)) = l.split_once(": ") {
+            if !in_order.contains(&f) {
+                in_order.push(f);
+            }
+        }
+    }
+    assert_eq!(names, in_order[..3], "{}\n{detail}", row.text);
+    assert_eq!(
+        in_order.len(),
+        4,
+        "four distinct names in the hover: {detail}"
+    );
     for f in ["rock_n.png", "tile_n.png", "slab_n.png", "door_d.png"] {
         assert!(detail.contains(&format!("{f}: ")), "{detail}");
     }
@@ -635,6 +649,31 @@ fn a_mixed_recording_names_three_files_and_counts_the_rest() {
     assert!(detail.ends_with(&format!("\n\n{CONFIDENCE}")), "{detail}");
 }
 
+/// Exactly three distinct files list all three in order with no ", and 0 more".
+#[test]
+fn exactly_three_files_add_no_more_clause() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, m) = three_types(d.path());
+    let row = auto_row(&m).expect("the row");
+    assert_eq!(
+        row.text,
+        "3 types set automatically: x_n.png, y_n.png, z_n.png"
+    );
+}
+
+/// The row counts decisions but names distinct file names: same-named files in two folders read as one name.
+#[test]
+fn same_named_files_in_two_folders_are_one_name() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    rgb(&root, "a/rock_n.png", [128, 128, 255]);
+    rgb(&root, "b/rock_n.png", [128, 128, 255]);
+    let m = support::opened_as_the_app(root, d.path().join("export"));
+    let row = auto_row(&m).expect("the row");
+    assert_eq!(row.text, "2 types set automatically: rock_n.png");
+}
+
+/// Ruling 10: a values-only row's hover is the per-file lines alone, so it never says Tessalith "sets a type".
 #[test]
 fn the_values_row_hover_never_speaks_of_types() {
     let d = tempfile::tempdir().unwrap();

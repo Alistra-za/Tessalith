@@ -321,6 +321,10 @@ fn an_alpha_write_beside_a_normal_follow_has_no_confidence_paragraph() {
         "{detail}"
     );
     assert!(!detail.contains("sets a type on its own"), "{detail}");
+    assert!(
+        !detail.contains("\n\n"),
+        "no blank line or paragraph: {detail}"
+    );
 }
 
 fn skin_msn(dir: &Path, files: &str, borrow: &str) -> AppModel {
