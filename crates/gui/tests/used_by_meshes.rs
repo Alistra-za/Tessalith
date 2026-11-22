@@ -799,6 +799,20 @@ fn a_shape_request_brings_meshes_forward() {
         app.meshes.status,
         "That mesh link came from another scan database than Meshes shows, so it opened nothing."
     );
+    // No scan database open in Meshes: the line says that instead.
+    app.meshes.store_path = None;
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: 2,
+        block: 0,
+        shape: None,
+    });
+    app.route_3d(&ctx);
+    assert!(sdc_gui::ui::header::meshes_view_active(&ctx));
+    assert_eq!(
+        app.meshes.status,
+        "Meshes has no scan database open, so that mesh link opened nothing."
+    );
 }
 
 #[test]

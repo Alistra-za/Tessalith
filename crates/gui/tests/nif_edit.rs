@@ -18419,15 +18419,36 @@ fn a_shape_link_selects_that_shape() {
     // A copy the rows no longer hold.
     app.meshes.status.clear();
     app.model.show_mesh = Some(MeshPick {
-        store,
+        store: store.clone(),
         copy_id: i64::MAX,
         block,
-        shape,
+        shape: shape.clone(),
     });
     app.route_3d(&ctx);
     assert_eq!(app.meshes.selected_nif, Some(x));
     assert_eq!(app.meshes.card_sel, card);
     assert_eq!(app.meshes.status, "That shape is no longer in the scan");
+    // A link that opens clears that line; a scan's own status line stays.
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: y,
+        block,
+        shape: shape.clone(),
+    });
+    app.route_3d(&ctx);
+    opened_on(&mut app.meshes, y, block, shape.as_deref());
+    assert_eq!(app.meshes.status, "");
+    app.meshes.select_nif(x);
+    app.meshes.status = "Scanned 3 NIFs".into();
+    app.model.show_mesh = Some(MeshPick {
+        store,
+        copy_id: y,
+        block,
+        shape,
+    });
+    app.route_3d(&ctx);
+    assert_eq!(app.meshes.selected_nif, Some(y));
+    assert_eq!(app.meshes.status, "Scanned 3 NIFs");
 }
 
 /// A link to another NIF saves the open draft (a drag tick included) before the session ends.
@@ -18615,10 +18636,19 @@ fn a_shape_link_to_a_pair_keeps_an_edit_of_another_nif_that_cannot_be_saved() {
     assert_eq!(snapshot(&m), before);
     let why = m.edit.as_ref().unwrap().export_block().unwrap();
     assert_eq!(m.error.as_deref(), Some(why.as_str()));
+    // The visible losing row (the source, under Overridden once it opens) is refused the same way.
+    let source_a = scan_block(&d.path().join("scan.db"), pair.source, "A");
+    m.show_shape(pair.source, source_a, Some("A".into()));
+    assert_eq!(snapshot(&m), before);
+    assert_eq!(m.error.as_deref(), Some(why.as_str()));
 }
 
-/// A waiting link is dropped by a row read that fails or stops: the error and the selection stay, the old rows are
-/// no fallback, and the next read that works does not bring it back.
+/// Meshes' status line for a link the scan database could not serve (ruling 3d-T17-1).
+const UNREAD_LINK: &str = "The scan database could not be read, so that mesh link opened nothing.";
+
+/// A waiting link is dropped by a row read that fails or stops, and says so: the error and the selection stay, the
+/// old rows are no fallback (a link after the failure is dropped too, never parked), and the next read that works
+/// does not bring either back.
 #[test]
 fn a_failed_row_read_drops_a_waiting_shape_link() {
     let (_d, mut m) = export_session();
@@ -18648,6 +18678,7 @@ fn a_failed_row_read_drops_a_waiting_shape_link() {
         }
         m.poll_rows();
         assert_eq!(m.error.as_deref(), Some(why));
+        assert_eq!(m.status, UNREAD_LINK);
         assert_eq!(
             (m.selected_nif, m.card_sel.clone()),
             (Some(x), card.clone())
@@ -18656,17 +18687,175 @@ fn a_failed_row_read_drops_a_waiting_shape_link() {
         m.poll_rows();
         assert_eq!(m.selected_nif, Some(x), "the dropped link stays dropped");
         m.error = None;
+        m.status.clear();
     }
-    // No fallback: after a failed read a link waits for rows that are read again.
+    // No fallback: after a failed read a link opens nothing on the old rows and is not parked either.
     m.hold_rows_read()
         .send(Err("Scan database: locked".into()))
         .unwrap();
     m.poll_rows();
     m.show_shape(y, block, name.clone());
     assert_eq!(m.selected_nif, Some(x), "the old rows are not used");
+    assert_eq!(m.status, UNREAD_LINK);
+    assert_eq!(
+        m.error.as_deref(),
+        Some("Scan database: locked"),
+        "the error stays"
+    );
     m.hold_rows_read().send(Ok(rows)).unwrap();
     m.poll_rows();
-    assert_eq!(m.selected_nif, Some(y), "the link after the failure");
+    assert_eq!(m.selected_nif, Some(x), "the dropped link stays dropped");
+}
+
+/// Ruling 3d-T17-1: a reload that stopped on the mod list reads no rows, so a link, waiting or new, is dropped with
+/// the status line beside the database error.
+#[test]
+fn a_shape_link_after_a_reload_that_could_not_read_the_mods_is_dropped() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    let other = modscan::store::Store::open(&d.path().join("scan.db")).unwrap();
+    other
+        .conn()
+        .execute("ALTER TABLE origin RENAME TO origin_gone", [])
+        .unwrap();
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name.clone());
+    m.set_scanning_for_test(false);
+    m.reload();
+    assert!(
+        m.error.is_some() && !m.rows_loading(),
+        "premise: the reload stopped"
+    );
+    assert_eq!(m.status, UNREAD_LINK, "the waiting link");
+    assert_eq!(m.selected_nif, Some(x));
+    m.status.clear();
+    m.show_shape(y, block, name);
+    assert_eq!(m.status, UNREAD_LINK, "a new link");
+    assert_eq!(m.selected_nif, Some(x));
+}
+
+/// Ruling 3d-T17-1: a scan database that would not open: a link, waiting or new, is dropped with the status line.
+#[test]
+fn a_shape_link_with_a_database_that_would_not_open_is_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    // A folder where the database file should be: the open fails.
+    let mut m = MeshesModel::new(Some(d.path().to_path_buf()), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    m.activate_with(None);
+    assert!(m.error.is_some(), "premise: the open failed");
+    m.show_shape(1, 0, None);
+    assert_eq!(m.status, UNREAD_LINK);
+    assert_eq!(m.selected_nif, None);
+}
+
+/// Rows on hand with no store open (only the `hold_rows_read` test hook makes that state): the link says the scan
+/// database could not be read.
+#[test]
+fn a_shape_link_on_rows_without_a_store_says_so() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let rows = (m.winners.as_ref().clone(), m.losers.as_ref().clone());
+    let mut bare = MeshesModel::empty();
+    bare.hold_rows_read().send(Ok(rows)).unwrap();
+    bare.poll_rows();
+    bare.show_shape(y, 0, None);
+    assert_eq!(bare.status, UNREAD_LINK);
+    assert_eq!(bare.selected_nif, None);
+}
+
+/// A manual pick after a link that still waits for its rows is the latest pick: the link does not take it back.
+#[test]
+fn a_manual_pick_drops_a_waiting_shape_link() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    m.reload();
+    m.show_shape(y, block, name);
+    m.select_nif(x);
+    wait_shape_rows(&mut m, &[x, y]);
+    assert_eq!(m.selected_nif, Some(x));
+}
+
+/// Ruling E6-C and review I2: an edit of x.nif stays only for its own row or its PGPatcher pair. Another mod's copy of
+/// the same path is another row: the session ends as a leave allows, and its ops come back on the next open.
+#[test]
+fn a_shape_link_to_another_mods_copy_of_the_edited_nif_leaves_the_edit() {
+    let d = instance("+B\n+A\n");
+    put(d.path(), "mods/A/meshes/x.nif", Some(&two_named(false)));
+    put(d.path(), "mods/B/meshes/x.nif", Some(&two_named(false)));
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let a = m.selected_nif.expect("A's x.nif");
+    wait_shape_rows(&mut m, &[a]);
+    let b = winner(&m, "x.nif");
+    assert_ne!(a, b, "premise: B's copy wins");
+    assert_eq!(m.pair, None, "premise: no PGPatcher pair");
+    let block = scan_block(&d.path().join("scan.db"), b, "A");
+    m.set_project_root(Some(d.path()));
+    m.open_edit();
+    gloss_drag(&mut m, 30.5);
+    m.show_shape(b, block, Some("A".into()));
+    assert!(m.edit.is_none(), "the session ended");
+    opened_on(&mut m, b, block, Some("A"));
+    assert!(shows_mesh_of(&m, b));
+    m.select_nif(a);
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [30.5]
+    );
+}
+
+/// Review M4: a switch to a second scanned database through the model's own read (`reload` after `store_path`
+/// changes): the waiting link is dropped at once and says why, and the other database's same-numbered copy never
+/// opens.
+#[test]
+fn a_waiting_shape_link_is_dropped_when_the_database_switches() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    // The second database numbers a copy `y` too (`wait_shape_rows` checks it).
+    let (d2, mut other) = export_session();
+    wait_shape_rows(&mut other, &[y]);
+    drop(other);
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name);
+    m.set_scanning_for_test(false);
+    m.store_path = Some(d2.path().join("scan.db"));
+    m.reload();
+    assert_eq!(
+        m.status,
+        "That mesh link came from another scan database than Meshes shows, so it opened nothing.",
+        "dropped at the switch, before any rows land"
+    );
+    assert!(m.rows_loading());
+    wait_shape_rows(&mut m, &[]);
+    assert_ne!(m.selected_nif, Some(y));
 }
 
 /// A link clicked while a reload's row read is out (the panel's state is a frame old) waits for that read.
@@ -18682,6 +18871,8 @@ fn a_shape_link_during_a_reload_waits_for_its_rows() {
         m.shapes[0].name.as_deref().map(str::to_owned),
     );
     m.select_nif(x);
+    // Any mod: the reload holds x and selects it again when the rows land, before the link opens.
+    m.any_mod();
     m.reload();
     assert!(m.rows_loading());
     m.show_shape(y, block, name.clone());

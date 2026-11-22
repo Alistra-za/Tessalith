@@ -521,6 +521,16 @@ struct ShapeRequest {
 
 /// A shape link's copy, block or name is not in the current rows and shapes (ruling 3d-R4).
 const SHAPE_GONE: &str = "That shape is no longer in the scan";
+/// A shape link from another scan database than Meshes reads (ruling 3d-T17-3).
+pub(crate) const OTHER_STORE_LINK: &str =
+    "That mesh link came from another scan database than Meshes shows, so it opened nothing.";
+/// A shape link while Meshes has no scan database (ruling 3d-T17-5).
+pub(crate) const NO_STORE_LINK: &str =
+    "Meshes has no scan database open, so that mesh link opened nothing.";
+/// A shape link while the scan database could not be read: a failed open, reload or row read (ruling 3d-T17-1).
+const UNREAD_LINK: &str = "The scan database could not be read, so that mesh link opened nothing.";
+/// Every status line a shape link writes: a link that opens clears it.
+const LINK_LINES: [&str; 4] = [SHAPE_GONE, OTHER_STORE_LINK, NO_STORE_LINK, UNREAD_LINK];
 
 pub struct MeshesModel {
     pub picker: super::picker::Picker,
@@ -1176,6 +1186,7 @@ impl MeshesModel {
     /// holds NIFs and is not PGPatcher-derived. The selected NIF is selected again when it is still listed.
     pub fn reload(&mut self) {
         self.rows_current = false; // the store changed under the rows on hand
+        self.drop_foreign_request();
         let Some(store) = &self.store else {
             return;
         };
@@ -1186,6 +1197,7 @@ impl MeshesModel {
             }
             Err(e) => {
                 self.error = Some(db_err(e));
+                self.take_shape_request(); // no rows will be read: a waiting link says so
                 return;
             }
         }
@@ -1227,7 +1239,7 @@ impl MeshesModel {
                     // Note GQ4: select_nif refuses now; the next completed scan's reload takes it
                     self.reselect = nif;
                 } else if let Some(c) = nif.filter(|c| self.nifs.iter().any(|n| n.copy_id == *c)) {
-                    self.select_nif(c);
+                    self.select_row(c, false); // a reselect: a waiting shape link stays
                 }
             }
             // Any mod, or a picked mod that is gone: the picker's own path back, then the NIF waits for the rows.
@@ -1257,7 +1269,8 @@ impl MeshesModel {
     }
 
     /// Takes a finished row read. True while one is still running, so the caller repaints. A shape link waiting for
-    /// rows is opened after a read that succeeded, and dropped after one that failed (its error stays).
+    /// rows is opened after a read that succeeded, and dropped with a status line after one that failed or stopped
+    /// (the database error stays).
     pub fn poll_rows(&mut self) -> bool {
         let Some(rx) = &self.rows_rx else {
             return false;
@@ -1279,14 +1292,10 @@ impl MeshesModel {
                     }
                 }
             }
-            Ok(Err(e)) => {
-                self.error = Some(e);
-                self.shape_request = None;
-            }
+            Ok(Err(e)) => self.error = Some(e),
             Err(std::sync::mpsc::TryRecvError::Empty) => return true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.error = Some(db_err("reading the mesh list stopped"));
-                self.shape_request = None;
             }
         }
         self.rows_rx = None;
@@ -1303,7 +1312,7 @@ impl MeshesModel {
         }
         if let Some(c) = self.reselect.take() {
             if self.selected_nif.is_none() && self.find_row(c).is_some() {
-                self.select_nif(c);
+                self.select_row(c, false); // not `select_nif`: a waiting shape link is no older pick than this
             }
         }
     }
@@ -1777,7 +1786,9 @@ impl MeshesModel {
         }
     }
 
+    /// A pick of a NIF row. It is the latest pick: a shape link still waiting for its rows is dropped.
     pub fn select_nif(&mut self, copy_id: i64) {
+        self.shape_request = None;
         self.select_row(copy_id, false);
     }
 
@@ -1804,11 +1815,13 @@ impl MeshesModel {
     }
 
     /// Review E (Task 17): a Used-by link asks for copy `copy_id`'s shape at `block`, named `shape` in the scan. The
-    /// request is bound to the store Meshes reads now and replaces any earlier one. It opens once no scan runs or is
-    /// unfinished and the rows on hand came from a read that succeeded: at once, else after the next such read lands
-    /// (a failed read drops it). A copy, block or name the rows and shapes no longer hold is said in `status`, with
-    /// nothing changed. An open edit of another NIF ends only as ruling E6-C allows (a refusal keeps everything);
-    /// one of this NIF (either side of a pair) stays open when the shape has a counterpart in it.
+    /// request is bound to the store Meshes reads now and replaces any earlier one; a later `select_nif` or a store
+    /// change drops it. It opens once no scan runs or is unfinished and the rows on hand came from a read that
+    /// succeeded: at once, else after the next such read lands. When no read is out and the rows could not be read
+    /// (a failed open, reload or read) it is dropped (ruling 3d-T17-1). A copy, block or name the rows and shapes no
+    /// longer hold, or a dropped link, is said in `status`, with nothing changed; a link that opens clears that line.
+    /// An open edit of another NIF, or of another copy of this one, ends only as ruling E6-C allows (a refusal keeps
+    /// everything); an edit of the selected row or its PGPatcher pair stays open when the shape has a counterpart in it.
     pub fn show_shape(&mut self, copy_id: i64, block: u32, shape: Option<String>) {
         self.shape_request = Some(ShapeRequest {
             store: self.store_path.clone(),
@@ -1819,25 +1832,41 @@ impl MeshesModel {
         self.take_shape_request();
     }
 
-    /// Opens the waiting shape request when the rows are current (`show_shape`); a request asked on another store
-    /// than Meshes reads now is dropped.
+    /// Opens the waiting shape request when the rows are current (`show_shape`), or drops it with a status line when
+    /// it was asked on another store or no read will make the rows current.
     fn take_shape_request(&mut self) {
-        // A read in flight makes the rows not current (`reload`), so the panel's one-frame-old state cannot open a
-        // link on rows a reload replaces.
-        if !self.store_settled() || !self.rows_current {
+        self.drop_foreign_request();
+        // A scan running or unfinished, or a read in flight (the panel's state is a frame old): it waits.
+        if self.shape_request.is_none() || !self.store_settled() || self.rows_loading() {
             return;
         }
-        let Some(r) = self.shape_request.take() else {
+        // Ruling 3d-T17-1: settled, no read out, rows not current: the open, the reload or the last read failed, and
+        // nothing reads them again before the next scan. Waiting would be a silent no-op.
+        if !self.rows_current {
+            self.shape_request = None;
+            self.status = UNREAD_LINK.into();
             return;
-        };
-        if r.store == self.store_path {
+        }
+        if let Some(r) = self.shape_request.take() {
             self.open_shape(r);
+        }
+    }
+
+    /// Drops a waiting shape link asked on another store than `store_path` names now (a copy id is local to its
+    /// store), and says so. `reload` and `take_shape_request` call it: `store_path` is a plain field.
+    fn drop_foreign_request(&mut self) {
+        if (self.shape_request.as_ref()).is_some_and(|r| r.store != self.store_path) {
+            self.shape_request = None;
+            self.status = OTHER_STORE_LINK.into();
         }
     }
 
     /// `show_shape` on current rows. Everything it needs is read before anything changes.
     fn open_shape(&mut self, r: ShapeRequest) {
+        // Current rows come from a reload, which needs the store; only the `hold_rows_read` test hook gets here
+        // without one.
         let Some(store) = &self.store else {
+            self.status = UNREAD_LINK.into();
             return;
         };
         let winners = self.winners.iter().map(|e| (e, true));
@@ -1853,6 +1882,7 @@ impl MeshesModel {
             Ok(read) => read,
             Err(e) => {
                 self.error = Some(db_err(e));
+                self.status = UNREAD_LINK.into();
                 return;
             }
         };
@@ -1869,14 +1899,16 @@ impl MeshesModel {
             Ok(pair) => pair,
             Err(e) => {
                 self.error = Some(e);
+                self.status = UNREAD_LINK.into();
                 return;
             }
         };
         let source = pair.is_some_and(|p| p.source == r.copy_id);
-        let kept = self
-            .edit
-            .as_ref()
-            .filter(|e| e.data_path == row.path)
+        // The edit's own row or its PGPatcher partner; another mod's copy of the same path is another row.
+        let own_row = self.selected_nif == Some(r.copy_id)
+            || (self.pair).is_some_and(|p| p.game == r.copy_id || p.source == r.copy_id);
+        let kept = (self.edit.as_ref())
+            .filter(|e| own_row && e.data_path == row.path)
             .and_then(|e| edit_counterpart(&e.model, r.block, name.as_deref()));
         match kept {
             // This NIF's edit stays, with its preview: only the row, the side and the cards follow the link.
@@ -1902,9 +1934,16 @@ impl MeshesModel {
         let shown = self.shown_copy() == Some(r.copy_id)
             && (self.shapes.iter())
                 .any(|s| s.block == r.block && s.name.as_deref() == name.as_deref());
-        if shown {
-            self.card_sel = Some((r.block, name));
-            self.shapes_col = true;
+        // Not shown only when the selection's own shape read failed after the preflight read worked (`load_shapes`
+        // has put the database error up); no test can make one read fail and the next succeed.
+        if !shown {
+            self.status = UNREAD_LINK.into();
+            return;
+        }
+        self.card_sel = Some((r.block, name));
+        self.shapes_col = true;
+        if LINK_LINES.contains(&self.status.as_str()) {
+            self.status.clear();
         }
     }
 
@@ -2046,8 +2085,6 @@ impl MeshesModel {
     }
 
     fn load_shapes(&mut self) {
-        // Note GO: the spec below has no texture set picks.
-        self.txst_picks.clear();
         let (Some(store), Some(copy)) = (&self.store, self.shown_copy()) else {
             return;
         };

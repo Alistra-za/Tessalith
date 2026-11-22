@@ -31,10 +31,6 @@ fn worker_poll(visible: bool, background: bool) -> Option<std::time::Duration> {
     }
 }
 
-/// Meshes' status line after a Used-by shape link from another scan database than Meshes reads.
-const OTHER_STORE_LINK: &str =
-    "That mesh link came from another scan database than Meshes shows, so it opened nothing.";
-
 fn same<T>(a: &Option<Arc<T>>, b: &Option<Arc<T>>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -190,16 +186,18 @@ impl SdcApp {
             m.show_texture(t);
         }
         // A Used-by shape link brings Meshes forward and opens there (now or once its rows are read). A copy id is
-        // local to its store, so a link from another database than Meshes reads only says so in Meshes' status line
-        // (the panel keeps its links off in that case, so it is only a race). `MeshesModel::store_path` and
-        // `AppModel::scan_db` are one value (`SdcApp::new`), so plain equality cannot differ by spelling.
+        // local to its store, so a link from another database than Meshes reads, or with none open, only says so in
+        // Meshes' status line (the panel keeps its links off for another database, so that is only a race).
+        // `MeshesModel::store_path` is built from `AppModel::scan_db` (`SdcApp::new`) and neither is assigned again
+        // outside tests, so plain equality cannot differ by spelling.
         if let Some(p) = model.show_mesh.take() {
+            use crate::model::meshes::{NO_STORE_LINK, OTHER_STORE_LINK};
             model.centre_over_meshes = false;
             crate::ui::header::set_meshes_view(ctx, true);
-            if m.store_path.as_ref() == Some(&p.store) {
-                m.show_shape(p.copy_id, p.block, p.shape);
-            } else {
-                m.status = OTHER_STORE_LINK.into();
+            match &m.store_path {
+                Some(s) if *s == p.store => m.show_shape(p.copy_id, p.block, p.shape),
+                Some(_) => m.status = OTHER_STORE_LINK.into(),
+                None => m.status = NO_STORE_LINK.into(),
             }
         }
         // Copied after the link above, so the panel's next frame sees Meshes as the link left it.
