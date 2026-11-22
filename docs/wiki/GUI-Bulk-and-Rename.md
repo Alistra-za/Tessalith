@@ -25,7 +25,7 @@ Under **Apply** a line counts the selected textures that already have a type ("{
 
 ### What an edit reaches
 
-Each row's note says how many of the selected textures it reaches: "applies to {k} of {n}", also when k is n. Hover it for why the others are skipped. <!-- D:LM11 -->
+A row that writes the same value to every texture says how many of the selected textures it reaches: "applies to {k} of {n}", also when k is n. Hover it for why the others are skipped. <!-- D:LM11 -->
 
 - **Rows with options that differ in reach:** the mip filter, BC7 weighting, Format and DDS tag list every option as "{option} ({k} of {n})", counting the textures a write of that value reaches. A texture that already holds the value counts. An option that reaches none is greyed ("None of the selected textures can take this"), and while an edit is running every other option is greyed too ("Wait for the plan to finish"). A read-only `sdc.toml` greys every row, and the panel says why. The row's note groups options of equal reach, widest first, two groups at most, then "others vary". <!-- D:LM11 -->
 - **A packed output** is a tile of its own, so Ctrl+A selects it, and an unlocked setting such as mip levels is written to the output's own entry. A source that feeds an output but has no job of its own is skipped. Hover either tile: the output says what it is made from, the source says "Packed into {output}: changing this file changes {output}." and, for one with no job, that bulk edits skip it. <!-- D:LM16 -->

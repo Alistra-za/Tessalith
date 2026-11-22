@@ -10,7 +10,7 @@ A plain click on a thumbnail opens the set. For Ctrl+click, see [Selecting sever
 
 Chips are lettered by the slot's suffix. The **?** beside the **Sets** heading lists what each letter, pill and **(auto)** means. <!-- D:LM5 --> Empty shader slots are hidden at rest. Hover the status pill to list them, or drag a texture or files from Explorer over the card: a strip beside it shows the empty slots' letters, with a caption "{type}: no file yet" for each. Only the letters take a drop; a release over a caption goes to the card under the pointer. <!-- D:JW1,LM5 --> Dropping Explorer files on the card or its strip opens the files' folder. <!-- D:JW2 --> If the set owns or borrows a packed file, its chip reads RMAOS or RFAOS for that file. Linking slot 6 changes the thumbnail and keeps the lettering. An Advanced skin set with only a metallic input keeps RMAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
 
-A chip with a file hovers as its name, the slot's type (as in [Texture types](Texture-Types.md#types-what-each-file-becomes)) and "Shift+click to open its settings." A borrowed slot adds "borrowed from {set}". Slots without a file read: <!-- D:LM5 -->
+A chip with a file hovers as its name, the slot's [type](Texture-Types.md#types-what-each-file-becomes) and "Shift+click to open its settings." A borrowed one has "borrowed from {set}" before its type. Linked, cleared and replaced slots read: <!-- D:LM5 -->
 
 - **Linked:** "{slot} linked to {path}", then "{type}, from set {set}" or "{type}: {file}, set by path".
 - **Cleared:** "{slot} (cleared): {file}", then "{type}: cleared, so the JSON leaves this slot empty".
@@ -18,7 +18,7 @@ A chip with a file hovers as its name, the slot's type (as in [Texture types](Te
 
 A member that fills no chip but has a job adds its type's description under its role. <!-- D:JX1,LM5 -->
 
-A small thumbnail on a chip's corner is a [helper](Texture-Packing.md#helper-textures) feeding that slot. A chip shows at most two. Click the **+** (with or without a number) for the rest. Click a file in that list to open its settings. <!-- D:JX4 --> A helper that appears on no chip or overflow list sits small at the end of the card. <!-- D:JW7 -->
+A small thumbnail on a chip's corner is a [helper](Texture-Packing.md#helper-textures) feeding that slot. A chip shows at most two. Click the **+** (numbered or not) for the rest. Click a file in that list to open its settings. <!-- D:JX4 --> A helper that appears on no chip or overflow list sits small at the end of the card. <!-- D:JW7 -->
 
 A slot linked from another set ([From another set](GUI-Set-Editor.md#slot-menus)) has a small link mark at the top centre of its chip. A cleared slot shows a dim letter when it has a file to show underneath. <!-- D:JR1 --> A slot shared from another set has an outline in the text colour and two linked rings. A red **?** marks a borrow whose set is gone or a file that is gone. <!-- D:JW3 --> A slot shared from a set that shares it in turn reads the set that has the file; a loop of shares fills nothing and shows the **?**. <!-- D:JN1 --> Delete that middle set, or **Clear** its share, and the far set keeps the texture: its share passes on to the set the middle one shared from. <!-- D:JN4 --> Right-click a **?** for **Remove from set** (or **Delete set** when nothing is left); each one is also a Problems row.
 

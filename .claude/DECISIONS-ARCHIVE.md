@@ -468,6 +468,15 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY, LD
 
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS, JE, JQ, JR, JS, JW
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC
+
 ## Digest
 
 ARCHIVED (wording before the edit; superseded in part by Note JW6, 2026-11-20)

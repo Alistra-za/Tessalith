@@ -121,7 +121,7 @@ After planning, Tessalith records High-confidence types and mesh-derived alpha p
 
 To check which normals can follow a shader, Tessalith reads the recorded types, file entries and slot locks once for the whole pass. <!-- D:JS5 -->
 
-**The Notes row** reads "{n} types set automatically: {a}, {b}, {c}, and {m} more"; hover for every file. A batch that set a type adds why: a known ending such as `_n`, the folder, or the meshes and grass that use it. <!-- D:LM7 -->
+Each batch adds a row in **Messages**, not in Problems or Notes, that names the files it recorded: [Messages](GUI-Guide.md#messages). <!-- D:LM7 -->
 
 - Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
 - Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->

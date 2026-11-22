@@ -91,14 +91,14 @@ The GUI shows each field's provenance, so you can see which layer set it.
 
 ## [defaults] and [subtypes]
 
-Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Type ids are on [Texture types](Texture-Types.md#types-what-each-file-becomes); the type itself is the `subtype` key of one file, not a field here. `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
+Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Type ids are on [Texture types](Texture-Types.md#types-what-each-file-becomes); the type itself is set per file by `[files]` or a rule's `subtype`, not a field here. `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
 
 ## [[rules]]
 
 ```toml
 [[rules]]
 match = { glob = "...", suffix = "...", set_has = "...", alpha = "...", subtypes = ["..."] }
-subtype = "<type id>"     # optional
+subtype = "<type id>"         # optional
 overrides = { ... }           # optional partial profile
 ```
 
