@@ -148,8 +148,9 @@ fn a_restricted_picker_skips_an_unavailable_likely_type() {
 
 /// Four textures in four folders. `p_wait.png` and `q_wait.png` wait for a type, with one engine suggestion each
 /// (Normal and Height, which no real file name gives a waiting texture, so they are set on the jobs); `r_wait.png`
-/// is written Gray, `s_wait.png` and then `a_wait.png` Envmask (so the first Envmask file in lexical order is the one
-/// written last, in the folder made last), and `b_wait.png` Gray: Gray and Envmask are written twice each, a tie only
+/// is written Gray, `s_wait.png` and then `a_wait.png` Envmask (so the first Envmask file in lexical order,
+/// `a_wait.png`, is the last Envmask written), and `six/b_wait.png`, written last and in the folder made last, Gray:
+/// Gray and Envmask are written twice each, a tie only
 /// the id breaks. Returns the model and the keys of p and q.
 fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     use engine::config::Subtype;
@@ -341,7 +342,7 @@ fn a_reason_comes_from_the_first_key_in_lexical_order() {
         }];
     }
     assert!(p < q, "p is the lexically first key");
-    // Two files written Envmask: the one first in key order is `a_wait.png`, written and listed last.
+    // Two files written Envmask: the one first in key order is `a_wait.png`, the last Envmask written.
     let want = vec![
         (Subtype::Diffuse, "reason from p".to_string()),
         (Subtype::Envmask, "a_wait.png has this type.".to_string()),
@@ -355,6 +356,67 @@ fn a_reason_comes_from_the_first_key_in_lexical_order() {
             "{keys:?}"
         );
     }
+}
+
+/// Four lone 64 x 64 gradients in one folder, so name order is key order.
+fn four_bumps(dir: &Path) -> AppModel {
+    let f = dir.join("textures/clutter");
+    std::fs::create_dir_all(&f).unwrap();
+    for name in [
+        "a_keep_bump.png",
+        "b_keep_bump.png",
+        "c_hide_bump.png",
+        "d_keep_bump.png",
+    ] {
+        ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+            .save(f.join(name))
+            .unwrap();
+    }
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    idle(&mut m);
+    m
+}
+
+#[test]
+fn confirm_moves_to_the_next_visible_undecided_only() {
+    use sdc_gui::model::Selection;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = four_bumps(dir.path());
+    let [a, b, c, d] = [
+        "a_keep_bump.png",
+        "b_keep_bump.png",
+        "c_hide_bump.png",
+        "d_keep_bump.png",
+    ]
+    .map(|name| key_of(&m, name));
+    m.prefs.sort = sdc_gui::model::texture_view::SortKey::Name;
+    for k in [&a, &b, &c, &d] {
+        assert!(m.subtype_question(k).is_some());
+    }
+    m.search = "keep".into();
+    assert_eq!(
+        m.visible_items()
+            .iter()
+            .map(|&i| &m.items[i].key)
+            .collect::<Vec<_>>(),
+        [&a, &b, &d]
+    );
+    m.select_item(&b);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Confirm").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert_eq!(h.state().selection, Selection::Item(d.clone()));
+    assert!(h.state().subtype_question(&b).is_none());
+    h.get_by_label("Confirm").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert!(h.state().subtype_question(&d).is_none());
+    assert!(h.state().subtype_question(&a).is_some() && h.state().subtype_question(&c).is_some());
+    assert_eq!(h.state().selection, Selection::Item(d));
 }
 
 #[test]

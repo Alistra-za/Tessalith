@@ -5038,6 +5038,16 @@ impl AppModel {
         });
     }
 
+    /// `decide`, then the selection moves to the next undecided texture in view (the single card's Confirm). The next
+    /// key is read before the plan starts, from the current list; with none, the selection stays.
+    pub fn decide_and_advance(&mut self, key: &str, a: Answer) {
+        let next = self.next_undecided_after(key);
+        self.decide(key, a);
+        if let Some(next) = next {
+            self.select_item(&next);
+        }
+    }
+
     /// The PGPatcher JSON file name (header field); empty restores the default (the folder's name). No re-plan (P7).
     pub fn set_json_name(&mut self, name: &str) {
         let n = name.trim().to_string();

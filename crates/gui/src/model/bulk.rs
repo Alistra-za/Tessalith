@@ -137,6 +137,18 @@ impl AppModel {
             .collect()
     }
 
+    /// The first key after `key` in the visible order that still waits for a decision. No wrap; a key the filter
+    /// hides never counts.
+    pub fn next_undecided_after(&self, key: &str) -> Option<String> {
+        let undecided = self.undecided_keys();
+        let visible = self.visible_keys();
+        let at = visible.iter().position(|k| k == key)?;
+        visible
+            .into_iter()
+            .skip(at + 1)
+            .find(|k| undecided.contains(k))
+    }
+
     /// Note DY16 review: what the column shows, tiles then helper rows, in display order (mouse ranges and the
     /// summary's hidden count). Keyboard navigation and Ctrl+A stay on `visible_keys` (tiles only).
     fn shown_keys(&self) -> Vec<String> {

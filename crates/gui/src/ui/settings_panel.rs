@@ -35,6 +35,8 @@ enum Action {
     Set(&'static str, Value),
     Clear(&'static str),
     Decide(Answer),
+    /// The single card's Confirm: decide, then select the next undecided texture in view.
+    DecideAndAdvance(Answer),
     Select(String),
     Reencode(bool),
     /// Note HI4: a role picked under the ticked Helper box, or `None` (Reset) for the role guessed from the name.
@@ -1549,7 +1551,7 @@ fn subtype_decision(
         }
     };
     if confirm {
-        actions.push(Action::Decide(Answer::Subtype(chosen)));
+        actions.push(Action::DecideAndAdvance(Answer::Subtype(chosen)));
     }
     ui.data_mut(|d| d.insert_temp(id, chosen));
 }
@@ -1920,6 +1922,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             Action::Set(f, v) => model.set_field(key, f, v),
             Action::Clear(f) => model.clear_field(key, f),
             Action::Decide(a) => model.decide(key, a),
+            Action::DecideAndAdvance(a) => model.decide_and_advance(key, a),
             Action::Select(k) => model.select_item(&k),
             Action::Reencode(on) => model.set_reencode(&[key.to_string()], on),
             Action::HelperRole(r) => {
