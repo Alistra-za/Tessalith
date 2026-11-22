@@ -1,4 +1,5 @@
 //! Modal dialogs for `model.dialog` (M3a spec §2.1).
+use crate::model::set_json_copy::{ticked, JsonRow};
 use crate::model::{AfterExport, AppModel, Dialog, DocKind};
 use eframe::egui;
 
@@ -19,6 +20,12 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel) {
         Dialog::ExternalChange(which) => external_change(ctx, model, which),
         Dialog::Error(msg) => error(ctx, model, &msg),
         Dialog::CopySettings { from, to, fields } => copy_settings(ctx, model, &from, &to, fields),
+        Dialog::CopySetJson {
+            source,
+            paste,
+            to,
+            rows,
+        } => copy_set_json(ctx, model, &source, paste, &to, rows),
         Dialog::ConfirmResetAll(keys) => confirm_reset_all(ctx, model, &keys),
         Dialog::Rename(d) => super::rename_dialog::draw(ctx, model, d),
         Dialog::MakeMarker => super::marker_dialog::draw(ctx, model),
@@ -244,15 +251,99 @@ fn copy_settings(
             );
         }
     });
-    let close = clicked == Some(0) || k.cancel;
+    let ticked: Vec<String> = fields.iter().filter(|f| f.1).map(|f| f.0.clone()).collect();
+    copy_tail(
+        model,
+        (clicked, k.cancel, any),
+        |m| m.apply_copy_settings(from, to, &ticked),
+        |d| {
+            if let Dialog::CopySettings { fields: kept, .. } = d {
+                *kept = fields;
+            }
+        },
+    );
+}
+
+/// What a copy checklist does after its frame: Apply (with something ticked) applies, Cancel and Esc close, anything
+/// else keeps the ticks in the open dialog. `press` is the clicked button, whether Esc was pressed and whether
+/// anything is ticked.
+fn copy_tail(
+    model: &mut AppModel,
+    press: (Option<usize>, bool, bool),
+    apply: impl FnOnce(&mut AppModel),
+    keep: impl FnOnce(&mut Dialog),
+) {
+    let (clicked, cancel, any) = press;
     if clicked == Some(1) && any {
-        let ticked: Vec<String> = fields.iter().filter(|f| f.1).map(|f| f.0.clone()).collect();
-        model.apply_copy_settings(from, to, &ticked);
-    } else if close {
+        apply(model);
+    } else if clicked == Some(0) || cancel {
         model.dialog = None;
-    } else if let Some(Dialog::CopySettings { fields: kept, .. }) = model.dialog.as_mut() {
-        *kept = fields;
+    } else if let Some(d) = model.dialog.as_mut() {
+        keep(d);
     }
+}
+
+/// The JSON copy (or paste) checklist, every row ticked to start, grouped under the group headings. The ticks live in
+/// the dialog itself. Enter does nothing here.
+fn copy_set_json(
+    ctx: &egui::Context,
+    model: &mut AppModel,
+    source: &str,
+    paste: bool,
+    to: &[String],
+    mut rows: Vec<(JsonRow, bool)>,
+) {
+    let verb = if paste { "Paste" } else { "Copy" };
+    let title = format!(
+        "{verb} JSON settings from {source} to {} selected",
+        to.len()
+    );
+    // Apply's enabled state is read before the body: a Check none shows on the next frame.
+    let any = rows.iter().any(|r| r.1);
+    let buttons = [("Cancel", Role::Plain, true), ("Apply", Role::Plain, any)];
+    let list_height = ctx.content_rect().height() * DIALOG_LIST_SHARE;
+    let (k, clicked) = dialog(ctx, "copy-set-json", false, 420.0, &title, &buttons, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Check all").clicked() {
+                rows.iter_mut().for_each(|r| r.1 = true);
+            }
+            if ui.button("Check none").clicked() {
+                rows.iter_mut().for_each(|r| r.1 = false);
+            }
+        });
+        // ui-rules 3.2: a bar drawn without hover, so a list that overflows says so.
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
+        egui::ScrollArea::vertical()
+            .id_salt("copy-set-json-rows")
+            .max_height(list_height)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let mut group = None;
+                for (row, on) in rows.iter_mut() {
+                    if group != Some(row.group) {
+                        ui.strong(row.group.heading());
+                        group = Some(row.group);
+                    }
+                    let value = row.value_text();
+                    let r = ui.checkbox(on, format!("{}: {value}", row.label));
+                    super::name_input(
+                        r,
+                        &format!("{}: {}: {value}", row.group.heading(), row.label),
+                    );
+                }
+            });
+    });
+    let chosen = ticked(&rows);
+    copy_tail(
+        model,
+        (clicked, k.cancel, any),
+        |m| m.apply_copy_set_json(source, paste, to, &chosen),
+        |d| {
+            if let Dialog::CopySetJson { rows: kept, .. } = d {
+                *kept = rows;
+            }
+        },
+    );
 }
 
 /// F3a D4: Reset all asks first; it names how many textures lose their settings.

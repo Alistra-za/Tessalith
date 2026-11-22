@@ -2663,3 +2663,188 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
         "each title ends with its unique tail (Task 1's `short`): {shown:?}"
     );
 }
+
+// ---- Edit match... (Note LJ2) ----
+
+const NOTE: &str = "The entry applies when any of these matches.";
+
+/// The card title node of set `id` in the Sets column (the leftmost label of that name).
+fn card_title<'a>(h: &'a Harness<'static, AppModel>, id: &'a str) -> egui_kittest::Node<'a> {
+    h.query_all_by_label(id)
+        .min_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x))
+        .unwrap_or_else(|| panic!("{id}'s card"))
+}
+
+/// Right-click set `id`'s card: the card menu opens.
+fn open_card_menu(h: &mut Harness<'static, AppModel>, id: &str) {
+    let at = card_title(h, id).rect().center();
+    h.hover_at(at);
+    h.run();
+    card_title(h, id).click_secondary();
+    h.run();
+}
+
+fn rock_pbr(dir: &std::path::Path) -> AppModel {
+    let mut m = support::pbr_opened_plain(dir);
+    let Selection::Set(k) = rock_selection(&m) else {
+        panic!("rock is a keyed set")
+    };
+    m.select_set(&k);
+    m
+}
+
+/// Collapse Matching and switch the set editor to Also export, so Edit match... has both to undo.
+fn collapse_matching_and_leave_the_tab(h: &mut Harness<'static, AppModel>) {
+    h.get_by_label("Matching").scroll_to_me();
+    h.run();
+    h.get_by_label("Matching").click();
+    h.run();
+    h.get_by_label("Also export").scroll_to_me();
+    h.run();
+    h.get_by_label("Also export").click();
+    h.run();
+    assert!(
+        h.query_by_label(NOTE).is_none(),
+        "premise: Matching is out of view"
+    );
+}
+
+fn focused_input<'a>(h: &'a Harness<'static, AppModel>) -> Option<egui_kittest::Node<'a>> {
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.accesskit_node().is_focused())
+}
+
+#[test]
+fn edit_match_opens_matching_and_focuses_the_first_match() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(rock_pbr(d.path()));
+    h.run();
+    collapse_matching_and_leave_the_tab(&mut h);
+    open_card_menu(&mut h, ROCK);
+    h.get_by_label("Edit match…").click();
+    for _ in 0..4 {
+        h.run();
+    }
+    h.get_by_label(NOTE);
+    let n = focused_input(&h).expect("a focused text field");
+    let label = n.accesskit_node().label().unwrap_or_default();
+    assert!(label.ends_with(" match path"), "{label}");
+}
+
+#[test]
+fn edit_match_with_no_match_row_opens_the_group_in_view() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_pbr(d.path());
+    m.set_json_value(ROCK, "match1", Some(serde_json::json!("")));
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    collapse_matching_and_leave_the_tab(&mut h);
+    open_card_menu(&mut h, ROCK);
+    h.get_by_label("Edit match…").click();
+    for _ in 0..4 {
+        h.run();
+    }
+    h.get_by_label(NOTE);
+    let head = h.get_by_label("Matching").rect();
+    let seen = h.ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, ws)| ws)
+            .find(|w| w.rect == head)
+            .map(|w| w.interact_rect)
+    });
+    let seen = seen.expect("the Matching header is a widget this pass");
+    assert!(
+        seen.width() > 0.0 && seen.height() >= head.height() - 1.0,
+        "Matching header {head:?} is clipped away ({seen:?})"
+    );
+    assert!(focused_input(&h).is_none(), "no field to focus");
+}
+
+#[test]
+fn edit_match_is_off_with_its_reason_on_a_set_without_json() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_plain(d.path());
+    let odd = views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/odd")
+        .cloned()
+        .unwrap();
+    assert!(
+        !sdc_gui::model::sets::shows_json_panel(&odd, m.target),
+        "premise: odd has no JSON panel"
+    );
+    m.select_set(&odd.key);
+    let mut h = harness(m);
+    h.run();
+    open_card_menu(&mut h, "landscape/odd");
+    let entry = h.get_by_label("Edit match…");
+    assert!(entry.accesskit_node().is_disabled());
+    let at = entry.rect().center();
+    h.hover_at(at);
+    // `run()` settles before the tooltip's first drawn frame inside an open menu. The harness sets the tooltip delay
+    // to 0, so 8 steps (more than TOOLTIP_STEPS = 4: the hover plus the tooltip's sizing pass) outlast it.
+    h.run_steps(8);
+    h.get_by_label(sdc_gui::model::sets::EDIT_MATCH_OFF);
+}
+
+#[test]
+fn edit_match_waits_for_a_focused_field_and_uses_the_view_after_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_pbr(d.path());
+    m.set_json_value(ROCK, "match1", Some(serde_json::json!("landscape/rock01")));
+    m.set_json_value(
+        ROCK,
+        "match2",
+        Some(serde_json::json!("landscape/rock01_alt")),
+    );
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    open_card_menu(&mut h, ROCK);
+    // The right-click commits any focused field, so focus comes back after the menu is open (an AccessKit focus
+    // action, not a click: the menu stays).
+    h.get_by_role_and_label(
+        egui::accesskit::Role::TextInput,
+        sdc_gui::ui::input_name::HINT,
+    )
+    .focus();
+    h.step();
+    let at = h.get_by_label("Edit match…").rect().center();
+    assert!(
+        focused_input(&h).is_some(),
+        "premise: a text field has the focus"
+    );
+    h.input_mut().events.push(egui::Event::PointerMoved(at));
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: at,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.step();
+    assert_eq!(
+        h.state().after_commit.len(),
+        1,
+        "Edit match waits for the field"
+    );
+    // While it waits, the first match row goes away: the view after the commit starts at match2.
+    h.state_mut()
+        .set_json_value(ROCK, "match1", Some(serde_json::json!("")));
+    idle(h.state_mut());
+    for _ in 0..4 {
+        h.run();
+    }
+    h.get_by_label(NOTE);
+    let n = focused_input(&h).expect("a focused text field");
+    let label = n.accesskit_node().label().unwrap_or_default();
+    assert!(label.ends_with(" match path"), "{label}");
+    assert_eq!(
+        n.accesskit_node().value().as_deref(),
+        Some("landscape/rock01_alt")
+    );
+}

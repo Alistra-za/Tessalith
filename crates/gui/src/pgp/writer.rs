@@ -48,7 +48,7 @@ impl EntryInput {
     }
 }
 
-fn colour(v: &Value, alpha: bool) -> Option<Node> {
+pub(crate) fn colour(v: &Value, alpha: bool) -> Option<Node> {
     let c = super::settings::rgb_of(v)?;
     // AG133: a float is written as stored (0.08 stays 0.08, 1.25 stays 1.25), within 0..=RGB_MAX; an old 0-255 colour
     // keeps the 4-place rounding it always had, so its JSON does not change.
@@ -71,7 +71,7 @@ fn colour(v: &Value, alpha: bool) -> Option<Node> {
 
 /// `v` inside `range` (F1 spec §2): a hand-edited value outside it is written clamped. A value inside it, or one that
 /// is not a number (the validator reports that), is written as it is.
-fn clamped(v: &Value, range: NumRange) -> Value {
+pub(crate) fn clamped(v: &Value, range: NumRange) -> Value {
     match v.as_f64() {
         // A whole-number key is always written as an integer (the schema says integer).
         Some(x) if matches!(range, NumRange::Int(_)) => json!(range.clamp(x).round() as u64),

@@ -8,7 +8,7 @@ use super::slot_commands::SlotCmdState;
 use super::status::{shared_stroke, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
-use crate::model::bulk::MenuAction;
+use crate::model::bulk::{MenuAction, MenuEntry};
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files, ItemKind, TextureItem};
 use crate::model::labels::subtype_name;
@@ -17,8 +17,9 @@ use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, chip_letter, fill_proposals, is_shareable_helper, kind_text, member_tail,
-    shader_options, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
-    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
+    shader_options, shows_json_panel, slot_shown, view_row, BorrowOccupant, BorrowOutcome,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
+    SlotShown, EDIT_MATCH_OFF,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -342,6 +343,8 @@ enum Act {
     Shader(String, Option<Shader>),
     /// A pill click with its modifiers (F3a D1).
     Click(String, bool, bool),
+    /// The card menu's Edit match…: select the set and open its Matching group on the first match.
+    EditMatch(String),
     RightClick(String),
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
@@ -2479,6 +2482,23 @@ pub fn draw(
             Act::Click(id, ctrl, shift) => after_card_commit(&ctx, model, id, move |m, target| {
                 m.click_set(target, ctrl, shift)
             }),
+            // Every step runs in the deferred callback, against the card as it is after a focused field commits.
+            Act::EditMatch(id) => {
+                let c = ctx.clone();
+                after_card_commit(&ctx, model, id, move |m, t| {
+                    m.select_target(t);
+                    let v = m.resolved_selection().view().cloned();
+                    // The field's commit may have left the set without a Matching group: nothing to ask for then.
+                    if let Some(v) = v.filter(|v| shows_json_panel(v, m.target)) {
+                        super::set_editor::focus_set_field(
+                            &c,
+                            m,
+                            &v.id,
+                            &crate::model::sets::edit_match_field(&v),
+                        );
+                    }
+                });
+            }
             Act::RightClick(id) => after_card_commit(&ctx, model, id, AppModel::right_click_set),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
@@ -3748,7 +3768,8 @@ fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.
-/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1).
+/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1). Rename inputs is not
+/// here: it is a Textures-view command (Note LJ3).
 fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> {
     let mut v = vec![(
         "Rename…".to_string(),
@@ -3762,12 +3783,27 @@ fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> 
             Act::Bulk(MenuAction::RenameOutputs),
         ));
     }
-    v.push((
-        "Rename inputs…".to_string(),
-        "Read the source files under other names; the files on disk keep theirs",
-        Act::Bulk(MenuAction::RenameInputs),
-    ));
     v
+}
+
+/// One model menu entry as a card-menu button: off with its own reason on hover when `own_reason` (the entry's reason is
+/// the one to read), otherwise through `tip` (the read-only reason on a disabled `ui`); a click pushes its action.
+fn entry_button(
+    ui: &mut egui::Ui,
+    entry: &MenuEntry,
+    own_reason: bool,
+    tip: impl Fn(egui::Response) -> egui::Response,
+    acts: &mut Vec<Act>,
+) {
+    let r = ui.add_enabled(entry.disabled.is_none(), egui::Button::new(&entry.label));
+    let r = match &entry.disabled {
+        Some(why) if own_reason => r.on_disabled_hover_text(why),
+        _ => tip(r),
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(entry.action.clone()));
+        ui.close();
+    }
 }
 
 fn menu(
@@ -3814,6 +3850,8 @@ fn menu(
         acts.push(Act::ExportSet(v.key.clone(), v.id.clone()));
         ui.close();
     }
+    // It only reads (the clipboard is not the document), so it sits above the disable and shows its own reason.
+    entry_button(ui, &model.copy_clip_entry(), true, |r| r, acts);
     if !editing.on {
         ui.disable();
     }
@@ -3834,10 +3872,21 @@ fn menu(
         }
     });
     tip(rename.response);
-    if tip(ui.button("Edit match…")).clicked() {
-        acts.push(Act::Click(v.id.clone(), false, false));
+    // Off on a set the editor draws no Matching group for; the reason sits on the disabled entry.
+    let on = shows_json_panel(v, model.target);
+    let r = ui.add_enabled(on, egui::Button::new("Edit match…"));
+    let r = if on {
+        tip(r)
+    } else {
+        r.on_disabled_hover_text(EDIT_MATCH_OFF)
+    };
+    if r.clicked() {
+        acts.push(Act::EditMatch(v.id.clone()));
         ui.close();
     }
+    // The same entry as the sets menu: with one set selected it reads "to 0 selected…" and says why it is off.
+    entry_button(ui, &model.copy_json_entry(), editing.on, tip, acts);
+    entry_button(ui, &model.paste_clip_entry(), editing.on, tip, acts);
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());

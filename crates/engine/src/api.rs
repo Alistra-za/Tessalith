@@ -1114,12 +1114,14 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 /// - The encode version: another `encode_version` for the sub-type, another encoder tag (the rgbcx patch only for
 ///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
-/// - The profile: the same hash changes nothing. Else the record's own profile (`raw["profile"]`, which must hash to
-///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
-///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
-///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).
+/// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
+///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile
+///   (`raw["profile"]`, which must hash to its `profile_sha256`) with the job's three quality targets
+///   (`encoder.effort`, `encoder.bc45_search_radius`, `encoder.bc1_search`) must hash as the job's profile, or `Stale`
+///   (format, weighting or any other field changed); then a target that rose for the job's format is `Stale` and one
+///   that fell keeps it (`lower_target`). In that comparison such an old `max` record counts as `slowest`.
 ///
-/// Neither flag: `Current`. The engine version is not compared, nor is the record's `isa`.
+/// Neither flag: `Current`. The engine version is read only for that `max` rule; the record's `isa` is not compared.
 pub(crate) fn currency(
     e: &ManifestEntry,
     job: &ResolvedJob,
@@ -1200,10 +1202,17 @@ pub(crate) fn currency(
 
 /// [`currency`]'s profile step: `Some(false)` when the record's profile is the job's or differs only in a quality
 /// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
-/// otherwise, an unreadable or self-inconsistent record included.
+/// otherwise, an unreadable or self-inconsistent record included. Equal hashes return `Some(false)` at once, except
+/// for a job at `max` on a format that reads the radius (BC3, BC4, BC5) against a record not known to be newer than
+/// 3.0.0 (Note LI4): that record reads as `slowest`, so it is stale. When the hashes differ, the rank comparison reads
+/// such a record's radius as `slowest` too (`recorded_radius`).
 fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let now = profile_sha256(p).ok()?;
-    if now == e.profile_sha256 {
+    // Equal hashes mean equal radii, so an old or undated `max` record against a job at `max` must not return here.
+    let max_was_slowest = radius_rank(p.format, p.encoder.bc45_search_radius).is_some()
+        && p.encoder.bc45_search_radius == SearchRadius::Max
+        && old_max(e);
+    if now == e.profile_sha256 && !max_was_slowest {
         return Some(false);
     }
     let mut was: Profile = serde_json::from_value(e.raw.get("profile")?.clone()).ok()?;
@@ -1221,13 +1230,63 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let f = p.format;
     let moves = [
         effort_rank(f, new.effort).cmp(&effort_rank(f, old.effort)),
-        radius_rank(f, new.bc45_search_radius).cmp(&radius_rank(f, old.bc45_search_radius)),
+        radius_rank(f, new.bc45_search_radius)
+            .cmp(&radius_rank(f, recorded_radius(e, old.bc45_search_radius))),
         search_rank(f, new.bc1_search).cmp(&search_rank(f, old.bc1_search)),
     ];
     if moves.contains(&std::cmp::Ordering::Greater) {
         return None;
     }
     Some(moves.contains(&std::cmp::Ordering::Less))
+}
+
+/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
+///
+/// shortcut: a 3.0.1 build from before Note LI also wrote `max` for radius 10, and such dev records read as the new
+/// `max`; upgrade (record a build marker in the manifest) when one of those builds is known to have reached users.
+const MAX_WAS_SLOWEST_THROUGH: [u32; 3] = [3, 0, 0];
+
+/// Where a record's `engine_version` places it against a last version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordAge {
+    // At most the last version.
+    Old,
+    // Above it.
+    New,
+    // Missing, not a string, or not `X.Y.Z`: the manifest reader stores the first two as "".
+    Unknown,
+}
+
+/// The age of engine version `v` (`X.Y.Z`, a `-pre` or `+build` suffix ignored) against `last`.
+fn record_age(v: &str, last: [u32; 3]) -> RecordAge {
+    let core = v.split(['-', '+']).next().unwrap_or_default();
+    let parts: Vec<Option<u32>> = core.split('.').map(|s| s.parse().ok()).collect();
+    match parts[..] {
+        [Some(a), Some(b), Some(c)] => {
+            if [a, b, c] <= last {
+                RecordAge::Old
+            } else {
+                RecordAge::New
+            }
+        }
+        _ => RecordAge::Unknown,
+    }
+}
+
+/// The radius a record's bytes were searched at: a `max` not known to be newer than 3.0.0 was `slowest`. An unknown
+/// age counts as old (BC45-R9), so a `max` job re-encodes it rather than trusting bytes it cannot date.
+fn recorded_radius(e: &ManifestEntry, r: SearchRadius) -> SearchRadius {
+    if r == SearchRadius::Max && old_max(e) {
+        SearchRadius::Slowest
+    } else {
+        r
+    }
+}
+
+/// Whether the record was written by engine 3.0.0 or older, or by one that cannot be dated. It checks the age only;
+/// the callers check that the radius is `max`.
+fn old_max(e: &ManifestEntry) -> bool {
+    record_age(&e.engine_version, MAX_WAS_SLOWEST_THROUGH) != RecordAge::New
 }
 
 /// How hard format `f` searches at `effort`: BC7 by its bc7e level, BC6H by its ISPC level (`slowest` and `max`
@@ -1249,9 +1308,15 @@ fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
     }
 }
 
-/// The BC4 search radius of format `f` (BC3's alpha, BC4, BC5), not its declared order; `None` elsewhere.
-fn radius_rank(f: Format, r: SearchRadius) -> Option<u32> {
-    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then(|| crate::encode::radius(r))
+/// How hard format `f` searches its BC4 endpoints (BC3's alpha, BC4, BC5): `fast` < `default` < `slowest` < `max`
+/// (Note LI), not the declared order and not the radius (Slowest and Max both start at 10); `None` elsewhere.
+fn radius_rank(f: Format, r: SearchRadius) -> Option<u8> {
+    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then_some(match r {
+        SearchRadius::Fast => 0,
+        SearchRadius::Default => 1,
+        SearchRadius::Slowest => 2,
+        SearchRadius::Max => 3,
+    })
 }
 
 /// The BC1 search depth of format `f` (BC1, BC3's colour): `fast` below `default`; `None` elsewhere.
@@ -5502,6 +5567,34 @@ mod tests {
             [TGT, TGT],
         );
         row(
+            "radius slowest to max on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Max), p),
+            &radius(SearchRadius::Slowest),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius max to slowest on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Max),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "radius default to slowest on BC3",
+            &|p| both(&fmt(Format::Bc3), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Default),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius slowest to default on BC5",
+            &|p| both(&fmt(Format::Bc5), &radius(SearchRadius::Default), p),
+            &radius(SearchRadius::Slowest),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
             "bc1_search fast to default on BC1",
             &|p| both(&fmt(Format::Bc1), &search(Bc1Search::Default), p),
             &search(Bc1Search::Fast),
@@ -5585,6 +5678,79 @@ mod tests {
             &ev("0.9.0"),
             [BOTH, Stale],
         );
+        // Note LI: through engine 3.0.0 a `max` record was the radius-10 search, today's `slowest`.
+        let dated = |v: &'static str| move |e: &mut ManifestEntry| e.engine_version = v.into();
+        let at = |f: Format, r: SearchRadius| {
+            move |p: &mut Profile| {
+                p.format = f;
+                p.encoder.bc45_search_radius = r;
+            }
+        };
+        row(
+            "3.0.0 record at max against max on BC4",
+            &at(Format::Bc4, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Stale, Stale],
+        );
+        row(
+            "3.0.0 record at max against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Current, Current],
+        );
+        row(
+            "2.0.0 record at max against max on BC3",
+            &at(Format::Bc3, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("2.0.0"),
+            [Stale, Stale],
+        );
+        row(
+            "3.0.0 record at max against max on BC7",
+            &at(Format::Bc7, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Current, Current],
+        );
+        // shortcut: a 3.0.1 record is the new `max`, even from a dev build that wrote radius 10.
+        row(
+            "3.0.1 record at max against max on BC5",
+            &at(Format::Bc5, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(ENGINE_VERSION),
+            [Current, Current],
+        );
+        row(
+            "record without engine_version at max against max on BC4",
+            &at(Format::Bc4, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Stale, Stale],
+        );
+        row(
+            "record without engine_version at max against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Current, Current],
+        );
+        row(
+            "record without engine_version at max against max on BC7",
+            &at(Format::Bc7, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Current, Current],
+        );
+        // BC45-R14: only a recorded `max` of unknown age reads as `slowest`.
+        row(
+            "record without engine_version at fast against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Fast),
+            &dated(""),
+            [Stale, Stale],
+        );
         for (what, job, e, [without, with]) in &rows {
             assert_eq!(
                 currency(e, job, &enc, false),
@@ -5592,6 +5758,83 @@ mod tests {
                 "{what}, without ev"
             );
             assert_eq!(currency(e, job, &enc, true), *with, "{what}, with ev");
+        }
+        // BC45-R9, BC45-R14: the same record as the reader hands it over, with no `engine_version` key on disk.
+        let mut bc4 = job0.clone();
+        at(Format::Bc4, SearchRadius::Max)(&mut bc4.profile);
+        let e = entry(&bc4, &radius(SearchRadius::Max));
+        let line = serde_json::json!({
+            "schema": e.schema,
+            "output": e.output,
+            "source_sha256": e.source_sha256,
+            "sources": e.sources,
+            "profile_sha256": e.profile_sha256,
+            "encode_version": e.encode_version,
+            "encoders": e.encoders,
+            "preset": e.preset,
+            "bc1_model": e.bc1_model,
+            "output_stamp": e.output_stamp,
+            "validation": e.raw["validation"],
+            "profile": e.raw["profile"],
+        });
+        let root = d.path();
+        std::fs::create_dir_all(root.join("_sdc")).unwrap();
+        std::fs::write(
+            root.join("_sdc").join("manifest.jsonl"),
+            format!("{line}\n"),
+        )
+        .unwrap();
+        let read = Manifest::at(root).read().unwrap();
+        let key = crate::manifest::output_key(root, &bc4.output);
+        let loaded = read.get(&key).expect("the record is read back");
+        assert_eq!(loaded.engine_version, "");
+        let mut slowest = bc4.clone();
+        at(Format::Bc4, SearchRadius::Slowest)(&mut slowest.profile);
+        for ev in [false, true] {
+            assert_eq!(
+                currency(loaded, &bc4, &enc, ev),
+                Stale,
+                "undated max against max, ev {ev}"
+            );
+            assert_eq!(
+                currency(loaded, &slowest, &enc, ev),
+                Current,
+                "undated max against slowest, ev {ev}"
+            );
+        }
+    }
+
+    /// The `""` rows of `currency_follows_the_owners_rule` stand for what the reader hands `currency`.
+    #[test]
+    fn a_record_without_engine_version_reads_as_empty() {
+        use crate::manifest::MANIFEST_SCHEMA;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("_sdc")).unwrap();
+        let lines = [
+            serde_json::json!({ "schema": MANIFEST_SCHEMA, "output": "a.dds" }),
+            serde_json::json!({ "schema": MANIFEST_SCHEMA, "output": "b.dds", "engine_version": 3 }),
+        ];
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(d.path().join("_sdc").join("manifest.jsonl"), text).unwrap();
+        let read = Manifest::at(d.path()).read().unwrap();
+        assert_eq!(read.len(), 2);
+        for key in ["a.dds", "b.dds"] {
+            assert_eq!(read[key].engine_version, "", "{key}");
+        }
+    }
+
+    #[test]
+    fn record_age_reads_core_versions() {
+        use RecordAge::{New, Old, Unknown};
+        let last = MAX_WAS_SLOWEST_THROUGH;
+        for v in ["3.0.0", "3.0.0-rc.1", "2.0.0", "1.2.0+x"] {
+            assert_eq!(record_age(v, last), Old, "{v}");
+        }
+        for v in ["3.0.1", "10.0.0", ENGINE_VERSION] {
+            assert_eq!(record_age(v, last), New, "{v}");
+        }
+        for v in ["", "3.0", "a.b.c", "3.0.0.1"] {
+            assert_eq!(record_age(v, last), Unknown, "{v}");
         }
     }
 

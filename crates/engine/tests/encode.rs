@@ -490,6 +490,143 @@ fn output_is_identical_for_any_thread_count() {
     }
 }
 
+fn noise(w: u32, h: u32, seed: u64) -> Vec<[u8; 4]> {
+    let mut r = gen::Rng(seed);
+    (0..w * h)
+        .map(|_| [r.byte(), r.byte(), r.byte(), r.byte()])
+        .collect()
+}
+
+fn with_radius(mut p: Profile, r: &str) -> Profile {
+    p.encoder.bc45_search_radius = serde_json::from_value(serde_json::json!(r)).unwrap();
+    p
+}
+
+/// Note LI: `max` runs the pair search, `slowest` is rgbcx's radius 10 (what `max` wrote before).
+#[test]
+fn max_routes_to_the_pair_search_and_slowest_keeps_radius_10() {
+    let px = noise(32, 32, 0x5EA7_C0DE_0000_0001);
+    let input = EncoderInput::Ldr(px.clone());
+    let blocks = encoders_sys::gather_blocks(&px, 32, 32);
+    for fmt in [Format::Bc4, Format::Bc5, Format::Bc3] {
+        let mut p = profile(Subtype::Diffuse);
+        p.format = fmt;
+        let perceptual = p.encoder.perceptual;
+        let max = encode(&input, 32, 32, &with_radius(p.clone(), "max"));
+        let slowest = encode(&input, 32, 32, &with_radius(p, "slowest"));
+        let bs = fmt.block_bytes().unwrap();
+        assert_eq!(max.len(), blocks.len() / 16 * bs);
+        for (i, src) in blocks.chunks(16).enumerate() {
+            let src: &[[u8; 4]; 16] = src.try_into().unwrap();
+            let (want_max, want_slowest): (Vec<u8>, Vec<u8>) = match fmt {
+                Format::Bc4 => (
+                    bcenc::bc4_encode_block_max(src, 0).to_vec(),
+                    encoders_sys::bc4_encode_block(src, 0, 10).to_vec(),
+                ),
+                Format::Bc5 => (
+                    bcenc::bc5_encode_block_max(src).to_vec(),
+                    encoders_sys::bc5_encode_block(src, 10).to_vec(),
+                ),
+                _ => (
+                    bcenc::bc3_encode_block_max_with(
+                        src,
+                        std::num::NonZeroU8::new(128).unwrap(),
+                        perceptual,
+                        bcenc::Bc1Search::Default,
+                    )
+                    .to_vec(),
+                    encoders_sys::bc3_encode_block(src, 10, 128, perceptual).to_vec(),
+                ),
+            };
+            assert_eq!(
+                &max[i * bs..(i + 1) * bs],
+                &want_max[..],
+                "{fmt:?} max block {i}"
+            );
+            assert_eq!(
+                &slowest[i * bs..(i + 1) * bs],
+                &want_slowest[..],
+                "{fmt:?} slowest block {i}"
+            );
+        }
+        assert_ne!(
+            max, slowest,
+            "{fmt:?}: the fixture must tell Max from Slowest"
+        );
+    }
+}
+
+/// BC45-R13: Max's alpha guard reads the texture's cut (`gt 200` is 201), not 128.
+#[test]
+fn max_bc3_guards_at_the_textures_cut() {
+    // bcenc's `gen::MAX_GUARD_FALLBACK`: Max falls back at cut 128 and not at 201.
+    const V: [u8; 16] = [
+        60, 238, 201, 32, 198, 232, 251, 14, 93, 229, 153, 238, 113, 130, 40, 173,
+    ];
+    assert_eq!(V, gen::MAX_GUARD_FALLBACK);
+    let mut rng = gen::Rng(0x0C07_0042_0000_0003);
+    let px: Vec<[u8; 4]> = (0..64)
+        .map(|i| {
+            let (x, y) = (i % 8, i / 8);
+            [rng.byte(), rng.byte(), rng.byte(), V[(y % 4) * 4 + x % 4]]
+        })
+        .collect();
+    let mut p = profile(Subtype::Diffuse);
+    p.format = Format::Bc3;
+    p.alpha.threshold = 200;
+    p.alpha.compare = AlphaCompare::Gt;
+    assert_eq!(alpha_cut(&p.alpha), 201);
+    let out = encode(&EncoderInput::Ldr(px.clone()), 8, 8, &with_radius(p, "max"));
+    let blocks = encoders_sys::gather_blocks(&px, 8, 8);
+    for (i, src) in blocks.chunks(16).enumerate() {
+        let alpha: [u8; 16] = std::array::from_fn(|t| src[t][3]);
+        assert_eq!(alpha, V, "block {i} alpha");
+        let half = &out[i * 16..i * 16 + 8];
+        assert_eq!(half, bcenc::bc4_encode_alpha_max(&alpha, 201), "block {i}");
+        assert_eq!(
+            half,
+            [0xed, 0x1e, 0x87, 0x22, 0x20, 0x06, 0xd1, 0x66],
+            "block {i} literal at cut 201"
+        );
+        // The fallback at cut 128, which a Max arm that hard-coded 128 would write.
+        let at_128 = bcenc::bc4_encode_alpha_max(&alpha, 128);
+        assert_eq!(
+            at_128,
+            [0xea, 0x04, 0x86, 0x2e, 0x20, 0xc5, 0x50, 0x7e],
+            "block {i} literal at cut 128"
+        );
+        assert_ne!(half, at_128, "block {i}");
+    }
+}
+
+#[test]
+fn max_output_is_identical_for_any_thread_count() {
+    let one = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    let many = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    for fmt in [Format::Bc3, Format::Bc4, Format::Bc5] {
+        let mut p = profile(Subtype::Diffuse);
+        p.format = fmt;
+        let p = with_radius(p, "max");
+        for (w, h, px) in [
+            (70, 37, gradient(70, 37)),
+            (70, 37, noise(70, 37, 0x5EA7_C0DE_0000_0001)),
+        ] {
+            let input = EncoderInput::Ldr(px);
+            let a = one.install(|| encode(&input, w, h, &p));
+            let b = many.install(|| encode(&input, w, h, &p));
+            let c = encode(&input, w, h, &p);
+            assert_eq!(a, b, "{fmt:?}: 1 vs 4 threads");
+            assert_eq!(a, c, "{fmt:?}: 1 thread vs default pool");
+        }
+    }
+}
+
 #[test]
 fn cancellation_stops_the_level() {
     let ctx = EncodeCtx {
@@ -524,6 +661,7 @@ fn effort_and_radius_mappings() {
     }
     assert_eq!(radius(SearchRadius::Default), 5);
     assert_eq!(radius(SearchRadius::Max), 10);
+    assert_eq!(radius(SearchRadius::Slowest), 10);
     assert_eq!(radius(SearchRadius::Fast), 4);
 }
 

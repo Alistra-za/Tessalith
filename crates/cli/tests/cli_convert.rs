@@ -1031,16 +1031,86 @@ fn invalid_configs_are_exit_2_and_valid_ones_are_really_read() {
     );
 }
 
-/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
-fn noise(fx: &Fx, name: &str) {
-    let mut state = 12345u32;
-    let mut next = move || {
+/// The bytes of a linear congruential generator seeded with `seed`.
+fn lcg(seed: u32) -> impl FnMut() -> u8 {
+    let mut state = seed;
+    move || {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
         (state >> 24) as u8
-    };
+    }
+}
+
+/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
+fn noise(fx: &Fx, name: &str) {
+    let mut next = lcg(12345);
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([next(), next(), next()]))
         .save(fx.p(&format!("in/textures/a/{name}")))
         .unwrap();
+}
+
+/// Note LI (BC45-R13): each spelling of `encoder.bc45_search_radius` reaches the encoder. `fast`, `default` and
+/// `slowest` write rgbcx's radius 4, 5 and 10 (`slowest` is what `max` wrote before); `max` writes other bytes.
+#[test]
+fn bc45_search_radius_spellings_reach_the_encoder() {
+    let fx = Fx::new();
+    let mut next = lcg(777);
+    let grey: Vec<u8> = (0..32 * 32).map(|_| next()).collect();
+    ImageBuffer::from_fn(32, 32, |x, y| image::Luma([grey[(y * 32 + x) as usize]]))
+        .save(fx.p("in/textures/a/g.png"))
+        .unwrap();
+    let texels: Vec<[u8; 4]> = grey.iter().map(|&g| [g, g, g, 255]).collect();
+    let src = encoders_sys::gather_blocks(&texels, 32, 32);
+    let mut payloads: BTreeMap<&str, Vec<u8>> = BTreeMap::new();
+    for (spelling, r) in [
+        ("fast", Some(4)),
+        ("default", Some(5)),
+        ("slowest", Some(10)),
+        ("max", None),
+    ] {
+        let out = format!("out_{spelling}");
+        let setting = format!("encoder.bc45_search_radius={spelling}");
+        let o = fx.convert_to(
+            &out,
+            &[
+                "--set",
+                "subtype=height",
+                "--set",
+                "format=bc4",
+                "--set",
+                &setting,
+            ],
+        );
+        assert_eq!(code(&o), 0, "{spelling}: {}", text(&o.stderr));
+        let manifest = std::fs::read_to_string(fx.p(&out).join("_sdc/manifest.jsonl")).unwrap();
+        let records: Vec<Value> = manifest
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(records.len(), 1, "{spelling}: {manifest}");
+        assert_eq!(
+            records[0]["profile"]["encoder"]["bc45_search_radius"], spelling,
+            "{spelling}"
+        );
+        let dds = std::fs::read_dir(fx.p(&out).join("textures/a"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.extension().is_some_and(|x| x == "dds"))
+            .unwrap();
+        let f = read_dds(&std::fs::read(dds).unwrap()).unwrap();
+        let (w, h, range) = f.surfaces()[0].clone();
+        assert_eq!((w, h), (32, 32));
+        let payload = f.data[range].to_vec();
+        // `max` has no rgbcx counterpart to compare with.
+        if let Some(r) = r {
+            let want: Vec<u8> = src
+                .chunks(16)
+                .flat_map(|b| encoders_sys::bc4_encode_block(b.try_into().unwrap(), 0, r))
+                .collect();
+            assert_eq!(payload, want, "{spelling}: radius {r}");
+        }
+        payloads.insert(spelling, payload);
+    }
+    assert_ne!(payloads["max"], payloads["slowest"]);
 }
 
 /// A layered value is not only reported: the engine acts on it. A noisy source misses the fixed 30 dB mip

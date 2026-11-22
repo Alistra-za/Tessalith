@@ -44,6 +44,7 @@ pub mod rename;
 pub mod review;
 pub mod sections;
 pub mod set_groups;
+pub mod set_json_copy;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
@@ -115,6 +116,16 @@ pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
 pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     use code_text::{row_class, RowClass};
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
+}
+
+/// Note JI4: an undo step's label for a field write: every field the Effort row writes reads "Effort", as the bulk
+/// panel's step does (`bulk.rs`), not the raw config key.
+fn field_step_label(verb: &str, field: &str) -> String {
+    if fields::EFFORT_FIELDS.contains(&field) {
+        format!("{verb} Effort")
+    } else {
+        format!("{verb} {field}")
+    }
 }
 
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
@@ -364,6 +375,13 @@ pub enum Dialog {
         from: String,
         to: Vec<String>,
         fields: Vec<(String, bool)>,
+    },
+    /// Copy (or paste) the ticked JSON settings of set `source` (its card name) to the sets `to` (document ids).
+    CopySetJson {
+        source: String,
+        paste: bool,
+        to: Vec<String>,
+        rows: Vec<(set_json_copy::JsonRow, bool)>,
     },
     /// F3a D4: remove the `[files]` settings of these textures, once confirmed.
     ConfirmResetAll(Vec<String>),
@@ -934,6 +952,8 @@ pub struct AppModel {
     pub marker_note: Option<(messages::Severity, String)>,
     /// F3b D4: the rename dialog's last applied recipe, offered again on the next open (this session only).
     pub last_recipe: rename::Recipe,
+    /// The Copy JSON settings clipboard (SM-R1): kept across opening another project, never saved.
+    pub json_clip: Option<set_json_copy::JsonClip>,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
     /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
@@ -1313,6 +1333,7 @@ impl AppModel {
             marker: Default::default(),
             marker_note: None,
             last_recipe: Default::default(),
+            json_clip: None,
             expanded: None,
             export: export::ExportModel::default(),
             reencode_all: false,
@@ -4729,6 +4750,9 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, false);
+        // The result line of a JSON copy ("Copy JSON settings from X: 3 written, ...") describes the step just undone.
+        self.status_note
+            .take_if(|n| n.starts_with(&format!("{}:", c.label)));
         self.undo_noted(
             if self.centre_over_meshes {
                 "Undone"
@@ -4983,7 +5007,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Change {f}"), move |p| {
+        self.edit(&field_step_label("Change", field), move |p| {
             p.set_file_value(&k, &f, &value)
         });
     }
@@ -5002,7 +5026,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Reset {f}"), move |p| {
+        self.edit(&field_step_label("Reset", field), move |p| {
             p.clear_file_value(&k, &f);
             // The Format row writes the tag with the format (`set_format`), so its reset clears both.
             if f == "format" {

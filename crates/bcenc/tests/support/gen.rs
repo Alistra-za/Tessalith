@@ -201,6 +201,85 @@ pub const LONG_WALK: ([[u8; 4]; 16], u16) = (
     0x6042,
 );
 
+// The six blocks below pin `bc4::search_max`. Their expected bytes (BC45-R10) come from the bench code itself
+// (`bench:crates/bench/src/bc4ref.rs`, branch `bench` 87c5539f, compiled unchanged), not from `bcenc`.
+
+/// The window's least error is 7 at the single pair (164, 103), and 164 = max + 16, so only pad 16 reaches it; at pad
+/// 15 the least error is 8, at (102, 148) and (111, 157), which radius 10 already found.
+pub const MAX_PAD_WITNESS: [u8; 16] = [
+    120, 148, 120, 111, 139, 120, 120, 120, 139, 120, 111, 113, 120, 120, 120, 113,
+];
+
+/// 100 to 115. Four pairs share the window's least error 8: (114, 100), (114, 101), (115, 100), (115, 101). Radius 10
+/// already holds (114, 100), so strict `<` keeps it.
+pub const MAX_TIE_RAMP: [u8; 16] = [
+    100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115,
+];
+
+/// Radius 10 ends at error 174 with (154, 45); two window pairs share the least error 172, (168, 61) and (171, 60).
+/// Forward order (e0 outer, ascending) meets (168, 61) first.
+pub const MAX_IMPROVING_TIE: [u8; 16] = [
+    78, 150, 105, 72, 95, 89, 124, 55, 91, 97, 74, 111, 96, 95, 156, 136,
+];
+
+/// Two window pairs share the least error 998 with the same e0, (225, 24) and (225, 25); ascending e1 meets (225, 24)
+/// first.
+pub const MAX_IMPROVING_TIE_E0: [u8; 16] = [
+    109, 174, 144, 115, 53, 5, 162, 71, 201, 219, 222, 63, 76, 31, 35, 88,
+];
+
+/// At cut 128 the window block flips 1 texel, the upstream block 0, so Max falls back. The guarded radius-10 block
+/// (which passed its own guard, 0 flips) differs from the upstream block, so a fallback that returned upstream
+/// directly is caught.
+pub const MAX_GUARD_FALLBACK: [u8; 16] = [
+    60, 238, 201, 32, 198, 232, 251, 14, 93, 229, 153, 238, 113, 130, 40, 173,
+];
+
+/// At cut 128 Max falls back and the guarded radius-10 search itself falls back to the upstream block, which differs
+/// from the unguarded radius-10 block, so a fallback that returned the unguarded radius-10 block is caught.
+pub const MAX_GUARD_FALLBACK_BASE: [u8; 16] = [
+    60, 243, 14, 47, 233, 42, 240, 198, 103, 199, 208, 76, 22, 37, 127, 252,
+];
+
+/// The six blocks above with the bench code's bytes (taken 2026-11-21 from `bench:crates/bench/src/bc4ref.rs` at
+/// 87c5539f, compiled unchanged; independent of `bcenc`). Per block: upstream r10, slowest no guard, slowest cut 128,
+/// max no guard, max cut 128.
+#[rustfmt::skip]
+pub const MAX_BENCH_BYTES: [([u8; 16], [[u8; 8]; 5]); 6] = [
+    (MAX_PAD_WITNESS, {
+        let s = [0x66, 0x94, 0xcb, 0xd4, 0x6d, 0x9d, 0xb4, 0x4d];
+        let m = [0xa4, 0x67, 0x9e, 0x4f, 0xdb, 0xf4, 0x6f, 0xfb];
+        [s, s, s, m, m]
+    }),
+    (MAX_TIE_RAMP, {
+        let s = [0x72, 0x64, 0xc9, 0xed, 0x96, 0xdc, 0x24, 0x00];
+        [s, s, s, s, s]
+    }),
+    (MAX_IMPROVING_TIE, {
+        let s = [0x9a, 0x2d, 0x06, 0xdd, 0xee, 0xad, 0xd9, 0x42];
+        let m = [0xa8, 0x3d, 0x57, 0x6f, 0x33, 0xf6, 0x6b, 0x6b];
+        [s, s, s, m, m]
+    }),
+    (MAX_IMPROVING_TIE_E0, {
+        let u = [0xd4, 0x03, 0xd4, 0xe8, 0xcc, 0x00, 0xec, 0xbf];
+        let s = [0xd3, 0x02, 0xd4, 0xe8, 0xcc, 0x00, 0xec, 0xbf];
+        let m = [0xe1, 0x18, 0x1d, 0xfb, 0xcc, 0x02, 0xee, 0xc4];
+        [u, s, s, m, m]
+    }),
+    (MAX_GUARD_FALLBACK, {
+        let u = [0xf1, 0x05, 0x86, 0x2e, 0x20, 0x05, 0x51, 0x7e];
+        let s = [0xea, 0x04, 0x86, 0x2e, 0x20, 0xc5, 0x50, 0x7e];
+        let m = [0xed, 0x1e, 0x87, 0x22, 0x20, 0x06, 0xd1, 0x66];
+        [u, s, s, m, s]
+    }),
+    (MAX_GUARD_FALLBACK_BASE, {
+        let u = [0xf2, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x17];
+        let s = [0xed, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x13];
+        let m = [0xed, 0x09, 0x46, 0x8e, 0x43, 0x95, 0x9c, 0x13];
+        [u, s, u, m, u]
+    }),
+];
+
 /// A block and transparency mask on which two distinct opaque colours tie on `encode_bc1_alpha`'s default axis
 /// (306, 601, 117) while that axis is in use, so the texel order picks the low endpoint (strict `<`, rgbcx.cpp
 /// 2122-2126). Texels 0 and 1 differ by (15, -9, 7), and 306 * 15 - 601 * 9 + 117 * 7 = 0: both dot to 102,400,
