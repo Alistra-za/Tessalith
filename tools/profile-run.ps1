@@ -11,6 +11,9 @@
              -Cohort <warmup|warm-fresh|warm-noop|warm-stale|cold-fresh|overhead|parity>
              -Build <release|base|release-off|profiling> [-RunRoot <folder>] [-Set <string[]>]
              [-CopyFrom <attempt name>] [-StaleEdge <clamp|wrap>] [-Samply <samply.exe>] [-Calibrate] [-DryRun]
+             [-ExpectedBytes <n>]  size of the expected output; required for the first attempt of a corpus and
+             build in a RunRoot, later ones size the free-space check from the newest earlier attempt's out.
+             Nothing reads the corpus outside the command.
   Expected:  -Expected -Exe <base sdc.exe> -Corpus <folder> -Label <name> -RunRoot <folder> [-Set <string[]>]
              Dry run of the base build into a new empty folder under RunRoot with frozen APPDATA. Writes, each
              created new: expected-<Label>.txt, planned-not-written-<Label>.txt, expected-<Label>-events.txt.
@@ -68,8 +71,10 @@ param(
     [switch]$Expected,
     [Parameter(ParameterSetName = 'SelfTest', Mandatory)]
     [switch]$SelfTest,
-    [Parameter(ParameterSetName = 'SelfTest')]
-    [string[]]$ProtectedForTest
+    [Parameter(ParameterSetName = 'SelfTest', DontShow)]
+    [string[]]$ProtectedForTest,
+    [Parameter(ParameterSetName = 'Run')]
+    [int64]$ExpectedBytes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,74 +82,7 @@ Set-StrictMode -Version 3.0
 
 # ---------------------------------------------------------------- paths and protection (spec 7.8)
 
-function Split-Components([string]$p) {
-    $full = [IO.Path]::GetFullPath($p)
-    , @($full.Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries))
-}
-
-# Resolves junctions and symlinks component by component; the part below the deepest existing component is kept.
-# shortcut: mapped and subst drives are not resolved, upgrade when a protected path is reached through one.
-function Resolve-Real([string]$p, [int]$depth = 0) {
-    $parts = Split-Components $p
-    $cur = $parts[0] + '\'
-    for ($i = 1; $i -lt $parts.Count; $i++) {
-        $next = Join-Path $cur $parts[$i]
-        $item = Get-Item -LiteralPath $next -Force -ErrorAction SilentlyContinue
-        if ($item -and $item.LinkType -and $depth -lt 8) {
-            $target = $item.ResolveLinkTarget($true)
-            if ($target) { $next = Resolve-Real $target.FullName ($depth + 1) }
-        }
-        $cur = $next
-    }
-    $cur
-}
-
-# Whole-component containment of the resolved paths: is $child equal to or inside $parent?
-function Test-Contained([string]$child, [string]$parent) {
-    $c = Split-Components (Resolve-Real $child)
-    $p = Split-Components (Resolve-Real $parent)
-    if ($p.Count -gt $c.Count) { return $false }
-    for ($i = 0; $i -lt $p.Count; $i++) {
-        if ($c[$i] -ine $p[$i]) { return $false }
-    }
-    $true
-}
-
-function Test-Overlap([string]$a, [string]$b) {
-    (Test-Contained $a $b) -or (Test-Contained $b $a)
-}
-
-function Get-ProtectedList {
-    @(
-        'B:\testdata', 'G:\', 'C:\_mount',
-        'F:\ai\dds\converter',
-        'F:\ai\dds\nifparseref',
-        'F:\ai\dds\PBR landscape modders resource',
-        'F:\ai\dds\complexgrass',
-        'F:\ai\dds\bench\profile\mixed-corpus',
-        (Join-Path $env:APPDATA 'sdc'),
-        (Join-Path $env:LOCALAPPDATA 'sdc')
-    )
-}
-
-# Returns the reason a RunRoot is refused, or $null.
-function Get-RunRootProblem([string]$root, [string[]]$protected) {
-    foreach ($p in $protected) {
-        if (Test-Overlap $root $p) { return "overlaps the protected path $p" }
-    }
-    $comp = Split-Components (Resolve-Real $root)
-    if ($comp.Count -ge 4 -and $comp[0] -ieq 'F:' -and $comp[1] -ieq 'ai' -and $comp[2] -ieq 'dds' -and $comp[3] -like 'converter-nif-*') {
-        return 'inside a converter-nif-* checkout'
-    }
-    $full = Resolve-Real $root
-    for ($i = $comp.Count; $i -ge 1; $i--) {
-        $dir = ($comp[0..($i - 1)] -join '\') + '\'
-        foreach ($name in 'sdc.toml', 'sdc-project.toml') {
-            if (Test-Path -LiteralPath (Join-Path $dir $name)) { return "$dir holds $name (an owner project)" }
-        }
-    }
-    $null
-}
+. (Join-Path $PSScriptRoot 'profile-paths.ps1')
 
 function Test-Label([AllowEmptyString()][string]$l) {
     $l -cmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,31}\z'
@@ -237,9 +175,16 @@ function Get-PredecessorProblem([string]$runRoot, [string]$corpus, [datetime]$no
 
 # ---------------------------------------------------------------- self-test
 
+# The self-test's own folder: always checked against the real protected list, plus any stand-in.
+function Get-SelfTestBaseProblem([string]$base, [string[]]$extra) {
+    Get-RunRootProblem ([IO.Path]::GetFullPath($base)) (@(Get-ProtectedList) + @($extra))
+}
+
 function Invoke-SelfTest {
     $base = if ($RunRoot) { $RunRoot } else { Join-Path ([IO.Path]::GetTempPath()) 'sdc-profile-selftest' }
-    $baseWhy = Get-RunRootProblem ([IO.Path]::GetFullPath($base)) $(if ($ProtectedForTest) { $ProtectedForTest } else { Get-ProtectedList })
+    $extra = @()
+    if ($ProtectedForTest) { $extra = @($ProtectedForTest) }
+    $baseWhy = Get-SelfTestBaseProblem $base $extra
     if ($baseWhy) { throw "refused: the self-test folder $base $baseWhy" }
     if (-not (Test-Path -LiteralPath $base)) { New-Item -ItemType Directory -Path $base | Out-Null }
     $t = Join-Path (Resolve-Path -LiteralPath $base).Path ('selftest-' + (Get-Date).ToString('yyyyMMdd-HHmmss'))
@@ -254,7 +199,7 @@ function Invoke-SelfTest {
     }
     foreach ($s in 'prot\keep.txt', 'prot2\keep.txt', 'proj\sdc.toml', 'exist\keep.txt', 'outside\keep.txt') { New-Sentinel $s }
     New-Item -ItemType Junction -Path (Join-Path $t 'link') -Target (Join-Path $t 'prot') | Out-Null
-    $prot = if ($ProtectedForTest) { $ProtectedForTest } else { @((Join-Path $t 'prot')) }
+    $prot = @((Join-Path $t 'prot')) + @(Get-ProtectedList) + $extra
     $results = New-Object System.Collections.Generic.List[object]
     function Case([string]$name, [scriptblock]$test) {
         try { $ok = [bool](& $test); $err = '' } catch { $ok = $false; $err = $_.Exception.Message }
@@ -274,6 +219,16 @@ function Invoke-SelfTest {
     Case 'RunRoot reached through a junction into the protected tree is refused' { & $refused (Join-Path $t 'link\runs') }
     Case 'RunRoot that is the junction itself is refused' { & $refused (Join-Path $t 'link') }
     Case 'a plain folder outside every protected path is allowed' { & $allowed (Join-Path $t 'outside\runs') }
+    Case 'a UNC RunRoot is refused as a UNC path' { (Get-RunRootProblem '\\server\share\runs' $prot) -like '*UNC*' }
+    Case 'the self-test base folder guard refuses a real protected path, with and without a stand-in list' {
+        (Get-SelfTestBaseProblem 'F:\ai\dds\converter\x' @()) -and (Get-SelfTestBaseProblem 'F:\ai\dds\converter\x' @('Z:\nothing')) -and
+        (Get-SelfTestBaseProblem (Join-Path $t 'prot\x') @((Join-Path $t 'prot'))) -and -not (Get-SelfTestBaseProblem (Join-Path $t 'outside\runs') @((Join-Path $t 'prot')))
+    }
+    Case 'the purge script checks its RunRoot through the shared helper, which refuses owner data' {
+        $purge = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'profile-purge.ps1'))
+        $purge.Contains('profile-paths.ps1') -and $purge.Contains('Get-RunRootProblem $RunRoot (Get-ProtectedList)') -and
+        (Get-RunRootProblem 'B:\testdata\runs' (Get-ProtectedList)) -and (Get-RunRootProblem 'G:\Acherus' (Get-ProtectedList))
+    }
     Case 'the real protected list holds every spec 7.8 entry (string check only)' {
         $real = Get-ProtectedList
         $need = 'B:\testdata', 'G:\', 'C:\_mount', 'F:\ai\dds\converter', 'F:\ai\dds\nifparseref', 'F:\ai\dds\PBR landscape modders resource', 'F:\ai\dds\complexgrass', 'F:\ai\dds\bench\profile\mixed-corpus', (Join-Path $env:APPDATA 'sdc'), (Join-Path $env:LOCALAPPDATA 'sdc')
@@ -311,6 +266,7 @@ function Invoke-SelfTest {
     New-Meta 'othercorpus' (With 'corpus' 'F:\corpus\two')
     New-Meta 'otherexe' (With 'exeSha256' 'FFF')
     New-Meta 'failed' (With 'exitCode' 1)
+    New-Meta 'unfinished' (With 'finished' $false)
     New-NewDir (Join-Path $rr 'nometa')
     New-NewDir (Join-Path $rr 'sub')
     New-Sentinel 'copyfrom\sub\deep\meta.json'
@@ -324,6 +280,81 @@ function Invoke-SelfTest {
     Case 'CopyFrom naming an attempt of another exe is refused' { [bool](Get-CopyFromProblem $rr 'otherexe' $corpus $sha) }
     Case 'CopyFrom naming a failed attempt is refused' { [bool](Get-CopyFromProblem $rr 'failed' $corpus $sha) }
     Case 'CopyFrom naming a folder without meta.json is refused' { [bool](Get-CopyFromProblem $rr 'nometa' $corpus $sha) }
+    Case 'CopyFrom naming an unfinished attempt (exit code 0 recorded) is refused' { [bool](Get-CopyFromProblem $rr 'unfinished' $corpus $sha) }
+
+    # free-space figure: never from the corpus (it does not even exist here)
+    $eb = Join-Path $t 'expected-bytes'; New-NewDir $eb
+    $missingCorpus = Join-Path $t 'no-such-corpus'
+    $mkAttempt = {
+        param($name, $build, $bytes, $code)
+        New-NewDir (Join-Path $eb $name); New-NewDir (Join-Path $eb "$name\out")
+        Write-NewFile (Join-Path $eb "$name\out\a.dds") ('x' * $bytes)
+        Write-NewJson (Join-Path $eb "$name\meta.json") @{ corpus = $missingCorpus; build = $build; exitCode = $code }
+    }
+    Case 'the free-space figure needs -ExpectedBytes when no earlier attempt of the corpus and build exists' {
+        $null -eq (Get-ExpectedBytesFigure $eb $missingCorpus 'release' 0)
+    }
+    Case 'the free-space figure is the given -ExpectedBytes for a first attempt, without touching the corpus' {
+        (Get-ExpectedBytesFigure $eb $missingCorpus 'release' 4096) -eq 4096
+    }
+    & $mkAttempt '20260101-000001-a-warmup-1-aaaaaaaa' 'release' 100 0
+    & $mkAttempt '20260101-000002-a-warm-fresh-1-bbbbbbbb' 'release' 300 0
+    & $mkAttempt '20260101-000003-a-warm-fresh-2-cccccccc' 'base' 900 0
+    & $mkAttempt '20260101-000004-a-warm-fresh-3-dddddddd' 'release' 700 1
+    Case 'the free-space figure is the newest finished attempt of the same corpus and build (other build and failed ones ignored)' {
+        (Get-ExpectedBytesFigure $eb $missingCorpus 'release' 4096) -eq 300
+    }
+    Case 'the attempt path never walks the corpus: no Get-DirBytes call takes the corpus' {
+        $text = [IO.File]::ReadAllText($PSCommandPath)
+        -not [regex]::IsMatch($text, 'Get-DirBytes\s+\(?\$A?\.?[Cc]orpus')
+    }
+    Case 'the next attempt number counts only the same label and cohort' {
+        $d = Join-Path $t 'k'; New-NewDir $d
+        foreach ($n in '20260101-000001-a-warm-fresh-1-aaaaaaaa', '20260101-000002-b-a-warm-fresh-1-bbbbbbbb', '20260101-000003-a-warm-fresh-2-cccccccc') { New-NewDir (Join-Path $d $n) }
+        (Get-NextK $d 'a' 'warm-fresh') -eq 3
+    }
+
+    # plan stream parser (EP-T4-2b): canned events, StrictMode-safe on missing fields
+    $canned = @(
+        'not json at all',
+        '{"kind":"file_planned","job_key":"textures/a.dds","job":{"status":{"state":"ready"}}}',
+        '{"kind":"file_planned","job_key":"textures/b.dds","job":{"status":{"state":"blocked","codes":["X-1"]}}}',
+        '{"kind":"file_skipped","path":"C:/c/textures/c_ao.png","job_key":"textures/c.dds","skip":"packed_source","code":null,"reason":"packed into x"}',
+        '{"kind":"file_skipped","path":"C:/c/textures/d.png","skip":"other"}',
+        '{"kind":"file_failed","path":"C:/c/textures/e.png"}',
+        '{"kind":"file_planned","job_key":"textures/f.dds"}'
+    )
+    $parsed = ConvertFrom-PlanStream $canned 'C:\c'
+    Case 'plan stream: only ready planned jobs are expected keys (a job without a status is not)' {
+        (@($parsed.Ready) -join ',') -eq 'textures/a.dds'
+    }
+    Case 'plan stream: planned-not-written holds planned jobs only, with their status' {
+        $nw = @($parsed.NotWritten)
+        $nw.Count -eq 2 -and $nw[0].StartsWith("textures/b.dds`tblocked`t") -and $nw[1].StartsWith("textures/f.dds`t")
+    }
+    Case 'plan stream: skip events go to skipped-inputs with their input path, never into planned-not-written' {
+        $sk = @($parsed.Skipped)
+        $sk.Count -eq 2 -and $sk[0].StartsWith("textures/c_ao.png`tpacked_source") -and $sk[1].StartsWith("textures/d.png`tother") -and -not (@($parsed.NotWritten) -match 'c_ao')
+    }
+    Case 'plan stream: skip and failure events are listed with reasons, missing fields tolerated' {
+        $ev = @($parsed.Events)
+        $ev.Count -eq 3 -and $ev[2].StartsWith("failed`ttextures/e.png")
+    }
+
+    # contention: gaps in the counter stream are flagged (Minor 1)
+    $mkRow = { param($ctr) [pscustomobject]@{ t_ms = 0; ctr_ms = $ctr; total = 0; exempt = 0; other_cpu = 0; other_io = 0; sys_cpu = 0; sys_io = 0; banned = '' } }
+    $base0 = @{ otherCpuCores = 0.0; otherIoBytesPerSec = 0.0 }
+    Case 'contention: a gap over 1.5 s between counter samples makes the verdict contaminated' {
+        $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 4000)) $base0 $false
+        $v.contaminated -and $v.sampleGaps -eq 1
+    }
+    Case 'contention: one-second samples are clean' {
+        $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 3010)) $base0 $false
+        (-not $v.contaminated) -and $v.sampleGaps -eq 0
+    }
+    Case 'hashes and list files: no rows give no blank line' {
+        (Join-Lines @()) -eq '' -and (Join-Lines @('a', 'b')) -eq "a`nb`n"
+    }
 
     # cold stamps
     $now = Get-Date
@@ -366,7 +397,7 @@ function Invoke-SelfTest {
         ($a -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($b -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($a -ne $b)
     }
     Case 'the script text has no delete, move, clear, mirror, purge or forced folder creation' {
-        $text = [IO.File]::ReadAllText($PSCommandPath)
+        $text = [IO.File]::ReadAllText($PSCommandPath) + "`n" + [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'profile-paths.ps1'))
         $words = @(('Remove' + '-Item'), ('Move' + '-Item'), ('Clear' + '-Content'), ('/M' + 'IR'), ('/PUR' + 'GE'), ('/M' + 'OV'))
         $hit = @($words | Where-Object { $text.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
         $newForce = @($text -split "`n" | Where-Object { $_.Contains('New' + '-Item') -and $_.Contains('-Fo' + 'rce') })
@@ -385,8 +416,6 @@ function Invoke-SelfTest {
     exit 0
 }
 
-if ($SelfTest) { Invoke-SelfTest }
-
 # ---------------------------------------------------------------- machine state, quiet check, contention
 
 $BannedNames = @('cargo', 'rustc', 'link', 'cl', 'clippy-driver', 'tessalith', 'sdc', 'samply', 'wpr')
@@ -397,9 +426,16 @@ $DetectionLimit = 'Detection limit: a process that starts and exits between two 
 function Get-ExeSha([string]$exe) { (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash }
 
 function Sort-Ordinal($items) {
-    $a = [string[]]@($items)
+    $a = [string[]]@($items | Where-Object { $null -ne $_ })
     [Array]::Sort($a, [StringComparer]::Ordinal)
-    $a
+    , $a
+}
+
+# One line per item, each ended by a newline; nothing at all for no items (no blank line).
+function Join-Lines($items) {
+    $a = @($items | Where-Object { $null -ne $_ })
+    if ($a.Count -eq 0) { return '' }
+    ($a -join "`n") + "`n"
 }
 
 function Say([string]$m) { Write-Host ('[{0}] {1}' -f (Get-Date).ToString('HH:mm:ss'), $m) }
@@ -436,6 +472,59 @@ function Get-DirBytes([string]$dir) {
     $n
 }
 
+# Free-space basis: the newest finished attempt's out size for the same corpus and build, read from our own
+# folders; otherwise the caller's -ExpectedBytes; otherwise $null. Nothing reads the corpus outside the command.
+# shortcut: the first attempt of a corpus and build needs -ExpectedBytes by hand, upgrade when -Expected records planned output sizes.
+function Get-ExpectedBytesFigure([string]$runRoot, [string]$corpus, [string]$build, [int64]$given) {
+    foreach ($d in Get-ChildItem -LiteralPath $runRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending) {
+        $mp = Join-Path $d.FullName 'meta.json'
+        $out = Join-Path $d.FullName 'out'
+        if (-not (Test-Path -LiteralPath $mp) -or -not (Test-Path -LiteralPath $out)) { continue }
+        $m = Read-Json $mp
+        if ([string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase') -and (Get-Prop $m 'build') -eq $build -and (Get-Prop $m 'exitCode') -eq 0) {
+            return (Get-DirBytes $out)
+        }
+    }
+    if ($given -gt 0) { return $given }
+    $null
+}
+
+# The next repeat number for a label and cohort: exact name match, so label "a" does not count "b-a".
+function Get-NextK([string]$runRoot, [string]$label, [string]$cohort) {
+    $rx = '^\d{8}-\d{6}-' + [regex]::Escape($label) + '-' + [regex]::Escape($cohort) + '-\d+-[0-9a-f]{8}$'
+    @(Get-ChildItem -LiteralPath $runRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $rx }).Count + 1
+}
+
+# Parses the dry run's JSONL (spec 7.3). Missing fields are tolerated (StrictMode).
+function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
+    $corpusRoot = ([IO.Path]::GetFullPath($corpusDir).TrimEnd('\') + '\').Replace('\', '/')
+    $rel = { param($p) $s = [string]$p; $n = $s.Replace('\', '/'); if ($n.StartsWith($corpusRoot, 'OrdinalIgnoreCase')) { $n.Substring($corpusRoot.Length) } else { $s } }
+    $ready = New-Object System.Collections.Generic.List[string]
+    $notWritten = New-Object System.Collections.Generic.List[string]
+    $skipped = New-Object System.Collections.Generic.List[string]
+    $events = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $lines) {
+        if (-not $line.Trim().StartsWith('{')) { continue }
+        $e = $line | ConvertFrom-Json
+        $path = & $rel (Get-Prop $e 'path')
+        switch (Get-Prop $e 'kind') {
+            'file_planned' {
+                $status = Get-Prop (Get-Prop $e 'job') 'status'
+                $state = Get-Prop $status 'state'
+                $key = [string](Get-Prop $e 'job_key')
+                if ($state -eq 'ready') { $ready.Add($key) }
+                else { $notWritten.Add(("{0}`t{1}`t{2}" -f $key, $(if ($state) { $state } else { '(none)' }), $(if ($status) { $status | ConvertTo-Json -Compress -Depth 5 } else { '' }))) }
+            }
+            'file_skipped' {
+                $kind = Get-Prop $e 'skip'; $code = Get-Prop $e 'code'; $reason = Get-Prop $e 'reason'
+                $events.Add(("skipped`t{0}`t{1}`t{2}`t{3}" -f $path, $kind, $code, $reason))
+                $skipped.Add(("{0}`t{1}`t{2}`t{3}`t{4}" -f $path, $kind, $code, (Get-Prop $e 'job_key'), $reason))
+            }
+            'file_failed' { $events.Add(("failed`t{0}`t{1}" -f $path, (Get-Prop $e 'error'))) }
+        }
+    }
+    [pscustomobject]@{ Ready = $ready.ToArray(); NotWritten = $notWritten.ToArray(); Skipped = $skipped.ToArray(); Events = $events.ToArray() }
+}
 # One quiet check (spec 7.6): banned processes, 10 s of CPU under 5 %, free space.
 function Test-Quiet([string]$runRoot, [int64]$neededBytes) {
     $reasons = @()
@@ -505,7 +594,7 @@ function Start-ContentionStream($shared) {
             [void]$tree.Add($sh.RunnerPid)
             $all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
             do { $grew = $false; foreach ($p in $all) { if ($tree.Contains([int]$p.ParentProcessId) -and $tree.Add([int]$p.ProcessId)) { $grew = $true } } } while ($grew)
-            $exemptCpu = 0.0; $otherCpuPct = 0.0; $sysCpu = 0.0; $otherIo = 0.0; $sysIo = 0.0; $found = @()
+            $exemptCpu = 0.0; $sysCpu = 0.0; $otherIo = 0.0; $sysIo = 0.0; $found = @()
             foreach ($k in $by.Keys) {
                 $name = ($k -replace '#\d+$', '')
                 if ($name -eq '_total' -or $name -eq 'idle') { continue }
@@ -515,7 +604,7 @@ function Start-ContentionStream($shared) {
                 $io = [double]$m['io read bytes/sec'] + [double]$m['io write bytes/sec']
                 if ($tree.Contains($procId) -or $sh.Exempt.ContainsKey($procId)) { $exemptCpu += $cpu; continue }
                 if ($system -contains $name) { $sysCpu += $cpu; $sysIo += $io; continue }
-                $otherCpuPct += $cpu; $otherIo += $io
+                $otherIo += $io
                 if ($banned -contains $name) { $found += ('{0}({1})' -f $name, $procId) }
             }
             foreach ($p in Get-Process) {
@@ -526,7 +615,7 @@ function Start-ContentionStream($shared) {
             }
             $totalCores = $total / 100.0 * $sh.Logical
             $sh.Queue.Enqueue([pscustomobject]@{
-                    t_ms = $sh.Sw.ElapsedMilliseconds; total = [math]::Round($totalCores, 3); exempt = [math]::Round($exemptCpu, 3)
+                    t_ms = $sh.Sw.ElapsedMilliseconds; ctr_ms = ([DateTimeOffset]$_.Timestamp).ToUnixTimeMilliseconds(); total = [math]::Round($totalCores, 3); exempt = [math]::Round($exemptCpu, 3)
                     other_cpu = [math]::Round([math]::Max(0.0, $totalCores - $exemptCpu - $sysCpu), 3); other_io = [math]::Round($otherIo, 0)
                     sys_cpu = [math]::Round($sysCpu, 3); sys_io = [math]::Round($sysIo, 0); banned = ($found -join ';')
                 })
@@ -544,6 +633,11 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
     $sysIoMean = if ($n) { ($rows | Measure-Object sys_io -Average).Average } else { 0.0 }
     $bannedSeen = @($rows | Where-Object { $_.banned } | ForEach-Object { $_.banned } | ForEach-Object { $_ -split ';' } | Sort-Object -Unique)
     $reasons = @()
+    # EP-R4: every second. Counter timestamps further apart than 1.5 s mean seconds were not sampled.
+    $stamps = @($rows | ForEach-Object { $_.ctr_ms } | Sort-Object)
+    $gaps = 0
+    for ($i = 1; $i -lt $stamps.Count; $i++) { if ($stamps[$i] - $stamps[$i - 1] -gt 1500) { $gaps++ } }
+    if ($gaps) { $reasons += "$gaps gap(s) over 1.5 s between contention samples" }
     if ($n -eq 0) { $reasons += 'no contention samples were recorded' }
     if ($bannedSeen.Count) { $reasons += ('banned process appeared: ' + ($bannedSeen -join ', ')) }
     if (-not $calibrating -and $baseline) {
@@ -553,7 +647,7 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
         if ($spike) { $reasons += "other I/O exceeded the baseline by 200 MB/s in $spike second(s)" }
     }
     [ordered]@{
-        contaminated = ($reasons.Count -gt 0); reasons = $reasons; samples = $n; calibrating = $calibrating
+        contaminated = ($reasons.Count -gt 0); reasons = $reasons; samples = $n; sampleGaps = $gaps; calibrating = $calibrating
         otherCpuCoresMean = [math]::Round($cpuMean, 3); otherIoBytesPerSecMean = [math]::Round($ioMean, 0); otherIoBytesPerSecMax = [math]::Round($ioMax, 0)
         systemLineCpuCoresMean = [math]::Round($sysCpuMean, 3); systemLineIoBytesPerSecMean = [math]::Round($sysIoMean, 0)
         baseline = $baseline; detectionLimit = $DetectionLimit
@@ -607,32 +701,13 @@ function Invoke-Expected([hashtable]$A) {
     $c = Start-Child $A.Exe $cargs $dir @{ APPDATA = (Join-Path $dir 'appdata'); SDC_PROFILE = $null } (Join-Path $dir 'stdout.jsonl') (Join-Path $dir 'stderr.log')
     Stop-Child $c
     if ($c.Process.ExitCode -ne 0) { throw "the dry run exited with $($c.Process.ExitCode); see $dir\stderr.log" }
-    $ready = New-Object System.Collections.Generic.List[string]
-    $notWritten = New-Object System.Collections.Generic.List[string]
-    $events = New-Object System.Collections.Generic.List[string]
-    $corpusRoot = ([IO.Path]::GetFullPath($A.Corpus).TrimEnd('\') + '\').Replace('\', '/')
-    foreach ($line in [IO.File]::ReadLines((Join-Path $dir 'stdout.jsonl'))) {
-        if (-not $line.Trim().StartsWith('{')) { continue }
-        $e = $line | ConvertFrom-Json
-        $rel = { param($p) if ($p -and ([string]$p).Replace('\', '/').StartsWith($corpusRoot, 'OrdinalIgnoreCase')) { ([string]$p).Replace('\', '/').Substring($corpusRoot.Length) } else { $p } }
-        switch ($e.kind) {
-            'file_planned' {
-                $state = $e.job.status.state
-                if ($state -eq 'ready') { $ready.Add([string]$e.job_key) }
-                else { $notWritten.Add(("{0}`t{1}`t{2}" -f $e.job_key, $state, (($e.job.status | ConvertTo-Json -Compress -Depth 5)))) }
-            }
-            'file_skipped' {
-                $events.Add(("skipped`t{0}`t{1}`t{2}`t{3}" -f (& $rel $e.path), $e.skip, $e.code, $e.reason))
-                if ($e.skip -eq 'packed_source') { $notWritten.Add(("{0}`tpacked_source`tpacked into {1}" -f (& $rel $e.path), $e.job_key)) }
-            }
-            'file_failed' { $events.Add(("failed`t{0}`t{1}" -f (& $rel $e.path), $e.error)) }
-        }
-    }
-    $sorted = Sort-Ordinal $ready
-    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label).txt") (($sorted -join "`n") + "`n")
-    Write-NewFile (Join-Path $A.RunRoot "planned-not-written-$($A.Label).txt") (((Sort-Ordinal $notWritten) -join "`n") + "`n")
-    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label)-events.txt") (((Sort-Ordinal $events) -join "`n") + "`n")
-    Say ('expected {0} key(s); {1} planned but not written; {2} skip/failure event(s); dry-run folder {3}' -f $sorted.Count, $notWritten.Count, $events.Count, $dir)
+    $plan = ConvertFrom-PlanStream @([IO.File]::ReadAllLines((Join-Path $dir 'stdout.jsonl'))) $A.Corpus
+    $sorted = Sort-Ordinal $plan.Ready
+    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label).txt") (Join-Lines $sorted)
+    Write-NewFile (Join-Path $A.RunRoot "planned-not-written-$($A.Label).txt") (Join-Lines (Sort-Ordinal $plan.NotWritten))
+    Write-NewFile (Join-Path $A.RunRoot "skipped-inputs-$($A.Label).txt") (Join-Lines (Sort-Ordinal $plan.Skipped))
+    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label)-events.txt") (Join-Lines (Sort-Ordinal $plan.Events))
+    Say ('expected {0} key(s); {1} planned but not written; {2} skipped input(s); {3} skip/failure event(s); dry-run folder {4}' -f $sorted.Count, @($plan.NotWritten).Count, @($plan.Skipped).Count, @($plan.Events).Count, $dir)
 }
 
 # ---------------------------------------------------------------- one attempt (spec 7.3 to 7.7)
@@ -652,10 +727,15 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         else { $cp = Get-CopyFromProblem $A.RunRoot $A.CopyFrom $A.Corpus $exeSha; if ($cp) { $problems += "-CopyFrom $($A.CopyFrom): $cp" } }
     } elseif ($A.CopyFrom) { $problems += "-CopyFrom is refused for $cohort" }
     if ($A.Samply -and -not (Test-Path -LiteralPath $A.Samply -PathType Leaf)) { $problems += "samply not found: $($A.Samply)" }
+    # refuse at once what no amount of waiting for a quiet machine can fix (a missing stamp or predecessor)
+    if ($cohort -eq 'cold-fresh' -and -not (Get-PurgeStamp $A.RunRoot (Get-Date))) { $problems += 'no unused purge-*.json under 15 minutes old in RunRoot (the owner runs tools\profile-purge.ps1 elevated)' }
+    if ($cohort -in $WarmCohorts) { $pp = Get-PredecessorProblem $A.RunRoot $A.Corpus (Get-Date); if ($pp) { $problems += $pp } }
+    $figure = Get-ExpectedBytesFigure $A.RunRoot $A.Corpus $A.Build ([int64]$A.ExpectedBytes)
+    if ($null -eq $figure) { $problems += 'no earlier attempt of this corpus and build in RunRoot to size the free-space check from: pass -ExpectedBytes (the corpus is never read outside the command)' }
 
     $extra = @()
     if ($cohort -eq 'warm-stale') { $extra = @('--set', "mips.edge=$($A.StaleEdge)") }
-    $name = Get-AttemptName $A.Label $cohort ((@(Get-ChildItem -LiteralPath $A.RunRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*-$($A.Label)-$cohort-*" }).Count) + 1)
+    $name = Get-AttemptName $A.Label $cohort (Get-NextK $A.RunRoot $A.Label $cohort)
     $attempt = Join-Path $A.RunRoot $name
     $out = Join-Path $attempt 'out'
     $cmdArgs = Get-ConvertArgs $A.Corpus $out $A.Set $extra
@@ -664,8 +744,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $exeToRun = $A.Exe
     $fullArgs = $cmdArgs
     if ($A.Samply) { $exeToRun = $A.Samply; $fullArgs = @('record', '--save-only', '--unstable-presymbolicate', '-o', (Join-Path $attempt 'samply.json.gz'), '--', $A.Exe) + $cmdArgs }
-    $expectedBytes = if ($copies -and -not ($problems | Where-Object { $_ -like '-CopyFrom*' })) { Get-DirBytes (Join-Path (Join-Path $A.RunRoot $A.CopyFrom) 'out') } else { Get-DirBytes $A.Corpus }
-    $needed = [int64](2.5 * $expectedBytes + 20GB)
+    $needed = [int64](2.5 * [int64]$figure + 20GB)
 
     if ($dry) {
         Say "DRY RUN (nothing is created or run)"
@@ -676,9 +755,6 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         if ($copies) { Say "copy:           robocopy <$($A.RunRoot)\$($A.CopyFrom)\out> $out /E /COPY:DAT /DCOPY:T" }
         $q = Test-Quiet $A.RunRoot $needed
         Say ('quiet check: {0}; CPU {1} %; free {2:N1} GB, needed {3:N1} GB{4}' -f $(if ($q.Ok) { 'PASS' } else { 'FAIL' }), $q.CpuAvgPct, ($q.FreeBytes / 1GB), ($q.NeededBytes / 1GB), $(if ($q.Reasons) { '; ' + ($q.Reasons -join '; ') } else { '' }))
-        if ($cohort -eq 'cold-fresh') { $s = Get-PurgeStamp $A.RunRoot (Get-Date); Say ('purge stamp: {0}' -f $(if ($s) { $s } else { 'NONE usable (run tools\profile-purge.ps1 elevated)' })) }
-        if ($cohort -in $WarmCohorts -and -not $copies -and (Test-Path -LiteralPath $A.RunRoot)) { $pp = Get-PredecessorProblem $A.RunRoot $A.Corpus (Get-Date); Say ('predecessor: {0}' -f $(if ($pp) { "would refuse: $pp" } else { 'ok' })) }
-        elseif ($cohort -in $WarmCohorts -and -not $copies) { Say 'predecessor: would refuse: RunRoot does not exist yet' }
         foreach ($p in $problems) { Say "would refuse: $p" }
         Say $DetectionLimit
         return 0
@@ -690,7 +766,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $quiet = Wait-Quiet $A.RunRoot $needed
     if (-not $quiet.PassedFirstTry -and ($cohort -in $WarmCohorts)) {
         Say 'the quiet check needed a retry: running a warmup first'
-        $w = $A.Clone(); $w.Cohort = 'warmup'; $w.Build = 'release'; $w.CopyFrom = $null; $w.Calibrate = $false; $w.Samply = $null
+        $w = $A.Clone(); $w.Cohort = 'warmup'; $w.CopyFrom = $null; $w.Calibrate = $false; $w.Samply = $null
         $wr = Invoke-Attempt $w $false
         if ($wr -ne 0) { throw "the warmup ended with code $wr; stopping" }
         $qs = Get-Date
@@ -734,7 +810,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             $meta['copy'] = [ordered]@{ from = $A.CopyFrom; bytes = $bytes; ms = $csw.ElapsedMilliseconds; robocopyExit = $rc }
             if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
         }
-        if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-before.csv') ("path,size,mtime_utc_ticks`n" + ((Get-FileList $out) -join "`n") + "`n") }
+        if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-before.csv') ("path,size,mtime_utc_ticks`n" + (Join-Lines (Get-FileList $out))) }
 
         $meta['powerPlan'] = ((& powercfg /getactivescheme) -join ' ')
         $meta['defender'] = try { (Get-MpComputerStatus).RealTimeProtectionEnabled } catch { "unavailable: $($_.Exception.Message)" }
@@ -750,13 +826,13 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         $job = Start-ContentionStream $shared
         $contWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'contention.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
         $sampWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'sampler.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
-        $contWriter.WriteLine('t_ms,total_cpu_cores,exempt_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,banned')
+        $contWriter.WriteLine('t_ms,counter_unix_ms,total_cpu_cores,exempt_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,banned')
         $sampWriter.WriteLine('t_ms,pid,working_set,private_bytes,threads,cpu_ms')
         $rows = New-Object System.Collections.Generic.List[object]
         $drain = {
             $r = $null
             while ($shared.Queue.TryDequeue([ref]$r)) {
-                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7}' -f $r.t_ms, $r.total, $r.exempt, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.banned))
+                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8}' -f $r.t_ms, $r.ctr_ms, $r.total, $r.exempt, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.banned))
                 $rows.Add($r)
             }
         }
@@ -779,7 +855,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             while (-not $proc.HasExited) {
                 $now = $shared.Sw.ElapsedMilliseconds
                 if (-not $target) {
-                    $kid = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($proc.Id)" | Where-Object { $_.Name -ieq 'sdc.exe' } | Select-Object -First 1
+                    $kid = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($proc.Id)" | Where-Object { $_.Name -ieq [IO.Path]::GetFileName($A.Exe) } | Select-Object -First 1
                     if ($kid) { try { $target = [Diagnostics.Process]::GetProcessById([int]$kid.ProcessId); $shared.Exempt[[int]$kid.ProcessId] = $true } catch { } }
                 }
                 if ($target) {
@@ -834,9 +910,9 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             $key = $_.Substring($prefix.Length).Replace('\', '/').ToLowerInvariant()
             '{0},{1}' -f $key, (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        Write-NewFile (Join-Path $attempt 'hashes.csv') ("path,sha256`n" + ((Sort-Ordinal $hashRows) -join "`n") + "`n")
+        Write-NewFile (Join-Path $attempt 'hashes.csv') ("path,sha256`n" + (Join-Lines (Sort-Ordinal $hashRows)))
         $meta['ddsFiles'] = $files.Count
-        if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-after.csv') ("path,size,mtime_utc_ticks`n" + ((Get-FileList $out) -join "`n") + "`n") }
+        if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-after.csv') ("path,size,mtime_utc_ticks`n" + (Join-Lines (Get-FileList $out))) }
 
         Write-NewJson (Join-Path $A.RunRoot "last-run-$name.json") ([ordered]@{
                 attempt = $name; corpus = $A.Corpus; cohort = $cohort; finished = $true; killed = $false; exitCode = $code
@@ -858,6 +934,8 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
 
 # ---------------------------------------------------------------- entry
 
+if ($SelfTest) { Invoke-SelfTest }
+
 if (-not (Test-Label $Label)) { throw "refused: -Label must match ^[A-Za-z0-9][A-Za-z0-9-]{0,31}`$ (got '$Label')" }
 if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw "refused: exe not found: $Exe" }
 if (-not (Test-Path -LiteralPath $Corpus -PathType Container)) { throw "refused: corpus folder not found: $Corpus" }
@@ -875,5 +953,5 @@ if ($PSCmdlet.ParameterSetName -eq 'Expected') {
     Invoke-Expected @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; RunRoot = $RunRoot; Set = $Set }
     exit 0
 }
-$code = Invoke-Attempt @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; Cohort = $Cohort; Build = $Build; RunRoot = $RunRoot; Set = $Set; CopyFrom = $CopyFrom; StaleEdge = $StaleEdge; Samply = $Samply; Calibrate = [bool]$Calibrate } $dry
+$code = Invoke-Attempt @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; Cohort = $Cohort; Build = $Build; RunRoot = $RunRoot; Set = $Set; CopyFrom = $CopyFrom; StaleEdge = $StaleEdge; Samply = $Samply; Calibrate = [bool]$Calibrate; ExpectedBytes = $ExpectedBytes } $dry
 exit $code

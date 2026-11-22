@@ -18,10 +18,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'profile-paths.ps1')
+
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host 'run this from an elevated PowerShell'
     exit 1
+}
+# Spec 7.8: never write into owner data (shared check with profile-run.ps1).
+$why = Get-RunRootProblem $RunRoot (Get-ProtectedList)
+if ($why) {
+    Write-Host "refused: RunRoot $RunRoot $why"
+    exit 2
 }
 if (-not (Test-Path -LiteralPath $RunRoot -PathType Container)) {
     Write-Host "RunRoot does not exist: $RunRoot (the runner creates it; pass the same folder)"
@@ -43,16 +51,20 @@ public static class StandbyPurge {
     static extern bool AdjustTokenPrivileges(IntPtr tok, bool disall, ref TokPriv1Luid newst, int len, IntPtr prev, IntPtr relen);
     [DllImport("kernel32.dll")]
     static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr h);
     [DllImport("ntdll.dll")]
     static extern int NtSetSystemInformation(int infoClass, IntPtr info, int length);
 
     public static void EnablePrivilege(string name) {
         IntPtr tok = IntPtr.Zero;
         if (!OpenProcessToken(GetCurrentProcess(), 0x28, ref tok)) throw new Exception("OpenProcessToken failed: " + Marshal.GetLastWin32Error());
-        TokPriv1Luid tp = new TokPriv1Luid(); tp.Count = 1; tp.Attr = 2;
-        if (!LookupPrivilegeValue(null, name, ref tp.Luid)) throw new Exception("LookupPrivilegeValue failed: " + Marshal.GetLastWin32Error());
-        if (!AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero)) throw new Exception("AdjustTokenPrivileges failed: " + Marshal.GetLastWin32Error());
-        if (Marshal.GetLastWin32Error() != 0) throw new Exception("the privilege was not granted: " + Marshal.GetLastWin32Error());
+        try {
+            TokPriv1Luid tp = new TokPriv1Luid(); tp.Count = 1; tp.Attr = 2;
+            if (!LookupPrivilegeValue(null, name, ref tp.Luid)) throw new Exception("LookupPrivilegeValue failed: " + Marshal.GetLastWin32Error());
+            if (!AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero)) throw new Exception("AdjustTokenPrivileges failed: " + Marshal.GetLastWin32Error());
+            if (Marshal.GetLastWin32Error() != 0) throw new Exception("the privilege was not granted: " + Marshal.GetLastWin32Error());
+        } finally { CloseHandle(tok); }
     }
 
     // SystemMemoryListInformation = 80, command MemoryPurgeStandbyList = 4.
