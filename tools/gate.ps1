@@ -42,13 +42,13 @@ Step render3d-alone { cargo check --offline -p render3d }
 if ($failed) {
     'Tests skipped: fix fmt, clippy and the render3d check first.'
 } else {
-    Step test { cargo test --offline --workspace --no-fail-fast -- --skip render_ --test-threads=4 }
+    Step test { cargo test --offline --workspace --no-fail-fast -- --skip render_ --skip render:: --test-threads=4 }
     Step avx512 {
         $env:SDC_TEST_AVX512 = '1'
         try { cargo test --offline -p encoders-sys -p sdc --test level_identity --test bc6h --test target }
         finally { Remove-Item Env:SDC_TEST_AVX512 }
     }
-    Step render { cargo test --offline --workspace --no-fail-fast -- render_ --test-threads=1 }
+    Step render { cargo test --offline --workspace --no-fail-fast -- render_ render:: --test-threads=1 }
 }
 Step doc-dupes { py -3.13 -I "$top/tools/doc-dupes.py" --root $top }
 Step doc-lint { py -3.13 -I "$top/tools/doc-lint.py" --root $top }

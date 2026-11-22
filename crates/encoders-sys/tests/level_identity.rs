@@ -413,6 +413,7 @@ fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
         }
     }
     if record {
+        eprintln!("SDC_RECORD_LEVEL_HASHES is set: the hashes were printed, nothing was compared");
         return;
     }
     assert!(
