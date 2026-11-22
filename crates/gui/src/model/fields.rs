@@ -251,6 +251,14 @@ pub fn cube_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
 pub const LEVELS_FIELD: (&str, &str) = ("mips.levels", "Levels");
 /// The mip filter: a live combo in the basic Mipmaps group, each option locked by `filter_option_lock`.
 pub const FILTER_FIELD: (&str, &str) = ("mips.filter", "Filter");
+
+/// The mip filters a picker lists, in order, with their labels.
+pub const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
+    (MipFilter::Box, "Box"),
+    (MipFilter::Tent, "Tent"),
+    (MipFilter::Mitchell, "Mitchell"),
+    (MipFilter::Kaiser, "Kaiser"),
+];
 pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
 
 pub fn group_of(field: &str) -> &'static str {

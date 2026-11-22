@@ -252,7 +252,7 @@ fn two_selected_textures_show_the_bulk_panel_with_mixed_values() {
     let mut h = harness(m);
     h.run();
     h.get_by_label("2 textures selected");
-    assert!(h.query_all_by_label("— mixed").count() >= 1);
+    assert!(h.query_all_by_label("— mixed · applies to 2 of 2").count() >= 1);
     // The single panel's heading for the active texture is gone.
     assert!(h.query_by_label("Undecided").is_none());
 }
@@ -920,4 +920,427 @@ fn a_second_bulk_type_cannot_overwrite_a_held_choice() {
     m.undo();
     assert!(m.wait_idle(WAIT));
     assert_eq!(docs(m), before, "one Undo restores both texts");
+}
+
+/// The BC7 weighting combo of the open bulk panel, found by its row's name.
+fn weighting_combo<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+    use eframe::egui::accesskit::Role;
+    let combos: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| n.accesskit_node().label().as_deref() == Some("BC7 weighting"))
+        .collect();
+    assert_eq!(combos.len(), 1, "one BC7 weighting combo");
+    combos.into_iter().next().unwrap()
+}
+
+/// E14: the bulk BC7 weighting combo offers Perceptual to the diffuse even when the normal is the active texture,
+/// whose own lock used to disable the entry for everyone.
+#[test]
+fn perceptual_reaches_the_diffuse_with_a_normal_active() {
+    use sdc_gui::model::bulk::{plan_bulk_edit, BulkOp, Change};
+    use sdc_gui::model::fields::WEIGHTING;
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    for k in [ROCK, NORMAL] {
+        m.set_field(k, WEIGHTING, serde_json::json!("linear"));
+        assert!(m.wait_idle(WAIT));
+    }
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    assert_eq!(
+        m.selection,
+        Selection::Item(NORMAL.to_string()),
+        "the normal is active"
+    );
+    let keys = vec![ROCK.to_string(), NORMAL.to_string()];
+    assert!(keys.iter().all(|k| m.is_selected(k, false)));
+    let plan = plan_bulk_edit(
+        &m,
+        &keys,
+        WEIGHTING,
+        &BulkOp::Set(serde_json::json!("perceptual")),
+    );
+    assert_eq!(plan[0], (ROCK.to_string(), Change::Write));
+    assert!(matches!(plan[1].1, Change::Skip(_)), "{plan:?}");
+    let weighting = |m: &AppModel, k: &str| {
+        let p = m.project.as_ref().unwrap();
+        (
+            p.file_value(k, "encoder.perceptual"),
+            p.file_value(k, WEIGHTING),
+        )
+    };
+    let normal_before = weighting(&m, NORMAL);
+    let mut h = harness(m);
+    h.run();
+    weighting_combo(&h).scroll_to_me();
+    h.run();
+    weighting_combo(&h).click();
+    h.run();
+    let entry = h
+        .query_all_by_label_contains("Perceptual")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Perceptual"))
+        })
+        .expect("the Perceptual entry");
+    assert!(
+        !entry.accesskit_node().is_disabled(),
+        "enabled for the diffuse"
+    );
+    assert_eq!(
+        entry.accesskit_node().label().as_deref(),
+        Some("Perceptual (1 of 2)")
+    );
+    entry.click();
+    h.run();
+    assert!(h.state_mut().wait_idle(WAIT));
+    h.run();
+    let m = h.state();
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(ROCK, "encoder.perceptual"),
+        Some(serde_json::json!(true))
+    );
+    assert_eq!(
+        weighting(m, NORMAL),
+        normal_before,
+        "the normal is untouched"
+    );
+}
+
+/// Three normals and a plain diffuse, mipmaps on, the first `selected` of them selected: the reach of each filter,
+/// weighting, format and tag differs between the normals and the diffuse.
+fn reach_fixture(dir: &std::path::Path, selected: usize) -> (AppModel, Vec<String>) {
+    use engine::config::{GreenConvention, Subtype};
+    use image::{ImageBuffer, Rgb};
+    use sdc_gui::model::Answer;
+    let r = dir.join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    for n in ["a_n.png", "b_n.png", "c_n.png"] {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+            .save(r.join(n))
+            .unwrap();
+    }
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(r.join("plain.png"))
+        .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..sdc_gui::settings::GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.open_folder(dir.join("textures"));
+    assert!(m.wait_idle(WAIT));
+    choose_export(&mut m, dir.join("export"));
+    let keys: Vec<String> = ["a_n", "b_n", "c_n", "plain"]
+        .iter()
+        .map(|n| format!("landscape/{n}.png"))
+        .collect();
+    for k in &keys[..3] {
+        m.decide(k, Answer::Subtype(Subtype::Normal));
+        m.decide(k, Answer::Green(GreenConvention::Directx));
+    }
+    m.decide(&keys[3], Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(WAIT));
+    for k in &keys {
+        m.set_field(k, "mips.levels", serde_json::json!("full"));
+    }
+    assert!(m.wait_idle(WAIT));
+    m.click_item(&keys[0], false, false);
+    for k in &keys[1..selected] {
+        m.click_item(k, true, false);
+    }
+    assert_eq!(m.bulk_view().keys.len(), selected);
+    (m, keys[..selected].to_vec())
+}
+
+/// A harness 1100 px wide (the narrowest width the layout promises) and tall enough for every popup.
+fn narrow_harness(m: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1100.0, 1500.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
+}
+
+/// Open the popup of the bulk row `row` over `selected` textures and compare every entry (text, enabled) with the
+/// planner's count for each independently listed option. Every entry stays inside the 1100 px window. Returns the
+/// entries.
+fn popup_entries(row: &str, selected: usize) -> Vec<(String, bool)> {
+    let d = tempfile::tempdir().unwrap();
+    let (m, keys) = reach_fixture(d.path(), selected);
+    popup_of(row, m, keys)
+}
+
+/// [`popup_entries`] over the selection `keys` of `m`.
+fn popup_of(row: &str, m: AppModel, keys: Vec<String>) -> Vec<(String, bool)> {
+    use eframe::egui::accesskit::Role;
+    use sdc_gui::model::bulk::{bulk_encodings, plan_bulk_edit, BulkOp, Change};
+    use sdc_gui::model::fields::{WEIGHTING, WEIGHTING_OPTIONS};
+    use sdc_gui::model::labels::UNORM_LABEL;
+    let selected = keys.len();
+    let field = match row {
+        "Filter" => "mips.filter",
+        "BC7 weighting" => WEIGHTING,
+        "Format" => "format",
+        _ => "color.tag",
+    };
+    let options: Vec<(String, serde_json::Value)> = match field {
+        "mips.filter" => ["Box", "Tent", "Mitchell", "Kaiser"]
+            .map(|l| (l.to_string(), serde_json::json!(l.to_lowercase())))
+            .to_vec(),
+        WEIGHTING => WEIGHTING_OPTIONS
+            .iter()
+            .map(|o| (o.1.to_string(), serde_json::json!(o.0)))
+            .collect(),
+        "format" => bulk_encodings(&m, &keys)
+            .into_iter()
+            .map(|(e, l)| (l, serde_json::json!(e)))
+            .collect(),
+        // The tags the engine offers with each texture's own format (srgb only where the target writes it).
+        _ => {
+            let mut v: Vec<(String, serde_json::Value)> = vec![];
+            for k in &keys {
+                let p = m.item(k).unwrap().job.as_ref().unwrap().profile.clone();
+                for ((f, t), _) in sdc_gui::model::fields::encoding_options(m.target, &p) {
+                    let label = match t {
+                        engine::config::ColorTag::Srgb => "_SRGB",
+                        engine::config::ColorTag::Unorm => UNORM_LABEL,
+                        engine::config::ColorTag::NotApplicable => continue,
+                    };
+                    let e = (label.to_string(), serde_json::json!(t));
+                    if f == p.format && !v.contains(&e) {
+                        v.push(e);
+                    }
+                }
+            }
+            assert!(!v.is_empty());
+            v
+        }
+    };
+    let mut h = narrow_harness(m);
+    h.run();
+    let combos: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| n.accesskit_node().label().as_deref() == Some(row))
+        .collect();
+    assert_eq!(combos.len(), 1, "{row}: one combo");
+    combos[0].scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, row).click();
+    h.run();
+    let tail = format!(" of {selected})");
+    let nodes: Vec<_> = h.query_all_by_label_contains(&tail).collect();
+    assert!(
+        nodes.iter().all(|n| n.rect().max.x <= 1100.0),
+        "{row}: an entry runs past the window"
+    );
+    let mut shown: Vec<(String, bool)> = nodes
+        .iter()
+        .map(|n| {
+            (
+                n.accesskit_node().label().unwrap().to_string(),
+                n.accesskit_node().is_disabled(),
+            )
+        })
+        .collect();
+    let mut want: Vec<(String, bool)> = options
+        .iter()
+        .map(|(label, v)| {
+            let k = plan_bulk_edit(h.state(), &keys, field, &BulkOp::Set(v.clone()))
+                .iter()
+                .filter(|(_, c)| *c == Change::Write)
+                .count();
+            (format!("{label} ({k}{tail}"), k == 0)
+        })
+        .collect();
+    shown.sort();
+    want.sort();
+    assert_eq!(shown, want, "{row}");
+    shown
+}
+
+/// E14: each of the four value-dependent popups lists every option as "{option} ({k} of {n})", enabled exactly when
+/// the independent planner says a write reaches some texture.
+#[test]
+fn the_value_dependent_popups_show_every_option_with_the_planners_reach() {
+    for row in ["Filter", "BC7 weighting", "Format", "DDS tag"] {
+        popup_entries(row, 4);
+    }
+}
+
+/// E14: an option no selected texture can take is listed, disabled, with its zero (three normals: only Box, and no
+/// Perceptual).
+#[test]
+fn an_option_nothing_can_take_is_listed_disabled_with_zero() {
+    let filter = popup_entries("Filter", 3);
+    assert!(filter.contains(&("Box (3 of 3)".to_string(), false)));
+    for o in ["Tent", "Mitchell", "Kaiser"] {
+        assert!(
+            filter.contains(&(format!("{o} (0 of 3)"), true)),
+            "{o}: {filter:?}"
+        );
+    }
+    let weighting = popup_entries("BC7 weighting", 3);
+    assert!(
+        weighting.contains(&("Perceptual (0 of 3)".to_string(), true)),
+        "{weighting:?}"
+    );
+    assert!(
+        weighting.contains(&("Alpha ×8 (3 of 3)".to_string(), false)),
+        "{weighting:?}"
+    );
+}
+
+/// E14: a PBR albedo takes _SRGB and a PBR normal UNORM: the tag popup offers both, each with its own reach.
+#[test]
+fn the_tag_popup_offers_both_tags_where_the_target_writes_srgb() {
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    let keys = vec![ROCK.to_string(), NORMAL.to_string()];
+    let tag = popup_of("DDS tag", m, keys);
+    assert!(tag.iter().any(|(l, _)| l.starts_with("_SRGB (")), "{tag:?}");
+    assert!(
+        tag.iter()
+            .any(|(l, _)| l.starts_with("UNORM (as stored) (")),
+        "{tag:?}"
+    );
+}
+/// E14: at 1100 px the longest notes (the BC7 weighting and Format rows name every option) stay inside the window and
+/// keep their whole text in their name and on hover.
+#[test]
+fn a_long_reach_note_stays_inside_the_panel_with_its_text_on_hover() {
+    use sdc_gui::model::bulk::bulk_fields;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, keys) = reach_fixture(d.path(), 4);
+    // The diffuse sets its own weighting, filter and format, so each of the three rows ends in a reset button.
+    m.set_field(
+        &keys[3],
+        sdc_gui::model::fields::WEIGHTING,
+        serde_json::json!("alpha2"),
+    );
+    m.set_field(&keys[3], "mips.filter", serde_json::json!("tent"));
+    m.set_format(
+        &keys[3],
+        engine::config::Format::Bc7,
+        engine::config::ColorTag::Unorm,
+    );
+    assert!(m.wait_idle(WAIT));
+    let notes: Vec<String> = bulk_fields(&m, &keys)
+        .into_iter()
+        .filter(|r| ["BC7 weighting", "Format", "Filter"].contains(&r.label))
+        .map(|r| r.note())
+        .collect();
+    assert_eq!(notes.len(), 3);
+    let mut h = narrow_harness(m);
+    instant_tips(&h.ctx);
+    h.run();
+    for note in &notes {
+        h.get_by_label(note).scroll_to_me();
+        h.run();
+        let n = h.get_by_label(note);
+        let (left, right) = (n.rect().min.x, n.rect().max.x);
+        assert!(right <= 1100.0 - 8.0, "{note}: ends at {right}");
+        assert!(left < right, "{note}");
+        h.get_by_label(note).hover();
+        h.run();
+        assert!(
+            h.query_all_by_label(note).count() >= 2,
+            "{note}: the hover repeats it"
+        );
+    }
+    // The reset buttons after the notes stay inside the window too.
+    let resets: Vec<f32> = h.query_all_by_label("↺").map(|n| n.rect().max.x).collect();
+    assert!(resets.len() >= 3, "{resets:?}");
+    assert!(resets.iter().all(|x| *x <= 1100.0 - 8.0), "{resets:?}");
+    // The longest of them does not fit its column: it is cut, not drawn at its full width.
+    let longest = notes.iter().max_by_key(|n| n.len()).unwrap();
+    let r = h.get_by_label(longest).rect();
+    let font = eframe::egui::TextStyle::Small.resolve(&h.ctx.global_style());
+    let full = h.ctx.fonts_mut(|f| {
+        f.layout_no_wrap(longest.clone(), font, eframe::egui::Color32::WHITE)
+            .size()
+            .x
+    });
+    assert!(r.width() < full - 1.0, "cut: {} of {full}", r.width());
+}
+
+/// E14: the unit of the note's wording: groups by equal reach, two at most, then "others vary".
+#[test]
+fn a_third_group_of_reaches_reads_others_vary() {
+    use sdc_gui::model::bulk::BulkField;
+    let mut f = BulkField {
+        field: "mips.filter",
+        label: "Filter",
+        value: Some(serde_json::json!("box")),
+        applies: 4,
+        edited: 0,
+        skipped: vec![],
+        total: 4,
+        formats_differ: false,
+        option_reach: ["A", "B", "C", "D"]
+            .iter()
+            .zip([4, 3, 2, 3])
+            .map(|(l, k)| (l.to_string(), serde_json::json!(l), k))
+            .collect(),
+    };
+    assert_eq!(f.note(), "A: 4 of 4 · B, D: 3 of 4 · others vary");
+    f.option_reach.truncate(2);
+    f.value = None;
+    assert_eq!(f.note(), "— mixed · A: 4 of 4 · B: 3 of 4");
+}
+
+/// E14: a pick that reaches some texture dispatches even though the active texture (the normal) already has that
+/// value: the diffuse takes it.
+#[test]
+fn a_pick_dispatches_when_the_active_texture_already_has_the_value() {
+    use sdc_gui::model::fields::WEIGHTING;
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.set_field(NORMAL, WEIGHTING, serde_json::json!("linear"));
+    assert!(m.wait_idle(WAIT));
+    m.set_field(ROCK, WEIGHTING, serde_json::json!("alpha2"));
+    assert!(m.wait_idle(WAIT));
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    let mut h = harness(m);
+    h.run();
+    weighting_combo(&h).scroll_to_me();
+    h.run();
+    weighting_combo(&h).click();
+    h.run();
+    let entry = h
+        .query_all_by_label_contains("Linear")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Linear ("))
+        })
+        .expect("the Linear entry");
+    assert_eq!(
+        entry.accesskit_node().label().as_deref(),
+        Some("Linear (2 of 2)")
+    );
+    entry.click();
+    h.run();
+    assert!(h.state_mut().wait_idle(WAIT));
+    let m = h.state();
+    let job = m.item(ROCK).unwrap().job.clone().unwrap();
+    let shown = sdc_gui::model::fields::field_view(m.target, &job, WEIGHTING).unwrap();
+    assert_eq!(
+        shown.value,
+        serde_json::json!("linear"),
+        "the diffuse took Linear"
+    );
 }

@@ -2,8 +2,8 @@
 //! model call, made after drawing.
 use super::columns::AMBER;
 use super::settings_panel::{
-    combo, editor, field_label, likely_buttons, offered_groups, own_name_after_link, subtype_label,
-    Options, RowEdit, GROUPS,
+    editor, field_label, likely_buttons, offered_groups, own_name_after_link, reach_combo,
+    subtype_label, RowEdit, GROUPS,
 };
 use crate::look::Combo036 as _;
 use crate::model::bulk::{BulkField, BulkOp};
@@ -218,12 +218,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             }
             let (target, busy) = (model.target, model.edit_busy());
             let rows = &view.rows;
-            // The Format row offers the pairs every selected texture allows (`bulk_encodings`).
-            let formats: Options = view
-                .encodings
-                .iter()
-                .map(|(e, l)| (serde_json::json!(e), l.clone()))
-                .collect();
             // Slider state is per selection, not shared by every bulk selection.
             let id = format!(
                 "bulk-{}-{}",
@@ -266,9 +260,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                                                 })
                                                 .flatten();
                                             let job = reader.unwrap_or(&job);
-                                            if let Some(e) =
-                                                row(ui, &id, job, target, busy, r, &formats)
-                                            {
+                                            if let Some(e) = row(ui, &id, job, target, busy, r) {
                                                 acts.push(Act::Edit(r.field, e));
                                             }
                                         }
@@ -299,7 +291,6 @@ fn row(
     target: Target,
     busy: bool,
     r: &BulkField,
-    formats: &Options,
 ) -> Option<RowEdit> {
     let mut edit = None;
     let label = field_label(ui, false, r.label, field_help(r.field));
@@ -318,12 +309,15 @@ fn row(
         let (set, control) = ui
             .add_enabled_ui(r.applies > 0, |ui| {
                 let mixed = r.value.is_none() && r.applies > 0;
-                if r.field == "format" {
-                    return combo(
+                // E14: a value-dependent row lists every option with how many textures a pick reaches.
+                if !r.option_reach.is_empty() {
+                    return reach_combo(
                         ui,
                         egui::Id::unique((id, r.field)),
+                        r.field,
                         &view.value,
-                        formats,
+                        &r.option_reach,
+                        r.total,
                         mixed,
                     );
                 }
@@ -337,9 +331,21 @@ fn row(
             edit = Some(RowEdit::Set(v));
         }
     }
-    let note = ui.label(egui::RichText::new(r.note()).small().weak());
-    if !r.skipped.is_empty() {
-        note.on_hover_text(r.skipped_text());
+    // E14: the note names options and counts, so it can outgrow the column: truncated, the whole text on hover with
+    // the skip reasons under it (rule 3.4).
+    let text = r.note();
+    let note = ui.add(
+        egui::Label::new(egui::RichText::new(&text).small().weak())
+            .truncate()
+            .show_tooltip_when_elided(false),
+    );
+    if !text.is_empty() {
+        let full = if r.skipped.is_empty() {
+            text
+        } else {
+            format!("{text}\n{}", r.skipped_text())
+        };
+        note.on_hover_text(full);
     }
     if r.edited > 0
         && ui

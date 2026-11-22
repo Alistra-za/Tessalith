@@ -11,8 +11,8 @@ use crate::model::fields::{
     auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
     field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_on,
     provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM,
-    BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
-    WEIGHTING, WEIGHTING_OPTIONS,
+    BC3_SEARCH, EXR_STRAIGHT_HOVER, FILTER_OPTIONS, HELPER_HELP, NOT_VALID, PARALLAX_HOVER,
+    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::labels::{
@@ -66,13 +66,6 @@ pub(super) const CONTROL_MIN: f32 = super::set_editor::COMBO_W;
 pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
 const MAX_LEVELS: u32 = 13;
-
-const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
-    (MipFilter::Box, "Box"),
-    (MipFilter::Tent, "Tent"),
-    (MipFilter::Mitchell, "Mitchell"),
-    (MipFilter::Kaiser, "Kaiser"),
-];
 
 /// An enum's options as (JSON value, label).
 pub type Options = Vec<(Value, String)>;
@@ -708,6 +701,63 @@ fn weighting_combo(
         i.current_text_value = Some(shown.to_string());
         i
     });
+    (picked, r)
+}
+
+/// Shown on an entry no selected texture can take.
+const NO_REACH_HOVER: &str = "None of the selected textures can take this";
+
+/// E14: the bulk combo of a value-dependent row (filter, BC7 weighting, Format, DDS tag). Each entry reads "{option}
+/// ({k} of {total})" and is enabled when a write of it reaches some texture (`BulkField::option_reach`); a pick
+/// dispatches when it differs from the row's one value (a mixed row has none). The closed combo shows the bare option.
+pub(super) fn reach_combo(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    field: &str,
+    current: &Value,
+    reach: &[(String, Value, usize)],
+    total: usize,
+    mixed: bool,
+) -> (Option<Value>, egui::Response) {
+    let shown = if mixed {
+        egui::RichText::new("— mixed").weak()
+    } else if current.is_null() {
+        egui::RichText::new("— not set").weak()
+    } else {
+        match reach.iter().find(|(_, v, _)| v == current) {
+            Some((l, _, _)) => egui::RichText::new(l),
+            None => egui::RichText::new(display_value(current)),
+        }
+    };
+    let mut picked = None;
+    let r = egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .show_ui_036(ui, |ui| {
+            for (label, v, k) in reach {
+                let on = *k > 0;
+                let text = format!("{label} ({k} of {total})");
+                let r = ui.add_enabled(on, egui::Button::selectable(!mixed && v == current, text));
+                let hover = if field == WEIGHTING {
+                    WEIGHTING_OPTIONS
+                        .iter()
+                        .find(|o| v.as_str() == Some(o.0))
+                        .map(|o| o.2)
+                } else if field == "color.tag" && *v == json!(ColorTag::Unorm) {
+                    Some(UNORM_HOVER)
+                } else {
+                    None
+                };
+                let r = match (on, hover) {
+                    (false, _) => r.on_disabled_hover_text(NO_REACH_HOVER),
+                    (true, Some(h)) => r.on_hover_text(h),
+                    (true, None) => r,
+                };
+                if on && r.clicked() && v != current {
+                    picked = Some(v.clone());
+                }
+            }
+        })
+        .response;
     (picked, r)
 }
 
