@@ -1,9 +1,5 @@
 //! Fast re-plan fixture (R2 §6): one generated cs project with every set shape the skeleton patch and the partial
-//! plan must get right. Used by `engine::skeleton`'s lib tests (through `#[path]`) and by `tests/fast_replan.rs`.
-#![allow(
-    dead_code,
-    reason = "shared by engine::skeleton's unit tests, alloc_budget and fast_replan; each uses a subset (alloc_budget never reads FastFixture::dir)"
-)]
+//! plan must get right. Used by `engine::skeleton`'s lib tests (through `#[path]`), `tests/fast_replan.rs` and `tests/alloc_budget.rs`.
 use engine::api::BatchRequest;
 use engine::config::Target;
 use engine::presets::ConfigFile;
@@ -53,6 +49,10 @@ subtype = "skin_albedo"
 
 /// A temp project and the request that plans it.
 pub struct FastFixture {
+    #[allow(
+        dead_code,
+        reason = "alloc_budget includes this file and never reads `dir`; the skeleton unit tests and fast_replan read it"
+    )]
     pub dir: tempfile::TempDir,
     pub req: BatchRequest,
 }

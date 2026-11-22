@@ -579,13 +579,6 @@ pub fn process_file(
     // Validate the exact bytes about to be written: `validate` parses them with the engine's DDS reader (spec §5.8).
     // Skipped, it only reads, so the bytes written are the same.
     let validated = req.validate || always_validated(p.subtype);
-    #[cfg_attr(
-        not(feature = "test-hooks"),
-        allow(
-            unused_mut,
-            reason = "only the test hook (force_validation_failure_for_test) mutates the report"
-        )
-    )]
     let mut report = if validated {
         enter(Stage::Validate);
         validate_prepared(&bytes, p, &prep)

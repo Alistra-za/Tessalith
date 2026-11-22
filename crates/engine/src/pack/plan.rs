@@ -951,7 +951,7 @@ pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
 /// is flat (Note HC1). `output_root` turns set keys into the set ids a fuzz-map message names.
 #[allow(
     clippy::too_many_arguments,
-    reason = "pass 1's inputs, each documented above and owned separately by the planner (context, sets, files, the jobs edited in place, failed and cancelled paths, skipped, packed_outputs, derive_heights, flat_b, flat_a, fills, output_root)"
+    reason = "pass 1's inputs, owned separately by the planner (context, sets, files, the jobs edited in place, failed and cancelled paths, skipped, packed_outputs, derive_heights, flat_b, flat_a, fills, output_root)"
 )]
 pub fn plan_packing(
     ctx: &ResolveCtx,

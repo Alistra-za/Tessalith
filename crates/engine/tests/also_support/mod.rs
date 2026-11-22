@@ -3,7 +3,7 @@
 //! `textures/clutter/plate` (a raw `_height`: cs packs a `_p`, vanilla a complex `_m`, Note AZ2), in `<tmp>/mods/Mod`.
 #![allow(
     dead_code,
-    reason = "shared by also_export, also_export_bc1 and events_manifest; each uses a subset (also_export_bc1 never calls dirt or record; events_manifest none of steel, dirt, plate, dds_files or BOTH)"
+    reason = "shared by also_export, also_export_bc1 and events_manifest; each uses a subset"
 )]
 use engine::also::*;
 use engine::api::*;

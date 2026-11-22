@@ -4184,7 +4184,7 @@ pub(crate) fn pre_edit_shaders(
 /// against the set it was typed with (`member_set`, Fuzz-1a's `f` from `f_sets`).
 #[allow(
     clippy::too_many_arguments,
-    reason = "the shader map check's inputs for one set, each a separate borrow from the planner's locals and registry (the resolve context, the set, the f-set ids, files, job index, skipped files, alias table, target), read by its only caller"
+    reason = "the shader map check's inputs for one set, each a separate borrow from the planner's locals and registry (the resolve context, the set, the f-set ids, files, job index, skipped files, alias table, target); the function reads them, and its caller reads the result"
 )]
 fn map_members(
     ctx: &ResolveCtx,
