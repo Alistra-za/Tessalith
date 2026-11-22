@@ -26,6 +26,7 @@
 // #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
 // #5 get_span returns the float span (it truncated through an int).
 // #1 block_quant keeps each texel's error as a float (an int overflowed on high-contrast blocks).
+// #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2462,6 +2463,14 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     float err = block_quant(qblock, state->block, 4, ep, 0, 3);
     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
 
+    // sdc patch 0004: keep the best of the first quantisation and every refinement (upstream submitted the last).
+    // Each pass still refits from the previous pass's indices, so the result is never worse than upstream's.
+    float best_err = err;
+    int best_qep[8];
+    uint32 best_qblock[2];
+    for (uniform int i = 0; i < 8; i++) best_qep[i] = qep[i];
+    for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
+
     // refine
     uniform int refineIterations = state->refineIterations_1p;
     for (uniform int i = 0; i<refineIterations; i++)
@@ -2470,12 +2479,19 @@ void bc6h_enc_1p(bc6h_enc_state state[])
         ep_quant_dequant_bc6h(state, qep, ep, 1);
         err = block_quant(qblock, state->block, 4, ep, 0, 3);
         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
+
+        if (err < best_err) // sdc patch 0004
+        {
+            best_err = err;
+            for (uniform int j = 0; j < 8; j++) best_qep[j] = qep[j];
+            for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
+        }
     }
 
-    if (err < state->best_err)
+    if (best_err < state->best_err) // sdc patch 0004: the best, not the last
     {
-        state->best_err = err;
-        bc6h_code_1p(state->best_data, qep, qblock, state->mode);
+        state->best_err = best_err;
+        bc6h_code_1p(state->best_data, best_qep, best_qblock, state->mode);
     }
 }
 

@@ -100,8 +100,12 @@ out of mode 2 at Fast; it now returns the float span. Proof test: `mode_2_takes_
 Fix #5 changes BC6H bytes (Note LM4). Fix #1: `block_quant` stored each texel's float error in an `int`, which overflows
 above 2^31 (a black texel beside one brighter than about 1344.0), and the overflowed value beat every honest candidate;
 it now keeps the float. Proof test: `black_beside_bright_keeps_both` (on the pre-fix objects it failed at Slow and
-Veryslow, and at VeryslowPeak on the one-black block). Fixes #5 and #1 change BC6H bytes (Note LM4, LM7): the pins in
-`tests/bc6h.rs` and the measured images (per-level counts in docs/research/encoder-benchmark.md).
+Veryslow, and at VeryslowPeak on the one-black block). Fix #3: `bc6h_enc_1p` submitted its last refinement pass, which
+can be worse than its first quantisation or an earlier pass; it still refines in upstream's order but submits the best.
+Proof test: `refinement_never_ends_worse_than_veryfast` (on the pre-fix objects Basic and Veryslow ended certainly worse
+than Veryfast on seeded blocks). Veryfast and Fast do not refine a one-region encode, so their bytes did not change.
+Fixes #5, #1 and #3 change BC6H bytes (Note LM4, LM7, LM8): the pins in `tests/bc6h.rs` and the measured images
+(per-level counts in docs/research/encoder-benchmark.md).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

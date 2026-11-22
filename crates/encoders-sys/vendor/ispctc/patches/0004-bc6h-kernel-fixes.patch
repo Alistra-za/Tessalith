@@ -1,8 +1,8 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index 9a8a776e..386d3c90 100644
+index 9a8a776e..bacc54c5 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-@@ -20,6 +20,13 @@
+@@ -20,6 +20,14 @@
  // the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
  // marked "sdc patch 0003". Without the define the file compiles as before.
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -12,11 +12,12 @@ index 9a8a776e..386d3c90 100644
 +// #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
 +// #5 get_span returns the float span (it truncated through an int).
 +// #1 block_quant keeps each texel's error as a float (an int overflowed on high-contrast blocks).
++// #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
 +///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
  #ifndef ISPC_UINT_IS_DEFINED
  //these are defined in ISPC version 1.13.0 and later
-@@ -1297,7 +1304,7 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
+@@ -1297,7 +1305,7 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
  			err1 += sq(dec_v1 - block[k+p*16]);
  		}
  		
@@ -25,7 +26,7 @@ index 9a8a776e..386d3c90 100644
  		int best_q = q1;
  		if (err0<err1)
  		{
-@@ -2239,7 +2246,7 @@ inline uniform float get_span(uniform int mode)
+@@ -2239,7 +2247,7 @@ inline uniform float get_span(uniform int mode)
          6,                  // (13) 3 / 16
      };
  
@@ -34,7 +35,7 @@ index 9a8a776e..386d3c90 100644
      assert(span > 0);
      return span;
  }
-@@ -2438,8 +2445,9 @@ void bc6h_enc_2p(bc6h_enc_state state[])
+@@ -2438,8 +2446,9 @@ void bc6h_enc_2p(bc6h_enc_state state[])
          part_list[part] = part + bound * 64;
      }
      
@@ -46,7 +47,45 @@ index 9a8a776e..386d3c90 100644
  }
  
  void bc6h_enc_1p(bc6h_enc_state state[])
-@@ -3224,7 +3232,7 @@ void bc6h_bounds(bc6h_enc_state state[])
+@@ -2454,6 +2463,14 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+     float err = block_quant(qblock, state->block, 4, ep, 0, 3);
+     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
+ 
++    // sdc patch 0004: keep the best of the first quantisation and every refinement (upstream submitted the last).
++    // Each pass still refits from the previous pass's indices, so the result is never worse than upstream's.
++    float best_err = err;
++    int best_qep[8];
++    uint32 best_qblock[2];
++    for (uniform int i = 0; i < 8; i++) best_qep[i] = qep[i];
++    for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
++
+     // refine
+     uniform int refineIterations = state->refineIterations_1p;
+     for (uniform int i = 0; i<refineIterations; i++)
+@@ -2462,12 +2479,19 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+         ep_quant_dequant_bc6h(state, qep, ep, 1);
+         err = block_quant(qblock, state->block, 4, ep, 0, 3);
+         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
++
++        if (err < best_err) // sdc patch 0004
++        {
++            best_err = err;
++            for (uniform int j = 0; j < 8; j++) best_qep[j] = qep[j];
++            for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
++        }
+     }
+ 
+-    if (err < state->best_err)
++    if (best_err < state->best_err) // sdc patch 0004: the best, not the last
+     {
+-        state->best_err = err;
+-        bc6h_code_1p(state->best_data, qep, qblock, state->mode);
++        state->best_err = best_err;
++        bc6h_code_1p(state->best_data, best_qep, best_qblock, state->mode);
+     }
+ }
+ 
+@@ -3224,7 +3248,7 @@ void bc6h_bounds(bc6h_enc_state state[])
      state->max_span = 0;
      state->max_span_idx = 0;
  

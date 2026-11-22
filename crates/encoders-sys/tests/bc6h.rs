@@ -94,15 +94,15 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Basic,
-        "77f47d088a051ee81193bbde671958d3ce11452ddc7f1d6a9c21fe8e38361a8e",
+        "a3815f73f1faa1991f89bd2d251f0c43d623f382c4e76aad0eb0ce405e001177",
     ),
     (
         Bc6hLevel::Slow,
-        "5cff76d6f54850151c3859ebbe25476bd014c83c85c97dffa6f48e39bb8c8732",
+        "4f5a52c6d602af099219a8a1461e96da250d3db076f6f1e5524baa2f1cf7a993",
     ),
     (
         Bc6hLevel::Veryslow,
-        "27cd50278c489eddbe355e00d270a00f24930bae01acddb7d96808dcd3f045f1",
+        "27319321e56deb1d397198fe8dcafac45f704c3ac0f96b93f1246b22f00357cd",
     ),
 ];
 
@@ -119,15 +119,15 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Basic,
-        "40490aad6ef3be2d6b4012023c76ade0fa8e4bdc4a3ca94e99f3ee0be00b731f",
+        "1ac7db96d1a36c074cfa8e2339070880ee11ec9bed41c515ea39ef51990629d7",
     ),
     (
         Bc6hLevel::Slow,
-        "0931a03ce5cb1b95461b162cfa56643a668351303d67bd89530b1697efe47ad8",
+        "f31409ce5530d9b9713b882207443b9fc1c5da53ad7b92f3508f25db605cdd17",
     ),
     (
         Bc6hLevel::Veryslow,
-        "815cd489e79d4bea56815d93a7c4be6483251d11c945aa2d7d4940df0f370978",
+        "4daf6ac2b51011af4988808a54a67a7a1559f7de5e8928ec953f5187bf6ff7ff",
     ),
 ];
 
@@ -144,15 +144,15 @@ const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Basic,
-        "3aec6443b998926eaf19c6609716b69089a19649524636cdb2ae44c140988765",
+        "56266f916dbd71a7c5fe23639d29a5a9acef72d9dad5850061e32dba275ee9ef",
     ),
     (
         Bc6hLevel::Slow,
-        "082cf8a89f677a03cf1c926dd9983fab11773a85c0e11d972918489ba3de6ef0",
+        "b84cd4a2bdbcfce6314d942a849de18c724f2e93eab4ab73e18aa4613ce1605d",
     ),
     (
         Bc6hLevel::Veryslow,
-        "a81ae4aaa7f9603d105dd5dbb78d0f39936f29e8f65a2b961329a2d592b90fca",
+        "842b34375b4e0526d4387c6cab6fcd6515b716fb4a0e4c01ebfe9571debab3c7",
     ),
 ];
 
@@ -200,9 +200,9 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
 /// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
 const RECORDED_PEAK: [&str; 3] = [
-    "0d45a9e2ddf853c1b8a332590fc7100a95d24837d88e3526d9a17b976337af64",
-    "7ef6b1145bc2887e96e1c841d4932961c757ae67cebbed49a63a53971a5cd8c8",
-    "a76716efee2ffafc3780cc95f8611527cc0c8f4e62022c9896aca54cb9b0870b",
+    "f382b224094a93524ef6594d352ef32a977b65bfbba46c619214797f426d6e3b",
+    "a36d9aaa489ef3dc9d1bbbd5cb52aec4babca0f3584d8b8ad471d9a73e6ff74b",
+    "62840b034aebaceeb13faf2765aac521873c5ea83f72baa5d68e5a3607725a9e",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -548,6 +548,211 @@ fn random_blocks_encode_at_every_level_on_every_path() {
             }
         }
     }
+}
+
+/// Bounds (E_lo, E_hi) on the encoder's own error for one encoded block, read from the output bytes alone, in half-code
+/// units (the encoder's UF16 error over the common factor (64/31)^2). The encoder scores the squared error of the
+/// decoded UF16 interpolant u against `h_src * 64 / 31`, unweighted over R, G and B. The decoder writes
+/// `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1): with d = h - h_src a channel's error lies between d^2
+/// and (d + 1)^2 (survey #3).
+fn err_bounds(src: &[[u16; 4]; 16], dec: &[[u16; 3]; 16]) -> (f64, f64) {
+    let (mut lo, mut hi) = (0i64, 0i64);
+    for (s, d) in src.iter().zip(dec) {
+        for c in 0..3 {
+            let d = d[c] as i64 - s[c] as i64;
+            let (a, b) = (d * d, (d + 1) * (d + 1));
+            lo += a.min(b);
+            hi += a.max(b);
+        }
+    }
+    (lo as f64, hi as f64)
+}
+
+/// A deterministic HDR block from index `i` (half codes in 0x2000..=0x7000, alpha 1.0), for the refinement search.
+/// Half the blocks are a gradient along a random direction across the block, with a random colour direction and up
+/// to 64 half codes of noise; the other half draw each channel from a random range. One block in eight gets one
+/// outlier texel. The widest channel spans 600..=12288 half codes, so the one-region modes in play are 10 to 12.
+/// Integer arithmetic only, so the blocks are the same on every machine.
+fn candidate(i: u32) -> [[u16; 4]; 16] {
+    const LO: i64 = 0x2000;
+    const HI: i64 = 0x7000;
+    let mut r = Lcg(i.wrapping_mul(0x9E37_79B9) ^ 0x2C1B_3C6D);
+    r.next();
+    let one = f16::ONE.to_bits();
+    let mut px = [[0, 0, 0, one]; 16];
+    let span = r.range(600, 0x3000) as i64;
+    let widest = (r.next() % 3) as usize;
+    if r.next().is_multiple_of(2) {
+        // A gradient: t = the texel's position along (dx, dy), 0..=1 over the block, times each channel's amplitude.
+        let (mut dx, dy) = (r.range(0, 6) as i64 - 3, r.range(0, 6) as i64 - 3);
+        if dx == 0 && dy == 0 {
+            dx = 1;
+        }
+        let pos: [i64; 16] = std::array::from_fn(|t| (t % 4) as i64 * dx + (t / 4) as i64 * dy);
+        let (pmin, pmax) = (*pos.iter().min().unwrap(), *pos.iter().max().unwrap());
+        let amp: [i64; 3] = std::array::from_fn(|c| {
+            if c == widest {
+                span
+            } else {
+                span * (r.range(0, 200) as i64 - 100) / 100
+            }
+        });
+        let noise = r.range(0, 64) as i64;
+        for c in 0..3 {
+            // The base keeps base + amp * t inside LO..=HI for every t in 0..=1.
+            let (lo, hi) = (LO - amp[c].min(0), HI - amp[c].max(0));
+            let base = r.range(lo as u32, hi as u32) as i64;
+            for (t, p) in pos.iter().enumerate() {
+                let v =
+                    base + amp[c] * (p - pmin) / (pmax - pmin) + r.range(0, noise as u32) as i64
+                        - noise / 2;
+                px[t][c] = v.clamp(LO, HI) as u16;
+            }
+        }
+    } else {
+        // A random range per channel; the widest channel spans `span`, the others up to it.
+        for c in 0..3 {
+            let s = if c == widest {
+                span
+            } else {
+                r.range(0, span as u32) as i64
+            };
+            let lo = r.range(LO as u32, (HI - s) as u32);
+            for texel in px.iter_mut() {
+                texel[c] = r.range(lo as u32, lo as u32 + s as u32);
+            }
+        }
+    }
+    if r.next().is_multiple_of(8) {
+        let t = (r.next() % 16) as usize;
+        for v in &mut px[t][..3] {
+            *v = r.range(LO as u32, HI as u32);
+        }
+    }
+    px
+}
+
+/// The candidates of `lo..hi` (at most `STRIP_BLOCKS`) whose Basic or Veryslow encode on `target` ends certainly worse
+/// than Veryfast's: (index, level, the level's E_lo, Veryfast's E_hi).
+fn refine_violations(lo: u32, hi: u32, target: IspcTarget) -> Vec<(u32, Bc6hLevel, f64, f64)> {
+    let blocks: Vec<[[u16; 4]; 16]> = (lo..hi).map(candidate).collect();
+    let mut n = 0;
+    let px = strip(|| {
+        // A short last chunk repeats its first block to fill the strip.
+        let c = blocks.get(n).unwrap_or(&blocks[0]);
+        n += 1;
+        std::array::from_fn(|t| [c[t][0], c[t][1], c[t][2]])
+    });
+    let encode = |level| {
+        let mut out = vec![0u8; STRIP_BLOCKS * 16];
+        bc6h_compress_rows_on(&px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+        out
+    };
+    let bounds = |out: &[u8], b: usize| {
+        let bytes: [u8; 16] = out[b * 16..b * 16 + 16].try_into().unwrap();
+        err_bounds(&blocks[b], &decode_halves(&bytes))
+    };
+    let veryfast = encode(Bc6hLevel::Veryfast);
+    let others = [
+        (Bc6hLevel::Basic, encode(Bc6hLevel::Basic)),
+        (Bc6hLevel::Veryslow, encode(Bc6hLevel::Veryslow)),
+    ];
+    let mut found = Vec::new();
+    for b in 0..blocks.len() {
+        let (_, vf_hi) = bounds(&veryfast, b);
+        for (level, out) in &others {
+            let (e_lo, _) = bounds(out, b);
+            if e_lo > vf_hi {
+                found.push((lo + b as u32, *level, e_lo, vf_hi));
+            }
+        }
+    }
+    found
+}
+
+/// Indices of `candidate` blocks where a pre-fix kernel ended Basic or Veryslow certainly worse than Veryfast on the
+/// AVX2 path (printed by `search_refine_witnesses`).
+const REFINE_WITNESSES: &[u32] = &[25, 95, 292, 364, 395, 432, 643, 678];
+
+/// Prints up to eight `candidate` indices in `0..1 << 20` where Basic or Veryslow ends certainly worse than Veryfast
+/// on the AVX2 path (`E_lo(level) > E_hi(Veryfast)`), each re-checked through a one-block encode, then the count
+/// scanned and the time. Each hit is a witness for `REFINE_WITNESSES`.
+#[test]
+#[ignore = "search for refine witnesses: run with --ignored --nocapture after a kernel change"]
+fn search_refine_witnesses() {
+    const END: u32 = 1 << 20;
+    const CHUNK: u32 = STRIP_BLOCKS as u32;
+    let target = IspcTarget::Avx2;
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
+    let start = std::time::Instant::now();
+    let mut hits = Vec::new();
+    let mut scanned = 0;
+    while scanned < END && hits.len() < 8 {
+        let mut batch: Vec<_> = std::thread::scope(|s| {
+            let jobs: Vec<_> = (0..threads)
+                .map(|t| scanned + t * CHUNK)
+                .filter(|&lo| lo < END)
+                .map(|lo| s.spawn(move || refine_violations(lo, (lo + CHUNK).min(END), target)))
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+        });
+        scanned = (scanned + threads * CHUNK).min(END);
+        batch.sort_by_key(|h| h.0);
+        for (i, level, e_lo, vf_hi) in batch {
+            if hits.len() == 8 {
+                break;
+            }
+            let px = candidate(i);
+            let one = |l| err_bounds(&px, &decode_halves(&encode_block(&px, l, target)));
+            let (lo1, _) = one(level);
+            let (_, hi1) = one(Bc6hLevel::Veryfast);
+            if lo1 > hi1 {
+                println!("witness {i} {level:?}: E_lo {e_lo} > Veryfast E_hi {vf_hi}");
+                if !hits.contains(&i) {
+                    hits.push(i);
+                }
+            } else {
+                println!("{i} {level:?}: the strip encode violates, the one-block encode does not");
+            }
+        }
+    }
+    println!(
+        "scanned {scanned} candidates in {:.1} s on {target:?}; witnesses {hits:?}",
+        start.elapsed().as_secs_f64()
+    );
+}
+
+/// Survey #3. Veryfast writes the first one-region candidate that Basic and Veryslow also make: the same mode choice,
+/// the same `qbounds`, unrefined (Veryfast has no refinement and nothing runs before its one-region encode). Basic
+/// keeps the better of its two-region result and its submitted one-region result, and Veryslow the best of all its
+/// candidates. So Basic and Veryslow can end worse than Veryfast only if a refinement pass made the one-region result
+/// worse and that pass was submitted. The bounds come from the output bytes (`err_bounds`); they could fail falsely
+/// only if the encoder's f32 error sat within f32 rounding of Veryfast's E_hi, so there is no tolerance.
+#[test]
+fn refinement_never_ends_worse_than_veryfast() {
+    let mut failures = Vec::new();
+    for target in paths() {
+        for &i in REFINE_WITNESSES {
+            let px = candidate(i);
+            let bounds = |l| err_bounds(&px, &decode_halves(&encode_block(&px, l, target)));
+            let (vf_lo, vf_hi) = bounds(Bc6hLevel::Veryfast);
+            for level in [Bc6hLevel::Basic, Bc6hLevel::Veryslow] {
+                let (lo, hi) = bounds(level);
+                if lo > vf_hi {
+                    failures.push(format!(
+                        "witness {i} {target:?} {level:?}: E_lo {lo} > Veryfast E_hi {vf_hi} \
+                         ({level:?} E_hi {hi}, Veryfast E_lo {vf_lo})"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} ends worse than Veryfast:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[test]
