@@ -37,7 +37,7 @@ Build folders fill the drive fast: one reaches 50–170 GB.
 ## Hard rules
 - **Goldens are byte-identical.** Encoded output must not change unless a DECISIONS note says why. If a golden would change, stop and say so.
 - **Tests never touch the real user data folders**: `%LOCALAPPDATA%\sdc` (scan.db, logs) and `%APPDATA%\sdc` (gui.toml, presets). Use temp dirs.
-- **Tests that need the owner's game or mod data** stay `#[ignore = "<what it needs>"]` or gated on an `SDC_*` environment variable, and a gated test prints its reason (`eprintln!("skipped: ...")`) before it returns (`it::every_early_return_in_a_test_says_why`, Note LH3).
+- **Tests that need the owner's game or mod data** stay `#[ignore = "<what it needs>"]` or gated on an `SDC_*` environment variable, and a gated test prints its reason (`eprintln!("skipped: ...")`) before it returns (`it::return_scan::every_early_return_in_a_test_says_why`, Note LH3).
 - **No game or mod assets in the repo**: no `.dds`, `.bsa`, `.esp` or real textures. Fixtures are generated in tests. The one exception is the pinned CS shader source in `crates/render3d/shaders/cs/` (Note GT). The pre-commit hook fails a staged `.dds`, `.bsa`, `.ba2`, `.esp`, `.esm` or `.esl`.
 - **Files the user edits are written with `engine::dds::write_atomic`**, which flushes before the rename (it lives in `texcore::dds`; the engine re-exports it). That covers `sdc.toml`, `sdc-project.toml`, `gui.toml`, presets and exported JSON. DDS outputs use it too (owner decision, Note BC10).
 - **Never overwrite a file Tessalith did not write.** This matters most next to PGPatcher's outputs. Exports check the recorded hash first, as the PGPatcher, CS PBR and complex-material JSON exports do.
