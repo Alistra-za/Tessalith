@@ -1109,7 +1109,7 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 ///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
 /// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
-///   version, against a job at `max` (Note LI4). Else the record's own profile (`raw["profile"]`, which must hash to
+///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile (`raw["profile"]`, which must hash to
 ///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
 ///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
 ///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).

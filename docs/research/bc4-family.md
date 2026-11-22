@@ -171,11 +171,11 @@ Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo 
 
 | format | max over `slowest` (radius 10) |
 |---|---|
-| BC3 (alpha and colour) | about 2x |
-| BC4 | about 4x |
-| BC5 | about 5x |
+| BC3 (alpha and colour) | 1.53x (about 2x) |
+| BC4 | 4.47x (about 4x) |
+| BC5 | 4.71x (about 5x) |
 
-BC4 and BC5 are far from the bench's 2.4x above (about 4 and 5 times `slowest`); the cause was not investigated (a different image mix, and the bench's figure is for its Rust reference against v4, not for `bcenc`). BC3 is much lower, as expected, since its colour half dominates (about 2 times; see the end-to-end table below). On the synthetic blocks the example generates when it gets no PNG (2,200 blocks, the hard classes of `gen::bc4_classes`) the ratios are about 7x, 10x and 10x; those blocks are not texture content, so they are not quoted elsewhere.
+BC4 and BC5 are far from the bench's 2.4x above (about 4 and 5 times `slowest`); the cause was not investigated (a different image mix, and the bench's figure is for its Rust reference against v4, not for `bcenc`). BC3 is much lower, as expected, since its colour half dominates (about 2 times; see the end-to-end table below). On the synthetic blocks the example generates when it gets no PNG (2,200 blocks, the hard classes of `gen::bc4_classes`) the ratios are 6.6x, 9.6x to 10.8x (two runs) and 13.4x (about 7x, 10x and 10x); those blocks are not texture content, so they are not quoted elsewhere.
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
