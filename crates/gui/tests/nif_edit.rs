@@ -18468,8 +18468,24 @@ fn a_shape_link_saves_the_open_draft_before_switching() {
     m.open_edit();
     gloss_drag(&mut m, 30.5);
     m.show_shape(x, block, name.clone());
+    assert!(m.edit.is_none(), "the session ended");
     assert_eq!(m.selected_nif, Some(x));
     assert_eq!(m.card_sel, Some((block, name)));
+    // The draft is on disk: a session that reads it fresh, with nothing in memory, gets the drag.
+    let draft = draft_path(d.path(), "meshes/y.nif").unwrap();
+    let doc = EditDoc::from_text(&std::fs::read_to_string(&draft).unwrap()).unwrap();
+    let saved: Vec<f32> = doc
+        .ops
+        .iter()
+        .map(|o| match &o.op {
+            Op::SetField {
+                value: Value::F32(v),
+                ..
+            } => f32::from_bits(*v),
+            o => panic!("{o:?}"),
+        })
+        .collect();
+    assert_eq!(saved, [30.5], "the draft file holds the drag");
     m.select_nif(y);
     m.open_edit();
     assert_eq!(

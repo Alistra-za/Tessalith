@@ -312,7 +312,7 @@ fn filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a
     v.remove(0)
 }
 
-/// The filter combos drawn now: a combo's accessible text is its value ("Sub-type: Any").
+/// The filter combos drawn now: a combo's accessible text is its value ("Filter by type: Any").
 fn filter_combos(h: &Harness<'static, AppModel>) -> Vec<String> {
     let names = ["Filter by type", "Output format", "Set membership", "Sort"];
     h.query_all_by_role(egui::accesskit::Role::ComboBox)

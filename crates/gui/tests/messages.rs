@@ -1097,6 +1097,83 @@ fn the_final_plan_announces_once_after_a_partial_and_an_intermediate_plan() {
     assert!(m.logged_set_target(&action).is_some(), "Show resolves");
 }
 
+/// Review Focus 9: a partial that applies while a type choice waits announces nothing and keeps the choice queued;
+/// the full plan announces it once. The alpha edit after the choice makes the choice's own partial stale, and its own
+/// partial carries both `[files]` entries onto the waiting file's set, which the open already landed.
+#[test]
+fn a_partial_that_applies_keeps_the_choice_for_the_final_plan() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let job = |m: &AppModel| {
+        let p = &m.item(&key).unwrap().job.as_ref().unwrap().profile;
+        (p.subtype, p.alpha.policy)
+    };
+    assert_ne!(
+        job(&m).1,
+        engine::config::AlphaPolicy::Data,
+        "premise: the alpha is not data yet"
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.edit_docs("Data alpha", None, true, |p, _| {
+        p.set_file_value(&key, "alpha.policy", &serde_json::json!("data"));
+    });
+    // Park the alpha edit's partial and the full plan of the current generation.
+    let seq = m.edit_seq;
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let mut got = vec![];
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        let generation = m.generation();
+        let partial = got
+            .iter()
+            .any(|x| matches!(x, WorkerMsg::Partial { seq: s, .. } if *s == seq));
+        let planned = got
+            .iter()
+            .any(|x| matches!(x, WorkerMsg::Planned { generation: g, .. } if *g == generation));
+        if partial && planned {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "no partial and plan parked"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (partials, full): (Vec<_>, Vec<_>) = got
+        .into_iter()
+        .partition(|x| matches!(x, WorkerMsg::Partial { .. }));
+    for x in partials {
+        m.handle_held(x);
+    }
+    assert_eq!(
+        m.applied_seq, seq,
+        "premise: the alpha edit's partial applied"
+    );
+    assert_eq!(
+        job(&m),
+        (Subtype::Diffuse, engine::config::AlphaPolicy::Data),
+        "premise: the partial carries the choice and the alpha"
+    );
+    assert_eq!(m.new_set_notes_pending(), 1, "the partial kept the choice");
+    assert!(new_set_lines(&m, before).is_empty());
+    m.hold_plan_results = false;
+    for x in full {
+        m.handle_held(x);
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let lines = new_set_lines(&m, before);
+    assert_eq!(
+        lines,
+        ["teeth_albedo2.png is now Diffuse. New set actors/teeth_albedo2 (1 texture)."]
+    );
+    assert_eq!(m.new_set_notes_pending(), 0);
+}
+
 #[test]
 fn a_document_card_gaining_a_key_is_not_new() {
     let d = tempfile::tempdir().unwrap();
@@ -1129,6 +1206,7 @@ fn a_document_card_gaining_a_key_is_not_new() {
     );
     assert!(new_set_lines(&m, before).is_empty());
 }
+
 #[test]
 fn an_output_root_rekey_does_not_announce_a_card() {
     let d = tempfile::tempdir().unwrap();

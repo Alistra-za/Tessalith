@@ -822,13 +822,11 @@ fn used_by_sits_under_the_heading() {
         ("meshes/b.nif", "B", 1, 3, None, None),
     ]);
     let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("centre panel");
-    // Scope by column even when the old header falls below the first screen.
-    let rect = |labels: &[&str]| {
-        labels.iter().find_map(|label| {
-            h.query_all_by_label(label)
-                .map(|n| n.rect())
-                .find(|r| centre.x_range().contains(r.center().x))
-        })
+    // Scope by column even when the header falls below the first screen.
+    let rect = |label: &str| {
+        h.query_all_by_label(label)
+            .map(|n| n.rect())
+            .find(|r| centre.x_range().contains(r.center().x))
     };
     let item = h.state().item("landscape/leaf.png").unwrap();
     let key = if item.job_key.is_empty() {
@@ -836,9 +834,9 @@ fn used_by_sits_under_the_heading() {
     } else {
         &item.job_key
     };
-    let job = rect(&[key.as_str()]).expect("displayed job key");
-    let head = rect(&["Used by meshes (2)", "Used by 2 meshes"]).expect("loaded two-copy header");
-    let row = rect(&["Sub-type", "Texture type"]).expect("type field row");
+    let job = rect(key.as_str()).expect("displayed job key");
+    let head = rect("Used by 2 meshes").expect("loaded two-copy header");
+    let row = rect("Texture type").expect("type field row");
     assert!(
         job.bottom() <= head.top() && head.top() < row.top(),
         "job {job:?}, Used by {head:?}, type {row:?}"
@@ -852,8 +850,7 @@ fn used_by_sits_under_the_heading() {
 #[test]
 fn a_shape_link_click_asks_for_that_mesh() {
     let (_d, _db, mut h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]); // copy id 2, block 0, no name
-    h.query_by_label("Used by meshes (1)")
-        .or_else(|| h.query_by_label("Used by 1 mesh"))
+    h.query_by_label("Used by 1 mesh")
         .expect("loaded one-copy header")
         .click();
     h.run();
@@ -1090,7 +1087,7 @@ fn a_wanted_read_keeps_frames_coming_only_while_it_is_asked_for() {
 }
 
 /// Trace-debug wave 2 #6: while a scan runs, or after one was cancelled or failed, the store has every origin
-/// disabled and reads empty. A plan then keeps the mesh evidence it has, and "Used by meshes" starts no read.
+/// disabled and reads empty. A plan then keeps the mesh evidence it has, and "Used by" starts no read.
 #[test]
 fn a_plan_while_the_scan_store_is_unsettled_keeps_the_mesh_evidence() {
     let settle = |m: &mut AppModel| {

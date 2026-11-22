@@ -688,8 +688,7 @@ fn the_bulk_type_card_uses_only_selected_actionable_type_questions() {
     h.run();
     assert!(h.state_mut().wait_idle(WAIT));
     let m = h.state_mut();
-    // Both documents, line by line: x1's `subtype` is the only [files] change, and the sets document gains
-    // only what the new type's follow writes name.
+    // Both documents: x1's `subtype` is the only [files] change, and the sets document is untouched.
     let (files_gone, files_new) = changed_lines(&before.0, &docs(m).0);
     assert!(files_gone.is_empty(), "{files_gone:?}");
     assert_eq!(
@@ -699,15 +698,7 @@ fn the_bulk_type_card_uses_only_selected_actionable_type_questions() {
             "subtype = \"height\"".to_string()
         ]
     );
-    let (sets_gone, sets_new) = changed_lines(
-        before.1.as_deref().unwrap_or_default(),
-        docs(m).1.as_deref().unwrap_or_default(),
-    );
-    assert!(
-        sets_gone.is_empty() && sets_new.is_empty(),
-        "the sets document is untouched: {sets_gone:?} {sets_new:?}"
-    );
-    assert_eq!(docs(m).1, before.1);
+    assert_eq!(docs(m).1, before.1, "the sets document is untouched");
     assert_eq!(
         m.project.as_ref().unwrap().file_value(&x1, "subtype"),
         Some(serde_json::json!("height"))
@@ -1091,8 +1082,9 @@ fn narrow_harness(m: AppModel) -> Harness<'static, AppModel> {
 }
 
 /// Open the popup of the bulk row `row` over `selected` textures and compare every entry (text, enabled) with the
-/// planner's count for each independently listed option. Every entry stays inside the 1100 px window. Returns the
-/// entries.
+/// planner's count for each listed option. Filter, weighting and tag options are listed apart from the code under
+/// test; the Format pairs come from `bulk_encodings`, which the popup draws too. Every entry stays inside the 1100 px
+/// window. Returns the entries.
 fn popup_entries(row: &str, selected: usize) -> Vec<(String, bool)> {
     let d = tempfile::tempdir().unwrap();
     let (m, keys) = reach_fixture(d.path(), selected);
@@ -1188,7 +1180,7 @@ fn popup_of(row: &str, m: AppModel, keys: Vec<String>) -> Vec<(String, bool)> {
 }
 
 /// E14: each of the four value-dependent popups lists every option as "{option} ({k} of {n})", enabled exactly when
-/// the independent planner says a write reaches some texture.
+/// the planner (`plan_bulk_edit`) says a write reaches some texture.
 #[test]
 fn the_value_dependent_popups_show_every_option_with_the_planners_reach() {
     for row in ["Filter", "BC7 weighting", "Format", "DDS tag"] {
@@ -1665,6 +1657,24 @@ fn a_shared_source_lists_every_output_it_feeds() {
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     let tip = |k: &str| sdc_gui::ui::columns::tile_tooltip(&m, m.item(k).unwrap(), false);
     let outs: Vec<String> = ["a/rock_rmaos", "a/slab_rmaos"].map(tip).into();
+    // Why the two outputs sit in different folders: rock's own roughness makes its diffuse `pbr_albedo`, so its set
+    // owns the `textures\pbr\a\rock` prefix (`SetView::pbr`, AG90); slab's diffuse stays a diffuse, a PBR pick with
+    // no `pbr_albedo` (Note HL5), so its outputs keep their mirrored paths and its JSON entry names them by slot.
+    let pbr_owner = |id: &str| {
+        let views = sdc_gui::model::sets::views(&m);
+        let v = views.iter().find(|v| v.id == id).unwrap();
+        (v.pbr, v.json)
+    };
+    assert_eq!(
+        pbr_owner("a/rock"),
+        (true, true),
+        "premise: rock owns its prefix"
+    );
+    assert_eq!(
+        pbr_owner("c/slab"),
+        (false, true),
+        "premise: slab is a JSON set only"
+    );
     // The source is a helper: the hover drawn on its row's target label lists both outputs, once each.
     let mut h = hover_harness(m);
     h.run();

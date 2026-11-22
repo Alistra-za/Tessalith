@@ -164,7 +164,8 @@ fn the_per_option_reach_equals_what_the_write_writes() {
     }
     idle(&mut m);
     let rows = bulk_fields(&m, &keys);
-    // The candidate set, independent of the code under test.
+    // The candidate set. Filter, tag and weighting are listed apart from the code under test; the Format pairs come
+    // from `bulk_encodings`, the list the popup itself draws, so a pair missing from both is not caught here.
     let tags: Vec<_> = keys
         .iter()
         .flat_map(|k| {

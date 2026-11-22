@@ -236,7 +236,7 @@ fn mean_rgb(img: &eframe::egui::ColorImage) -> u32 {
 }
 
 #[test]
-fn a_packed_tile_is_not_drawn_black() {
+fn a_data_alpha_tile_is_not_drawn_black() {
     let d = tempfile::tempdir().unwrap();
     let m = opened_with_eye(d.path());
     let item = m

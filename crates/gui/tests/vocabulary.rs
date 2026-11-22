@@ -27,6 +27,7 @@ const STRAYS: [&str; 17] = [
     // Note FI11: the pin and the PGPatcher lock are said in words; the terms ride on hover.
     "(sdc)",
     "(PGPatcher lock)",
+    // Table B: "type" in prose, no spec cites.
     "sub-type",
     "Sub-type",
     "spec §",

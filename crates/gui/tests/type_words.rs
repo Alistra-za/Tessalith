@@ -279,11 +279,11 @@ fn a_restricted_picker_skips_an_unavailable_likely_type() {
 }
 
 /// Four textures in four folders. `p_wait.png` and `q_wait.png` wait for a type, with one engine suggestion each
-/// (Normal and Height, which no real file name gives a waiting texture, so they are set on the jobs); `r_wait.png`
-/// is written Gray, `s_wait.png` and then `a_wait.png` Envmask (so the first Envmask file in lexical order,
-/// `a_wait.png`, is the last Envmask written), and `six/b_wait.png`, written last and in the folder made last, Gray:
-/// Gray and Envmask are written twice each, a tie only
-/// the id breaks. Returns the model and the keys of p and q.
+/// (Normal and Height, which no real file name gives a waiting texture, so they are set on the jobs). `s_wait.png`
+/// and then `a_wait.png` are written Envmask, `six/b_wait.png` and then `three/r_wait.png` Gray: Gray and Envmask
+/// are written twice each, a tie only the id breaks. `[files]` keeps the write order, which `likely` sorts away, so
+/// the first key in lexical order is the last Envmask written (an unsorted walk would take `s_wait.png`) and the first
+/// Gray written (a last-writer-wins reason would take `r_wait.png`). Returns the model and the keys of p and q.
 fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     use engine::config::Subtype;
     for (folder, name) in [
@@ -311,11 +311,24 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
         key(&m, "a_wait.png"),
         key(&m, "b_wait.png"),
     );
-    m.set_field(&r, "subtype", serde_json::json!(Subtype::Gray));
     m.set_field(&s, "subtype", serde_json::json!(Subtype::Envmask));
     m.set_field(&a, "subtype", serde_json::json!(Subtype::Envmask));
     m.set_field(&b, "subtype", serde_json::json!(Subtype::Gray));
+    m.set_field(&r, "subtype", serde_json::json!(Subtype::Gray));
     idle(&mut m);
+    let order: Vec<_> = m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_keys()
+        .into_iter()
+        .filter(|k| k.ends_with("_wait.png"))
+        .collect();
+    assert_eq!(
+        order,
+        [s.clone(), a.clone(), b.clone(), r.clone()],
+        "premise: `[files]` lists the keys in the order they were written"
+    );
     for (k, st, why) in [
         (&p, Subtype::Normal, "the engine reads p as a normal"),
         (&q, Subtype::Height, "the engine reads q as a height"),
@@ -478,7 +491,7 @@ fn a_reason_comes_from_the_first_key_in_lexical_order() {
     let want = vec![
         (Subtype::Diffuse, "reason from p".to_string()),
         (Subtype::Envmask, "a_wait.png has this type.".to_string()),
-        // Gray ties Envmask at two files each; the first Gray key in order is `six/b_wait.png`.
+        // Gray ties Envmask at two files each; the first Gray key in order is `six/b_wait.png`, the first Gray written.
         (Subtype::Gray, "b_wait.png has this type.".to_string()),
     ];
     for keys in [vec![p.clone(), q.clone()], vec![q.clone(), p.clone()]] {
@@ -648,4 +661,56 @@ fn the_undecided_card_hovers_the_description_not_the_id() {
         .query_by_label_contains("A grey mask that sets where the cubemap shines.")
         .is_some());
     assert!(h.query_by_label("envmask").is_none());
+}
+
+/// The words the owner reads verbatim (ruling 3d-R6), pinned literally once: the 18 legend lines as the plan's "For
+/// the owner to read" lists them, and Table B's texture-panel and set-card hovers. The drawn tests compare against the
+/// constants, so a reworded, added or dropped line fails here.
+#[test]
+fn the_owner_reads_these_words_verbatim() {
+    use sdc_gui::model::labels::*;
+    assert_eq!(
+        LEGEND,
+        [
+            "D: Diffuse, PBR albedo or Skin albedo",
+            "N: Normal map or PBR normal",
+            "G: Glow or PBR emissive",
+            "SK: Skin subsurface mask",
+            "P: Height (parallax)",
+            "RMAOS: PBR RMAOS (roughness, metallic, AO, specular)",
+            "RFAOS: Skin RFAOS (roughness, fuzz, AO, specular)",
+            "CNR: PBR coat normal",
+            "F: PBR fuzz",
+            "S: Subsurface tint, or PBR subsurface or coat colour",
+            "NOISE: Projected noise",
+            "DETAIL: Detail normal",
+            "WET: Skin wet",
+            "DETAIL_N: Skin detail",
+            "PBR → JSON: a PBR set that writes a PGPatcher JSON entry.",
+            "unused: a helper that fills no slot of this set.",
+            "(auto): Tessalith picked this shader from the set's files.",
+            "Empty slots: the letters shown while you drag have no file yet.",
+        ]
+    );
+    assert_eq!(UNORM_LABEL, "UNORM (as stored)");
+    assert_eq!(
+        UNORM_HOVER,
+        "The game reads the colours as stored. Right for everything except the colour maps of a PBR set under Community Shaders."
+    );
+    assert_eq!(
+        RENORM_BAKE_LABEL,
+        "Bake normal detail into roughness or gloss"
+    );
+    assert_eq!(
+        RENORM_BAKE_HOVER,
+        "The bake reads unit directions. Where they vary, the smaller mips gain roughness. On a plain normal in a complex material set, choosing this also reduces gloss in the smaller mips of the _m green channel."
+    );
+    assert_eq!(
+        VARIANCE_BAKE_HOVER,
+        "Keep as authored preserves average length in smaller XYZ tangent-space base and coat normal mips. The bake uses unit directions with either base setting."
+    );
+    assert_eq!(
+        AUTO_SHADER_FIRST,
+        "Tessalith picked this shader from the set's files."
+    );
 }

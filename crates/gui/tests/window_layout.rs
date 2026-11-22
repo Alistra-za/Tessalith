@@ -562,7 +562,7 @@ fn a_start_that_changes_nothing_writes_nothing() {
     );
 }
 
-/// Review E19 (fix round 1): an old gui.toml with status pills is not rewritten by a start (the first frame's capture
+/// Review E19: an old gui.toml with status pills is not rewritten by a start (the first frame's capture
 /// is the silent starting point, so the loaded pills are replaced without a write); the next save that something else
 /// causes writes the file without them. A pin of that existing behaviour: it also passes with the loader keeping the
 /// pill names.
