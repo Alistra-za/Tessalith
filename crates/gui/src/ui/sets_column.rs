@@ -3723,7 +3723,8 @@ fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.
-/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1).
+/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1). Rename inputs is not
+/// here: it is a Textures-view command (Note LG3).
 fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> {
     let mut v = vec![(
         "Rename…".to_string(),
@@ -3737,11 +3738,6 @@ fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> 
             Act::Bulk(MenuAction::RenameOutputs),
         ));
     }
-    v.push((
-        "Rename inputs…".to_string(),
-        "Read the source files under other names; the files on disk keep theirs",
-        Act::Bulk(MenuAction::RenameInputs),
-    ));
     v
 }
 

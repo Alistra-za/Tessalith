@@ -481,7 +481,7 @@ fn delete_set_has_no_dialog_and_undoes() {
 }
 
 #[test]
-fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
+fn a_sets_menu_groups_its_renames_in_a_submenu_with_hover_text() {
     let d = tempfile::tempdir().unwrap();
     // A PGPatcher PBR set: only it has the Rename outputs entry (Note HJ1).
     let m = pbr_opened(d.path());
@@ -497,10 +497,10 @@ fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
     h.get_by_label_contains("Rename").click();
     h.run();
     h.get_by_label("Rename…");
-    h.get_by_label("Rename outputs…  F2");
-    h.get_by_label("Rename inputs…").hover();
+    h.get_by_label("Rename outputs…  F2").hover();
     h.run();
-    h.get_by_label_contains("Read the source files under other names");
+    h.get_by_label_contains("Change the names of the files this set writes");
+    assert!(h.query_by_label_contains("Rename inputs").is_none());
 }
 
 /// Note HJ1: a vanilla set's Rename submenu has no Rename outputs.
@@ -514,7 +514,7 @@ fn a_vanilla_sets_rename_submenu_has_no_rename_outputs() {
     h.get_by_label_contains("Rename").click();
     h.run();
     h.get_by_label("Rename…");
-    h.get_by_label("Rename inputs…");
+    assert!(h.query_by_label_contains("Rename inputs").is_none());
     assert!(h.query_by_label("Rename outputs…  F2").is_none());
     assert!(h.query_by_label_contains("Rename outputs").is_none());
 }
@@ -538,6 +538,26 @@ fn the_rename_dialog_has_an_outputs_tab_only_for_pbr_sets() {
         .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
     h.run();
     h.get_by_label("Outputs");
+}
+
+/// Task 1 (SM-O5): the dialog has no Inputs tab over a set selection.
+#[test]
+fn the_rename_dialog_has_no_inputs_tab_over_a_set_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/rock01")
+        .unwrap()
+        .key
+        .clone();
+    m.click_set(&key, false, false);
+    let mut h = harness(m);
+    h.state_mut()
+        .open_rename(sdc_gui::model::rename::RenameMode::Outputs);
+    h.run();
+    h.get_by_label("Outputs");
+    assert!(h.query_by_label("Inputs").is_none());
 }
 
 #[test]

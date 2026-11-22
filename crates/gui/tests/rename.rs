@@ -926,7 +926,6 @@ fn the_item_and_set_menus_keep_their_rename_entries_in_order() {
                 format!("Rename outputs…{f2}"),
                 None
             ),
-            (MenuAction::RenameInputs, "Rename inputs…".to_string(), None),
             (
                 MenuAction::ClearInputAlias,
                 "Clear input alias (1)".to_string(),
@@ -1048,4 +1047,155 @@ fn a_rename_chain_moves_each_opt_out_once() {
         "landscape/a",
         &["landscape/c", "landscape/b"],
     );
+}
+
+/// SM-O6 fixture: `key_less_json_sets` (two created sets borrow slot 1 from rock01), plus a lamp set whose emissive
+/// rock borrows into slot 3, a `specular_level` on rock's entry and a pinned format on rock's diffuse.
+fn borrow_fixture(dir: &Path) -> (AppModel, (engine::config::Format, engine::config::ColorTag)) {
+    let mut m = key_less_json_sets(dir);
+    let r = dir.join("textures/landscape");
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 40u8]))
+        .save(r.join("lamp.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Rgb([(x * 4) as u8, 10u8, 10u8]))
+        .save(r.join("lamp_g.png"))
+        .unwrap();
+    m.replan();
+    idle(&mut m);
+    m.decide("landscape/lamp.png", Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(
+        "landscape/lamp_g.png",
+        Answer::Subtype(Subtype::PbrEmissive),
+    );
+    idle(&mut m);
+    m.edit_docs("borrow", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 3, Some("landscape/lamp"))
+    });
+    m.set_json_value(
+        "landscape/rock01",
+        "specular_level",
+        Some(serde_json::json!(0.5)),
+    );
+    idle(&mut m);
+    let st = m.item(ROCK).unwrap().job.as_ref().unwrap().profile.subtype;
+    let current = m.item(ROCK).unwrap().job.as_ref().unwrap().profile.format;
+    let (f, t) = *engine::policy::allowed_encodings(st, m.target)
+        .iter()
+        .find(|(f, _)| *f != current)
+        .expect("a second format for a TruePBR albedo");
+    m.set_format(ROCK, f, t);
+    idle(&mut m);
+    (m, (f, t))
+}
+
+fn view_of(m: &AppModel, id: &str) -> Option<sdc_gui::model::sets::SetView> {
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.id == id)
+        .cloned()
+}
+
+fn slot_n(v: &sdc_gui::model::sets::SetView, n: u8) -> Option<sdc_gui::model::sets::SlotFill> {
+    v.slots
+        .iter()
+        .find(|(k, _)| k.slot_number() == Some(n))
+        .map(|(_, f)| f.clone())
+}
+
+/// The resolved borrows and settings that must survive a rename of rock's diffuse: slot 3 from lamp, `specular_level`
+/// and the created sets' slot 1 from `rock`.
+fn assert_rock_kept(
+    m: &AppModel,
+    rock: &str,
+    fmt: (engine::config::Format, engine::config::ColorTag),
+) {
+    use sdc_gui::model::sets::SlotFill;
+    let v = view_of(m, rock).unwrap_or_else(|| panic!("no set {rock}"));
+    assert!(
+        matches!(slot_n(&v, 3), Some(SlotFill::Borrowed { from, item })
+            if from == "landscape/lamp" && item == "landscape/lamp_g.png"),
+        "slot 3 stays borrowed from the lamp: {:?}",
+        slot_n(&v, 3)
+    );
+    assert_eq!(pbr_settings_of(m, rock).unwrap()["specular_level"], 0.5);
+    for id in ["landscape/empty", "landscape/other"] {
+        let c = view_of(m, id).unwrap();
+        assert!(
+            matches!(slot_n(&c, 1), Some(SlotFill::Borrowed { from, .. }) if from == rock),
+            "{id} slot 1 borrows from {rock}: {:?}",
+            slot_n(&c, 1)
+        );
+    }
+    let j = m.item(ROCK).unwrap().job.as_ref().unwrap();
+    assert_eq!(
+        (j.profile.format, j.profile.color.tag),
+        fmt,
+        "pinned format"
+    );
+}
+
+/// SM-O6 (SM-R2), case A: a Textures-view rename of one member, the diffuse, keeps its set's settings and borrows:
+/// the entry follows the set's new automatic id, both ways of borrowing still resolve, and the pinned format stays
+/// on the renamed file. Whether the other members then group apart by name is the naming rule, not asserted here.
+#[test]
+fn a_textures_view_rename_of_one_member_keeps_the_sets_settings_and_borrows() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, fmt) = borrow_fixture(d.path());
+    assert_rock_kept(&m, "landscape/rock01", fmt);
+    let before_sets = m.sets_doc.as_ref().unwrap().text();
+    m.click_item(ROCK, false, false);
+    m.open_rename(RenameMode::Inputs);
+    dialog(&mut m).recipe.prefix = "steel_".into();
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(set_id_of(&m, ROCK), "landscape/steel_rock01");
+    assert_rock_kept(&m, "landscape/steel_rock01", fmt);
+    assert!(
+        pbr_settings_of(&m, "landscape/rock01").is_none_or(|s| s["specular_level"].is_null()),
+        "no entry is left under the old id holding the values"
+    );
+    m.undo();
+    idle(&mut m);
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before_sets);
+    assert_rock_kept(&m, "landscape/rock01", fmt);
+}
+
+/// SM-O6 (SM-R2), case B: renaming a non-diffuse member alone retargets nothing: rock keeps its id, settings,
+/// borrows and format, and the normal stays in its set.
+#[test]
+fn a_textures_view_rename_of_a_non_diffuse_member_keeps_the_sets_settings_and_borrows() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, fmt) = borrow_fixture(d.path());
+    let normal = "landscape/rock01_normal.png";
+    m.click_item(normal, false, false);
+    m.open_rename(RenameMode::Inputs);
+    dialog(&mut m)
+        .typed
+        .insert(normal.into(), "landscape/rock01_n.png".into());
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert_eq!(
+        m.read_as_of(normal).as_deref(),
+        Some("landscape/rock01_n.png")
+    );
+    assert_eq!(set_id_of(&m, ROCK), "landscape/rock01");
+    assert_rock_kept(&m, "landscape/rock01", fmt);
+    let v = view_of(&m, "landscape/rock01").unwrap();
+    assert!(matches!(
+        v.slots.get(&SlotKind::Normal),
+        Some(SlotFill::Own { .. })
+    ));
+}
+/// SM-O5, Task 1: a set selection never goes to Inputs mode, even by the mode switch's own call.
+#[test]
+fn set_rename_mode_never_turns_a_set_selection_to_inputs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_leaf(d.path());
+    let (a, b) = (set_key_of(&m, ROCK), set_key_of(&m, LEAF));
+    m.click_set(&a, false, false);
+    m.click_set(&b, true, false);
+    m.open_rename(RenameMode::Outputs);
+    m.set_rename_mode(RenameMode::Inputs);
+    assert_eq!(dialog(&mut m).mode, RenameMode::Outputs);
 }
