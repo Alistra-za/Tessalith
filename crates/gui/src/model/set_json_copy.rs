@@ -649,6 +649,11 @@ impl AppModel {
                         if follows && cs.starts_with("glintParameters.") {
                             self.set_cs_value(id, Kind::Mato, cs, Some(cv));
                         }
+                    } else {
+                        debug_assert!(
+                            false,
+                            "every mapped key has a CS form: pgp_to_cs refused {key}"
+                        );
                     }
                     return;
                 }
