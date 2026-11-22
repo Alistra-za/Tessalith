@@ -8,10 +8,10 @@
 //!
 //! Paths: [`search_on`] runs the search on the path it is given. `Base` runs it as plain code; `Avx2` runs it inside
 //! `search_avx2`, a `#[target_feature(enable = "avx2")]` frame, where the search (`#[inline(always)]`, with the token
-//! first) is compiled again with AVX2 (Note HY21); [`search_max_on`] does the same with `search_max_avx2`. Each loop hands its candidates to a `Batch` where it called
-//! `try_pair` before: on `Base` that is `try_pair`; on `Avx2` the batch scores two pairs at once in one 256-bit vector
-//! (`avx2::pair2`) and decides them in order (`apply`), and a lone last pair goes through `try_pair` when the loop
-//! flushes. No byte changes: each pair still gets `try_pair`'s verdict against the best of its moment (a strict `<`
+//! first) is compiled again with AVX2 (Note HY21); [`search_max_on`] does the same with `search_max_avx2`. Each loop
+//! hands its candidates to a `Batch` where it called `try_pair` before: on `Base` that is `try_pair`; on `Avx2` the
+//! batch scores two pairs at once in one 256-bit vector (`avx2::pair2`) and decides them in order (`apply`), and a lone
+//! last pair goes through `try_pair` when the loop flushes. No byte changes: each pair still gets `try_pair`'s verdict against the best of its moment (a strict `<`
 //! on the full total, which is what `pair` returning `None` means), in the order written, and no candidate of a loop
 //! is computed from the best inside that loop, so scoring the second pair before the first is decided changes neither
 //! the pairs nor their order. Each loop flushes before anything reads its best.
