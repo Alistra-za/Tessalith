@@ -4729,6 +4729,9 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, false);
+        // The result line of a JSON copy ("Copy JSON settings from X: 3 written, ...") describes the step just undone.
+        self.status_note
+            .take_if(|n| n.starts_with(&format!("{}:", c.label)));
         self.undo_noted(
             if self.centre_over_meshes {
                 "Undone"

@@ -1241,7 +1241,7 @@ fn hair_is_skipped_beside_multilayer() {
     clash_skipped(
         "hair",
         "multilayer",
-        "already uses multilayer, which excludes hair",
+        "already uses Multilayer (coat), which can't be combined with Hair",
     );
 }
 
@@ -1250,7 +1250,7 @@ fn subsurface_is_skipped_beside_subsurface_foliage() {
     clash_skipped(
         "subsurface",
         "subsurface_foliage",
-        "already uses subsurface_foliage, which excludes subsurface",
+        "already uses Foliage subsurface, which can't be combined with Subsurface",
     );
 }
 
@@ -1259,13 +1259,13 @@ fn foliage_is_skipped_beside_subsurface_and_hair_beside_any_engine_pair() {
     clash_skipped(
         "subsurface_foliage",
         "subsurface",
-        "already uses subsurface, which excludes subsurface_foliage",
+        "already uses Subsurface, which can't be combined with Foliage subsurface",
     );
     // `blocked_by` names the pair: hair excludes emissive too.
     clash_skipped(
         "hair",
         "emissive",
-        "already uses emissive, which excludes hair",
+        "already uses Emissive, which can't be combined with Hair",
     );
 }
 
@@ -1290,7 +1290,9 @@ fn two_exclusive_rows_of_one_apply_do_not_both_land() {
         "hair lands first: {lines:?}"
     );
     assert!(
-        lines[1].ends_with("skipped on 1 of 1: already uses hair, which excludes multilayer"),
+        lines[1].ends_with(
+            "skipped on 1 of 1: already uses Hair, which can't be combined with Multilayer (coat)"
+        ),
         "{lines:?}"
     );
 }
@@ -1390,4 +1392,29 @@ fn a_skin_write_and_another_groups_write_share_one_undo_step() {
     assert_eq!(m.history.undo.len(), undo + 1, "one step for both groups");
     m.undo();
     assert_eq!(doc_text(&m), before);
+}
+
+/// SM-T3-4: undoing the copy takes its result line out of the status line.
+#[test]
+fn undoing_the_copy_clears_its_result_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    idle(&mut m);
+    let rows = m.json_rows(ROCK);
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    idle(&mut m);
+    assert!(
+        m.status_line.contains("1 written, 0 skipped"),
+        "{:?}",
+        m.status_line
+    );
+    m.undo();
+    idle(&mut m);
+    assert!(
+        !m.status_line.contains("written"),
+        "after the undo: {:?}",
+        m.status_line
+    );
+    assert_eq!(m.status_note, None);
 }

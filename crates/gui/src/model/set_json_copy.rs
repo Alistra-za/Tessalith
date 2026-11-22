@@ -92,10 +92,9 @@ fn copy_report(label: &str, plan: &[(String, Change)]) -> String {
     s
 }
 
-/// The switch a row turns on, by the name the app shows for it: a feature's key without the GUI-only `_on`, or the
-/// Foliage subsurface key. `None` for any other row and for a switch turned off.
-fn feature_turned_on(row: &JsonRow) -> Option<&str> {
-    (is_switch(row) && row.value == Value::Bool(true)).then(|| row.key.trim_end_matches("_on"))
+/// Whether `row` turns a feature switch (or the Foliage subsurface switch) on: the only rows `feature_clash` checks.
+fn feature_turned_on(row: &JsonRow) -> bool {
+    is_switch(row) && row.value == Value::Bool(true)
 }
 
 /// Whether `row` is a feature switch (or the Foliage subsurface switch), on or off.
@@ -104,31 +103,40 @@ fn is_switch(row: &JsonRow) -> bool {
         && (row.key == FOLIAGE_KEY || FEATURE_KEYS.iter().any(|(_, k)| *k == row.key))
 }
 
-/// Why turning on `row`'s feature would give `settings` two features that exclude each other, naming the one the set
-/// already uses. The engine's own rules decide: `blocked_by` for the feature pairs, `sub_mode` for Standard and Foliage
-/// subsurface (a Foliage row counts as Subsurface for the pairs, as the Subsurface card does).
+/// The label the panels show for a PGPatcher key (`KeySpec::label`); a feature switch stored as `glint_on` is the
+/// schema's `glint`.
+fn panel_label(key: &str) -> &'static str {
+    KEYS.iter()
+        .find(|s| edit_key(s.key) == key)
+        .map_or("", |s| s.label)
+}
+
+/// Why turning on `row`'s feature would give `settings` two features that cannot be combined, naming the one the set
+/// already uses, both by their panel labels. The engine's own rules decide: `blocked_by` for the feature pairs,
+/// `sub_mode` for Standard and Foliage subsurface (a Foliage row counts as Subsurface for the pairs, as the Subsurface
+/// card does).
 fn feature_clash(settings: &Settings, row: &JsonRow) -> Option<String> {
-    let name = feature_turned_on(row)?;
+    if !feature_turned_on(row) {
+        return None;
+    }
     let used: Option<&str> = if row.key == FOLIAGE_KEY {
         if sub_mode(settings) == SubMode::Standard {
             Some("subsurface")
         } else {
-            blocked_by(settings, Feature::Subsurface).map(feature_name)
+            blocked_by(settings, Feature::Subsurface).map(feature_key)
         }
     } else if row.key == "subsurface" && sub_mode(settings) == SubMode::Foliage {
         Some(FOLIAGE_KEY)
     } else {
         let f = FEATURE_KEYS.iter().find(|(_, k)| *k == row.key)?.0;
-        blocked_by(settings, f).map(feature_name)
+        blocked_by(settings, f).map(feature_key)
     };
-    let used = used?;
-    Some(format!("already uses {used}, which excludes {name}"))
+    Some(format!(
+        "already uses {}, which can't be combined with {}",
+        panel_label(used?),
+        panel_label(&row.key)
+    ))
 }
-
-fn feature_name(f: Feature) -> &'static str {
-    feature_key(f).trim_end_matches("_on")
-}
-
 fn row(group: JsonGroup, key: &str, label: String, value: &Value) -> JsonRow {
     JsonRow {
         group,
@@ -374,7 +382,7 @@ impl AppModel {
                 if pgp_mapped(&row.key) && target.cs_block(Kind::Txst).is_some() {
                     // The block takes the CS form of the value; a value with none has nowhere to go.
                     (!matches!(pgp_to_cs(&row.key, Some(&row.value)), Some((_, Some(_)))))
-                        .then_some("has no CS form of this value")
+                        .then_some("has no Community Shaders form of this value")
                 } else if !is_json_set(target, self.target) {
                     Some("writes no PGPatcher JSON")
                 } else if is_pbr_grass(target) && grass_ignores(&row.key) {
