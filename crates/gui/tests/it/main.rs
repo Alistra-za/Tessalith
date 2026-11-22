@@ -397,7 +397,7 @@ fn every_test_file_is_built() {
 
 /// The process-state needles, built here so this file is not a hit. The first four are std's; the last two are the
 /// GUI's own wrappers (`crash_log::install_in` takes and sets the panic hook, `crash_log::watch_device` sets the
-/// device-lost flag), which the std needles cannot see from a test file.
+/// device-lost flag), which the std needles cannot see from a test file. A global allocator is process-wide too.
 fn process_state_needles() -> Vec<String> {
     vec![
         format!("{}_var(", "set"),
@@ -406,6 +406,7 @@ fn process_state_needles() -> Vec<String> {
         format!("{}_hook", "take"),
         format!("crash_log::{}", "install"),
         format!("{}_device(", "watch"),
+        format!("{}_allocator", "global"),
     ]
 }
 
@@ -504,7 +505,8 @@ fn no_it_module_changes_process_state() {
 #[test]
 fn process_state_needles_match_the_files_kept_apart() {
     // Kept apart for process-wide state: the seven that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
-    // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
+    // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag), `fonts_env` and
+    // `alloc_frame` (a global allocator).
     // `it` is the shared binary and `ui_drive` is a driver with its own `main` (`harness = false`), not kept apart
     // for state, so neither is on the list.
     let apart = [
@@ -519,6 +521,7 @@ fn process_state_needles_match_the_files_kept_apart() {
         "fonts_crash_hook",
         "device_lost",
         "fonts_env",
+        "alloc_frame",
     ];
     let manifest = include_str!("../../Cargo.toml").replace('\r', "");
     let mut targets: Vec<&str> = manifest
