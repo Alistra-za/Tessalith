@@ -1715,7 +1715,7 @@ ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
 ARCHIVED (wording before the edit; superseded in part by Note LC, 2026-11-20)
 - **JY13 One header row down to 1055 px (3c-3, 145, 147).** Move Tools, then MO2…, then Preset into `⋯`, measuring the destination at its normal display width before eliding it. Settings… stays outside. Wrap the destination, Save and Export together only when the fixed controls cannot fit. Size each Undo/Redo slot to the view's longest label, caching on view, labels, font, scale and padding. In Meshes the short label is **Undo NIF edit** or **Redo NIF edit**. Both directions keep the full step in the hover and accessible name. Tools and Preset are keyboard-accessible submenus through `look::menu_button_036`. Preset shares `preset_entries` with the regular picker. The submenu and Review's Choose preset popup scroll in short windows. Any enabled choice closes either picker, including the current value. Test `header_layout::the_1055_header_fits_long_fields_pending_nif_edits_and_launch`.
 
-## Note JT - Checks for rules that were prose only (main team, 2026-11-18)
+## Note JT — Checks for rules that were prose only (main team, 2026-11-18)
 
 ARCHIVED (superseded by Note LH, 2026-11-22)
 - **JT9 Each check and where it runs.**
@@ -1727,7 +1727,7 @@ ARCHIVED (superseded by Note LH, 2026-11-22)
   - `tools/doc-lint.py` (the gate's `doc-lint` step and CI; by hand `py -3.13 -I tools\doc-lint.py`): history words over README.md, docs/gui.md and docs/wiki (JT7); "as above" and "as below" in docs/wiki; the `###` headings of each released CHANGELOG section (Main first, then Engine, GUI, CLI, Common; 0.8.0-alpha.1 allowlisted); wiki page budgets and `_Sidebar.md` coverage; at most two IMPORTANT lines a wiki page; over README.md, docs/gui.md and docs/wiki, no byte-order mark and no image with empty alt text. Six or more top-level bullets in a row print a warning and do not fail.
   - `.githooks/pre-commit` (at each commit where `core.hooksPath` is `.githooks`; neither the gate nor CI runs it), on the staged change, beside fmt, control bytes and duplicate note headings: a `.dds`, `.bsa`, `.ba2`, `.esp`, `.esm` or `.esl` outside `crates/render3d/shaders/cs/`; with `core.autocrlf=true`, a staged `.rs` whose working copy is LF (not one marked `-text` or `eol=lf`) and a CR byte in a staged text blob not marked `-text`; a `## Note` letter missing from the `## Index` block of `.claude/DECISIONS.md`; a `.claude/mistakes/*.md` entry not in the `- YYYY-MM-DD <what> → <instead> (<where>)` form.
 
-## Note LF - Allocation budgets (main team, 2026-11-21)
+## Note LF — Allocation budgets (main team, 2026-11-21)
 
 ARCHIVED (superseded by Note LH, 2026-11-22)
 Three tests count allocation calls against a budget: a warm full plan and a one-edit re-plan (engine), and one settled frame of the demo project in the real app (GUI). A change that makes any of them allocate far more fails a test; the plan changes no encoded byte.
