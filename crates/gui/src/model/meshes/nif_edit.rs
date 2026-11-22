@@ -277,9 +277,15 @@ pub struct NifEdit {
 /// for (parsed material, JSON generation, scan revision).
 #[derive(Default)]
 struct SimCache {
-    #[allow(clippy::type_complexity)]
+    #[allow(
+        clippy::type_complexity,
+        reason = "a cache entry: the key fields (slots, JSON generation) then the cached value, matched by position where the cache is read and filled; a named struct would only rename the tuple fields"
+    )]
     cands: Option<(Vec<nif::path::TexPath>, u64, Vec<(usize, Vec<usize>)>)>,
-    #[allow(clippy::type_complexity)]
+    #[allow(
+        clippy::type_complexity,
+        reason = "a cache entry: the key fields (material, JSON generation, scan revision) then the cached value, matched by position where the cache is read and filled; a named struct would only rename the tuple fields"
+    )]
     out: Option<(MaterialState, u64, u64, (MaterialState, Vec<String>))>,
 }
 
@@ -2889,7 +2895,13 @@ impl NifEdit {
                     let cands = match &c.cands {
                         Some((slots, g, v)) if *slots == s.material.slots && *g == gen => v.clone(),
                         _ => {
-                            #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))]
+                            #[cfg_attr(
+                                not(feature = "test-hooks"),
+                                allow(
+                                    unused_variables,
+                                    reason = "`tested` is read only by the test hook below, which adds it to `match_tests`; without test-hooks nothing reads it"
+                                )
+                            )]
                             let (v, tested) = candidates(files, &nif_path, &s.material.slots);
                             #[cfg(feature = "test-hooks")]
                             {

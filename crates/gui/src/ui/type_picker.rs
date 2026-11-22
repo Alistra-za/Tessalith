@@ -20,7 +20,10 @@ pub const LIST_HEIGHT: f32 = 320.0;
 /// The picker on `anchor`: a click on it opens or closes the popup `id`. Returns the type picked this frame. Esc, a
 /// click outside or a pick closes it; Esc does nothing else (owner amendment G). `grass` also offers `complex_grass`
 /// (`engine::policy::grass_context`, Note FC10).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, popup id and anchor button, then the current and suggested type, the kind, target and grass flag that decide which types are offered; each comes from the caller's row, so a struct would be built per picker only to be taken apart here"
+)]
 pub fn show(
     ui: &mut egui::Ui,
     id: egui::Id,

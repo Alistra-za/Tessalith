@@ -5327,7 +5327,10 @@ impl AppModel {
         }
         let fail = |e: std::io::Error| format!("{}: {e}", path.display());
         let mut perm = std::fs::metadata(path).map_err(fail)?.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
+        #[allow(
+            clippy::permissions_set_readonly_false,
+            reason = "Clear read-only flag clears the flag on the user's own sdc.toml or sdc-project.toml so Save can write it again (Note FC10); the path was checked above to be one of this project's two files"
+        )]
         perm.set_readonly(false);
         std::fs::set_permissions(path, perm).map_err(fail)?;
         if self.unsaved() {

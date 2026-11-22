@@ -259,7 +259,6 @@ pub struct View {
     pub noise_uv: Option<f32>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -956,7 +955,10 @@ fn flag(
     .clicked()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the model it reads, the set view and the slot's cell, the thumbnail cache and act queue it writes, and the drop position, size estimate and room of one row; they come from the grid loop's own locals, so a struct would be built per row only to be taken apart here"
+)]
 fn row(
     ui: &mut egui::Ui,
     model: &AppModel,

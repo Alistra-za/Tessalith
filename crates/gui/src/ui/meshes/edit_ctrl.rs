@@ -389,7 +389,10 @@ fn row(
 
 /// The keys of controller `c` (v2 B6): Interpolation, the curve, the key table and Add key. `managed`: its keys are
 /// in the clips that drive it (v2 B7).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the edit state and act slot, the controller and anchor being drawn, its title, the managed flag and the clock; each comes from the caller's own locals, so a struct would be built per section only to be taken apart here"
+)]
 fn keys_section(
     ui: &mut egui::Ui,
     e: &NifEdit,
@@ -464,7 +467,10 @@ fn clips(
 
 /// Interpolation, the curve, the key table and Add key on `keys`: controller `c`'s own (`clip: None`), or clip
 /// `clip`'s, timed by its sequence (frequency, start, stop, cycle; phase 0, as `clip_tracks`).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the edit state and act slot, the controller and anchor being drawn, its title, the key data and optional clip, and the clock; each comes from the caller's own locals, so a struct would be built per body only to be taken apart here"
+)]
 fn keys_body(
     ui: &mut egui::Ui,
     e: &NifEdit,
@@ -591,7 +597,10 @@ fn swatch(ui: &mut egui::Ui, keys: &KeyData, k: usize, name: &str) -> (Option<Ke
 }
 
 /// The key table: one row per key with its time, value(s) and, for QUADRATIC, tangents, and a Remove button.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the edit state and act slot, the controller and anchor being drawn, the clip index and title, the key data and the editable flag; each comes from the caller's own locals, so a struct would be built per table only to be taken apart here"
+)]
 fn key_table(
     ui: &mut egui::Ui,
     e: &NifEdit,
@@ -722,7 +731,10 @@ fn without_key(keys: &KeyData, k: usize) -> KeyData {
 /// the next f32 up when the step rounds away; off when no finite time is later). An empty group
 /// starts LINEAR at `span`'s start with the value of the interpolator it edits (the controller's, or the clip's
 /// bound CB's). Past a controller's stop, `push_keys` moves the stop in the same step (B-P44).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the key table's own arguments (the Ui, the edit state and act slot, the controller and anchor, the clip index and title, the key data and the editable flag) plus the time span; the table passes its locals straight through, so a struct would be built per call only to be taken apart here"
+)]
 fn add_key(
     ui: &mut egui::Ui,
     e: &NifEdit,
@@ -810,7 +822,10 @@ fn add_key(
 /// One SetKeys on the anchored controller's own keys (`clip: None`) or a clip's. B-P44: on a controller's own keys
 /// the same step sets its stop to the last key's time, and its start to the first key's when that is earlier;
 /// each only when it changes from its value before this edit (or drag). A clip's sequence keeps its times.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the act slot, the edit state, the controller and anchor, the clip index, the new key data and the base it replaces or merges into, and the merge flag; each comes from the caller's own locals, so a struct would be built per push only to be taken apart here"
+)]
 fn push_keys(
     act: &mut Act,
     e: &NifEdit,
@@ -1089,7 +1104,10 @@ fn bits(at: &Anchor, flags: u16, mask: u32, value: u32) -> Op {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the edit state and act slot, the controller and anchor being drawn, its title, the variable id, the managed flag and the shader flags; each comes from the caller's own locals, so a struct would be built per row only to be taken apart here"
+)]
 fn variable(
     ui: &mut egui::Ui,
     e: &NifEdit,

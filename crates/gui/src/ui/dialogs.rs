@@ -118,7 +118,10 @@ pub fn dialog(
 }
 
 /// [`dialog`] with a hover reason for each button while it is disabled (`hovers[i]`, by the index into `buttons`).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the context and dialog id, the width and title, the button row with its hovers, and the body closure; each dialog passes these as literals, and a struct would be built per call only to be taken apart here"
+)]
 pub fn dialog_hover(
     ctx: &egui::Context,
     id: &str,

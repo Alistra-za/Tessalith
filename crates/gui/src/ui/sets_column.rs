@@ -854,7 +854,10 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetVi
 }
 
 /// A member's thumbnail, with the slot menu and an optional extra line on hover.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, member key and slot kind, the drag and note of one chip, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
+)]
 fn member_chip(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1045,7 +1048,10 @@ fn slot_box_menu(
 }
 
 /// A card thumbnail opens its set unless Shift is held. A row in the overflow list opens its texture directly.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the model and card, the member key, slot kind and drag of one chip, its response, and the act queue and menu flag the menu writes; they are the chip's own locals in the caller, so a struct would be built per chip only to be taken apart here"
+)]
 fn member_acts(
     model: &AppModel,
     card: Option<&SetView>,
@@ -1133,7 +1139,10 @@ fn paint_helper(
 }
 
 /// Note JW7: a helper that has no dock gets a BADGE thumbnail in a BADGE_HIT square with no painted tag.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the helper's key and role, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per tile only to be taken apart here"
+)]
 fn helper_tile(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1318,7 +1327,10 @@ fn plan_dock<'a>(
 
 /// Note HP: clamps every dock hit rect of one card at once (they must not meet each other, a chip, a tile or the
 /// combo, nor leave the card), then draws the docks. Returns after the chips, so badges sit on top.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the dock plans with the fixed and card rects they are placed against, the selection, and the act queue and menu flag; they come from the card's own locals, so a struct would be built per card only to be taken apart here"
+)]
 fn draw_docks(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1349,7 +1361,10 @@ fn draw_docks(
 /// Note HN: the helpers that fill one chip, drawn on its top corners. A badge is the helper's thumbnail with the
 /// member behaviours (JX1-JX3). `+K` lists the folded helpers.
 /// `hits` are the clamped hit rects of `plan.cells`, in order.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, one dock plan with its hit rects, the selection, and the act queue and menu flag; they come from the card's own locals, so a struct would be built per dock only to be taken apart here"
+)]
 fn draw_dock(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -2891,7 +2906,10 @@ fn insertion_y(from: usize, to: usize, r: egui::Rect) -> Option<f32> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the warnings, the Ui, model and thumbnail cache, the flagged and folded state, the set view with its index and count, the editing state, status and look of one pill, the selection, and the act queue; each comes from a different owner per frame, so a struct would be built per pill only to be taken apart here"
+)]
 fn pill(
     unused: &crate::model::sets::WarningsBySet,
     ui: &mut egui::Ui,
@@ -3319,7 +3337,10 @@ fn pill(
 /// Review E1: the chip of a slot that holds a link: the linked item's thumbnail, or a filled letter box when no item
 /// is known (a typed path); `link_mark` sits at its top centre. `cell` is the slot's kind, letter and link.
 /// Returns the chip's rect.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the linked slot's cell, the selection, the act queue and menu flag, and the set of chipped paths it adds to; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
+)]
 fn linked_chip<'a>(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -3394,7 +3415,10 @@ fn chip_link_mark(ui: &egui::Ui, rect: egui::Rect) {
 /// Note JW1: the chip row of a card: one chip per displayed fill or clear, the missing entries, then the
 /// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
 /// (`fixed` comes in holding the combo's).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view and its docked members, the folded and editing state, the selection, the act queue and menu flag, and the fixed rects it extends; they come from the card's own locals, so a struct would be built per row only to be taken apart here"
+)]
 fn chip_row<'a>(
     ui: &mut egui::Ui,
     model: &'a AppModel,
