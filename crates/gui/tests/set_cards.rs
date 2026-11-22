@@ -2667,8 +2667,6 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
 // ---- Edit match... (Note LG2) ----
 
 const NOTE: &str = "The entry applies when any of these matches.";
-const EDIT_MATCH_OFF_TEXT: &str =
-    "This set has no PGPatcher JSON settings, so it has no match rules";
 
 /// The card title node of set `id` in the Sets column (the leftmost label of that name).
 fn card_title<'a>(h: &'a Harness<'static, AppModel>, id: &'a str) -> egui_kittest::Node<'a> {
@@ -2688,10 +2686,10 @@ fn open_card_menu(h: &mut Harness<'static, AppModel>, id: &str) {
 
 fn rock_pbr(dir: &std::path::Path) -> AppModel {
     let mut m = support::pbr_opened_plain(dir);
-    let key = rock_selection(&m);
-    if let Selection::Set(k) = key {
-        m.select_set(&k);
-    }
+    let Selection::Set(k) = rock_selection(&m) else {
+        panic!("rock is a keyed set")
+    };
+    m.select_set(&k);
     m
 }
 
@@ -2759,7 +2757,7 @@ fn edit_match_with_no_match_row_opens_the_group_in_view() {
     });
     let seen = seen.expect("the Matching header is a widget this pass");
     assert!(
-        seen.width() > 0.0 && seen.height() > 0.0,
+        seen.width() > 0.0 && seen.height() >= head.height() - 1.0,
         "Matching header {head:?} is clipped away ({seen:?})"
     );
     assert!(focused_input(&h).is_none(), "no field to focus");
@@ -2786,10 +2784,12 @@ fn edit_match_is_off_with_its_reason_on_a_set_without_json() {
     assert!(entry.accesskit_node().is_disabled());
     let at = entry.rect().center();
     h.hover_at(at);
-    // `run()` settles before the tooltip's first drawn frame inside an open menu: step it out.
+    // `run()` settles before the tooltip's first drawn frame inside an open menu. The harness sets the tooltip delay
+    // to 0, so 8 steps (more than TOOLTIP_STEPS = 4: the hover plus the tooltip's sizing pass) outlast it.
     h.run_steps(8);
-    h.get_by_label(EDIT_MATCH_OFF_TEXT);
+    h.get_by_label(sdc_gui::model::sets::EDIT_MATCH_OFF);
 }
+
 #[test]
 fn edit_match_waits_for_a_focused_field_and_uses_the_view_after_it() {
     let d = tempfile::tempdir().unwrap();

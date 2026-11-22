@@ -2472,7 +2472,8 @@ pub fn draw(
                 after_card_commit(&ctx, model, id, move |m, t| {
                     m.select_target(t);
                     let v = m.resolved_selection().view().cloned();
-                    if let Some(v) = v {
+                    // The field's commit may have left the set without a Matching group: nothing to ask for then.
+                    if let Some(v) = v.filter(|v| shows_json_panel(v, m.target)) {
                         super::set_editor::focus_set_field(
                             &c,
                             m,
