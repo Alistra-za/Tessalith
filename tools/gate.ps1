@@ -5,8 +5,9 @@
 .DESCRIPTION
   Each step's output goes to <Out>\<step>.txt, ending in "exit N". Exits 1 if a step fails, 2 if it didn't start.
   <Out>\progress.txt gets one line per event (start, PASS or FAIL, skipped, final gate result), so a long run shows
-  which step is running. The step logs fill as a step runs (measured: a native child's stdout and stderr lines were
-  readable with Get-Content while the step was still going; a file-size check can show a stale 0 bytes on NTFS).
+  which step is running. The step logs fill as a step runs (measured through Step: a native child's stdout and stderr
+  lines were readable with Get-Content while the step was still going). A 0-byte size seen on a long run was not
+  reproduced; read a log's content, not its size, to see how far a step has got.
   Set CARGO_TARGET_DIR first (CLAUDE.md, Disk). A failed fmt, clippy or render3d-alone step skips the tests, which take about an hour.
   Test builds encode on AVX2 at most; the avx512 step re-runs the ISPC pins (level_identity, bc6h, target) with
   SDC_TEST_AVX512=1, so on an AVX-512 CPU they check the AVX-512 path too. The script clears SDC_TEST_AVX512 in the
