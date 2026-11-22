@@ -1,5 +1,5 @@
 id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
-JI4	JI		back	LI		partial	2026-11-22		goes: Effort on BC3, BC4 and BC5 offers Fast, Default, Max; stays: the rest
+JI4	JI		back	LI		partial	2026-11-22		goes: Effort on BC3, BC4 and BC5 offers Fast, Default, Max, and a single-texture edit on the other formats names its key in the undo step; stays: the rest
 JA5	JA		back	LI		partial	2026-11-22		goes: the radius order fast < default < max 10; stays: the rest
 JA1	JA		back	LI		partial	2026-11-22		goes: the engine version is not compared; stays: the rest
 HY1	HY		back	LI		partial	2026-11-22		goes: the C++ is the reference for every search; stays: the rest

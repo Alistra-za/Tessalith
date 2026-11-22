@@ -9,7 +9,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LI
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS, LA
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI
@@ -69,7 +69,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Engine 2.0.0 has one encode version for every type; a 1.x record is a stale baseline and re-encodes once. [FM9, DM1]
 - Removed config keys and values are errors that name the fix; the old-version upgrade code is gone, newer-version refusals stay. [FM10, FM13, T9]
 - Fifteen info and low-value warning codes and the re-encode report are gone; anything the user must act on is a code with a fix. [FM21]
-- An engine change that alters a type's bytes or verdict moves that type's arm in `encode_version` (Note DM), except the AVX-512 path (HZ2) and the `max` search (LI5); the byte-identity pins in `encode_versions/identity.json` are strict. [DM1, DM4, FM1, HZ2, LI5]
+- An engine change that alters a type's bytes or verdict moves that type's arm in `encode_version` (Note DM), except the AVX-512 path (HZ2) and the `max` search (LI5); the byte-identity pins in `encode_versions/identity.json` are strict, with the AVX-512 path the one exception there. [DM1, DM4, FM1, HZ2, LI5]
 - A new `Profile` field is `#[serde(default, skip_serializing_if = …)]` so existing profile hashes hold. [DM5, S-mips-9]
 - `RELEASED_ENGINE_VERSION` is set by the release commit to the released version. [DM5b, FF8, FM41]
 - Engine modules `coverage`, `dilate`, `migrate`, `pipeline` and `sysmem` are `pub(crate)`. [FA14]
@@ -2212,9 +2212,9 @@ The owner: "Probably turn validate into an optional setting flag in the gui, and
 
 ## Note LI - BC3/BC4/BC5 Max search, and Slowest for radius 10 (owner, 2026-11-22)
 
-- **LI1 Names (owner quotes).** `slowest` is the radius-10 search; `max` is the new one; no alias. The GUI ladder is Fast, Default, Slowest, Max on BC3, BC4 and BC5. A single-texture Effort pick undoes as "Change Effort" on every format (JI4).
+- **LI1 Names (owner, 2026-11-22; the quote is in LI5).** `slowest` is the radius-10 search; `max` is the new one; no alias. The GUI ladder is Fast, Default, Slowest, Max on BC3, BC4 and BC5. A single-texture Effort pick undoes as "Change Effort" on every format (JI4).
 - **LI2 The search.** The radius-10 search, then every endpoint pair within 16 of the block's lowest and highest value, then (BC3 alpha) the coverage guard at the texture's alpha-test cut, not 128. It lives in `bcenc` as the `_max` functions. It has no C++ counterpart: this amends HY1 and HY7, and the reference is `search_max_reference`, a literal port of bench 87c5539f `bc4ref.rs:304-340`.
-- **LI3 Proof.** The bench-derived byte pins (`max_bytes_match_the_bench`: the pad-16 witness, the incumbent tie, the two improving ties, the two fallback blocks), the mutations they catch, the reference equality, the window property, the pair-counter check for the early return, the regression pin, the hits, and determinism (R5).
+- **LI3 Proof.** The bench-derived byte pins (`max_bytes_match_the_bench`: the pad-16 witness, the incumbent tie, the two improving ties, the two fallback blocks), the mutations they catch, the reference equality, the window property, the pair-counter check for the early return, the regression pin, the hits, and determinism across thread counts (`max_output_is_identical_for_any_thread_count`).
 - **LI4 if-changed.** Ranks fast < default < slowest < max. A record at `max` whose `engine_version` is at most 3.0.0, or missing, not a string or unparsable, ranks as `slowest`, so a job at `max` encodes it again; a 3.0.1 dev build from before this note also wrote `max` for radius 10, and such records read as the new `max`.
 - **LI5 Versions.** No `encode_version` arm moves. This is an explicit, narrow exception to DM1: the same serialized `max` (same profile hash) now writes different BC3, BC4 and BC5 bytes. Why: the owner ruled that serde `max` is the new search, with no alias, because "a person using max already wants the best possible result", and LI4 already re-encodes old `max` records once through the record age, so moving the arms would only report every other radius's output as written by an older encode. `rgbcx_patch`, the pins and every profile hash are unchanged (no built-in preset stored `max`); semver MINOR (compare LG7).
 - **LI6 Quality and time.** The bench quality table, cited not copied: over the shipped Slowest, +0.033 dB on BC4 (`mask_real`), +0.020 dB on BC5 (`normal_real`), +0.076 dB on BC3 alpha over all BC3 sets and +0.211 dB on the cutout set (both against the guarded search BC3 ships; bc4-family.md:153-162). The 0.020 dB whole-BC3 figure is against the unguarded search and is not quoted. A complete block takes about 4 times Slowest's time on BC4, about 5 on BC5 and about 2 on BC3 (`bcenc`'s `max_speed` example on 20 sampled PNGs, measured while other builds ran; docs/research/bc4-family.md#max-near-exhaustive).
