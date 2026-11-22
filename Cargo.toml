@@ -44,6 +44,7 @@ exit = "warn"
 undocumented_unsafe_blocks = "warn"
 allow_attributes_without_reason = "warn"
 ignore_without_reason = "warn"
+format_push_string = "warn"
 
 [profile.dev]
 opt-level = 1

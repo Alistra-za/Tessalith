@@ -5,6 +5,8 @@
 //! DECISIONS AP10) → analysis facts → the project config's
 //! `[files]` entries (DECISIONS N2) → `--set` (unscoped, then sub-type-scoped, then file-scoped, each in
 //! command-line order).
+use std::fmt::Write as _;
+
 use crate::analyse::Analysis;
 use crate::codes::{Code, Severity, Warning};
 use crate::config::*;
@@ -1674,7 +1676,8 @@ fn gray_pick_problem(pick: GraySource, a: &Analysis, has_alpha: bool) -> Option<
             } else {
                 format!("; {} varies", s.label())
             };
-            why += &format!(
+            let _ = write!(
+                why,
                 "{lead} (channels.grayscale_source = \"{}\")",
                 s.label().to_lowercase()
             );

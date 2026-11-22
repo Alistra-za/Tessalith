@@ -16,6 +16,7 @@ use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
 use engine::sets::{fold_id, same_id};
 use serde_json::Value;
+use std::fmt::Write as _;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
 /// only while it holds two or more keys and the active entry (`AppModel::selection`) is one of them; otherwise the
@@ -325,11 +326,18 @@ impl AppModel {
         let mut s = format!("{} selected", keys.len());
         match (hidden, in_fold) {
             (0, 0) => {}
-            (h, 0) => s.push_str(&format!(" ({h} hidden by filter)")),
-            (0, f) => s.push_str(&format!(" ({f} in the collapsed Helpers group)")),
-            (h, f) => s.push_str(&format!(
-                " ({h} hidden by filter, {f} in the collapsed Helpers group)"
-            )),
+            (h, 0) => {
+                let _ = write!(s, " ({h} hidden by filter)");
+            }
+            (0, f) => {
+                let _ = write!(s, " ({f} in the collapsed Helpers group)");
+            }
+            (h, f) => {
+                let _ = write!(
+                    s,
+                    " ({h} hidden by filter, {f} in the collapsed Helpers group)"
+                );
+            }
         }
         Some(s)
     }
@@ -790,7 +798,7 @@ fn report(label: &str, plan: &[(String, Change)]) -> String {
     }
     let mut s = format!("{label}: written to {written} of {n}");
     for (r, k) in skipped {
-        s.push_str(&format!("; locked on {k} of {n}: {r}"));
+        let _ = write!(s, "; locked on {k} of {n}: {r}");
     }
     s
 }
@@ -1017,7 +1025,7 @@ impl AppModel {
         if changed || !why.is_empty() {
             let mut s = label;
             for (r, n) in why {
-                s.push_str(&format!("; locked on {n} of {total}: {r}"));
+                let _ = write!(s, "; locked on {n} of {total}: {r}");
             }
             self.bulk.report = Some(s);
         }

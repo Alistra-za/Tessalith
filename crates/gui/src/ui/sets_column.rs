@@ -29,6 +29,7 @@ use engine::codes::Warning;
 use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 /// Drag payload: a texture, by item key.
@@ -626,7 +627,7 @@ pub fn pill_hover(model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) -
     for r in &v.recipes {
         let mut l = format!("{}: {}", r.subtype.id(), status_text(r.status).0);
         if let Some(reason) = &r.reason {
-            l.push_str(&format!(" ({reason})"));
+            let _ = write!(l, " ({reason})");
         }
         lines.push(l);
     }
@@ -4186,8 +4187,12 @@ fn fill_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
                         *tick = on;
                         let mut what = format!("→ {}", r.slot.label());
                         match (&r.blocked, &r.replaces) {
-                            (Some(why), _) => what.push_str(&format!(" · {why}")),
-                            (None, Some(cur)) => what.push_str(&format!(" · replaces {cur}")),
+                            (Some(why), _) => {
+                                let _ = write!(what, " · {why}");
+                            }
+                            (None, Some(cur)) => {
+                                let _ = write!(what, " · replaces {cur}");
+                            }
                             _ => {}
                         }
                         ui.label(what);

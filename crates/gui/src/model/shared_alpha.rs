@@ -981,6 +981,7 @@ impl AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     #[test]
     fn keep_alpha_reuses_the_single_unicode_folded_full_name() {
@@ -1088,9 +1089,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut text = String::new();
         for i in 0..10_000 {
-            text.push_str(&format!(
-                "[files.\"d/f{i:05}.png\"]\nalpha.policy = \"data\"\n"
-            ));
+            let _ = write!(text, "[files.\"d/f{i:05}.png\"]\nalpha.policy = \"data\"\n");
         }
         std::fs::write(d.path().join("sdc.toml"), text).unwrap();
         let p = ProjectDoc::open(d.path());

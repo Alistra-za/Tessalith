@@ -13,6 +13,7 @@ use sdc_gui::model::sets::{
 };
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 use support::{session, shapes};
@@ -1290,7 +1291,7 @@ const BODY_N: &str = "textures/s/body_n.dds";
 fn txst(slots: &[(u8, &str)]) -> String {
     let mut s = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\n".to_string();
     for (n, p) in slots {
-        s += &format!("slot{n} = \"{p}\"\n");
+        let _ = writeln!(s, "slot{n} = \"{p}\"");
     }
     s
 }

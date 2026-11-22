@@ -1779,9 +1779,10 @@ impl NifEdit {
             None => None,
         };
         let abort_before_record = |mut why: String| {
+            use std::fmt::Write as _;
             if let Some((to, fp)) = move_aside.zip(previous_fp.as_deref()) {
                 if let Err(err) = remove_known(to, fp) {
-                    why.push_str(&format!(". Could not remove the record backup: {err}"));
+                    let _ = write!(why, ". Could not remove the record backup: {err}");
                 }
             }
             ExportOutcome::Blocked(why)

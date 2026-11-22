@@ -9,6 +9,7 @@ use sdc_gui::model::AppModel;
 use sdc_gui::settings::MeshesSettings;
 use sdc_gui::ui::header::{elide_middle, readable_path};
 use sdc_gui::ui::State;
+use std::fmt::Write as _;
 use support::*;
 
 type H = Harness<'static, (AppModel, State, MeshesModel)>;
@@ -593,7 +594,7 @@ fn a_long_export_path_keeps_tools_mo2_and_preset_at_1440_and_1600() {
     let d = tempfile::tempdir().unwrap();
     let mut path = String::from(r"C:\Users\runneradmin\AppData\Local\Temp\");
     for i in 0..4 {
-        path.push_str(&format!(r"a rather long folder name number {i}\"));
+        let _ = write!(path, r"a rather long folder name number {i}\");
     }
     path.push_str("export");
     for (w, meshes) in [

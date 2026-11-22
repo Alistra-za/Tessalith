@@ -12,6 +12,7 @@ use sdc_gui::model::{Answer, AppModel, Selection};
 use sdc_gui::pgp::writer::document;
 use sdc_gui::ui::set_editor::OUTPUTS_COUNT_NOTE;
 use serde_json::{json, Value};
+use std::fmt::Write as _;
 use support::*;
 
 const LEAF: &str = "arch/leaf";
@@ -239,9 +240,10 @@ pub(crate) fn cape_project(dir: &std::path::Path, sets: &[(&str, &[&str], &str)]
     let mut doc = String::new();
     let mut decisions = Vec::new();
     for &(id, tails, settings) in sets {
-        doc.push_str(&format!(
+        let _ = write!(
+            doc,
             "[[sets]]\nid = \"{id}\"\nshader = \"pbr\"\n{settings}\n"
-        ));
+        );
         for tail in tails {
             let key = format!("{id}{tail}.png");
             let path = dir.join(&key);
@@ -283,11 +285,11 @@ pub(crate) fn cape_project(dir: &std::path::Path, sets: &[(&str, &[&str], &str)]
 pub(crate) fn cape_packs(dir: &std::path::Path, share: bool, borrow: bool) -> AppModel {
     let mut settings = String::new();
     if share {
-        settings.push_str(&format!("share = [\"{AO}\"]\n"));
+        let _ = writeln!(settings, "share = [\"{AO}\"]");
     }
-    settings.push_str(&format!("[sets.borrow]\nslot2 = \"{B}\"\n"));
+    let _ = write!(settings, "[sets.borrow]\nslot2 = \"{B}\"\n");
     if borrow {
-        settings.push_str(&format!("slot6 = \"{B}\"\n"));
+        let _ = writeln!(settings, "slot6 = \"{B}\"");
     }
     cape_project(
         dir,

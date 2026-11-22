@@ -12,6 +12,7 @@ use crate::model::AppModel;
 use crate::ui::status::{AMBER, RED};
 use eframe::egui;
 use render3d::ShapeStatus;
+use std::fmt::Write as _;
 
 /// SLSF1.29 External Emittance: the preview draws the NIF colour (captures C1, frame6171: the engine sends exactly that
 /// in an interior); outdoors the engine can substitute the cell or weather colour.
@@ -288,7 +289,7 @@ fn members(ui: &mut egui::Ui, s: &SetPreview, view: Option<&SetView>, attention:
             let mut text = member_text(view, m);
             // The time of the bytes on show, so the two modes can be compared (Fresh already says it).
             if let (false, Some(e)) = (matches!(m.state, EncState::Fresh(_)), m.state.shown()) {
-                text += &format!(" · last {:.0} ms", e.ms);
+                let _ = write!(text, " · last {:.0} ms", e.ms);
             }
             match &m.state {
                 EncState::Failed(_) => ui.colored_label(RED, text),

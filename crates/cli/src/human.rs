@@ -1,6 +1,7 @@
 //! Concise human log on stderr (spec §8: human output on stderr; `--json` keeps stdout for JSON Lines only).
 use engine::codes::{Code, Severity, Warning};
 use engine::events::{EngineEvent, EventKind, EventSink, SkipKind};
+use std::fmt::Write as _;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -46,10 +47,13 @@ fn validation_clause(validated: bool, failed: u32) -> String {
 fn kept_clause((older, lower): (u64, u64)) -> String {
     let mut s = String::new();
     if older > 0 {
-        s += &format!(", {older} kept from an older encode version (--ev re-encodes)");
+        let _ = write!(
+            s,
+            ", {older} kept from an older encode version (--ev re-encodes)"
+        );
     }
     if lower > 0 {
-        s += &format!(", {lower} kept at a higher target");
+        let _ = write!(s, ", {lower} kept at a higher target");
     }
     s
 }

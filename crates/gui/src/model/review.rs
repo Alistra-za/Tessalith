@@ -9,6 +9,7 @@ use super::{
 };
 use engine::api::{CancelToken, PreviewVerdict};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1779,7 +1780,7 @@ impl AppModel {
         let mut t = format!("Review {}", counted(a.files, "file", "files"));
         // Note FI7: `Review` writes nothing, so it counts every pending NIF edit.
         if rows > 0 {
-            t.push_str(&format!(" + {}", nif_edits(rows)));
+            let _ = write!(t, " + {}", nif_edits(rows));
         }
         t.push('…');
         t
@@ -1800,7 +1801,7 @@ impl AppModel {
             );
             for (name, count) in [("Kept", w.kept.len()), ("Protected", w.protected.len())] {
                 if count > 0 {
-                    line.push_str(&format!(" · {name} ({count})"));
+                    let _ = write!(line, " · {name} ({count})");
                 }
             }
             line
@@ -1833,13 +1834,13 @@ impl AppModel {
         };
         // Note JF1: the count is the PBR folder's; the folders copied or derived from it are named, not counted.
         if self.also_runs() {
-            t.push_str(&format!(" + {}", self.also_extra_folders()));
+            let _ = write!(t, " + {}", self.also_extra_folders());
         }
         // Note FI7 (rule 7.1): only the NIF edits this Export writes; a blocked one is skipped.
         let blocked = self.nif_rows.iter().filter(|r| r.blocked.is_some()).count();
         let written = self.nif_rows.len() - blocked;
         if written > 0 {
-            t.push_str(&format!(" + {}", nif_edits(written)));
+            let _ = write!(t, " + {}", nif_edits(written));
         }
         let mut skip = vec![];
         if skipped > 0 {
@@ -1849,7 +1850,7 @@ impl AppModel {
             skip.push(nif_edits(blocked));
         }
         if !skip.is_empty() {
-            t.push_str(&format!(" (skip {})", skip.join(", ")));
+            let _ = write!(t, " (skip {})", skip.join(", "));
         }
         t
     }

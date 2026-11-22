@@ -5704,6 +5704,7 @@ pub fn export_finished_text(result: &export::ExportResult) -> String {
 mod tests {
     use super::*;
     use engine::sets::OutputKey;
+    use std::fmt::Write as _;
     use std::path::Path;
 
     pub(super) fn bare_model() -> AppModel {
@@ -5867,8 +5868,8 @@ mod tests {
         let mut sets = String::from("[project.auto_normal]\n");
         for i in 0..2_048 {
             let key = format!("rock{i}_n.png");
-            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
-            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            let _ = write!(files, "[files.'{key}']\nsubtype = 'pbr_normal'\n");
+            let _ = writeln!(sets, "'{key}' = 'pbr_normal'");
             if i < 16 {
                 normal.save(root.join(key)).unwrap();
             }

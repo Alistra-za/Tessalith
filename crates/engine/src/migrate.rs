@@ -2,6 +2,7 @@
 //! newer than this sdc, and when it names a key or value that a past version removed: the error says where and what to write
 //! instead. Nothing is upgraded in place; there are no step tables. Every removal adds a row to [`REMOVED`].
 use crate::presets::SCHEMA_VERSION as PRESET_SCHEMA;
+use std::fmt::Write as _;
 use toml::Value;
 
 /// Version of `config.toml` / `sdc.toml`; an absent `schema_version` is 1.
@@ -637,7 +638,7 @@ fn walk<'a>(v: &'a Value, segs: &mut Vec<&'a str>, shown: &mut String, out: &mut
         Value::Array(a) => {
             for (i, child) in a.iter().enumerate() {
                 let keep = shown.len();
-                shown.push_str(&format!("[{i}]"));
+                let _ = write!(shown, "[{i}]");
                 walk(child, segs, shown, out);
                 shown.truncate(keep);
             }
@@ -653,7 +654,7 @@ fn listed(hits: Vec<String>) -> Option<String> {
     let more = hits.len().saturating_sub(LISTED);
     let mut m = hits.into_iter().take(LISTED).collect::<Vec<_>>().join("\n");
     if more > 0 {
-        m.push_str(&format!("\nand {more} more"));
+        let _ = write!(m, "\nand {more} more");
     }
     (!m.is_empty()).then_some(m)
 }
@@ -824,7 +825,7 @@ mod tests {
         let mut text =
             String::from("[defaults]\nencoder = { backend = \"bc7e\" }\nresize = \"pot-down\"\n");
         for i in 0..20 {
-            text.push_str(&format!("[files.\"t{i:02}.png\"]\ndrop_top_mip = true\n"));
+            let _ = write!(text, "[files.\"t{i:02}.png\"]\ndrop_top_mip = true\n");
         }
         let MigrateError::Removed(m) = migrate_config(t(&text)).unwrap_err() else {
             panic!()

@@ -10,6 +10,7 @@ use image::{ImageBuffer, Rgb, RgbImage};
 use sdc_gui::model::bottom::{problems, At, Level};
 use sdc_gui::model::{AppModel, Dialog};
 use sdc_gui::settings::GuiSettings;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -44,7 +45,7 @@ fn folder(dir: &Path) -> PathBuf {
     upscaled(3).save(r.join("up2.png")).unwrap();
     let mut toml = String::from("[defaults.encoder]\neffort = \"ultrafast\"\n");
     for n in ["noise.png", "up.png", "up2.png"] {
-        toml += &format!("\n[files.\"{n}\"]\nsubtype = \"diffuse\"\n");
+        let _ = write!(toml, "\n[files.\"{n}\"]\nsubtype = \"diffuse\"\n");
     }
     std::fs::write(r.join("sdc.toml"), toml).unwrap();
     r

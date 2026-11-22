@@ -4,6 +4,7 @@ use crate::model::nav::{Palette, Pick};
 use crate::model::picker::PickerPurpose;
 use crate::model::AppModel;
 use eframe::egui::{self, Key, Modifiers};
+use std::fmt::Write as _;
 
 /// Where an action works; the sheet groups by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -939,11 +940,7 @@ pub fn markdown_table() -> String {
             } else {
                 (area.title(), "")
             };
-            s.push_str(&format!(
-                "| {area} | {} | {}{detail} |\n",
-                keys_text(a.id),
-                a.label
-            ));
+            let _ = writeln!(s, "| {area} | {} | {}{detail} |", keys_text(a.id), a.label);
         }
     }
     s

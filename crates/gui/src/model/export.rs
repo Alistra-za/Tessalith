@@ -5,6 +5,7 @@ use engine::api::{BatchSummary, CancelToken, CHECKED_IN_PLACE, CHECKED_IN_PLACE_
 use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -144,18 +145,19 @@ impl Outcomes {
             (self.cancelled, "cancelled"),
         ] {
             if n > 0 {
-                line.push_str(&format!(", {n} {label}"));
+                let _ = write!(line, ", {n} {label}");
             }
         }
         if self.skipped_sources > 0 {
-            line.push_str(&format!(
+            let _ = write!(
+                line,
                 ", {}",
                 super::code_text::counted(
                     self.skipped_sources,
                     "skipped source",
                     "skipped sources"
                 )
-            ));
+            );
         }
         line
     }
@@ -172,20 +174,22 @@ pub struct ExportResult {
 pub fn result_line(result: &ExportResult) -> String {
     let mut line = result.primary.line();
     for (phase, outcomes) in &result.phases {
-        line.push_str(&format!(
+        let _ = write!(
+            line,
             " · {}: {}",
             super::also::phase_name(*phase),
             outcomes.line()
-        ));
+        );
     }
     if result.copied > 0 {
-        line.push_str(&format!(
+        let _ = write!(
+            line,
             " · {}",
             super::code_text::counted(result.copied as usize, "Vanilla copy", "Vanilla copies")
-        ));
+        );
     }
     if let Some(error) = &result.phase_error {
-        line.push_str(&format!(" · {error}"));
+        let _ = write!(line, " · {error}");
     }
     line
 }
@@ -569,7 +573,8 @@ impl ExportModel {
             } else {
                 String::new()
             };
-            s += &format!(
+            let _ = write!(
+                s,
                 "Converted {}, up to date {}, skipped {}, failed {}, {validation}{checked}.\n\n",
                 b.converted, b.up_to_date, b.skipped, b.failed
             );
@@ -578,14 +583,15 @@ impl ExportModel {
         if !self.notes.is_empty() {
             s += "## Export details\n\n";
             for n in &self.notes {
-                s += &format!("- {n}\n");
+                let _ = writeln!(s, "- {n}");
             }
             s += "\n";
         }
         s += "## Warnings by code\n\n";
         for (code, keys) in self.by_code() {
-            s += &format!(
-                "- **{}** ({}): {}\n",
+            let _ = writeln!(
+                s,
+                "- **{}** ({}): {}",
                 code.as_str(),
                 keys.len(),
                 keys.join(", ")
@@ -593,7 +599,7 @@ impl ExportModel {
         }
         s += "\n## Files\n\n| Output | State |\n|---|---|\n";
         for r in &self.rows {
-            s += &format!("| {} | {} |\n", r.job_key, r.state.label());
+            let _ = writeln!(s, "| {} | {} |", r.job_key, r.state.label());
         }
         s
     }
@@ -729,7 +735,7 @@ impl Pace {
             self.rate(now)
         );
         if let Some(eta) = self.eta(done, total, now) {
-            s += &format!(" · ETA {}", fmt_duration(eta));
+            let _ = write!(s, " · ETA {}", fmt_duration(eta));
         }
         s
     }

@@ -951,9 +951,10 @@ impl MeshesModel {
     /// The scan row's bar text: `phase done/total`, then ` · ETA m:ss` once there is one.
     pub fn scan_line(&self, now: Instant) -> Option<String> {
         let (phase, done, total) = self.progress?;
+        use std::fmt::Write as _;
         let mut s = format!("{phase} {done}/{total}");
         if let Some(eta) = self.scan_eta(now) {
-            s += &format!(" · ETA {}", crate::model::export::fmt_duration(eta));
+            let _ = write!(s, " · ETA {}", crate::model::export::fmt_duration(eta));
         }
         Some(s)
     }
