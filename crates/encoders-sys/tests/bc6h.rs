@@ -81,7 +81,8 @@ fn hdr_image() -> Vec<[u16; 4]> {
     px
 }
 
-/// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
+/// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
+/// (Note LM).
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -351,19 +352,16 @@ fn mode_2_takes_a_span_inside_its_fractional_limit() {
     // R is the widest channel: exactly 99 half codes, 0x3C00..=0x3C63. The left two columns (one region of BC6H
     // partition 0) vary R with G fixed; the right two columns vary G with R fixed, so no single line fits the block.
     const BASE: u16 = 0x3C00;
+    const R_STEPS: [u16; 8] = [0, 14, 28, 42, 56, 70, 84, 99];
+    const G_STEPS: [u16; 8] = [0, 8, 16, 24, 32, 40, 48, 56];
     let one = f16::ONE.to_bits();
     let mut px = [[BASE, BASE, BASE, one]; 16];
-    for row in 0..4u16 {
-        for col in 0..2u16 {
-            // 0, 14, 28, 42, 56, 70, 84, 99
-            let steps = [0u16, 14, 28, 42, 56, 70, 84, 99];
-            let r = BASE + steps[(row * 2 + col) as usize];
-            px[(row * 4 + col) as usize][0] = r;
+    for row in 0..4usize {
+        for col in 0..2usize {
+            px[row * 4 + col][0] = BASE + R_STEPS[row * 2 + col];
         }
-        for col in 2..4u16 {
-            let steps = [0u16, 8, 16, 24, 32, 40, 48, 56];
-            let g = BASE + steps[(row * 2 + (col - 2)) as usize];
-            px[(row * 4 + col) as usize][1] = g;
+        for col in 2..4usize {
+            px[row * 4 + col][1] = BASE + G_STEPS[row * 2 + col - 2];
         }
     }
     let modes: Vec<(IspcTarget, u32)> = paths()
@@ -382,8 +380,8 @@ fn mode_2_takes_a_span_inside_its_fractional_limit() {
         assert_ne!(mode, 0, "{target:?}: mode 0 kept the block out of mode 2");
         let one_region = matches!(mode, 3 | 7 | 11 | 15);
         assert!(
-            one_region || matches!(mode, 2 | 6 | 10),
-            "{target:?}: a two-region mode other than the mode-2 family: {mode}"
+            one_region || mode == 2,
+            "{target:?}: a two-region mode other than mode 2 with R widest: {mode}"
         );
     }
 }
