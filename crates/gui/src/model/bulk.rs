@@ -1419,7 +1419,7 @@ impl AppModel {
             ),
             disabled: project,
         });
-        // Note LG3: the Sets view renames outputs only; Rename inputs is a Textures-view command.
+        // Note LJ3: the Sets view renames outputs only; Rename inputs is a Textures-view command.
         let mut v = if sets {
             outputs.into_iter().collect::<Vec<_>>()
         } else {

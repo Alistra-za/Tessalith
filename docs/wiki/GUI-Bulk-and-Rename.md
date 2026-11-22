@@ -20,12 +20,15 @@ Right-clicking a selected tile or set keeps the selection; right-clicking anothe
 
 ![A texture tile's right-click menu.](../img/gui/GUI-Bulk-and-Rename/tile-menu.png)
 
-- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. A format a target's type doesn't allow is skipped for it, so a [grey map](GUI-Texture-Panel.md#how-edits-are-saved) never takes BC7. Textures only: to copy between sets, use **Select members of kind** first.
+- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. A format a target's type doesn't allow is skipped for it, so a [grey map](GUI-Texture-Panel.md#how-edits-are-saved) never takes BC7. Textures only: to copy between sets, use [Copy JSON settings](#the-right-click-menu) in the next bullet.
+- **Copy JSON settings from <set> to N selected…** copies the last-clicked set's exported material values (PGPatcher, CS PBR texture set and material object, complex material, XPMF, Advanced skin) to the other selected sets. <!-- D:LJ1 -->
+- **Copy JSON settings** and **Paste JSON settings from <set> to N selected…** do the same through a clipboard that lasts until Tessalith closes, also into another project.
+- Matches, slot commands, Rename, locks, paths, record fields, each set's export choice and its XPMF PBR switch stay its own. A value a target can't take is skipped, and the reason shows in Messages.
 - **Reset all settings for N…** removes their `sdc.toml` entries after asking. It keeps your acknowledgements and skips a texture in a pinned slot.
 
 ## Renaming
 
-Right-click a texture or a set, or press **F2**. The dialog has two modes.
+Right-click a texture, or a PGPatcher PBR set for Outputs, or press **F2**. Inputs is offered in the Textures view only. <!-- D:LJ3 --> The dialog has two modes.
 
 | Mode | What it does | Saved where |
 |---|---|---|

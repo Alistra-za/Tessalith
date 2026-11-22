@@ -499,7 +499,7 @@ pub static ACTIONS: &[Action] = &[
         &[key(Key::F2)],
         |m, _| {
             use crate::model::rename::{RenameMode, INPUTS_IN_TEXTURES};
-            // Note LG3: a set selection renames outputs (Note HJ1); with no PGPatcher PBR set in it F2 says where
+            // Note LJ3: a set selection renames outputs (Note HJ1); with no PGPatcher PBR set in it F2 says where
             // inputs are renamed. A texture selection renames inputs.
             if m.inputs_rename_offered() {
                 m.open_rename(RenameMode::Inputs);

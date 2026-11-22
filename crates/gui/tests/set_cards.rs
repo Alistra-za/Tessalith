@@ -2664,7 +2664,7 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
     );
 }
 
-// ---- Edit match... (Note LG2) ----
+// ---- Edit match... (Note LJ2) ----
 
 const NOTE: &str = "The entry applies when any of these matches.";
 

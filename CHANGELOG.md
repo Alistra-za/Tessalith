@@ -136,10 +136,14 @@
 ### Added
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
+- New **Copy JSON settings from <set> to N selected…** in a set's right-click menu: copy a set's PGPatcher, CS PBR, complex material, XPMF and Advanced skin material values to the other selected sets in one undo step. **Copy JSON settings** and **Paste JSON settings from <set> to N selected…** do the same through a clipboard that lasts the session, across projects.
+- **Edit match…** on a set card opens the set editor at its Matching group; on a set with no PGPatcher JSON settings it is off and says why.
+- **Rename inputs…** is no longer in the Sets view; rename inputs from the Textures view. F2 on a set that is not a PGPatcher PBR set says so.
 
 ### Fixed
 
 - Shared roughness maps bake once when every set uses the same normal. Problems explains when the sets cannot share a bake.
+- Renaming a texture's input from the rename dialog no longer drops its set's opt-out from the Also export, and moving an opt-out keeps the comments in `[export]`.
 
 ## 3.0.0
 

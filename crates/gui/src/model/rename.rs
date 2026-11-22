@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// W19: the status line when F2 is pressed over sets and none of them can rename outputs (Note LG3).
+/// W19: the status line when F2 is pressed over sets and none of them can rename outputs (Note LJ3).
 pub const INPUTS_IN_TEXTURES: &str =
     "Rename inputs in the Textures view: select the textures there and press F2";
 
@@ -748,7 +748,7 @@ impl AppModel {
         self.rename_cache.take();
     }
 
-    /// Note LG3: Rename inputs is a Textures-view command; a set selection (either kind) is not offered it.
+    /// Note LJ3: Rename inputs is a Textures-view command; a set selection (either kind) is not offered it.
     pub fn inputs_rename_offered(&self) -> bool {
         !matches!(
             self.selection,
@@ -757,7 +757,7 @@ impl AppModel {
     }
 
     /// Switch the open dialog's mode; the recipe stays, the keys follow the selection. A set selection never goes
-    /// to Inputs (Note LG3).
+    /// to Inputs (Note LJ3).
     pub fn set_rename_mode(&mut self, mode: RenameMode) {
         if mode == RenameMode::Inputs && !self.inputs_rename_offered() {
             return;
