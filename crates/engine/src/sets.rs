@@ -244,6 +244,10 @@ pub(crate) fn no_set_paths(
     let Some(root) = root else {
         return BTreeSet::new();
     };
+    // No index without a `NoSet` edit to look up.
+    if !edits.iter().any(|e| matches!(e, SetEdit::NoSet { .. })) {
+        return BTreeSet::new();
+    }
     let index = KeyIndex::new(root, files);
     edits
         .iter()
