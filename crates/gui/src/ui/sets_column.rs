@@ -856,7 +856,7 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetVi
 /// A member's thumbnail, with the slot menu and an optional extra line on hover.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the Ui, the model and thumbnail cache, the set view, member key and slot kind, the drag and note of one chip, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
+    reason = "the Ui, the model and thumbnail cache, the set view, member key, slot kind and remove flag, the drag and note of one chip, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
 )]
 fn member_chip(
     ui: &mut egui::Ui,
@@ -1050,7 +1050,7 @@ fn slot_box_menu(
 /// A card thumbnail opens its set unless Shift is held. A row in the overflow list opens its texture directly.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the model and card, the member key, slot kind and drag of one chip, its response, and the act queue and menu flag the menu writes; they are the chip's own locals in the caller, so a struct would be built per chip only to be taken apart here"
+    reason = "the model and card, the member key, slot kind, remove flag and drag of one chip, its response, and the act queue and menu flag the menu writes; they are the chip's own locals in the caller, so a struct would be built per chip only to be taken apart here"
 )]
 fn member_acts(
     model: &AppModel,
