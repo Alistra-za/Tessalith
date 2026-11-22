@@ -1,7 +1,7 @@
 //! Export and its report (M3a spec §2.5, §2.6, §5.5).
 use super::bottom::open_export_warnings;
 use super::AppModel;
-use engine::api::{BatchSummary, CancelToken, CHECKED_IN_PLACE_FAILED};
+use engine::api::{BatchSummary, CancelToken, CHECKED_IN_PLACE, CHECKED_IN_PLACE_FAILED};
 use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -17,7 +17,7 @@ pub enum RowState {
         passed: bool,
     },
     UpToDate,
-    /// Checked in place (OV-O2) and failed: the file was kept and not written (D13).
+    /// Checked in place and failed (Note LF10): the file was kept and not written.
     CheckFailed,
     Kept,
     Skipped(SkipKind, String),
@@ -421,11 +421,15 @@ impl ExportModel {
                     SkipKind::UpToDate => RowState::UpToDate,
                     k => RowState::Skipped(*k, reason.clone()),
                 };
-                // A skip is not work: it counts in done/total but not in the files/s rate or the ETA.
+                // A skip is not work: it counts in done/total but not in the files/s rate or the ETA. A check in
+                // place (Note LF10) is: it reads and decodes the DDS.
                 if let Some(r) = self.row(&ev) {
                     if terminal.is_some() || r.state.accepts_skip() {
                         r.state = state;
                     }
+                }
+                if primary_batch && reason.contains(CHECKED_IN_PLACE) {
+                    self.finished_at(now);
                 }
             }
             EventKind::FileFailed { error, .. } => {
@@ -857,7 +861,7 @@ mod tests {
         m
     }
 
-    /// Note LF (OV-O2, D13): an output checked in place that failed is a failed row, in the Failed only filter, the
+    /// Note LF10: an output checked in place that failed is a failed row, in the Failed only filter, the
     /// Files counts and the report. One that passed, and a keep, are not.
     #[test]
     fn a_failed_check_in_place_is_a_failed_row() {
@@ -878,7 +882,7 @@ mod tests {
         let o = m.primary_outcomes(false);
         assert_eq!((o.failed, o.current), (0, 1));
 
-        // A keep is never checked (OV-R4).
+        // A keep is never checked (Note LF11).
         let m = up_to_date_with("kept: x".into());
         assert_eq!(m.rows[0].state, RowState::Kept);
     }
