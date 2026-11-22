@@ -939,6 +939,9 @@ fn window_pairs(isa: impl Isa, v: &[u8; 16], b: &mut Best) {
 }
 
 #[cfg(test)]
+mod bound;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::gen;
