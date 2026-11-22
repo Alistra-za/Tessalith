@@ -8,6 +8,7 @@ use crate::shader::Shader;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
@@ -120,6 +121,10 @@ pub fn project_rel(root: &Path, input: &InputFile) -> Option<String> {
     })
 }
 
+/// Each planned file's match forms (`None` for a path outside the root) by path, with the file name they were worked
+/// out for.
+pub(crate) type FormsByPath = BTreeMap<PathBuf, (Option<std::ffi::OsString>, Option<KeyForms>)>;
+
 /// The `[files]` layer (DECISIONS N2) and the per-file acknowledgements, resolved against one project root.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileScopes {
@@ -129,8 +134,9 @@ pub struct FileScopes {
     pub overrides: Vec<SetOverride>,
     /// Key → codes acknowledged for that file only.
     pub allow: BTreeMap<String, BTreeSet<Code>>,
-    /// The planned files' match forms by path (`index`), with the file name they were worked out for.
-    pub(crate) forms: BTreeMap<PathBuf, (Option<std::ffi::OsString>, Option<KeyForms>)>,
+    /// The planned files' match forms by path (`index`), with the file name they were worked out for. `None` until
+    /// `index`.
+    pub(crate) forms: Option<Arc<FormsByPath>>,
     /// Note DW: indices (into the planned files, as `TextureSet::members`) of the GUI's pinned files named as a
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
@@ -165,7 +171,7 @@ impl FileScopes {
         root: None,
         overrides: Vec::new(),
         allow: BTreeMap::new(),
-        forms: BTreeMap::new(),
+        forms: None,
         skin_pinned: BTreeSet::new(),
         skin_typed: BTreeSet::new(),
         hand_fuzz: BTreeSet::new(),
@@ -222,13 +228,15 @@ impl FileScopes {
             return;
         }
         self.rebuild_keys();
-        self.forms = files
-            .iter()
-            .map(|f| {
-                let forms = project_rel(&root, f).map(|r| KeyForms::of(&r));
-                (f.path.clone(), (key_name(f).map(Into::into), forms))
-            })
-            .collect();
+        self.forms = Some(Arc::new(
+            files
+                .iter()
+                .map(|f| {
+                    let forms = project_rel(&root, f).map(|r| KeyForms::of(&r));
+                    (f.path.clone(), (key_name(f).map(Into::into), forms))
+                })
+                .collect(),
+        ));
     }
 
     /// Replace every `[files]` override and the `allow` entry of `key` (this exact spelling, as the document holds
@@ -287,7 +295,7 @@ impl FileScopes {
     /// path under this name, else worked out now (a packed output's virtual name, a file planned later).
     pub fn forms_of(&self, input: &InputFile) -> Option<std::borrow::Cow<'_, KeyForms>> {
         let root = self.root.as_deref()?;
-        match self.forms.get(&input.path) {
+        match self.forms.as_deref().and_then(|m| m.get(&input.path)) {
             Some((name, forms)) if name.as_deref() == key_name(input) => {
                 forms.as_ref().map(std::borrow::Cow::Borrowed)
             }

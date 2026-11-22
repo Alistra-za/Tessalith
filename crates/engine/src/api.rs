@@ -1314,25 +1314,27 @@ struct Setup {
 #[derive(Clone)]
 pub(crate) struct Prepared {
     pub(crate) req: BatchRequest,
-    pub(crate) registry: PresetRegistry,
-    pub(crate) user_config: Option<ConfigFile>,
+    pub(crate) registry: Arc<PresetRegistry>,
+    pub(crate) user_config: Option<Arc<ConfigFile>>,
     pub(crate) project_config: Option<ConfigFile>,
     pub(crate) target: Target,
     pub(crate) target_src: Provenance,
     pub(crate) preset_id: String,
-    pub(crate) files: Vec<InputFile>,
+    // The fields below that are `Arc`s are shared by a skeleton patch's copy (Note LH5); a patch writes only
+    // `req`, `project_config`, `file_scopes`, `typed` (replaced whole) and, through `Arc::make_mut`, `sets`.
+    pub(crate) files: Arc<Vec<InputFile>>,
     /// `group_sets_with`'s sets, before `drop_typed_roles` and the joins.
-    pub(crate) grouped: Vec<TextureSet>,
+    pub(crate) grouped: Arc<Vec<TextureSet>>,
     /// The sets after [`join_members`], before set edits.
-    pub(crate) joined: Vec<TextureSet>,
+    pub(crate) joined: Arc<Vec<TextureSet>>,
     /// Final membership, before the predicted packing suffixes.
-    pub(crate) sets: Vec<TextureSet>,
+    pub(crate) sets: Arc<Vec<TextureSet>>,
     pub(crate) file_scopes: FileScopes,
-    pub(crate) hand: Vec<Option<crate::helper::HelperRole>>,
-    pub(crate) typed: BTreeSet<usize>,
-    pub(crate) dup_idx: BTreeSet<usize>,
-    pub(crate) gen_replaced: Vec<SkippedFile>,
-    pub(crate) packed_outputs: BTreeMap<(String, String), PathBuf>,
+    pub(crate) hand: Arc<Vec<Option<crate::helper::HelperRole>>>,
+    pub(crate) typed: Arc<BTreeSet<usize>>,
+    pub(crate) dup_idx: Arc<BTreeSet<usize>>,
+    pub(crate) gen_replaced: Arc<Vec<SkippedFile>>,
+    pub(crate) packed_outputs: Arc<BTreeMap<(String, String), PathBuf>>,
 }
 
 impl Prepared {
@@ -1343,7 +1345,7 @@ impl Prepared {
             self.target,
             &self.registry,
             &self.preset_id,
-            self.user_config.as_ref(),
+            self.user_config.as_deref(),
             self.project_config.as_ref(),
             &self.file_scopes,
         )
@@ -2088,22 +2090,22 @@ impl Engine {
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
             req: req.clone(),
-            registry,
-            user_config,
+            registry: Arc::new(registry),
+            user_config: user_config.map(Arc::new),
             project_config,
             target,
             target_src,
             preset_id,
-            files,
-            grouped,
-            joined,
-            sets,
+            files: Arc::new(files),
+            grouped: Arc::new(grouped),
+            joined: Arc::new(joined),
+            sets: Arc::new(sets),
             file_scopes,
-            hand,
-            typed,
-            dup_idx,
-            gen_replaced,
-            packed_outputs,
+            hand: Arc::new(hand),
+            typed: Arc::new(typed),
+            dup_idx: Arc::new(dup_idx),
+            gen_replaced: Arc::new(gen_replaced),
+            packed_outputs: Arc::new(packed_outputs),
         })
     }
 
@@ -2139,7 +2141,7 @@ impl Engine {
             target,
             registry,
             preset_id,
-            p.user_config.as_ref(),
+            p.user_config.as_deref(),
             p.project_config.as_ref(),
             file_scopes,
         );
@@ -3377,7 +3379,7 @@ impl Engine {
         }
         let plan = Plan {
             request: req.clone(),
-            registry: registry.clone(),
+            registry: PresetRegistry::clone(registry),
             preset_id: preset_id.clone(),
             target,
             jobs,
@@ -4362,7 +4364,8 @@ pub(crate) fn check_file_overrides(p: &Prepared, ovs: &[&SetOverride]) -> Result
     let chain = p.registry.chain(&p.preset_id).map_err(preset_err)?;
     let configs: Vec<&ConfigFile> = p
         .user_config
-        .iter()
+        .as_deref()
+        .into_iter()
         .chain(p.project_config.iter())
         .collect();
     for st in Subtype::ALL {

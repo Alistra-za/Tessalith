@@ -55,18 +55,18 @@ pub struct Skeleton {
     pub(crate) req_sig: u64,
     pub(crate) prepared: Prepared,
     /// File index → index into `prepared.sets`; `u32::MAX` for a file in no set.
-    pub(crate) set_of: Vec<u32>,
+    pub(crate) set_of: Arc<Vec<u32>>,
     /// Lower-cased key form (each member's full and stem form, and the packed-output keys of each set that packs)
     /// → the sets it names.
-    pub(crate) key_sets: HashMap<String, Vec<u32>>,
+    pub(crate) key_sets: Arc<HashMap<String, Vec<u32>>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
-    pub(crate) pbr_sets: BTreeSet<u32>,
+    pub(crate) pbr_sets: Arc<BTreeSet<u32>>,
     /// Sets with a fuzz map (Fuzz-19): a member fuzz map image (`group::is_fuzz_map_image`), or a set
     /// that lists one, also shared in (`pack::plan::has_fuzz_map`, the gate the Advanced Skin evidence reads).
-    pub(crate) fuzz_sets: BTreeSet<u32>,
+    pub(crate) fuzz_sets: Arc<BTreeSet<u32>>,
     /// Sets whose `set_resolved` read them with `f` in the full plan, from a fuzz map read as the PBR fuzz texture
     /// (Fuzz-1a, `api::pbr_read_fuzz`): the PBR check's clone gains it too.
-    pub(crate) f_sets: BTreeSet<u32>,
+    pub(crate) f_sets: Arc<BTreeSet<u32>>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
     /// The partner groups [`Skeleton::scope`] closes over (set keys), built once per full plan.
@@ -181,11 +181,11 @@ impl Skeleton {
             req_sig: prepared.req.sig_without_files(),
             partners: Arc::new(partner_groups(&prepared)),
             prepared,
-            set_of,
-            key_sets,
-            pbr_sets,
-            fuzz_sets,
-            f_sets,
+            set_of: Arc::new(set_of),
+            key_sets: Arc::new(key_sets),
+            pbr_sets: Arc::new(pbr_sets),
+            fuzz_sets: Arc::new(fuzz_sets),
+            f_sets: Arc::new(f_sets),
             patched: false,
             writers: Arc::new(writers),
             clash_sets: Arc::new(clash_sets),
@@ -267,6 +267,9 @@ impl Skeleton {
                     .extend(codes.iter().copied());
                 n.file_scopes.rebuild_keys();
             }
+            // shortcut: the [files] documents, the request and file_scopes are copied whole on every patch, since patch
+            // writes them; upgrade when a re-plan of a project with a large [files] table shows them in the
+            // allocation profile.
             // Keep the documents in step with the layer, as a fresh `prepare` would read them.
             for doc in [
                 n.project_config.as_mut(),
@@ -316,7 +319,7 @@ impl Skeleton {
             .collect();
         check_file_overrides(&next.prepared, &edited).map_err(|_| NeedsFull(BAD_ENTRY))?;
         // What the edits change per hit file, under the old and the new layer (`prepare`'s own rules).
-        let mut typed = p.typed.clone();
+        let mut typed = (*p.typed).clone();
         {
             let (old_ctx, new_ctx) = (p.ctx(), next.prepared.ctx());
             for &i in &hit_files {
@@ -339,7 +342,7 @@ impl Skeleton {
             // that unmakes the skin set, is seen too; a file that moved in or out and shares an output with
             // another file changes that pair's verdict.
             if self.shared_output {
-                let mut sets = p.sets.clone();
+                let mut sets = p.sets.to_vec();
                 for s in typed
                     .symmetric_difference(&p.typed)
                     .map(|&i| self.set_of[i])
@@ -363,7 +366,7 @@ impl Skeleton {
             }
             // Membership check: rerun `prepare`'s joins on its grouping under the new layer; any set whose members
             // differ from the kept joins means a full plan. All sets, since a join reaches its partner by key.
-            let mut joined = p.grouped.clone();
+            let mut joined = p.grouped.to_vec();
             drop_typed_roles(&mut joined, &p.files, &typed);
             let explicit = pre_edit_shaders(&next.prepared.req, &joined);
             join_members(
@@ -378,7 +381,7 @@ impl Skeleton {
                 a.key == b.key && a.members == b.members && a.shared_skin == b.shared_skin
             };
             if joined.len() != p.joined.len()
-                || !joined.iter().zip(&p.joined).all(|(a, b)| same(a, b))
+                || !joined.iter().zip(p.joined.iter()).all(|(a, b)| same(a, b))
             {
                 return Err(NeedsFull(MEMBERSHIP_CHANGE));
             }
@@ -404,9 +407,13 @@ impl Skeleton {
             .chain(sharing)
             .filter(|&s| s != u32::MAX)
             .collect();
-        n.typed = typed;
+        n.typed = Arc::new(typed);
         for s in flipped {
-            refresh_suffixes(&mut n.sets[s as usize], &n.files, &n.typed);
+            refresh_suffixes(
+                &mut Arc::make_mut(&mut n.sets)[s as usize],
+                &n.files,
+                &n.typed,
+            );
         }
         // A hit set whose PBR status flips moves output paths too (P1); decided as `set_resolved` decides it.
         let ctx = n.ctx();
@@ -477,7 +484,7 @@ fn partner_groups(p: &Prepared) -> Vec<BTreeSet<String>> {
     // Cube: `plan_cubes` groups face jobs by (folded output folder, base minus the face tag). Any sub-type, since
     // an edit can make or unmake a face; an untagged output named like the base clashes with the merged cube.
     let mut cube: HashMap<(String, String), (bool, BTreeSet<String>)> = HashMap::new();
-    for set in &p.sets {
+    for set in p.sets.iter() {
         for &m in &set.members {
             let out = &p.files[m].output;
             let Some(stem) = out.file_stem().and_then(|s| s.to_str()) else {
@@ -704,6 +711,43 @@ mod tests {
             .patch(&[("dir/q_height.png".into(), None)])
             .unwrap();
         assert_eq!(layer(&back.prepared), layer(&s.prepared));
+    }
+
+    /// Note LH5: a patch shares what it does not write and leaves the session's skeleton as it was, also when it
+    /// rewrites a set's suffixes (the q_height edit types a member). The fast re-plan keeps what the full plan keeps:
+    /// the patched copy equals a fresh `prepare` of the edited request.
+    #[test]
+    fn a_patch_leaves_the_kept_skeleton_as_it_was() {
+        let fx = fast_fixture();
+        let s = skeleton(&fx.req);
+        let before = (
+            layer(&s.prepared),
+            format!("{:?}", (&s.set_of, &s.pbr_sets, &s.fuzz_sets, &s.f_sets)),
+        );
+        let t = table("subtype = \"diffuse\"");
+        let (next, _) = s
+            .patch(&[("dir/q_height.png".into(), Some(t.clone()))])
+            .unwrap();
+        assert_ne!(
+            layer(&next.prepared),
+            before.0,
+            "the edit changes the patched copy"
+        );
+        let edited = with_entry(&fx.req, "dir/q_height.png", Some(&t));
+        assert_eq!(
+            layer(&next.prepared),
+            layer(&prepare(&edited)),
+            "the patched copy equals the full plan's"
+        );
+        let after = (
+            layer(&s.prepared),
+            format!("{:?}", (&s.set_of, &s.pbr_sets, &s.fuzz_sets, &s.f_sets)),
+        );
+        assert_eq!(after, before, "the kept skeleton is unchanged");
+        assert!(!s.patched && next.patched);
+        assert!(Arc::ptr_eq(&s.prepared.files, &next.prepared.files));
+        assert!(Arc::ptr_eq(&s.prepared.grouped, &next.prepared.grouped));
+        assert!(Arc::ptr_eq(&s.key_sets, &next.key_sets));
     }
 
     /// Minor 7: a file name with upper-case letters is hit by its lower-cased and its exact-case key.

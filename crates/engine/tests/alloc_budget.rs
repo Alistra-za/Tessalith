@@ -12,6 +12,7 @@ use engine::api::{BatchRequest, CancelToken};
 use engine::config::{Format, RawMap, Subtype};
 use engine::events::{Reporter, VecSink};
 use engine::session::Session;
+use engine::skeleton::Skeleton;
 use fast_fixture::{fast_fixture, with_entry};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -90,6 +91,10 @@ const WARM_PLAN_CALLS: u64 = 130_000;
 // index only for a `NoSet` edit: 27376 calls in all five (2531208 bytes, 5 jobs). 27376 * 1.10 = 30114, rounded up to
 // two significant figures.
 const REPLAN_CALLS: u64 = 31_000;
+// Measured 2026-11-22 with `--nocapture`, 5 runs, jobs = 1, after the re-plan began sharing what a patch does not
+// write (Note LH5): 17888 calls in all five (1550583 bytes); 20446 calls in all five before (1859388 bytes).
+// 17888 * 1.10 = 19677, rounded up to two significant figures.
+const PATCH_CALLS: u64 = 20_000;
 
 fn reporter() -> Reporter {
     Reporter::new(Arc::new(VecSink::default()), "t")
@@ -195,5 +200,30 @@ fn a_one_edit_replan_stays_within_its_allocation_budget() {
     assert!(
         calls <= REPLAN_CALLS,
         "a one-edit re-plan made {calls} allocation calls, budget {REPLAN_CALLS}"
+    );
+}
+
+/// Note LH5: one `[files]` edit patched into the kept skeleton, without planning.
+#[test]
+fn a_skeleton_patch_stays_within_its_allocation_budget() {
+    let _x = exclusive();
+    let (_fx, session, base) = planned();
+    let edit = vec![(
+        "dir/a.png".to_string(),
+        Some(toml::from_str::<toml::Table>("alpha.policy = \"cutout\"").unwrap()),
+    )];
+    let req = with_entry(&base, &edit[0].0, edit[0].1.as_ref());
+    let sig = req.sig_without_files();
+    let skel = session.skeleton().expect("the full plan kept a skeleton");
+    let (patched, calls, bytes) = counted(|| Skeleton::patch_sig(Some(&skel), sig, &edit));
+    assert!(
+        patched.is_ok(),
+        "the edit must patch, or the count means nothing: {:?}",
+        patched.err()
+    );
+    eprintln!("skeleton patch: {calls} calls, {bytes} bytes");
+    assert!(
+        calls <= PATCH_CALLS,
+        "a skeleton patch made {calls} allocation calls, budget {PATCH_CALLS}"
     );
 }
