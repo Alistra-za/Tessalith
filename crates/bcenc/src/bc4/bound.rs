@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use crate::gen;
 
-    /// The generated blocks plus the flat extremes and a 0/255 checkerboard.
+    /// The generated blocks plus the flat extremes and a block alternating 0 and 255.
     fn blocks() -> Vec<[u8; 16]> {
         let mut out = gen::bc4_classes(0xB4B4_0099, 12);
         out.push([0; 16]);
@@ -255,6 +255,15 @@ mod tests {
         assert_eq!(want, 15 * 36 * 36 + 16 * 16);
         assert!(want > 0);
         assert_eq!(t.lb(136, 136), want);
+        // Above the window with the other end inside: both modes, and the sums are positive, so only the window check
+        // makes them 0 (C[120] and A[120] are 15 x 20^2).
+        assert_eq!(t.lb(120, 137), 0);
+        assert_eq!(t.lb(137, 120), 0);
+        // The lower edge is inside too. Texels 100 x15 and 120 lie above 99: 15 x 1^2 + 21^2. (The window's lower end
+        // has no texel below it, so its own table entry is 0; the other end of the pair carries the sum.)
+        let above = 15 + 21 * 21;
+        assert_eq!(t.lb(84, 99), above);
+        assert_eq!(t.lb(99, 84), above);
         let e = Bound::empty();
         for (e0, e1) in [
             (0, 0),
