@@ -128,6 +128,155 @@ fn the_list_stops_at_200_and_counts_the_rest() {
     assert_eq!(USED_BY_CAP, 200);
 }
 
+#[test]
+fn same_name_copies_count_toward_the_cap() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    let tex = "textures/a/wall.dds";
+    let names: Vec<_> = (0..USED_BY_CAP)
+        .map(|i| format!("meshes/m{i:04}.nif"))
+        .collect();
+    let users: Vec<User> = names
+        .iter()
+        .map(|n| (n.as_str(), n.as_str(), 1, 1, None, None))
+        .collect();
+    db_with(&db, tex, &users);
+    let s = modscan::store::Store::open(&db).unwrap();
+    s.conn()
+        .execute_batch(
+            "INSERT INTO origin(id, kind, name, root, priority, enabled)
+             SELECT 202, kind, name, 'second-root', priority, enabled FROM origin WHERE id = 2;
+         INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (202, 2, 202, 0, 0);
+         INSERT INTO shape(copy_id, block, kind, shader_kind, shader_type, slsf2, texset_id)
+             VALUES (202, 0, 'BSTriShape', 1, 0, 0, 1);",
+        )
+        .unwrap();
+    let copies: i64 = s
+        .conn()
+        .query_row(
+            "SELECT count(DISTINCT s.copy_id) FROM shape s JOIN tex_use t ON t.texset_id = s.texset_id
+         WHERE t.tex_path_id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(copies, 201);
+    drop(s);
+    let u = read_users(&db, "a/wall.png", tex, false);
+    assert_eq!(u.error, None);
+    assert_eq!(u.more, 1);
+}
+
+#[test]
+fn a_row_knows_its_shapes() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    db_with(
+        &db,
+        "textures/a/wall.dds",
+        &[("meshes/tree.nif", "Trees", 1, 7, None, None)],
+    ); // copy id 2, block 0
+    {
+        let s = modscan::store::Store::open(&db).unwrap();
+        s.conn().execute_batch(
+            "INSERT INTO shape(copy_id, block, name, kind, shader_kind, shader_type, slsf2, texset_id) VALUES (2, 5, 'Body', 'BSTriShape', 1, 0, 0, 1);
+             INSERT INTO shape(copy_id, block, name, kind, shader_kind, shader_type, slsf2, texset_id) VALUES (2, 9, NULL, 'BSTriShape', 1, 0, 0, 1);
+             INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (3, 1, 'Trees', 'other-root', 6, 1);
+             INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (3, 2, 3, 0, 0);
+             INSERT INTO shape(copy_id, block, name, kind, shader_kind, shader_type, slsf2, texset_id) VALUES (3, 5, 'Body', 'BSTriShape', 1, 0, 0, 1);
+             INSERT INTO tex_use(tex_path_id, texset_id, slot) VALUES (1, 1, 1);",
+        )
+        .unwrap();
+    }
+    let u = read_users(&db, "a/wall.png", "textures/a/wall.dds", false);
+    assert_eq!(
+        (u.total_copies, u.rows.len(), u.rows[0].copies.len()),
+        (2, 1, 2)
+    );
+    let copies = &u.rows[0].copies;
+    assert_eq!((copies[0].copy_id, copies[1].copy_id), (2, 3));
+    assert_eq!(
+        copies[0].shapes,
+        vec![(0, None), (5, Some("Body".into())), (9, None)]
+    );
+    assert_eq!(copies[1].shapes, vec![(5, Some("Body".into()))]);
+}
+
+#[test]
+fn a_losing_copy_names_the_actual_winner_even_when_it_uses_another_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    // Copies 2 (Low, priority 1) and 3 (Mid, 2) use the texture; copy 9 in "Boss" wins the path but uses none.
+    db_with(
+        &db,
+        "textures/a/wall.dds",
+        &[("meshes/tree.nif", "Low", 1, 1, None, None)],
+    );
+    {
+        let s = modscan::store::Store::open(&db).unwrap();
+        s.conn()
+            .execute_batch(
+                "INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (3, 1, 'Mid', 'mid', 2, 1);
+                 INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (3, 2, 3, 0, 0);
+                 INSERT INTO shape(copy_id, block, kind, shader_kind, shader_type, slsf2, texset_id) VALUES (3, 0, 'BSTriShape', 1, 0, 0, 1);
+                 INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (9, 1, 'Boss', 'boss', 9, 1);
+                 INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (9, 2, 9, 0, 0);
+                 INSERT INTO nif_winner(path_id, copy_id, n_copies) VALUES (2, 9, 3);",
+            )
+            .unwrap();
+    }
+    let u = read_users(&db, "a/wall.png", "textures/a/wall.dds", false);
+    assert_eq!(u.error, None);
+    let by: Vec<_> = u
+        .rows
+        .iter()
+        .flat_map(|r| r.copies.iter())
+        .map(|c| (c.copy_id, c.overridden_by.as_deref()))
+        .collect();
+    assert_eq!(by, vec![(3, Some("Boss")), (2, Some("Boss"))]);
+    // The winner itself reads no annotation.
+    {
+        let s = modscan::store::Store::open(&db).unwrap();
+        s.conn()
+            .execute("UPDATE nif_winner SET copy_id = 3", [])
+            .unwrap();
+    }
+    let u = read_users(&db, "a/wall.png", "textures/a/wall.dds", false);
+    let by: Vec<_> = u
+        .rows
+        .iter()
+        .flat_map(|r| r.copies.iter())
+        .map(|c| (c.copy_id, c.overridden_by.as_deref()))
+        .collect();
+    assert_eq!(by, vec![(3, None), (2, Some("Mid"))]);
+}
+
+#[test]
+fn alpha_evidence_past_the_cap_still_decides() {
+    // 200 copies at priority 5 fill the list, the first of them cutting out at 100. The one copy cutting out at 200
+    // has priority 1 and sorts past the cap, but its evidence decides the threshold: the listed copy is not marked.
+    let names: Vec<String> = (0..USED_BY_CAP)
+        .map(|i| format!("meshes/m{i:04}.nif"))
+        .collect();
+    let mut users: Vec<User> = names
+        .iter()
+        .map(|n| (n.as_str(), n.as_str(), 1, 5, None, None))
+        .collect();
+    users[0].4 = Some(1 << 9);
+    users[0].5 = Some(100);
+    users.push(("meshes/z.nif", "Z", 1, 1, Some(1 << 9), Some(200)));
+    let u = read(&users, true);
+    assert_eq!(
+        (u.rows.len(), u.more, u.total_copies),
+        (USED_BY_CAP, 1, USED_BY_CAP + 1)
+    );
+    assert!(u.rows.iter().all(|r| r.nif != "meshes/z.nif"));
+    assert!(
+        u.rows.iter().all(|r| !r.decided_alpha),
+        "the threshold came from the copy past the cap"
+    );
+}
+
 fn wait_used_by(m: &mut AppModel, key: &str) -> std::sync::Arc<UsedBy> {
     let t = Instant::now();
     loop {

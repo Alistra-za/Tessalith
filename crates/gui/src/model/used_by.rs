@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 /// The list shows this many meshes, then "and N more".
 pub const USED_BY_CAP: usize = 200;
 
-/// One NIF copy (a mesh in a mod) whose shapes use the texture, in any slot.
+/// One NIF copy (a mesh in a mod) whose shapes use the texture, in any slot. Copies of one NIF in one mod name (two
+/// origins with the same name, other roots) are one display group; each keeps its own facts in [`MeshUser::copies`].
+/// The row facts below are the first (winning-order) copy's.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MeshUser {
     pub nif: String,
@@ -20,11 +22,27 @@ pub struct MeshUser {
     pub priority: i32,
     /// From a BSA: loses to every loose copy whatever its number (archive rank).
     pub bsa: bool,
-    /// Its shapes carry the alpha evidence that decided the texture's alpha meaning (AG96).
+    /// Any copy's shapes carry the alpha evidence that decided the texture's alpha meaning (AG96).
     pub decided_alpha: bool,
+    /// Every listed copy of this NIF in this mod name, in list order.
+    pub copies: Vec<MeshCopy>,
 }
 
-/// The answer for one texture: winner first, at most `USED_BY_CAP` rows.
+/// One copy in the scan database (one `nif_copy` row) and the shapes of it that use the texture.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MeshCopy {
+    pub copy_id: i64,
+    pub priority: i32,
+    pub bsa: bool,
+    pub decided_alpha: bool,
+    /// The mod whose copy of this NIF wins instead (it need not use this texture); `None` for the winner, or when
+    /// the scan names no winner.
+    pub overridden_by: Option<String>,
+    /// The (block number, name) of each shape using the texture, once each, in block order.
+    pub shapes: Vec<(u32, Option<String>)>,
+}
+
+/// The answer for one texture: winner first, at most `USED_BY_CAP` copies grouped into rows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsedBy {
     /// The item key it was read for.
@@ -32,11 +50,12 @@ pub struct UsedBy {
     /// The scan-database path asked for (`<mesh_key>.dds`).
     pub tex: String,
     pub rows: Vec<MeshUser>,
-    /// Rows past the cap.
+    /// Distinct matching copies, before the cap.
+    pub total_copies: usize,
+    /// Copies past the cap.
     pub more: usize,
     pub error: Option<String>,
 }
-
 #[derive(Debug, Default)]
 pub struct UsedByState {
     /// The last answer that landed (kept on screen while a newer read runs).
@@ -67,15 +86,26 @@ pub fn read_users(db: &Path, item: &str, tex: &str, alpha: bool) -> UsedBy {
         ..UsedBy::default()
     };
     match query(db, tex) {
-        Ok(rows) => (out.rows, out.more) = users(rows, alpha),
+        Ok(rows) => (out.rows, out.total_copies, out.more) = users(rows, alpha),
         Err(e) => out.error = Some(format!("Scan database: {e}")),
     }
     out
 }
 
-/// One shape row: NIF, mod, kind, priority, and whether it is a slot-0 source lighting shape with its alpha (the
-/// shapes `meshes::mesh_evidence` counts).
-type ShapeRow = (String, String, i32, i32, Option<MeshAlpha>);
+/// One shape row of one copy: the copy, its NIF and origin, the shape, the winning copy's origin, and whether it is
+/// a slot-0 source lighting shape with its alpha (the shapes `meshes::mesh_evidence` counts).
+struct ShapeRow {
+    copy_id: i64,
+    nif: String,
+    mod_name: String,
+    kind: i32,
+    priority: i32,
+    block: u32,
+    shape_name: Option<String>,
+    /// The origin of the path's winning copy, when that is another copy.
+    overridden_by: Option<String>,
+    alpha: Option<MeshAlpha>,
+}
 
 fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
     let store = Store::open_read_only(db).map_err(|e| e.to_string())?;
@@ -85,13 +115,16 @@ fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
         .conn()
         .prepare(
             "SELECT np.p, o.name, o.kind, o.priority, tu.slot, s.shader_kind, ifnull(s.slsf2, 0), c.is_derived,
-                    s.alpha_flags, s.alpha_threshold
+                    s.alpha_flags, s.alpha_threshold, c.id, s.block, s.name, w.copy_id, wo.name
              FROM path tp
              JOIN tex_use tu ON tu.tex_path_id = tp.id
              JOIN shape s ON s.texset_id = tu.texset_id
              JOIN nif_copy c ON c.id = s.copy_id
              JOIN origin o ON o.id = c.origin_id AND o.enabled = 1
              JOIN path np ON np.id = c.path_id
+             LEFT JOIN nif_winner w ON w.path_id = c.path_id
+             LEFT JOIN nif_copy wc ON wc.id = w.copy_id
+             LEFT JOIN origin wo ON wo.id = wc.origin_id
              WHERE tp.p = ?1",
         )
         .map_err(|e| e.to_string())?;
@@ -103,27 +136,39 @@ fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
             let source = slot == 0 && kind == 1 && slsf2 & (1 << 23) == 0 && !derived;
             let flags = r.get::<_, Option<i64>>(8)?.unwrap_or(0);
             let threshold = r.get::<_, Option<i64>>(9)?.unwrap_or(0);
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                source.then(|| MeshAlpha {
+            let copy_id: i64 = r.get(10)?;
+            let winner: Option<i64> = r.get(13)?;
+            Ok(ShapeRow {
+                copy_id,
+                nif: r.get(0)?,
+                mod_name: r.get(1)?,
+                kind: r.get(2)?,
+                priority: r.get(3)?,
+                block: r.get(11)?,
+                shape_name: r.get(12)?,
+                overridden_by: if winner == Some(copy_id) {
+                    None
+                } else {
+                    r.get(14)?
+                },
+                alpha: source.then(|| MeshAlpha {
                     blend: flags & 1 != 0,
                     test: flags & (1 << 9) != 0,
                     threshold: threshold.clamp(0, 255) as u8,
                 }),
-            ))
+            })
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
         .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
-/// One row per (NIF, mod), sorted and capped. The decided mark follows `mesh_alpha_policy`: blend comes from every
-/// blending shape, the cutout threshold from the shapes testing at the largest one; "remove" singles none out.
-fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize) {
-    let shapes: Vec<MeshAlpha> = rows.iter().filter_map(|r| r.4).collect();
+/// One entry per copy, sorted and capped, then grouped by (NIF, mod name). The decided mark follows
+/// `mesh_alpha_policy` over every row, before the cap: blend comes from every blending shape, the cutout threshold
+/// from the shapes testing at the largest one; "remove" singles none out. Returns the rows, the distinct copies
+/// before the cap and the copies past it.
+fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize, usize) {
+    let shapes: Vec<MeshAlpha> = rows.iter().filter_map(|r| r.alpha).collect();
     let policy = alpha.then(|| mesh_alpha_policy(&shapes)).flatten();
     let range = engine::config::ALPHA_THRESHOLD;
     let thr = |a: &MeshAlpha| Some(a.threshold.clamp(*range.start(), *range.end()));
@@ -133,33 +178,76 @@ fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize) {
         Some((AlphaPolicy::CutoutBlend, t)) => a.blend || (a.test && thr(a) == t),
         _ => false,
     };
-    let mut by: std::collections::BTreeMap<(String, String), MeshUser> = Default::default();
-    for (nif, mod_name, kind, priority, a) in rows {
-        let u = by
-            .entry((nif.clone(), mod_name.clone()))
-            .or_insert(MeshUser {
-                nif,
-                mod_name,
-                priority,
-                bsa: kind == KIND_BSA,
-                decided_alpha: false,
-            });
-        u.decided_alpha |= a.as_ref().is_some_and(decides);
+    // By copy first: a block matched by several slots is kept once.
+    let mut by: std::collections::BTreeMap<i64, (String, String, MeshCopy)> = Default::default();
+    let mut blocks: std::collections::BTreeMap<
+        i64,
+        std::collections::BTreeMap<u32, Option<String>>,
+    > = Default::default();
+    for r in rows {
+        let (_, _, c) = by.entry(r.copy_id).or_insert_with(|| {
+            (
+                r.nif.clone(),
+                r.mod_name.clone(),
+                MeshCopy {
+                    copy_id: r.copy_id,
+                    priority: r.priority,
+                    bsa: r.kind == KIND_BSA,
+                    decided_alpha: false,
+                    overridden_by: r.overridden_by.clone(),
+                    shapes: vec![],
+                },
+            )
+        });
+        c.decided_alpha |= r.alpha.as_ref().is_some_and(decides);
+        blocks
+            .entry(r.copy_id)
+            .or_default()
+            .insert(r.block, r.shape_name);
     }
-    let mut v: Vec<MeshUser> = by.into_values().collect();
-    v.sort_by(|a, b| {
-        (a.bsa, std::cmp::Reverse(a.priority), &a.nif, &a.mod_name).cmp(&(
+    let mut copies: Vec<(String, String, MeshCopy)> = by.into_values().collect();
+    for (_, _, c) in &mut copies {
+        c.shapes = blocks
+            .remove(&c.copy_id)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    }
+    copies.sort_by(|(an, am, a), (bn, bm, b)| {
+        (a.bsa, std::cmp::Reverse(a.priority), an, am, a.copy_id).cmp(&(
             b.bsa,
             std::cmp::Reverse(b.priority),
-            &b.nif,
-            &b.mod_name,
+            bn,
+            bm,
+            b.copy_id,
         ))
     });
-    let more = v.len().saturating_sub(USED_BY_CAP);
-    v.truncate(USED_BY_CAP);
-    (v, more)
+    let total = copies.len();
+    copies.truncate(USED_BY_CAP);
+    let more = total - copies.len();
+    // Group the listed copies by (NIF, mod name), in first-seen order.
+    let mut rows: Vec<MeshUser> = vec![];
+    for (nif, mod_name, c) in copies {
+        match rows
+            .iter_mut()
+            .find(|u| u.nif == nif && u.mod_name == mod_name)
+        {
+            Some(u) => {
+                u.decided_alpha |= c.decided_alpha;
+                u.copies.push(c);
+            }
+            None => rows.push(MeshUser {
+                nif,
+                mod_name,
+                priority: c.priority,
+                bsa: c.bsa,
+                decided_alpha: c.decided_alpha,
+                copies: vec![c],
+            }),
+        }
+    }
+    (rows, total, more)
 }
-
 impl AppModel {
     /// The "Used by meshes" list of texture `key`: `None` hides it (no scan database, or the texture has no job);
     /// `Some(None)` while the first read runs. The first ask for a texture, or after a finished scan, starts the read.

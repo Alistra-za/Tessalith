@@ -1673,7 +1673,7 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
         return;
     };
     let title = match &u {
-        Some(u) => format!("Used by meshes ({})", u.rows.len() + u.more),
+        Some(u) => format!("Used by meshes ({})", u.total_copies),
         None => "Used by meshes".to_string(),
     };
     egui::CollapsingHeader::new(title)
