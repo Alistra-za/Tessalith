@@ -3,6 +3,7 @@ mod support;
 use eframe::egui::{Key, Modifiers};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use engine::config::Subtype;
 use sdc_gui::model::{AppModel, Dialog, Selection};
 use support::*;
 
@@ -471,4 +472,311 @@ fn the_bulk_panel_has_size_and_dds_header_rows() {
         );
     }
     assert_eq!(h.state().undo_label(), Some("Change Resize on 2 textures"));
+}
+
+fn key_of(m: &AppModel, name: &str) -> String {
+    m.items
+        .iter()
+        .find(|i| i.key.ends_with(name))
+        .expect("an item with that name")
+        .key
+        .clone()
+}
+
+fn gradient(path: &std::path::Path) {
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(path)
+    .unwrap();
+}
+
+/// Nine lone files that ask for a type (GY1: unknown suffix), and `keep.png`, which the app has decided.
+fn nine_waiting(dir: &std::path::Path) -> AppModel {
+    nine_waiting_with(dir, |_| {})
+}
+
+/// `nine_waiting` with `extra` run on the folder before it is opened.
+fn nine_waiting_with(dir: &std::path::Path, extra: impl FnOnce(&std::path::Path)) -> AppModel {
+    let c = dir.join("textures/clutter");
+    std::fs::create_dir_all(&c).unwrap();
+    for i in 1..=9 {
+        gradient(&c.join(format!("x{i}_bump.png")));
+    }
+    gradient(&c.join("keep.png"));
+    extra(&c);
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    assert!(m.wait_idle(WAIT));
+    let keep = key_of(&m, "keep.png");
+    m.set_field(&keep, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(WAIT));
+    m
+}
+
+const WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[test]
+fn bulk_card_asks_for_the_undecided_ones() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting(d.path());
+    m.select_all_visible();
+    assert_eq!(
+        m.selected_items()
+            .iter()
+            .filter(|k| m.subtype_question(k).is_some())
+            .count(),
+        9
+    );
+    let mut h = harness(m);
+    h.run();
+    assert!(h
+        .query_by_label("What kind are these 9 textures?")
+        .is_some());
+    assert!(h
+        .query_by_label("1 other selected texture already has a type.")
+        .is_some());
+    h.get_by_label("Type for 9 textures").click();
+    h.run();
+    h.get_by_label("Height (parallax)").scroll_to_me();
+    h.run();
+    h.get_by_label("Height (parallax)").click();
+    h.run();
+    h.get_by_label("Apply to 9").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(WAIT));
+    assert!(h.state().undecided_keys().is_empty());
+}
+
+type Docs = (String, Option<String>);
+
+fn docs(m: &AppModel) -> Docs {
+    (
+        m.project.as_ref().unwrap().text(),
+        m.sets_doc.as_ref().map(|s| s.text()),
+    )
+}
+
+#[test]
+fn apply_to_undecided_is_one_undo_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting(d.path());
+    let before = docs(&m);
+    let (steps, generation) = (m.history.undo.len(), m.generation());
+    m.select_all_visible();
+    let keys = m.selected_undecided();
+    m.decide_many(&keys, Subtype::Height);
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+    assert_eq!(m.generation(), generation + 1, "one plan");
+    assert!(m.wait_idle(WAIT));
+    let new_sets: Vec<_> = m
+        .messages
+        .entries()
+        .filter(|e| e.text.contains("new sets"))
+        .collect();
+    assert_eq!(
+        new_sets.len(),
+        1,
+        "one line for the nine new sets (ruling 6)"
+    );
+    assert!(
+        new_sets[0].text.starts_with("9 new sets: ") && new_sets[0].text.ends_with(" and 6 more."),
+        "{}",
+        new_sets[0].text
+    );
+    m.undo();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(docs(&m), before, "both documents byte for byte");
+    assert_eq!(m.undecided_keys().len(), 9);
+}
+
+fn own_types(m: &AppModel) -> Vec<(String, Option<serde_json::Value>)> {
+    let p = m.project.as_ref().unwrap();
+    m.items
+        .iter()
+        .map(|i| (i.key.clone(), p.file_value(&i.key, "subtype")))
+        .collect()
+}
+
+#[test]
+fn the_bulk_type_card_uses_only_selected_actionable_type_questions() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting_with(d.path(), |c| {
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgba([(x * 4) as u8, (y * 4) as u8, 90u8, (x * 4) as u8])
+        })
+        .save(c.join("halo.png"))
+        .unwrap();
+        // Waits for a type (suggested diffuse), and fills the Diffuse slot of its own set.
+        gradient(&c.join("lock_i.png"));
+    });
+    // An alpha-only question: the type is decided, the alpha meaning is not.
+    let halo = key_of(&m, "halo.png");
+    m.set_field(&halo, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(WAIT));
+    assert!(m.subtype_question(&halo).is_none(), "halo asks no type");
+    assert!(
+        m.item(&halo)
+            .unwrap()
+            .decisions
+            .contains(&sdc_gui::model::items::Decision::AlphaMeaning),
+        "halo asks its alpha"
+    );
+    // A waiting file in a locked slot.
+    let (x1, x2, x5) = (
+        key_of(&m, "x1_bump.png"),
+        key_of(&m, "lock_i.png"),
+        key_of(&m, "x5_bump.png"),
+    );
+    // A lone unknown file has no set card until it is dropped on the empty area, which gives it one.
+    for k in [&x1, &x5] {
+        m.drop_new_set(k).unwrap();
+        assert!(m.wait_idle(WAIT));
+    }
+    let set_of = |m: &AppModel, k: &str| m.set_of_item_probe(k).expect("a set").id;
+    m.set_slot_lock(&set_of(&m, &x2), 1, true).unwrap();
+    assert!(m.wait_idle(WAIT));
+    assert!(
+        sdc_gui::model::sets::locked_items(&m).contains_key(&x2),
+        "x2 fills a locked slot"
+    );
+    // Review runs x5's set only: x1 is selected but outside it, x5 is inside and not selected.
+    let scope = m.set_of_item_probe(&x5).unwrap().key;
+    m.export_sets([scope].into(), "Export set".into());
+    assert!(m.wait_idle(WAIT));
+    assert!(m.undecided_keys().contains(&x5) && !m.undecided_keys().contains(&x1));
+    let keep = key_of(&m, "keep.png");
+    m.click_item(&x1, false, false);
+    for k in [&halo, &x2, &keep] {
+        m.click_item(k, true, false);
+    }
+    assert_eq!(m.selected_undecided(), vec![x1.clone()]);
+    let (before, types, steps) = (docs(&m), own_types(&m), m.history.undo.len());
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("What kind is this texture?");
+    // keep.png and halo.png (its alpha is the open question, its type is decided).
+    h.get_by_label("2 other selected textures already have a type.");
+    h.get_by_label("Type for 1 texture").click();
+    h.run();
+    h.get_by_label("Height (parallax)").scroll_to_me();
+    h.run();
+    h.get_by_label("Height (parallax)").click();
+    h.run();
+    h.get_by_label("Apply to 1").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(WAIT));
+    let m = h.state_mut();
+    let after = own_types(m);
+    let changed: Vec<&str> = after
+        .iter()
+        .zip(&types)
+        .filter(|(a, b)| a != b)
+        .map(|(a, _)| a.0.as_str())
+        .collect();
+    assert_eq!(changed, vec![x1.as_str()], "only x1's type is written");
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(&x1, "subtype"),
+        Some(serde_json::json!("height"))
+    );
+    assert_eq!(
+        m.item(&x1).unwrap().job.as_ref().unwrap().profile.subtype,
+        Subtype::Height,
+        "the plan holds the new type"
+    );
+    assert!(m.undecided_keys().contains(&x5), "x5 still waits");
+    assert!(
+        m.subtype_question(&x2).is_some(),
+        "the locked file still waits"
+    );
+    assert_eq!(m.history.undo.len(), steps + 1);
+    m.undo();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(docs(m), before, "one Undo restores both texts");
+}
+
+#[test]
+fn a_stale_bulk_type_choice_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting(d.path());
+    m.select_all_visible();
+    let keys = m.selected_undecided();
+    assert_eq!(keys.len(), 9);
+    // The selection moved on to a typed file before the click landed.
+    let keep = key_of(&m, "keep.png");
+    m.click_item(&keep, false, false);
+    let (before, steps) = (docs(&m), m.history.undo.len());
+    m.decide_many(&keys, Subtype::Height);
+    assert_eq!(
+        docs(&m),
+        before,
+        "no write for a texture no longer selected"
+    );
+    assert_eq!(m.history.undo.len(), steps);
+    // An sdc.toml the app cannot read is read-only for it: a choice that was drawn enabled writes nothing.
+    m.select_all_visible();
+    let keys = m.selected_undecided();
+    m.save().unwrap();
+    std::fs::write(m.root.clone().unwrap().join("sdc.toml"), "[[[ not toml").unwrap();
+    m.reload_documents();
+    assert!(
+        m.toml_read_only_reason().is_some(),
+        "the file is read-only for the app"
+    );
+    let (before, steps) = (docs(&m), m.history.undo.len());
+    m.decide_many(&keys, Subtype::Height);
+    assert_eq!(docs(&m), before, "read-only: nothing written");
+    assert_eq!(m.history.undo.len(), steps);
+}
+
+#[test]
+fn a_second_bulk_type_cannot_overwrite_a_held_choice() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting(d.path());
+    m.select_all_visible();
+    let keys = m.selected_undecided();
+    let before = docs(&m);
+    m.hold_plan_results = true;
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Type for 9 textures").click();
+    h.run();
+    h.get_by_label("Height (parallax)").scroll_to_me();
+    h.run();
+    h.get_by_label("Height (parallax)").click();
+    h.run();
+    h.get_by_label("Apply to 9").click();
+    h.run();
+    let after_one = docs(h.state());
+    let (steps, generation) = (h.state().history.undo.len(), h.state().generation());
+    assert_ne!(after_one, before, "click one wrote");
+    assert_eq!(
+        h.state().fix_off().as_deref(),
+        Some("Wait for the plan to finish")
+    );
+    assert!(h.get_by_label("Apply to 9").accesskit_node().is_disabled());
+    h.get_by_label("Apply to 9").click();
+    h.run();
+    h.state_mut().decide_many(&keys, Subtype::Diffuse);
+    let m = h.state_mut();
+    for k in &keys {
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(k, "subtype"),
+            Some(serde_json::json!("height")),
+            "{k}"
+        );
+    }
+    assert_eq!(docs(m), after_one);
+    assert_eq!((m.history.undo.len(), m.generation()), (steps, generation));
+    m.hold_plan_results = false;
+    for msg in m.take_held() {
+        m.handle_held(msg);
+    }
+    assert!(m.wait_idle(WAIT));
+    for k in &keys {
+        let st = m.item(k).unwrap().job.as_ref().unwrap().profile.subtype;
+        assert_eq!(st, Subtype::Height, "{k}");
+    }
+    m.undo();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(docs(m), before, "one Undo restores both texts");
 }

@@ -2,14 +2,17 @@
 //! model call, made after drawing.
 use super::columns::AMBER;
 use super::settings_panel::{
-    combo, editor, field_label, own_name_after_link, Options, RowEdit, GROUPS,
+    combo, editor, field_label, offered_groups, own_name_after_link, subtype_label, Options,
+    RowEdit, GROUPS,
 };
+use crate::look::Combo036 as _;
 use crate::model::bulk::{BulkField, BulkOp};
 use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
+use crate::model::labels::type_hover;
 use crate::model::sets::SlotKind;
 use crate::model::{AppModel, Selection};
 use eframe::egui;
-use engine::config::Target;
+use engine::config::{Subtype, Target};
 use engine::policy::ResolvedJob;
 use serde_json::Value;
 
@@ -20,6 +23,88 @@ enum Act {
     Kind(Option<SlotKind>),
     Edit(&'static str, RowEdit),
     Reencode(Vec<String>),
+    Decide(Vec<String>, Subtype),
+}
+
+/// "{m} other selected textures already have a type." (the card's line under Apply).
+fn typed_peers_line(m: usize) -> String {
+    if m == 1 {
+        "1 other selected texture already has a type.".into()
+    } else {
+        format!("{m} other selected textures already have a type.")
+    }
+}
+
+/// Task 10 (3d-R3): the selected textures that wait for a type, asked once for all of them. `typed` counts the
+/// selected textures that already have one. Drawn only when some selected texture asks.
+fn undecided_card(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    keys: &[String],
+    typed: usize,
+) -> Option<Act> {
+    if keys.is_empty() {
+        return None;
+    }
+    let n = keys.len();
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(if n == 1 {
+        "What kind is this texture?".to_string()
+    } else {
+        format!("What kind are these {n} textures?")
+    }));
+    let id = ui.scope_id().with("bulk-undecided-type");
+    let mut chosen: Option<Subtype> = ui.data(|d| d.get_temp::<Subtype>(id));
+    let grass = keys.iter().any(|k| {
+        model
+            .item(k)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(engine::policy::grass_context)
+    });
+    let name = format!("Type for {n} texture{}", if n == 1 { "" } else { "s" });
+    let shown = chosen.map_or_else(|| "Choose a type".to_string(), subtype_label);
+    ui.horizontal(|ui| {
+        let r = egui::ComboBox::from_id_salt(id)
+            .selected_text(&shown)
+            .show_ui_036(ui, |ui| {
+                for (heading, members) in offered_groups(model.target, grass) {
+                    ui.label(egui::RichText::new(heading).weak());
+                    for st in members {
+                        ui.selectable_value(&mut chosen, Some(st), subtype_label(st))
+                            .on_hover_text(type_hover(st));
+                    }
+                }
+            })
+            .response;
+        super::helper_panel::named(&r, egui::Role::ComboBox, &name, Some(&shown));
+    });
+    ui.data_mut(|d| {
+        if let Some(c) = chosen {
+            d.insert_temp(id, c);
+        }
+    });
+    let off = model.fix_off().or_else(|| {
+        chosen
+            .is_none()
+            .then(|| "Pick a type from the list first".to_string())
+    });
+    let r = ui.add_enabled(off.is_none(), egui::Button::new(format!("Apply to {n}")));
+    let r = match &off {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    let act = (r.clicked() && off.is_none())
+        .then_some(chosen)
+        .flatten()
+        .map(|st| Act::Decide(keys.to_vec(), st));
+    if typed > 0 {
+        ui.weak(typed_peers_line(typed));
+    }
+    ui.add_space(4.0);
+    if act.is_some() {
+        ui.data_mut(|d| d.remove::<Subtype>(id));
+    }
+    act
 }
 
 /// Note FI3: re-encode the selection's skipped DDS files (the S6 `reencode` selector, a plan-time field, so not a
@@ -99,6 +184,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         ui.weak(r);
     }
     reencode_row(ui, model, &view.reencode, &mut acts);
+    if let Some(a) = undecided_card(ui, model, &view.undecided.0, view.undecided.1) {
+        acts.push(a);
+    }
     // Options come from the active texture's job, else the first target's (design §3.2).
     let active = match &model.selection {
         Selection::Item(k) => model.item(k).and_then(|i| i.job.clone()),
@@ -184,6 +272,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         match a {
             Act::Kind(k) => model.bulk.kind = k,
             Act::Reencode(ks) => model.set_reencode(&ks, true),
+            Act::Decide(ks, st) => model.decide_many(&ks, st),
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
         }

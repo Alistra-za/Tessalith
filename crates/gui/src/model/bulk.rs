@@ -72,6 +72,8 @@ pub struct BulkView {
     pub encodings: Vec<((Format, ColorTag), String)>,
     /// `reencode_split(keys)`: the DDS files the Re-encode button can take, and the names of the blocked ones.
     pub reencode: (Vec<String>, Vec<String>),
+    /// `type_card_split`: the selected textures the type card asks about, and the count of typed ones beside them.
+    pub undecided: (Vec<String>, usize),
 }
 
 impl AppModel {
@@ -800,6 +802,54 @@ impl AppModel {
         self.project.as_ref().is_some_and(|p| !p.read_only())
     }
 
+    /// The selected textures that wait for a type (`subtype_question`: not an alpha or green question, and not the
+    /// blocked-type picker), minus those filling a locked slot, in selection order; and how many other selected
+    /// textures already have a type (a job, no type question, not locked). Read from the selection, not from Review's run.
+    pub fn type_card_split(&self) -> (Vec<String>, usize) {
+        let locked = locked_items(self);
+        let mut undecided = vec![];
+        let mut typed = 0;
+        for k in self.selected_items() {
+            if locked.contains_key(&k) {
+                continue;
+            }
+            if self.subtype_question(&k).is_some() {
+                undecided.push(k);
+            } else if self.item(&k).is_some_and(|i| i.job.is_some()) {
+                typed += 1;
+            }
+        }
+        (undecided, typed)
+    }
+
+    /// The selected textures the bulk type card asks about (Task 10, 3d-R3).
+    pub fn selected_undecided(&self) -> Vec<String> {
+        self.type_card_split().0
+    }
+
+    /// The bulk type card's Apply: write `st` to the textures of `keys` that are still selected, still ask for
+    /// a type, are not locked, and are offered `st` under the target, as one step through `apply_bulk_edit`. Everything
+    /// is read again here, at click time: nothing is written while the plan is out or `sdc.toml` is read-only.
+    pub fn decide_many(&mut self, keys: &[String], st: Subtype) {
+        if self.fix_off().is_some() {
+            return;
+        }
+        let current = self.selected_undecided();
+        let mut eligible: Vec<String> = vec![];
+        for k in keys {
+            let offered = self.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
+                engine::policy::offered_for(self.target, st, engine::policy::grass_context(j))
+            });
+            if offered && current.contains(k) && !eligible.contains(k) {
+                eligible.push(k.clone());
+            }
+        }
+        if eligible.is_empty() {
+            return;
+        }
+        self.apply_bulk_edit(&eligible, "subtype", BulkOp::Set(serde_json::json!(st)));
+    }
+
     /// F3a D2/D5: write (or clear) `field` on every texture of `keys` it applies to, through the single-texture
     /// path (a Sub-type runs `edit_subtype`), as one step and one plan. The selection is kept.
     pub fn apply_bulk_edit(&mut self, keys: &[String], field: &str, op: BulkOp) {
@@ -1240,12 +1290,14 @@ impl AppModel {
         };
         let encodings = bulk_encodings(self, &keys);
         let reencode = self.reencode_split(&keys);
+        let undecided = self.type_card_split();
         let view = std::sync::Arc::new(BulkView {
             keys,
             rows,
             chips,
             encodings,
             reencode,
+            undecided,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;
