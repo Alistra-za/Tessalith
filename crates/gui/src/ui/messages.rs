@@ -1,7 +1,7 @@
 //! Item 20 (DECISIONS AG112-AG114): the toasts at the bottom right and the Messages tab. The toasts are drawn once a
 //! frame by `SdcApp` for both views; the store is `model::messages`.
 use super::status::{AMBER, RED};
-use crate::model::messages::{Severity, Toast, ToastAction};
+use crate::model::messages::{EntryAction, Severity, Toast, ToastAction};
 use crate::model::AppModel;
 use eframe::egui;
 use std::collections::HashSet;
@@ -120,6 +120,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
     });
     ui.separator();
+    let mut shown: Option<EntryAction> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         for e in model.messages.entries().rev() {
             ui.horizontal_wrapped(|ui| {
@@ -129,9 +130,33 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     None => ui.label(e.severity.label()),
                 };
                 ui.label(&e.text);
+                let Some(action) = &e.action else {
+                    return;
+                };
+                let EntryAction::ShowSet { id, .. } = action;
+                let listed = model.logged_set_target(action).is_some();
+                let b = ui.add_enabled(listed, egui::Button::new("Show").small());
+                // The visible word is short; the name says which set.
+                b.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, listed, format!("Show {id}"))
+                });
+                let b = b.on_disabled_hover_text("That set is no longer listed");
+                if b.clicked() {
+                    shown = Some(action.clone());
+                }
             });
         }
     });
+    if let Some(action) = shown {
+        let ctx = ui.ctx().clone();
+        let at = ctx.clone();
+        super::after_commit(&at, model, move |m| {
+            // The project can change before a deferred click runs: the root is checked again there.
+            if m.show_logged_set(&action) {
+                super::header::set_meshes_view(&ctx, false);
+            }
+        });
+    }
     if model.messages.unread() > 0 {
         model.messages.mark_read();
         ui.ctx().request_repaint(); // The tab strip drew the previous count.

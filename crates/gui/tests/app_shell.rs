@@ -325,6 +325,135 @@ fn json_show_commits_the_focused_name_before_selecting_the_set() {
     }
 }
 
+fn show_action(m: &AppModel, id: &str) -> sdc_gui::model::messages::EntryAction {
+    sdc_gui::model::messages::EntryAction::ShowSet {
+        root: m.root.clone().unwrap(),
+        id: id.into(),
+    }
+}
+
+/// Task 7: a Messages row's Show, clicked over the Meshes view, goes back to Textures and shows the card.
+#[test]
+fn a_show_button_reveals_its_set_from_meshes() {
+    use sdc_gui::model::messages::Severity;
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.set_field(
+        "landscape/rock01.png",
+        "subtype",
+        serde_json::json!("diffuse"),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let rock = "landscape/rock01";
+    let target = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == rock)
+        .map(sdc_gui::model::SetTarget::view)
+        .expect("fixture has a rock01 card");
+    let action = show_action(&m, rock);
+    m.messages.log_with(Severity::Info, "from the log", action);
+    let mut h = app_harness::plain_harness(m);
+    h.get_by_label("Meshes view").click();
+    app_harness::settle(&mut h, 3);
+    assert!(header::meshes_view_active(&h.ctx));
+    h.get_by_label("NIFs");
+    let tab = sdc_gui::ui::messages::button_text(&h.state().model);
+    h.get_by_label(&tab).click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("from the log");
+    h.get_by_label(&format!("Show {rock}")).click();
+    app_harness::settle(&mut h, 3);
+    assert!(!header::meshes_view_active(&h.ctx));
+    assert!(!h.state().model.centre_over_meshes);
+    assert_eq!(h.state().model.selection, target.selection());
+    let card: Vec<_> = h
+        .query_all_by_label_contains("Set landscape/rock01, position ")
+        .map(|n| n.rect())
+        .collect();
+    assert!(
+        card.iter().any(|r| support::in_sets_column(&h, *r)),
+        "the card is in the Sets column's view: {card:?}"
+    );
+}
+
+/// Task 7: a row's Show belongs to the project it was logged in; another project's card of the same ID is not it.
+#[test]
+fn a_show_button_is_bound_to_its_project() {
+    use sdc_gui::model::messages::Severity;
+    app_data();
+    let wait = std::time::Duration::from_secs(60);
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let wall = |dir: &std::path::Path| {
+        let mut m = support::opened(dir);
+        m.edit_docs("t", None, true, |_, s| s.create_set("arch/wall"));
+        assert!(m.wait_idle(wait));
+        m.save().unwrap();
+        m.root.clone().unwrap()
+    };
+    let (root_a, root_b) = (wall(da.path()), wall(db.path()));
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    m.open_folder(root_a.clone());
+    assert!(m.wait_idle(wait));
+    let action = show_action(&m, "arch/wall");
+    m.messages
+        .log_with(Severity::Info, "logged in A", action.clone());
+    let mut h = app_harness::plain_harness(m);
+    support::instant_tips(&h.ctx);
+    // A's export folder changes under the row: the root is the same project, the card still resolves.
+    h.state_mut()
+        .model
+        .set_export_folder(da.path().join("elsewhere"));
+    app_harness::settle(&mut h, 3);
+    let tab = sdc_gui::ui::messages::button_text(&h.state().model);
+    h.get_by_label(&tab).click();
+    app_harness::settle(&mut h, 3);
+    h.get_by_label("logged in A");
+    let target_a = h
+        .state()
+        .model
+        .logged_set_target(&action)
+        .expect("A lists arch/wall");
+    h.get_by_label("Show arch/wall").click();
+    app_harness::settle(&mut h, 3);
+    assert_eq!(h.state().model.selection, target_a.clone().selection());
+    // Project B has a card of the same ID.
+    h.state_mut().model.open_folder(root_b);
+    app_harness::settle(&mut h, 3);
+    assert!(sdc_gui::model::sets::views(&h.state().model)
+        .iter()
+        .any(|v| v.id == "arch/wall"));
+    assert_eq!(h.state().model.logged_set_target(&action), None);
+    h.get_by_label("logged in A");
+    let show = h.get_by_label("Show arch/wall");
+    assert!(show.accesskit_node().is_disabled());
+    show.hover();
+    h.run();
+    h.get_by_label("That set is no longer listed");
+    let (selection, reveal) = (
+        h.state().model.selection.clone(),
+        h.state().model.nav.reveal_set.clone(),
+    );
+    h.get_by_label("Show arch/wall").click();
+    app_harness::settle(&mut h, 3);
+    assert_eq!(h.state().model.selection, selection);
+    assert_eq!(h.state().model.nav.reveal_set, reveal);
+    // A again, with the card: the link is back.
+    h.state_mut().model.open_folder(root_a);
+    app_harness::settle(&mut h, 3);
+    assert!(!h
+        .get_by_label("Show arch/wall")
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_label("Show arch/wall").click();
+    app_harness::settle(&mut h, 3);
+    assert_eq!(h.state().model.selection, target_a.selection());
+}
+
 #[test]
 fn invalid_header_mo2_pick_shows_the_error_above_the_open_tool() {
     app_data();

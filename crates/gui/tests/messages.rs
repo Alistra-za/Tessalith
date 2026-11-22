@@ -1,9 +1,11 @@
 //! Task 14 (item 20, DECISIONS AG112-AG114): the toasts (fake clock), the Messages log and its action.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::messages::{Messages, Severity, FADE, FADE_WARN, LOG_CAP, MAX_SHOWN};
+use sdc_gui::model::messages::{
+    EntryAction, Messages, Severity, FADE, FADE_WARN, LOG_CAP, MAX_SHOWN,
+};
 use sdc_gui::model::AppModel;
 use sdc_gui::ui::actions;
 use std::collections::HashSet;
@@ -257,6 +259,154 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
     h.step();
     h.step();
     assert!(h.query_by_label("Saved").is_none());
+}
+
+/// The Textures view: `ui::draw` only (the toasts are not drawn).
+fn harness(model: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1200.0, 800.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model)
+}
+
+/// Task 7: a log row can carry a Show button that selects its set; a set no longer listed disables it.
+#[test]
+fn a_show_button_selects_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.set_field(
+        "landscape/rock01.png",
+        "subtype",
+        serde_json::json!("diffuse"),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let rock = "landscape/rock01".to_owned();
+    let target = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == rock)
+        .map(sdc_gui::model::SetTarget::view)
+        .expect("fixture has a rock01 card");
+    let root = m.root.clone().unwrap();
+    m.messages.log_with(
+        Severity::Info,
+        "x",
+        EntryAction::ShowSet {
+            root: root.clone(),
+            id: rock.clone(),
+        },
+    );
+    m.messages.log_with(
+        Severity::Info,
+        "y",
+        EntryAction::ShowSet {
+            root,
+            id: "gone".into(),
+        },
+    );
+    m.toggle_tab(sdc_gui::model::bottom::BottomTab::Messages);
+    let mut h = harness(m);
+    support::instant_tips(&h.ctx);
+    h.run();
+    h.run();
+    assert!(h.query_by_label("x").is_some() && h.query_by_label("y").is_some());
+    assert!(
+        h.query_by_label(&format!("Show {rock}")).is_some(),
+        "the live card is reachable from its log row"
+    );
+    let gone = h.get_by_label("Show gone");
+    assert!(gone.accesskit_node().is_disabled());
+    gone.hover();
+    h.run();
+    assert!(h.query_by_label("That set is no longer listed").is_some());
+    h.get_by_label(&format!("Show {rock}")).click();
+    h.run();
+    h.run();
+    assert_eq!(h.state().selection, target.clone().selection());
+    h.get_by_label(&format!("Show {rock}")).click();
+    h.run();
+    assert_eq!(h.state().selection, target.selection());
+    assert_eq!(h.state().messages.unread(), 0);
+}
+
+fn show_set_action(m: &AppModel, id: &str) -> EntryAction {
+    EntryAction::ShowSet {
+        root: m.root.clone().unwrap(),
+        id: id.into(),
+    }
+}
+
+/// A card made in the document alone has no key; once a file joins it the same Show finds it by its ID.
+#[test]
+fn a_show_button_follows_a_document_only_card_that_later_gets_a_key() {
+    use sdc_gui::model::sets::{views, DropChoice, DropOutcome};
+    use sdc_gui::model::{Selection, SetTarget};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let normal = "landscape/rock01_normal.png";
+    m.edit_docs("t", None, true, |_, s| s.create_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let card = |m: &AppModel| {
+        views(m)
+            .iter()
+            .find(|v| v.id == "mine/empty")
+            .map(|v| (v.key.clone(), SetTarget::view(v)))
+            .expect("the card is listed")
+    };
+    let (key, target) = card(&m);
+    assert!(key.is_empty(), "no file yet: the card has no key");
+    let action = show_set_action(&m, "mine/empty");
+    m.messages.log_with(Severity::Info, "made", action.clone());
+    assert_eq!(m.logged_set_target(&action), Some(target));
+    m.remove_member("landscape/rock01", normal).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let out = m.drop_on_set(normal, "mine/empty");
+    if matches!(out, DropOutcome::AskChoice { .. }) {
+        m.drop_choice(normal, "mine/empty", DropChoice::Move);
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let (key, target) = card(&m);
+    assert!(!key.is_empty(), "a file joined: the card has a key now");
+    assert_eq!(m.logged_set_target(&action), Some(target));
+    assert!(m.show_logged_set(&action));
+    assert_eq!(m.selection, Selection::Set(key));
+}
+
+/// A Sets filter that hides the card is cleared by Show, so the card can be revealed; a filter that shows it stays.
+#[test]
+fn a_show_button_clears_a_sets_filter_that_hides_its_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let action = show_set_action(&m, "landscape/rock01");
+    m.sets_filter.search = "rock".into();
+    assert!(m.show_logged_set(&action));
+    assert_eq!(
+        m.sets_filter.search, "rock",
+        "the card passes: the filter stays"
+    );
+    m.sets_filter.search = "no such set".into();
+    assert!(m.show_logged_set(&action));
+    assert!(!m.sets_filter_active(), "the hiding filter is cleared");
+    assert!(m.nav.reveal_set.is_some());
+}
+
+/// A set deleted after its row was logged: Show finds nothing and changes nothing.
+#[test]
+fn a_show_button_for_a_target_removed_since_logging_does_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let action = show_set_action(&m, "mine/empty");
+    assert!(m.logged_set_target(&action).is_some());
+    assert!(m.delete_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let before = m.selection.clone();
+    assert_eq!(m.logged_set_target(&action), None);
+    assert!(!m.show_logged_set(&action));
+    assert_eq!(m.selection, before);
+    assert!(m.nav.reveal_set.is_none());
 }
 
 /// Note FC8 (supersedes CA10's anchor): while the bottom panel is open, the toasts sit above it, so they never cover
