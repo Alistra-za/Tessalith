@@ -589,12 +589,13 @@ fn apply_to_undecided_is_one_undo_step() {
     assert_eq!(m.undecided_keys().len(), 9);
 }
 
-fn own_types(m: &AppModel) -> Vec<(String, Option<serde_json::Value>)> {
-    let p = m.project.as_ref().unwrap();
-    m.items
-        .iter()
-        .map(|i| (i.key.clone(), p.file_value(&i.key, "subtype")))
-        .collect()
+/// The lines `before` has and `after` lacks, and the lines `after` has and `before` lacks (trimmed, in order).
+fn changed_lines(before: &str, after: &str) -> (Vec<String>, Vec<String>) {
+    let lines = |t: &str| -> Vec<String> { t.lines().map(|l| l.trim().to_string()).collect() };
+    let (b, a) = (lines(before), lines(after));
+    let gone = b.iter().filter(|l| !a.contains(l)).cloned().collect();
+    let new = a.iter().filter(|l| !b.contains(l)).cloned().collect();
+    (gone, new)
 }
 
 #[test]
@@ -650,7 +651,7 @@ fn the_bulk_type_card_uses_only_selected_actionable_type_questions() {
         m.click_item(k, true, false);
     }
     assert_eq!(m.selected_undecided(), vec![x1.clone()]);
-    let (before, types, steps) = (docs(&m), own_types(&m), m.history.undo.len());
+    let (before, steps) = (docs(&m), m.history.undo.len());
     let mut h = harness(m);
     h.run();
     h.get_by_label("What kind is this texture?");
@@ -666,14 +667,26 @@ fn the_bulk_type_card_uses_only_selected_actionable_type_questions() {
     h.run();
     assert!(h.state_mut().wait_idle(WAIT));
     let m = h.state_mut();
-    let after = own_types(m);
-    let changed: Vec<&str> = after
-        .iter()
-        .zip(&types)
-        .filter(|(a, b)| a != b)
-        .map(|(a, _)| a.0.as_str())
-        .collect();
-    assert_eq!(changed, vec![x1.as_str()], "only x1's type is written");
+    // Both documents, line by line: x1's `subtype` is the only [files] change, and the sets document gains
+    // only what the new type's follow writes name.
+    let (files_gone, files_new) = changed_lines(&before.0, &docs(m).0);
+    assert!(files_gone.is_empty(), "{files_gone:?}");
+    assert_eq!(
+        files_new,
+        vec![
+            format!("[files.\"{x1}\"]"),
+            "subtype = \"height\"".to_string()
+        ]
+    );
+    let (sets_gone, sets_new) = changed_lines(
+        before.1.as_deref().unwrap_or_default(),
+        docs(m).1.as_deref().unwrap_or_default(),
+    );
+    assert!(
+        sets_gone.is_empty() && sets_new.is_empty(),
+        "the sets document is untouched: {sets_gone:?} {sets_new:?}"
+    );
+    assert_eq!(docs(m).1, before.1);
     assert_eq!(
         m.project.as_ref().unwrap().file_value(&x1, "subtype"),
         Some(serde_json::json!("height"))
@@ -718,14 +731,142 @@ fn a_stale_bulk_type_choice_writes_nothing() {
     m.save().unwrap();
     std::fs::write(m.root.clone().unwrap().join("sdc.toml"), "[[[ not toml").unwrap();
     m.reload_documents();
+    assert!(m.wait_idle(WAIT));
     assert!(
         m.toml_read_only_reason().is_some(),
         "the file is read-only for the app"
+    );
+    assert!(m.fix_off().is_some_and(|r| r.contains("read-only")));
+    assert!(
+        !m.selected_undecided().is_empty(),
+        "the choice is still on offer, so only the read-only guard stops it"
     );
     let (before, steps) = (docs(&m), m.history.undo.len());
     m.decide_many(&keys, Subtype::Height);
     assert_eq!(docs(&m), before, "read-only: nothing written");
     assert_eq!(m.history.undo.len(), steps);
+}
+
+/// Open the card's combo and pick Height (the entry sits at the window edge, so it is scrolled to first).
+fn pick_height(h: &mut Harness<'static, AppModel>, combo: &str) {
+    h.get_by_label(combo).click();
+    h.run();
+    h.get_by_label("Height (parallax)").scroll_to_me();
+    h.run();
+    h.get_by_label("Height (parallax)").click();
+    h.run();
+}
+
+#[test]
+fn the_pick_follows_the_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting(d.path());
+    m.select_all_visible();
+    let (x1, x2) = (key_of(&m, "x1_bump.png"), key_of(&m, "x2_bump.png"));
+    let mut h = harness(m);
+    h.run();
+    pick_height(&mut h, "Type for 9 textures");
+    assert!(!h.get_by_label("Apply to 9").accesskit_node().is_disabled());
+    // Another set of textures asks: the old pick is not carried over to it.
+    h.state_mut().click_item(&x1, false, false);
+    h.state_mut().click_item(&x2, true, false);
+    h.run();
+    let combo = h.get_by_label("Type for 2 textures");
+    assert_eq!(
+        combo.accesskit_node().value().as_deref(),
+        Some("Choose a type"),
+        "no pick shown"
+    );
+    assert!(h.get_by_label("Apply to 2").accesskit_node().is_disabled());
+    // Back to the nine: the first pick is gone too.
+    h.state_mut().select_all_visible();
+    h.run();
+    assert!(h.get_by_label("Apply to 9").accesskit_node().is_disabled());
+}
+
+/// `a_bump.png` is under `textures/` (no grass context); `b_bump.png` is not (a grass context, Note FC10).
+fn mixed_grass(dir: &std::path::Path) -> AppModel {
+    std::fs::create_dir_all(dir.join("textures/clutter")).unwrap();
+    std::fs::create_dir_all(dir.join("loose")).unwrap();
+    gradient(&dir.join("textures/clutter/a_bump.png"));
+    gradient(&dir.join("loose/b_bump.png"));
+    gradient(&dir.join("loose/c_bump.png"));
+    let mut m = opened_as_the_app(dir.to_path_buf(), dir.join("export"));
+    assert!(m.wait_idle(WAIT));
+    m
+}
+
+#[test]
+fn the_card_offers_only_types_every_waiting_texture_is_offered() {
+    use sdc_gui::model::labels::subtype_name;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = mixed_grass(d.path());
+    let (a, b) = (key_of(&m, "a_bump.png"), key_of(&m, "b_bump.png"));
+    let grass = |m: &AppModel, k: &str| {
+        engine::policy::grass_context(m.item(k).unwrap().job.as_ref().unwrap())
+    };
+    assert!(
+        !grass(&m, &a) && grass(&m, &b),
+        "the two files differ in grass context"
+    );
+    let grass_only = subtype_name(Subtype::ComplexGrass);
+    // Control: two grass-context files are offered complex grass.
+    let c = key_of(&m, "c_bump.png");
+    m.click_item(&b, false, false);
+    m.click_item(&c, true, false);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Type for 2 textures").click();
+    h.run();
+    assert!(
+        h.query_by_label(&grass_only).is_some(),
+        "offered to a grass file"
+    );
+    // Both selected: the type is offered to one of them only, so the combo leaves it out.
+    let d2 = tempfile::tempdir().unwrap();
+    let mut m = mixed_grass(d2.path());
+    let (a, b) = (key_of(&m, "a_bump.png"), key_of(&m, "b_bump.png"));
+    m.click_item(&a, false, false);
+    m.click_item(&b, true, false);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Type for 2 textures").click();
+    h.run();
+    assert!(h.query_by_label(&grass_only).is_none(), "not offered to a");
+    assert!(h.query_by_label("Height (parallax)").is_some());
+    // A dispatch of it anyway (the offering is read again at click time) reaches only the texture it is offered to.
+    let m = h.state_mut();
+    let before = docs(m);
+    m.decide_many(&[a.clone(), b.clone()], Subtype::ComplexGrass);
+    let (gone, new) = changed_lines(&before.0, &docs(m).0);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(
+        new,
+        vec![
+            format!("[files.\"{b}\"]"),
+            "subtype = \"complex_grass\"".to_string()
+        ],
+        "{a} is not written"
+    );
+}
+
+#[test]
+fn a_locked_texture_that_has_a_type_counts_as_a_peer() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = nine_waiting_with(d.path(), |c| gradient(&c.join("lock_i.png")));
+    let (x1, locked) = (key_of(&m, "x1_bump.png"), key_of(&m, "lock_i.png"));
+    m.set_field(&locked, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(WAIT));
+    let id = m.set_of_item_probe(&locked).expect("a set").id;
+    m.set_slot_lock(&id, 1, true).unwrap();
+    assert!(m.wait_idle(WAIT));
+    assert!(sdc_gui::model::sets::locked_items(&m).contains_key(&locked));
+    m.click_item(&x1, false, false);
+    m.click_item(&locked, true, false);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("What kind is this texture?");
+    h.get_by_label("1 other selected texture already has a type.");
 }
 
 #[test]

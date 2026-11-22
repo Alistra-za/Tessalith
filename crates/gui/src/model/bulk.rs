@@ -804,22 +804,32 @@ impl AppModel {
 
     /// The selected textures that wait for a type (`subtype_question`: not an alpha or green question, and not the
     /// blocked-type picker), minus those filling a locked slot, in selection order; and how many other selected
-    /// textures already have a type (a job, no type question, not locked). Read from the selection, not from Review's run.
+    /// textures already have a type (a job and no type question, a locked one too). Read from the selection, not from
+    /// Review's run.
     pub fn type_card_split(&self) -> (Vec<String>, usize) {
         let locked = locked_items(self);
         let mut undecided = vec![];
         let mut typed = 0;
         for k in self.selected_items() {
-            if locked.contains_key(&k) {
-                continue;
-            }
             if self.subtype_question(&k).is_some() {
-                undecided.push(k);
+                // A waiting texture in a locked slot takes no write, and is no typed peer either.
+                if !locked.contains_key(&k) {
+                    undecided.push(k);
+                }
             } else if self.item(&k).is_some_and(|i| i.job.is_some()) {
                 typed += 1;
             }
         }
         (undecided, typed)
+    }
+
+    /// Whether the picker offers `st` for texture `key` under the target (`complex_grass` only in a grass context).
+    pub fn type_offered_to(&self, key: &str, st: Subtype) -> bool {
+        self.item(key)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| {
+                engine::policy::offered_for(self.target, st, engine::policy::grass_context(j))
+            })
     }
 
     /// The selected textures the bulk type card asks about (Task 10, 3d-R3).
@@ -837,10 +847,7 @@ impl AppModel {
         let current = self.selected_undecided();
         let mut eligible: Vec<String> = vec![];
         for k in keys {
-            let offered = self.item(k).and_then(|i| i.job.as_ref()).is_some_and(|j| {
-                engine::policy::offered_for(self.target, st, engine::policy::grass_context(j))
-            });
-            if offered && current.contains(k) && !eligible.contains(k) {
+            if self.type_offered_to(k, st) && current.contains(k) && !eligible.contains(k) {
                 eligible.push(k.clone());
             }
         }

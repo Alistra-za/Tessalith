@@ -48,28 +48,34 @@ fn undecided_card(
     }
     let n = keys.len();
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(if n == 1 {
+    ui.label(if n == 1 {
         "What kind is this texture?".to_string()
     } else {
         format!("What kind are these {n} textures?")
-    }));
-    let id = ui.scope_id().with("bulk-undecided-type");
-    let mut chosen: Option<Subtype> = ui.data(|d| d.get_temp::<Subtype>(id));
-    let grass = keys.iter().any(|k| {
-        model
-            .item(k)
-            .and_then(|i| i.job.as_ref())
-            .is_some_and(engine::policy::grass_context)
     });
+    let id = ui.scope_id().with("bulk-undecided-type");
+    // The pick belongs to this set of textures and to a type every one of them is offered: another selection, a
+    // changed target or a changed grass context shows no pick (and Apply stays off) rather than a stale one.
+    let offered_to_all = |st: Subtype| keys.iter().all(|k| model.type_offered_to(k, st));
+    let mut chosen: Option<Subtype> = ui
+        .data(|d| d.get_temp::<(Vec<String>, Subtype)>(id))
+        .filter(|(ks, st)| ks == keys && offered_to_all(*st))
+        .map(|(_, st)| st);
+    // `complex_grass` is the one type that depends on the texture, so the shared list starts from the grass one.
+    let groups: Vec<(&str, Vec<Subtype>)> = offered_groups(model.target, true)
+        .into_iter()
+        .map(|(h, ms)| (h, ms.into_iter().filter(|st| offered_to_all(*st)).collect()))
+        .filter(|(_, ms): &(&str, Vec<Subtype>)| !ms.is_empty())
+        .collect();
     let name = format!("Type for {n} texture{}", if n == 1 { "" } else { "s" });
     let shown = chosen.map_or_else(|| "Choose a type".to_string(), subtype_label);
     ui.horizontal(|ui| {
         let r = egui::ComboBox::from_id_salt(id)
             .selected_text(&shown)
             .show_ui_036(ui, |ui| {
-                for (heading, members) in offered_groups(model.target, grass) {
-                    ui.label(egui::RichText::new(heading).weak());
-                    for st in members {
+                for (heading, members) in &groups {
+                    ui.label(egui::RichText::new(*heading).weak());
+                    for &st in members {
                         ui.selectable_value(&mut chosen, Some(st), subtype_label(st))
                             .on_hover_text(type_hover(st));
                     }
@@ -78,10 +84,11 @@ fn undecided_card(
             .response;
         super::helper_panel::named(&r, egui::Role::ComboBox, &name, Some(&shown));
     });
-    ui.data_mut(|d| {
-        if let Some(c) = chosen {
-            d.insert_temp(id, c);
+    ui.data_mut(|d| match chosen {
+        Some(c) => {
+            d.insert_temp(id, (keys.to_vec(), c));
         }
+        None => d.remove::<(Vec<String>, Subtype)>(id),
     });
     let off = model.fix_off().or_else(|| {
         chosen
@@ -102,7 +109,7 @@ fn undecided_card(
     }
     ui.add_space(4.0);
     if act.is_some() {
-        ui.data_mut(|d| d.remove::<Subtype>(id));
+        ui.data_mut(|d| d.remove::<(Vec<String>, Subtype)>(id));
     }
     act
 }
