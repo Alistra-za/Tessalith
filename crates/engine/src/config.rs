@@ -164,7 +164,7 @@ pub(crate) fn stores_xyz(format: Format) -> bool {
 // uber 4, two least-squares passes and a quantised endpoint search); the vendored objects always carry it
 // (docs/research/bc7e-tuning.md).
 cfg_enum!(Effort, "lowercase" { Ultrafast, Veryfast, Fast, Basic, Veryslow, Slowest, Max });
-// BC4 search (Note LH): `fast` radius 4, `default` 5, `slowest` 10, `max` the radius-10 search then every endpoint
+// BC4 search (Note LI): `fast` radius 4, `default` 5, `slowest` 10, `max` the radius-10 search then every endpoint
 // pair near the block. `//`, not `///`: a variant doc turns the schema into `oneOf`.
 cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast, Slowest });
 // BC1 search depth (Note HY17): `default` is rgbcx level 18; `fast` is bcenc's fast level. No `///` on a variant: it

@@ -165,7 +165,17 @@ Alpha-test flips at 128 (BC3, percent of texels that cross 128, mean per image):
 
 Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref.rs, 2000 synthetic blocks at radius 10): SSE(max, no guard) <= SSE(search r10, no guard) on all 2000, 103 strictly better; SSE(max, guard) <= SSE(search r10, guard) and flips(max, guard) <= flips(upstream r10) on all 2000; on 28 the exhaustive pass raised flips and the guard fell back to guarded v4.
 
-The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Not shipped: the owner declined it after this timing (2026-11-01, "no exhaustive"), so `search_max` exists only in the Rust reference.
+The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Shipped as `max` (Note LI). On BC4, BC5 and BC3 at cut 128 the port in `bcenc` writes the bench's bytes (pinned against the bench code in `crates/bcenc/tests/bc4.rs`); at another alpha-test cut the BC3 guard tests that cut instead of 128, so those bytes can differ from the bench's.
+
+Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. The measurement ran while other builds were running, so both encoders were slowed alike; compare the ratio, not the times:
+
+| format | max over `slowest` (radius 10) |
+|---|---|
+| BC3 (alpha and colour) | about 2x |
+| BC4 | about 4x |
+| BC5 | about 5x |
+
+BC4 and BC5 are far from the bench's 2.4x above (about 4 and 5 times `slowest`); the cause was not investigated (a different image mix, and the bench's figure is for its Rust reference against v4, not for `bcenc`). BC3 is much lower, as expected, since its colour half dominates (about 2 times; see the end-to-end table below). On the synthetic blocks the example generates when it gets no PNG (2,200 blocks, the hard classes of `gen::bc4_classes`) the ratios are about 7x, 10x and 10x; those blocks are not texture content, so they are not quoted elsewhere.
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
@@ -202,5 +212,5 @@ The deltas against the old rows equal the probe's v5 (BC3) and v4 (BC4, BC5) pre
 
 ## What Tessalith does because of this
 
-- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, and v5 (v4 plus the coverage guard) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `max` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals the Rust reference `search` byte for byte. The guard tests each texture's own alpha-test cutoff, 128 at the default (Note FM19). Existing BC3/BC4/BC5 outputs re-encoded once through the manifest's `rgbcx_patch` tag.
-- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; the fast presets take the new search; `max` stays the new search at radius 10, without the near-exhaustive pass ("no exhaustive", see [max: near-exhaustive](#max-near-exhaustive)).
+- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, and v5 (v4 plus the coverage guard) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `slowest` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals the Rust reference `search` byte for byte. The guard tests each texture's own alpha-test cutoff, 128 at the default (Note FM19). Existing BC3/BC4/BC5 outputs re-encoded once through the manifest's `rgbcx_patch` tag.
+- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; the fast presets take the new search; the radius-10 value stayed the new search without the near-exhaustive pass ("no exhaustive"). It is `slowest` now, and the near-exhaustive pass ships as `max` (Note LI; see [max: near-exhaustive](#max-near-exhaustive)).

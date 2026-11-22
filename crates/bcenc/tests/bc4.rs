@@ -1,5 +1,5 @@
 //! `bcenc`'s BC4 and BC5 equal the vendored rgbcx (through `encoders_sys`) on every block class; the `_max` functions,
-//! which rgbcx does not have, are pinned to bytes taken from the bench code (Note LH).
+//! which rgbcx does not have, are pinned to bytes taken from the bench code (Note LI).
 use bcenc::{
     bc3_encode_block_max_with, bc3_encode_block_with, bc4_encode_alpha, bc4_encode_alpha_max,
     bc4_encode_block, bc4_encode_block_max, bc5_encode_block, bc5_encode_block_max, Bc1Search,

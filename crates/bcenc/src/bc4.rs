@@ -585,7 +585,7 @@ pub const MAX_PAD: i32 = 16;
 /// `max`: [`search`] at [`crate::MAX_SEARCH_RADIUS`] without the guard, then the near-exhaustive pair search of
 /// [`window_pairs`], then the guard last: when the result flips more texels across `cut` than the upstream block, the
 /// guarded radius-10 search is returned instead. A port of the bench's `search_max`
-/// (`bench:crates/bench/src/bc4ref.rs`, branch `bench`; Note LH), whose guard was fixed at 128; this one takes the cut.
+/// (`bench:crates/bench/src/bc4ref.rs`, branch `bench`; Note LI), whose guard was fixed at 128; this one takes the cut.
 /// `guard` is the cutoff itself: reading a 0 as 128 is `bc4_encode_alpha_max`'s job.
 pub fn search_max(v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
     let (base, b4) = searched(v, crate::MAX_SEARCH_RADIUS as i32);

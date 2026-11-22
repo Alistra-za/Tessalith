@@ -502,7 +502,7 @@ fn with_radius(mut p: Profile, r: &str) -> Profile {
     p
 }
 
-/// Note LH: `max` runs the pair search, `slowest` is rgbcx's radius 10 (what `max` wrote before).
+/// Note LI: `max` runs the pair search, `slowest` is rgbcx's radius 10 (what `max` wrote before).
 #[test]
 fn max_routes_to_the_pair_search_and_slowest_keeps_radius_10() {
     let px = noise(32, 32, 0x5EA7_C0DE_0000_0001);

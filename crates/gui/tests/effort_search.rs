@@ -341,7 +341,7 @@ fn every_bc3_pair_maps_to_one_entry() {
         help.contains("On BC3 it sets both the BC1 colour search and the BC4 alpha radius."),
         "{help}"
     );
-    // The Slowest and Max sentences (Note LH).
+    // The Slowest and Max sentences (Note LI).
     assert!(
         help.contains("Slowest searches the alpha at radius 10, and Max also tries every alpha endpoint pair near the block's values."),
         "{help}"

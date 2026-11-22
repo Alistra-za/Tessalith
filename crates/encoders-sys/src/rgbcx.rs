@@ -4,7 +4,7 @@ use crate::{ffi, init, Bc1Model};
 pub const RGBCX_MAX_LEVEL: u32 = 18;
 /// Search radius the bench used for `-3/-4/-5` (rdo_bc_params::m_bc345_search_rad = 5). Spec value `default`.
 pub const BC45_RADIUS_DEFAULT: u32 = 5;
-/// Spec value `slowest`, and the radius `max` starts from (bench `-hr10`; Note LH).
+/// Spec value `slowest`, and the radius `max` starts from (bench `-hr10`; Note LI).
 pub const BC45_RADIUS_MAX: u32 = 10;
 /// Spec value `fast` (M6 Track D, DECISIONS Note T11): the smallest radius within 0.1 dB of `default` on the bench
 /// corpus (docs/research/encoder-benchmark.md, "BC4/BC5 search radius").

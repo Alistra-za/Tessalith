@@ -443,7 +443,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
     })
 }
 
-/// Note JI4, Note LH: Fast and Default, then (with `slow`) Slowest and Max, the search fields' choices in that order.
+/// Note JI4, Note LI: Fast and Default, then (with `slow`) Slowest and Max, the search fields' choices in that order.
 fn search_options(slow: bool) -> Options {
     let mut v = vec![opt(json!("fast"), "Fast"), opt(json!("default"), "Default")];
     if slow {

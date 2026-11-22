@@ -7,7 +7,7 @@
 //! always on there. A target without SSE2 runs portable code instead, which the unit tests run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
 //! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16).
-//! The `_max` functions run a search the C++ does not have (Note LH); their reference is
+//! The `_max` functions run a search the C++ does not have (Note LI); their reference is
 //! `bc4::tests::search_max_reference`, a literal port of the bench measurement, and `tests/bc4.rs` pins bytes taken
 //! from the bench code itself.
 

@@ -1108,12 +1108,13 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 /// - The encode version: another `encode_version` for the sub-type, another encoder tag (the rgbcx patch only for
 ///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
-/// - The profile: the same hash changes nothing. Else the record's own profile (`raw["profile"]`, which must hash to
+/// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
+///   version, against a job at `max` (Note LI4). Else the record's own profile (`raw["profile"]`, which must hash to
 ///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
 ///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
 ///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).
 ///
-/// Neither flag: `Current`. The engine version is not compared, nor is the record's `isa`.
+/// Neither flag: `Current`. The engine version is read only for that `max` rule; the record's `isa` is not compared.
 pub(crate) fn currency(
     e: &ManifestEntry,
     job: &ResolvedJob,
@@ -1194,8 +1195,9 @@ pub(crate) fn currency(
 
 /// [`currency`]'s profile step: `Some(false)` when the record's profile is the job's or differs only in a quality
 /// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
-/// otherwise, an unreadable or self-inconsistent record included. The exception is a `max` record not known to be
-/// newer than 3.0.0 (Note LH): it reads as `slowest`, so against a job at `max` it is stale.
+/// otherwise, an unreadable or self-inconsistent record included. Equal hashes return `Some(false)` at once, except
+/// for a job at `max` on a format that reads the radius (BC3, BC4, BC5) against a record not known to be newer than
+/// 3.0.0 (Note LI4): that record reads as `slowest`, so it is stale.
 fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let now = profile_sha256(p).ok()?;
     // Equal hashes mean equal radii, so an old or undated `max` record against a job at `max` must not return here.
@@ -1230,8 +1232,8 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     Some(moves.contains(&std::cmp::Ordering::Less))
 }
 
-/// Note LH: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
-/// shortcut: a 3.0.1 build from before Note LH also wrote `max` for radius 10; such dev records read as the new `max`.
+/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
+/// shortcut: a 3.0.1 build from before Note LI also wrote `max` for radius 10; such dev records read as the new `max`.
 const MAX_WAS_SLOWEST_THROUGH: [u32; 3] = [3, 0, 0];
 
 /// Where a record's `engine_version` places it against a last version.
@@ -1297,7 +1299,7 @@ fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
 }
 
 /// How hard format `f` searches its BC4 endpoints (BC3's alpha, BC4, BC5): `fast` < `default` < `slowest` < `max`
-/// (Note LH), not the declared order and not the radius (Slowest and Max both start at 10); `None` elsewhere.
+/// (Note LI), not the declared order and not the radius (Slowest and Max both start at 10); `None` elsewhere.
 fn radius_rank(f: Format, r: SearchRadius) -> Option<u8> {
     matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then_some(match r {
         SearchRadius::Fast => 0,
@@ -5658,7 +5660,7 @@ mod tests {
             &ev("0.9.0"),
             [BOTH, Stale],
         );
-        // Note LH: through engine 3.0.0 a `max` record was the radius-10 search, today's `slowest`.
+        // Note LI: through engine 3.0.0 a `max` record was the radius-10 search, today's `slowest`.
         let dated = |v: &'static str| move |e: &mut ManifestEntry| e.engine_version = v.into();
         let at = |f: Format, r: SearchRadius| {
             move |p: &mut Profile| {

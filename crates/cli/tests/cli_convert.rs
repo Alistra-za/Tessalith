@@ -1048,7 +1048,7 @@ fn noise(fx: &Fx, name: &str) {
         .unwrap();
 }
 
-/// Note LH (BC45-R13): each spelling of `encoder.bc45_search_radius` reaches the encoder. `fast`, `default` and
+/// Note LI (BC45-R13): each spelling of `encoder.bc45_search_radius` reaches the encoder. `fast`, `default` and
 /// `slowest` write rgbcx's radius 4, 5 and 10 (`slowest` is what `max` wrote before); `max` writes other bytes.
 #[test]
 fn bc45_search_radius_spellings_reach_the_encoder() {
