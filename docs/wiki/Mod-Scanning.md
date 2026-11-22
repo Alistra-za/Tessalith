@@ -55,7 +55,7 @@ The NIFs column names the scan behind the list, for example “From the scan of 
 
 - **Search paths and mods** matches the path or mod name. ASCII case doesn't matter, `\` reads as `/` and a leading `meshes/` is ignored.
 - **Any mod** picks one mod and lists all of its copies, including the ones that lose. PGPatcher's output mod isn't offered.
-- **Show in Meshes** under a texture's **Used by meshes** opens this view with a **Uses <texture> ✕** chip, so only the meshes that use that texture are listed ([Used by meshes](GUI-Texture-Panel.md#used-by-meshes)). **✕** shows them all again.
+- **Show all in Meshes** under a texture's **Used by {n} meshes** list opens this view with a **Uses <texture> ✕** chip, so only the meshes that use that texture are listed ([Used by meshes](GUI-Texture-Panel.md#used-by-meshes)). **✕** shows them all again.
 - Filters never deselect: when the selected NIF is hidden by them, the count line says so.
 
 ### Mesh detail

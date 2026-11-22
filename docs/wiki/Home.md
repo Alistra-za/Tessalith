@@ -35,6 +35,7 @@ Settings, caches and logs: [where Tessalith keeps its files](Installation.md#whe
 
 ## Words the window uses
 
+- **Type:** what a file is (a normal map, a glow map…). Tessalith reads it from the file name; you pick it when it can't. [Every type](Texture-Types.md#types-what-each-file-becomes) is in one table.
 - **Set:** the textures of one material. They share a base name, and under `cs` one PGPatcher JSON entry.
 - **Helper:** a source file that fills a channel of another output. It's never written as a DDS.
 - **Undecided:** a texture waiting for your answer. Export skips it until you give one.

@@ -14,7 +14,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 
 | Row | Key |
 |---|---|
-| Sub-type | `subtype` |
+| Texture type | `subtype` |
 | Helper (images only) | `helper.role`: [Texture packing](Texture-Packing.md#helper-settings) |
 | Alpha, Threshold, Comparison | `alpha.policy`, `alpha.threshold`, `alpha.compare` |
 | Enable parallax (complex `_m` only) | `alpha.parallax`: ticked keeps the `_m` alpha as parallax height, unticked writes alpha 0 |
@@ -31,7 +31,8 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 
 - Under **Normal base level**, choose **Keep as authored** to carry deliberately short normals into the smaller mips of an XYZ base or coat normal. See [Normal length by output](Project-Config.md#normal-length-by-output) for other normal types.
 - When the texture set enables the [roughness bake](Texture-Packing.md#variance-and-gloss-bake), the normal's **Normal handling** row reads *decided by the texture set*. If your project explicitly sets `renormalize_bake`, the row shows where that setting came from.
-- The Sub-type picker is the one the Problems **Set type…** button opens.
+- The **Texture type** picker is the one the Problems **Set type…** button opens. Each type shows its one-line description under its name, and its hover adds the file ending that gives it. **Search types** matches the name, the description and the id, ignoring case. <!-- D:LM1 -->
+- Every type, with the name the window shows, is in [Texture types](Texture-Types.md#types-what-each-file-becomes).
 - For an emissive, the reason it is BC6H or BC7 sRGB shows under Compression (`FMT-HDR-SOURCE`).
 
 ### BC7 weighting against BC3
@@ -52,7 +53,7 @@ I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps 
 
 | Texture's format | The row offers, and writes |
 |---|---|
-| BC7, BC6H | The seven levels from **Ultrafast** to **Max**, as `encoder.effort`. |
+| BC7, BC6H | The seven levels from **Ultra fast** to **Max**, as `encoder.effort`. |
 | BC1 | **Fast** or **Default**, as `encoder.bc1_search`. |
 | BC3 | Three choices that set both keys: **Fast** sets both to `fast`, **Default** both to `default`, **Max** the radius to `max` and the BC1 search to `default`. |
 | BC4, BC5 | The same three choices as BC3, written to `encoder.bc45_search_radius` alone. |
@@ -67,19 +68,29 @@ I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps 
 
 ## Deciding
 
-A texture whose name follows the conventions decides itself: a High-confidence suggestion is written to the project ([what the GUI writes on its own](GUI-Problems.md#what-the-gui-writes-on-its-own)), and until then its sub-type reads **(auto)**. The naming rules are in [Texture types](Texture-Types.md).
+A texture whose name follows the conventions decides itself: a High-confidence suggestion is written to the project ([what the GUI writes on its own](GUI-Problems.md#what-the-gui-writes-on-its-own)), and until then its type reads **(auto)**. The naming rules are in [Texture types](Texture-Types.md).
 
-An **amber border** means the texture still needs an answer: a Medium or Low sub-type suggestion, the meaning of its alpha, or a blocking warning. The centre column then shows an *Undecided* box.
+An **amber border** means the texture still needs an answer: a Medium or Low type suggestion, the meaning of its alpha, or a blocking warning. The centre column then shows an *Undecided* box.
 
 | Question | Controls |
 |---|---|
-| What kind of texture is this? | A sub-type dropdown and **Confirm**. |
+| What kind of texture is this? | Likely-type buttons, a type dropdown and **Confirm** ([below](#picking-the-type)). |
 | What does the alpha channel mean? | An **Alpha** row, the dropdown set to the proposal, and **Confirm**. Pick another type, or press Confirm to keep the proposal. The rows below already read as the proposal. <!-- D:FM35 --> |
 | "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press **Treat as OpenGL (flip green)** if it is an OpenGL map; **Treat as DirectX** undoes it. |
 | A blocking warning | **Acknowledge for this texture**, or **Drop the alpha anyway** when the chosen format discards a varying alpha you've already confirmed: the export writes the texture without its alpha. |
-| A type the mode doesn't have | A sub-type dropdown and **Confirm**. No **Acknowledge**: it couldn't lift this one. <!-- D:JF3 --> |
+| A type the mode doesn't have | A type dropdown and **Confirm**. No **Acknowledge**: it couldn't lift this one. <!-- D:JF3 --> |
 
-Each answer is a field value or an `allow` code on the file's `[files]` entry. Your choice always wins over a suggestion. A field the target or the sub-type fixes is greyed with the reason (a field lock); it is not a pin and not a PGPatcher lock.
+Each answer is a field value or an `allow` code on the file's `[files]` entry. Your choice always wins over a suggestion. A field the target or the type fixes is greyed with the reason (a field lock); it is not a pin and not a PGPatcher lock.
+
+### Picking the type
+
+The box asks **What kind of texture is this?** and offers up to three likely types as buttons, then the **Type for this texture** dropdown. The buttons come from these sources, in this order, and a button's hover says why it is offered: <!-- D:LM9 -->
+
+1. Tessalith's own suggestion for the file.
+2. The type you gave other files with the same name ending (the part after the last `_`): "{file} has this type."
+3. The pixels: "The pixels look like a normal map." or "The pixels are grey."
+
+A button shows only a type the mode offers for this texture. Clicking one picks that type in the dropdown and writes nothing: **Confirm** writes it. **Confirm** then opens the next undecided texture after this one in the order the Textures column shows. A texture the filters hide is skipped, it never wraps round to the top, and with none left the selection stays. <!-- D:LM10 --> Selecting several textures asks once for all of them: [Bulk editing](GUI-Bulk-and-Rename.md#editing-them-together).
 
 ### Alpha from the meshes
 
@@ -96,7 +107,27 @@ The Alpha row then reads *from the meshes that use this texture*. Your own choic
 
 ## Used by meshes
 
-After a scan, **Used by meshes (N)** lists the meshes that use the texture, winner first. **Show in Meshes** opens the Meshes view filtered to it: [Mod scanning](Mod-Scanning.md).
+After a [scan](Mod-Scanning.md), the list under the texture's heading reads **Used by {n} meshes** (**Used by 1 mesh**). It counts the NIF copies in the scan database that use the texture, so the number matches what a click can open. <!-- D:LM13 -->
+
+- **A row** is one NIF in one mod: its path (the whole path on hover), then one line per copy, such as "{mod} · MO2 priority {p}" or "{mod} · BSA load rank {p}". A copy that loses to another mod's reads "(overridden by {mod})", with "at {root}" added when the winner has the same mod name in another root. <!-- D:LM13 -->
+- **An amber "decided the alpha" tag** marks a copy whose alpha settings decided what this texture's alpha means ([Alpha from the meshes](#alpha-from-the-meshes)). It looks at every copy, not only the listed ones. <!-- D:LM13 -->
+- **A shape link** per shape that uses the texture ("Shape {block}" when the shape has no name). A click opens that copy in Meshes with the shape selected. <!-- D:LM14 -->
+- **Show all in Meshes** opens the Meshes view filtered to the texture: [Mod scanning](Mod-Scanning.md).
+
+The list shows 200 copies, then "and {m} more meshes, not listed". The compact strip beside the preview has no list. <!-- D:LM13 -->
+
+When a link is greyed, its hover says why. A scan is running or didn't finish, the list is still being read, or Meshes shows another scan database than the list came from. If you click while Meshes is still reading its own list, the link opens once the read is done. <!-- D:LM13,LM14 -->
+
+When a link opens nothing, the Meshes status line says why:
+
+| Status line | Cause |
+|---|---|
+| That shape is no longer in the scan | A new scan removed the copy or the shape. |
+| That mesh link came from another scan database than Meshes shows, so it opened nothing. | Meshes reads a different database than this list. |
+| Meshes has no scan database open, so that mesh link opened nothing. | No scan is open in Meshes. |
+| The scan database could not be read, so that mesh link opened nothing. | The mesh list failed to load; it stays that way until the next scan. |
+
+If you have an unsaved NIF edit open, the link follows the same rules as picking another NIF ([Editing a NIF](GUI-NIF-Edit.md)): the draft is saved first, and an edit that can't be saved stays open and the link opens nothing. <!-- D:LM14 -->
 
 ## DDS files in the folder
 

@@ -59,7 +59,7 @@ A **helper** is a source file that fills one channel of another output in its ow
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
 | Opacity (`opacity`) | the colour texture's alpha (`diffuse.a`) | packed channels |
-| Specular (`specular`) | `n.a` on a texture of sub-type `normal`, plus the [packed channel for the target](#packing-loose-maps) | other packed channels |
+| Specular (`specular`) | `n.a` on a texture of type `normal`, plus the [packed channel for the target](#packing-loose-maps) | other packed channels |
 | Fuzz weight, PBR (`fuzzweight`) | the PBR `_f` alpha (`f.a`) | packed channels |
 | Subsurface weight, PBR (`subsurfaceweight`) | the PBR `_s` alpha (`s.a`) | packed channels |
 | Roughness, glossiness, metallic, AO, height, fuzz mask (skin), `_orm`, curvature, cavity | the packed channels of the tables above | any planned alpha target; the `_cnr` alpha (`cnr.a`, coat roughness) is offered, never suggested |
@@ -111,7 +111,7 @@ Every control writes the helper file's own `[files]` entry in `sdc.toml` as one 
 
 ### In the GUI
 
-Under the tiles, the Textures column has a **Helpers (n)** group, one compact row per helper. <!-- D:FB12 --> A row shows **→ targets** or **not used**; hover for the reason. A role you set shows as an amber **✎** chip. Tick **Helper** under any tile's Sub-type and pick a role to turn that texture into a helper. The set card's channel rows edit the same `helper.fills` ([Set editor](GUI-Set-Editor.md#packed-channel-sources)).
+Under the tiles, the Textures column has a **Helpers (n)** group, one compact row per helper. <!-- D:FB12 --> A row shows **→ targets** or **not used**; hover for the reason. A role you set shows as an amber **✎** chip. Tick **Helper** under any tile's **Texture type** and pick a role to turn that texture into a helper. The set card's channel rows edit the same `helper.fills` ([Set editor](GUI-Set-Editor.md#packed-channel-sources)).
 
 ![The panel of a helper texture.](../img/gui/Texture-Packing/helper-panel.png)
 
@@ -126,4 +126,4 @@ Tessalith looks for a `pbr_normal` first under any shader. A chosen or automatic
 When you borrow a Normal slot, your set’s shader decides which normals it can bake from in the other set. For example, the slot can show that set’s landscape normal while your PBR roughness bakes from its plain normal. The bake takes the highest-priority normal your shader accepts. Even if the other set shows a borrowed normal, it can lend you its own. <!-- D:JS2 -->
 
 - **Include both inputs in the batch.** A decided normal and a writable linear roughness map with smaller mips can bake. DDS inputs and a shared roughness map skip the bake. With `mips.levels = "none"` the roughness has no smaller mips to bake. Different sizes or shapes work. Set `mips.normal = "renormalize"` on the normal to opt out. See [companion diagnostics](Diagnostic-Codes.md#sets-and-suggestions) for a missing input. <!-- D:HD2,HD5 -->
-- **Complex `_m` gloss bake (opt-in).** On either target, choose **Renormalise and bake** under **Normal handling** (`mips.normal = "renormalize_bake"`) on the set's plain `_n`. Variation in its directions reduces gloss in the smaller mips of the `_m`'s green channel. Mip 0 keeps its gloss. Only an explicit choice enables this bake. <!-- D:CL40,JS2 -->
+- **Complex `_m` gloss bake (opt-in).** On either target, choose **Bake normal detail into roughness or gloss** under **Normal handling** (`mips.normal = "renormalize_bake"`) on the set's plain `_n`. Variation in its directions reduces gloss in the smaller mips of the `_m`'s green channel. Mip 0 keeps its gloss. Only an explicit choice enables this bake. <!-- D:CL40,JS2 -->

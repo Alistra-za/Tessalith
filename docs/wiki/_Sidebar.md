@@ -28,6 +28,7 @@ The GUI
 - [Main window](GUI-Main-Window.md)
 - [Texture settings](GUI-Texture-Panel.md)
 - [Sets column](GUI-Sets-Column.md)
+- [Set groups](GUI-Set-Groups.md)
 - [Set editor and texture set records](GUI-Set-Editor.md)
 - [Bulk editing and renaming](GUI-Bulk-and-Rename.md)
 - [Problems](GUI-Problems.md)

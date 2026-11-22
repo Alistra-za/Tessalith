@@ -14,7 +14,7 @@ While it opens, a progress bar counts the files to plan and **Cancel** returns t
 
 ### When `sdc.toml` is rejected
 
-An `sdc.toml` that can't be parsed, or that the engine refuses (an unknown field, an unknown sub-type), is left out of the plan. A banner shows the error and the GUI stays read-only until you fix the file and press **Reload**. Most out-of-range values aren't a rejection: they are reported per file as `CFG-INVALID` ([Diagnostic codes](Diagnostic-Codes.md)).
+An `sdc.toml` that can't be parsed, or that the engine refuses (an unknown field, an unknown type), is left out of the plan. A banner shows the error and the GUI stays read-only until you fix the file and press **Reload**. Most out-of-range values aren't a rejection: they are reported per file as `CFG-INVALID` ([Diagnostic codes](Diagnostic-Codes.md)).
 
 When the rejected value came from a GUI edit, that edit is the top **Undo** step. Undo takes it back and makes the file editable again.
 
@@ -55,7 +55,7 @@ These rows are saved in the open folder's files. With no folder open, the sectio
 
 | Row | Writes |
 |---|---|
-| **Mode** | `target` in `sdc.toml`: `cs` or `vanilla`. The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
+| **Mode** | `target` in `sdc.toml`: **Community Shaders (cs)** or **Base game (vanilla)**. It beats the Target a preset names. The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
 | **Preset** | `preset` in `sdc.toml`, the same value as the header's **Preset**. |
 | **Export folder** (**Choose…**, **Open**) | The export folder in `sdc-project.toml`, the same value as [Export to ▾](#export-to). |
 | **Export without review** | Sets `[project] export_without_review` in `sdc-project.toml`. [When Tessalith still opens Review](GUI-Review-and-Export.md#the-export-button). |
@@ -75,10 +75,10 @@ These apply to every project and save to `gui.toml` at once.
 
 ## Finding a texture
 
-One tile per source file, with a thumbnail, name and badges. An amber border means the texture waits for an answer ([Deciding](GUI-Texture-Panel.md#deciding)). Click selects a tile, double-click opens the 2D preview ([Previews](Previews.md)). Selecting several is on [Bulk editing and renaming](GUI-Bulk-and-Rename.md#editing-them-together).
+One tile per source file, with a thumbnail, name and badges. A packed output, or a texture whose alpha is data (a normal's specular, a mask), draws its colour only, without the alpha as transparency. <!-- D:LM15 --> An amber border means the texture waits for an answer ([Deciding](GUI-Texture-Panel.md#deciding)). Click selects a tile, double-click opens the 2D preview ([Previews](Previews.md)). Selecting several is on [Bulk editing and renaming](GUI-Bulk-and-Rename.md#editing-them-together).
 
 Helper files (raw AO, metallic, roughness and other masks) are rows under the tiles, not tiles ([Packing PBR maps](Texture-Packing.md#helper-textures)). A cube made of six face files is one item ([Cubemaps](Cubemaps.md)).
 
 ### Filters
 
-The pills *Undecided*, *Warnings*, *Failed* and *Not in a set* show how many textures each would list. *Not in a set* also counts a lone texture in a one-file set, which does export; only the **No set** label on a row means the texture isn't written ([Textures in no set](GUI-Sets-Column.md#textures-in-no-set)). *Undecided* and *Warnings* leave out textures in no set. <!-- D:HF1 --> **Filter ▾** adds *Sub-type*, *Output format*, *Set membership* and *Sort*, and the search box and the tile size buttons sit beside them. A texture shows only if it passes every filter, and a filter only hides: a selection keeps its hidden textures. **Clear filters** keeps the sort and the tile size. The filters, sort and tile size are remembered in `gui.toml` ([Installation](Installation.md)).
+The pills *Undecided*, *Warnings*, *Failed* and *Not in a set* show how many textures each would list. *Not in a set* also counts a lone texture in a one-file set, which does export; only the **No set** label on a row means the texture isn't written ([Textures in no set](GUI-Sets-Column.md#textures-in-no-set)). *Undecided* and *Warnings* leave out textures in no set. <!-- D:HF1 --> **Filter ▾** adds *Filter by type*, *Output format*, *Set membership* and *Sort*, and the search box and the tile size buttons sit beside them. A texture shows only if it passes every filter, and a filter only hides: a selection keeps its hidden textures. **Clear filters** keeps the sort and the tile size. The type, format and set filters, the sort and the tile size are remembered in `gui.toml` ([Installation](Installation.md)). The four pills start off each time Tessalith starts, as the Sets pills do ([why](GUI-Sets-Column.md#finding-a-set)). <!-- D:LM12 -->

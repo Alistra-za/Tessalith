@@ -96,8 +96,8 @@ The 3D preview shows the texture and coverage keys; every other row says "Not sh
 
 A Landscape or PBR Landscape set has two optional slots that feed the profile: **Projected noise** and **Detail normal**. They have no PGPatcher slot, so they aren't in the PGPatcher JSON, and a file can't be shared between sets. <!-- D:GI12,GI18 -->
 
-- **Projected noise** is the sub-type `projected_noise`, suffix `_noise`. It's written as BC4 (one linear channel, full mips), half the size of BC7, because Community Shaders reads only its red channel. <!-- D:GI14 --> In a landscape set a `_noise` file is read as projected noise without asking. <!-- D:GI21 -->
-- **Detail normal** is the sub-type `detail_normal`. In a landscape set a file with the suffix `_detail`, `_detailnorm` or `_detail_n` is the detail normal ([Detail names](Texture-Types.md#detail-names)). <!-- D:GI13 -->
+- **Projected noise** is the type `projected_noise`, suffix `_noise`. It's written as BC4 (one linear channel, full mips), half the size of BC7, because Community Shaders reads only its red channel. <!-- D:GI14 --> In a landscape set a `_noise` file is read as projected noise without asking. <!-- D:GI21 -->
+- **Detail normal** is the type `detail_normal`. In a landscape set a file with the suffix `_detail`, `_detailnorm` or `_detail_n` is the detail normal ([Detail names](Texture-Types.md#detail-names)). <!-- D:GI13 -->
 - **A set made only for a material object needs no `_rmaos`.** The projected layer samples only the noise, normal, detail and diffuse textures; roughness, metallic and specular come from the `cs_mato` values. <!-- D:GI15 -->
 - **The Community Shaders build the preview uses doesn't draw the projected normal and detail samples** ([which build](Previews.md)). They show without Community Shaders, or in a later version of it. The slot still exports. <!-- D:GI16 -->
 
@@ -118,5 +118,5 @@ Community Shaders draws grass with its own shader, which reads only the albedo, 
 
 Both targets accept it; only Community Shaders or ENB read it in game. A complex-grass texture is one image twice as tall as it is wide, with power-of-two sides (for example 1024x2048): diffuse and alpha in the top half, normal and specular in the bottom half. Community Shaders detects it from the bottom-left texel.
 
-- Tag it by setting the set's shader to `complex_grass`, by setting `subtype = "complex_grass"` on the file's `[files]` entry, or let the GUI do it after a scan that included plugins: a texture a GRAS record uses, 1:2, with a valid detection corner and a normal-map bottom half gets a High-confidence suggestion. A complex-grass-shaped diffuse nothing tags gets an info row in Problems with **Tag as grass**. The sub-type picker offers **Complex grass** where the set's shader is a grass shader or no `textures` folder is above the file.
+- Tag it by setting the set's shader to `complex_grass`, by setting `subtype = "complex_grass"` on the file's `[files]` entry, or let the GUI do it after a scan that included plugins: a texture a GRAS record uses, 1:2, with a valid detection corner and a normal-map bottom half gets a High-confidence suggestion. A complex-grass-shaped diffuse nothing tags gets an info row in Problems with **Tag as grass**. The type picker offers **Complex grass** where the set's shader is a grass shader or no `textures` folder is above the file.
 - The checks and their codes are under [Diagnostic codes](Diagnostic-Codes.md#shaders-skin-and-grass).

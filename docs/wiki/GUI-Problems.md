@@ -39,8 +39,8 @@ A row you must act on has its fix as a button.
 | A blocker, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …* | None: the texture failed to plan. |
 | *Undecided: …* | The type buttons and **Acknowledge** ([below](#deciding-from-the-list)). |
-| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
-| *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
+| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Types](Texture-Types.md#types-what-each-file-becomes). <!-- D:JF3 --> |
+| *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
 | Warnings on a set | **Go to set** ([below](#go-to-set)). You can export with these warnings. They still bring up Review if you've opted to skip it on clean exports. |
 | A file's export warnings, after an export | Click the file. |
@@ -110,8 +110,7 @@ Check the mode in the row before you remove anything. Some files are planned onl
 
 ## Deciding from the list
 
-- An undecided texture with a suggestion shows **Set type: X ✓** (a click decides it) and a **▾** for the type picker, which has a search box and the suggestion on top. With no suggestion it shows **Set type…**. **Accept all suggestions (n)** decides every texture that has one, as one undo step.
-- Tab to a row and press Enter or Space to accept its suggestion and move on to the next row.
+- An undecided texture with a suggestion shows **Set type: X ✓** (a click decides it) and a **▾** for the type picker, which has a search box and the suggestion on top. With no suggestion it shows **Set type…**. **Accept all suggestions (n)** decides every texture that has one, as one undo step.- Tab to a row and press Enter or Space to accept its suggestion and move on to the next row.
 
 An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 
@@ -123,6 +122,7 @@ To check which normals can follow a shader, Tessalith reads the recorded types, 
 
 - Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
 - Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->
+- **The Notes row** reads "{n} types set automatically: {a}, {b}, {c}, and {m} more"; hover for every file. A batch that set a type adds why: a known ending such as `_n`, the folder, or the meshes and grass that use it. <!-- D:LM7 -->
 - Your own type or alpha changes, including Undo, [need a save](GUI-Main-Window.md#header).
 - Saving presets can give a recorded normal a different type for that pass. A normal can follow its set into PBR with suggestion acceptance off. Its Info row omits confidence. If ownership can't be recorded in `sdc-project.toml`, the suggested type stays. <!-- D:JS5 -->
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
