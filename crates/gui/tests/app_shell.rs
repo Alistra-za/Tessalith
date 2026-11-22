@@ -1,5 +1,8 @@
 mod app_harness;
-#[allow(dead_code)] // fields only the doc shots read
+#[allow(
+    dead_code,
+    reason = "the doc-shot manifest's fields are read only by the doc shots"
+)]
 #[path = "doc_shots/manifest.rs"]
 mod manifest;
 mod support;

@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by the alloc_frame, app_shell, doc_shots, ui_drive and ui_proof tests; each uses a subset"
+)]
 //! The doc-shot app harness, shared by every test binary that drives the real `SdcApp`. The including binary declares
 //! `#[path = "doc_shots/manifest.rs"] mod manifest;` at its root.
 

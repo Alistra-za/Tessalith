@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by the ui_drive and ui_proof tests; ui_drive reads a subset of the node and paint fields and calls"
+)]
 //! A frame read as data: the AccessKit tree joined to egui's widget list, plus the text actually painted.
 //! Works on any `Harness`, so it is tested on tiny UIs.
 

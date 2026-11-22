@@ -1,6 +1,14 @@
 //! Note GO: the shape card's Texture set dropdown (TXSTs plugins assign to the shape's 3D index, preview only).
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../modscan/tests/common/mod.rs"]
 mod scan_fixture;
 use egui_kittest::kittest::{NodeT, Queryable};

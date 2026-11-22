@@ -919,7 +919,7 @@ fn a_read_only_project_disables_with_the_reason() {
 /// Renders the Sets column with groups at 1100, 1280 and 1600 px wide into `SDC_GROUP_SHOTS` (a folder), for the
 /// review against the egui-ui-rules. Needs a GPU: `cargo test -p sdc-gui --test it set_groups_ui::render_ -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and SDC_GROUP_SHOTS"]
 fn render_the_groups() {
     let out = std::path::PathBuf::from(
         std::env::var("SDC_GROUP_SHOTS").unwrap_or_else(|_| "group-shots".into()),

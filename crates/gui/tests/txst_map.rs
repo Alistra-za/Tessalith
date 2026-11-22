@@ -995,7 +995,7 @@ fn no_fill_round_trips() {
 /// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test it txst_map::render_ -- --ignored`: the card and the editor of the
 /// shared set at 1100, 1280 and 1600 px wide.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and TXST_SHOTS_DIR"]
 fn render_shared_set_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("TXST_SHOTS_DIR").expect("TXST_SHOTS_DIR"));
     std::fs::create_dir_all(&out).unwrap();
@@ -3015,7 +3015,7 @@ fn the_card_hover_marks_a_supplied_slot() {
 /// Screenshots for the Task 6 review (`TXST_SHOTS_DIR` names the folder): the card and editor with a mapped set, the
 /// picker with long EDIDs and paths, and the Problems rows. Not a gate.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and TXST_SHOTS_DIR"]
 fn render_picker_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("TXST_SHOTS_DIR").expect("TXST_SHOTS_DIR"));
     std::fs::create_dir_all(&out).unwrap();

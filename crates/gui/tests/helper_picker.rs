@@ -425,7 +425,7 @@ fn picker_combo_inside_card_at_1100() {
 /// Review pictures of the card's pickers at 1100, 1280 and 1600 px, closed and open (egui-ui-rules step 5). Needs a
 /// GPU and `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helper_picker::shots -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and SDC_SHOTS_DIR"]
 fn shots() {
     let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
         return;

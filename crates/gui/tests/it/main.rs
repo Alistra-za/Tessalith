@@ -7,9 +7,10 @@
 //! change what the tests on the other threads see. `every_test_file_is_built` fails when a file is in neither place
 //! or in both.
 
-// Every file declares `mod support;` for itself, as it did as its own binary. A few also declare the fixture builder
-// of another crate (`nif`, `esp`, `modscan`) the same way. So those files are loaded as a module more than once.
-#![allow(clippy::duplicate_mod)]
+#![allow(
+    clippy::duplicate_mod,
+    reason = "each file declares mod support (and a few another crate's fixture builder) for itself, as it did as its own binary"
+)]
 
 #[path = "../accepted_037.rs"]
 mod accepted_037;

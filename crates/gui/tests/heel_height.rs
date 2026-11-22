@@ -33,6 +33,10 @@ fn heel_z_of_a_fixture_is_finite_and_a_bad_block_is_none() {
     assert_eq!(heel_z_of(&b, 9999), None);
 }
 
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 
@@ -94,7 +98,7 @@ fn stored(m: &nif::model::NifModel, s: &nif::model::ShapeModel) -> Option<(f32, 
 /// Owner data, read-only (not a gate): every loose NIF under `SDC_ACHERUS\mods` whose header names HH_OFFSET or
 /// SDTA; per shape with a stored heel height, Calculate's value next to it. Prints the spread for the task report.
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_ACHERUS"]
 fn heel_height_calculation_against_the_corpus() {
     let Ok(root) = std::env::var("SDC_ACHERUS") else {
         println!("skipped: set SDC_ACHERUS");

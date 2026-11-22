@@ -691,7 +691,7 @@ fn skin_fixture_reopen(dir: &Path) -> AppModel {
 
 /// Screenshots for the report (not a check): the chip menu and the Problems row at 1100 and 1280 wide.
 #[test]
-#[ignore]
+#[ignore = "screenshots for a review, not a check; needs a GPU"]
 fn set_cleanup_screenshots() {
     let out = std::env::var("SDC_SHOT_DIR")
         .unwrap_or_else(|_| std::env::temp_dir().display().to_string());

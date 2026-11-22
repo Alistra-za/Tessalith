@@ -306,7 +306,10 @@ fn a_non_conflict_save_error_names_the_file() {
         .unwrap()
         .set_value("a", "hair", Some(json!(false)));
     let saved = m.save();
-    #[allow(clippy::permissions_set_readonly_false)]
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "the test restores write access to its own temp-dir file straight after the refused save, before the asserts, so a failed assert does not leave it read-only"
+    )]
     perm.set_readonly(false);
     std::fs::set_permissions(&file, perm).unwrap();
     assert!(saved.is_err());

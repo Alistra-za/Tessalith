@@ -117,7 +117,7 @@ fn manifest_scenarios_and_pages_agree() {
 /// PNG and writes `<page>/<id>.png`, `<page>/<id>.diff.png` (changed shots), `summary.tsv` and `summary.md`. Needs a
 /// GPU or WARP; run it through `tools\doc-shots.ps1`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU or WARP; run through tools/doc-shots.ps1"]
 fn render_doc_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("DOC_SHOTS_OUT").expect("DOC_SHOTS_OUT"));
     let only: Option<Vec<String>> = std::env::var("DOC_SHOTS_ONLY").ok().map(|v| {

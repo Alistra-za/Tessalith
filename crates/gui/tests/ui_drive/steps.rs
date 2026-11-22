@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! The step format of the headless UI driver and the code that runs a UI step on any `Harness`.
 //! Steps are JSON lines; `Pick`, `Expect` and `Check` need the app and are run elsewhere.
 

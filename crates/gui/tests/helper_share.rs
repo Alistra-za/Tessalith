@@ -1066,7 +1066,7 @@ fn a_click_on_a_helper_row_still_selects() {
 /// Review pictures of the set editor with a shared helper at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a
 /// GPU and `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helper_share::shots -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and SDC_SHOTS_DIR"]
 fn shots() {
     let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
         return;

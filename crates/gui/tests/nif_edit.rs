@@ -1642,6 +1642,10 @@ fn in_game_and_back_keeps_the_session_and_shows_every_edit() {
 
 // ---- v2 A17: the edit panel, selection, Shader and Alpha tabs ----
 
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 use builder::scenes;

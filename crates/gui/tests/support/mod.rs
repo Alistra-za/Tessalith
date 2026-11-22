@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "every GUI test file declares this module for itself (Note HU1) and each uses a subset"
+)]
 //! A folder like a small mod: a diffuse with varying alpha (needs an alpha decision), a normal with no stated green
 //! convention, a 3 px diffuse (blocked by DIM-SMALL), a plain diffuse, and roughness + AO that pack `_rmaos`.
 use eframe::egui;
@@ -15,7 +18,6 @@ use std::time::{Duration, Instant};
 
 type RecordedSpecs = Arc<Mutex<Vec<PickerSpec>>>;
 
-#[allow(dead_code)]
 pub fn toml_has_key(text: &str, key: &str) -> bool {
     text.lines().any(|line| {
         line.split_once('=')
