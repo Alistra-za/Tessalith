@@ -950,7 +950,7 @@ pub(super) fn dep_ok(
     if let Some(r) = rows.iter().find(|r| r.job_key.eq_ignore_ascii_case(key)) {
         if !matches!(
             r.state,
-            RowState::Done { .. } | RowState::UpToDate | RowState::Kept
+            RowState::Done { .. } | RowState::UpToDate | RowState::CheckFailed | RowState::Kept
         ) {
             return Err(r.state.label());
         }

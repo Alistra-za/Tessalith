@@ -1529,6 +1529,12 @@ impl AppModel {
         (self.settled_writes_now, self.settled_export_files) = (false, 0);
     }
 
+    /// Note LF: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
+    pub fn set_validate_exports(&mut self, on: bool) {
+        self.settings.validate_exports = on;
+        self.save_settings();
+    }
+
     pub fn save_settings(&mut self) {
         let Some(p) = self.settings_path.clone() else {
             return;
@@ -3295,7 +3301,7 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
-        req.validate = true; // Task 4 replaces this with the Validate exported DDS setting.
+        req.validate = self.settings.validate_exports;
         Some(req)
     }
 
@@ -3344,6 +3350,7 @@ impl AppModel {
                 .map(|i| (i.job_key.clone(), None))
                 .collect(),
             pace: Some(export::Pace::new(Instant::now())),
+            validated: req.validate,
             outside_run,
             ..Default::default()
         };

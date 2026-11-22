@@ -1,7 +1,7 @@
 //! Export and its report (M3a spec §2.5, §2.6, §5.5).
 use super::bottom::open_export_warnings;
 use super::AppModel;
-use engine::api::{BatchSummary, CancelToken};
+use engine::api::{BatchSummary, CancelToken, CHECKED_IN_PLACE_FAILED};
 use engine::codes::{Code, Warning};
 use engine::events::{EngineEvent, EventKind, SkipKind};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -13,8 +13,12 @@ use std::time::{Duration, Instant};
 pub enum RowState {
     Queued,
     Running,
-    Done { passed: bool },
+    Done {
+        passed: bool,
+    },
     UpToDate,
+    /// Checked in place (OV-O2) and failed: the file was kept and not written (D13).
+    CheckFailed,
     Kept,
     Skipped(SkipKind, String),
     Failed(String),
@@ -30,6 +34,7 @@ impl RowState {
             RowState::Done { passed: true } => "converted".into(),
             RowState::Done { passed: false } => "validation failed".into(),
             RowState::UpToDate => "up to date".into(),
+            RowState::CheckFailed => "up to date, failed validation".into(),
             RowState::Kept | RowState::Skipped(SkipKind::OnExistingSkip, _) => "kept".into(),
             RowState::Skipped(SkipKind::Unresolved | SkipKind::Blocked, _) => {
                 "skipped: undecided".into()
@@ -53,7 +58,10 @@ impl RowState {
 
     /// The "Failed only" filter: a failed file or a validation failure.
     pub fn is_failed(&self) -> bool {
-        matches!(self, RowState::Failed(_) | RowState::Done { passed: false })
+        matches!(
+            self,
+            RowState::Failed(_) | RowState::Done { passed: false } | RowState::CheckFailed
+        )
     }
 }
 
@@ -88,6 +96,9 @@ impl Terminal {
             EventKind::FileDone { validation, .. } if validation.passed => Some(Self::Written),
             EventKind::FileDone { .. } | EventKind::FileFailed { .. } => Some(Self::Failed),
             EventKind::FileSkipped { kind, reason, .. } => match kind {
+                SkipKind::UpToDate if reason.ends_with(CHECKED_IN_PLACE_FAILED) => {
+                    Some(Self::Failed)
+                }
                 SkipKind::UpToDate if reason.starts_with("kept:") => Some(Self::Kept),
                 SkipKind::UpToDate => Some(Self::Current),
                 SkipKind::OnExistingSkip => Some(Self::Kept),
@@ -194,6 +205,8 @@ pub struct ExportModel {
     pub error: Option<String>,
     /// What the export did besides converting: the JSON, the vanilla copies, and what was left out.
     pub notes: Vec<String>,
+    /// The export ran with Validate exported DDS on (its `BatchRequest::validate`); the report words follow it.
+    pub validated: bool,
     /// Job key to the file the engine plans to write (or wrote): an absolute path with forward slashes.
     pub outputs: HashMap<String, String>,
     /// Progress timing of the running export (set when it starts).
@@ -286,7 +299,8 @@ impl ExportModel {
         }
         Outcomes {
             written: (summary.converted - summary.validation_failed) as usize,
-            failed: (summary.failed + summary.validation_failed) as usize,
+            // A failed check in place counts here and not under `current` (`Terminal::from_event`); it wrote nothing.
+            failed: (summary.failed + summary.validation_failed + summary.checked_failed) as usize,
             current,
             kept,
             protected,
@@ -400,6 +414,9 @@ impl ExportModel {
             }
             EventKind::FileSkipped { kind, reason, .. } => {
                 let state = match kind {
+                    SkipKind::UpToDate if terminal == Some(Terminal::Failed) => {
+                        RowState::CheckFailed
+                    }
                     SkipKind::UpToDate if terminal == Some(Terminal::Kept) => RowState::Kept,
                     SkipKind::UpToDate => RowState::UpToDate,
                     k => RowState::Skipped(*k, reason.clone()),
@@ -535,9 +552,22 @@ impl ExportModel {
     pub fn to_markdown(&self) -> String {
         let mut s = String::from("# Tessalith export report\n\n");
         if let Some(b) = &self.summary {
+            let validation = match (self.validated, b.validation_failed) {
+                (true, n) => format!("validation failed {n}"),
+                (false, 0) => "not validated".to_string(),
+                (false, n) => format!("validation failed {n} (complex types only)"),
+            };
+            let checked = if self.validated && b.checked > 0 {
+                format!(
+                    ", checked in place {} ({} failed)",
+                    b.checked, b.checked_failed
+                )
+            } else {
+                String::new()
+            };
             s += &format!(
-                "Converted {}, up to date {}, skipped {}, failed {}, validation failed {}.\n\n",
-                b.converted, b.up_to_date, b.skipped, b.failed, b.validation_failed
+                "Converted {}, up to date {}, skipped {}, failed {}, {validation}{checked}.\n\n",
+                b.converted, b.up_to_date, b.skipped, b.failed
             );
         }
         // Audit 08c-4: what the export did besides converting (a JSON not written or kept, the copies).
@@ -601,12 +631,13 @@ pub fn export_folder_problem(root: &Path, export: &Path) -> Option<String> {
 /// The `sdc convert` command that reproduces the export from the saved `sdc.toml` (M3a spec §2.5). The GUI plans
 /// with High suggestions accepted (Note U3), so the command does too (audit 08c-2). Set edits in
 /// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither.
-pub fn cli_command(root: &Path, export: &Path) -> String {
+pub fn cli_command(root: &Path, export: &Path, validate: bool) -> String {
     let q = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "/"));
     format!(
-        "sdc convert {} --recursive -o {} --accept-suggestions high",
+        "sdc convert {} --recursive -o {} --accept-suggestions high{}",
         q(root),
-        q(export)
+        q(export),
+        if validate { " --validate" } else { "" }
     )
 }
 
@@ -793,5 +824,91 @@ mod tests {
         m.drop_unstarted();
         let left: Vec<&str> = m.rows.iter().map(|r| r.job_key.as_str()).collect();
         assert_eq!(left, ["g/b"]);
+    }
+
+    fn event(seq: u64, key: &str, kind: EventKind) -> EngineEvent {
+        EngineEvent {
+            schema: engine::events::EVENT_SCHEMA,
+            seq,
+            ts: "2026-11-21T00:00:00.000Z".into(),
+            batch: "b".into(),
+            set: None,
+            path: Some("a.png".into()),
+            job: Some(key.into()),
+            kind,
+        }
+    }
+
+    /// An export model that discovered `a/x.dds` and then got `reason` as its up-to-date skip.
+    fn up_to_date_with(reason: String) -> ExportModel {
+        let mut m = ExportModel::default();
+        let found = EventKind::FileDiscovered {
+            output: "a/x.dds".into(),
+        };
+        m.on_event(event(0, "a/x.dds", found));
+        let skip = EventKind::FileSkipped {
+            kind: SkipKind::UpToDate,
+            code: None,
+            reason,
+        };
+        m.on_event(event(1, "a/x.dds", skip));
+        m
+    }
+
+    /// Note LF (OV-O2, D13): an output checked in place that failed is a failed row, in the Failed only filter, the
+    /// Files counts and the report. One that passed, and a keep, are not.
+    #[test]
+    fn a_failed_check_in_place_is_a_failed_row() {
+        use engine::api::{CHECKED_IN_PLACE, CHECKED_IN_PLACE_FAILED};
+        let m = up_to_date_with(format!("up to date; {CHECKED_IN_PLACE_FAILED}"));
+        assert_eq!(m.rows[0].state, RowState::CheckFailed);
+        assert!(m.rows[0].state.is_failed());
+        assert_eq!(m.rows[0].state.label(), "up to date, failed validation");
+        let o = m.primary_outcomes(false);
+        assert_eq!((o.failed, o.current), (1, 0));
+        assert!(m
+            .to_markdown()
+            .contains("| a/x.dds | up to date, failed validation |"));
+
+        let m = up_to_date_with(format!("up to date; {CHECKED_IN_PLACE}"));
+        assert_eq!(m.rows[0].state, RowState::UpToDate);
+        assert!(!m.rows[0].state.is_failed());
+        let o = m.primary_outcomes(false);
+        assert_eq!((o.failed, o.current), (0, 1));
+
+        // A keep is never checked (OV-R4).
+        let m = up_to_date_with("kept: x".into());
+        assert_eq!(m.rows[0].state, RowState::Kept);
+    }
+
+    /// Note LF: with the switch off, a complex-type failure is still reported as one, and `not validated` says nothing
+    /// was checked; with it on, the in-place checks are counted.
+    #[test]
+    fn the_report_shows_mandatory_failures_when_not_validating() {
+        let mut m = ExportModel {
+            validated: false,
+            summary: Some(BatchSummary {
+                validation_failed: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let md = m.to_markdown();
+        assert!(
+            md.contains("validation failed 1 (complex types only)"),
+            "{md}"
+        );
+        assert!(!md.contains("not validated"), "{md}");
+        m.summary = Some(BatchSummary::default());
+        assert!(m.to_markdown().contains("not validated"));
+        m.validated = true;
+        m.summary = Some(BatchSummary {
+            checked: 2,
+            checked_failed: 1,
+            ..Default::default()
+        });
+        let md = m.to_markdown();
+        assert!(md.contains("checked in place 2 (1 failed)"), "{md}");
+        assert!(md.contains("validation failed 0"), "{md}");
     }
 }
