@@ -65,3 +65,9 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Engine profiling with samply (spec 7.1): release code plus line tables, symbols kept.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
