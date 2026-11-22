@@ -1243,9 +1243,15 @@ fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
     }
 }
 
-/// The BC4 search radius of format `f` (BC3's alpha, BC4, BC5), not its declared order; `None` elsewhere.
-fn radius_rank(f: Format, r: SearchRadius) -> Option<u32> {
-    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then(|| crate::encode::radius(r))
+/// How hard format `f` searches its BC4 endpoints (BC3's alpha, BC4, BC5): `fast` < `default` < `slowest` < `max`
+/// (Note LH), not the declared order and not the radius (Slowest and Max both start at 10); `None` elsewhere.
+fn radius_rank(f: Format, r: SearchRadius) -> Option<u8> {
+    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then_some(match r {
+        SearchRadius::Fast => 0,
+        SearchRadius::Default => 1,
+        SearchRadius::Slowest => 2,
+        SearchRadius::Max => 3,
+    })
 }
 
 /// The BC1 search depth of format `f` (BC1, BC3's colour): `fast` below `default`; `None` elsewhere.
@@ -5484,6 +5490,34 @@ mod tests {
             "radius max to fast on BC4",
             &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Fast), p),
             &radius(SearchRadius::Max),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "radius slowest to max on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Max), p),
+            &radius(SearchRadius::Slowest),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius max to slowest on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Max),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "radius default to slowest on BC3",
+            &|p| both(&fmt(Format::Bc3), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Default),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius slowest to default on BC5",
+            &|p| both(&fmt(Format::Bc5), &radius(SearchRadius::Default), p),
+            &radius(SearchRadius::Slowest),
             as_is,
             [TGT, TGT],
         );

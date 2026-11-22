@@ -82,10 +82,17 @@ fn bc1_search(s: Bc1Search) -> bcenc::Bc1Search {
     }
 }
 
+const _: () = assert!(
+    bcenc::MAX_SEARCH_RADIUS == BC45_RADIUS_MAX,
+    "bcenc's Max starts at the engine's radius 10"
+);
+
+/// The radius of the radius search. `Max` starts with that radius-10 search and then runs the pair search
+/// (`bcenc::*_max`), so it reads 10 too; not a rank (`api::radius_rank` orders the four values).
 pub fn radius(r: SearchRadius) -> u32 {
     match r {
         SearchRadius::Default => BC45_RADIUS_DEFAULT,
-        SearchRadius::Max => BC45_RADIUS_MAX,
+        SearchRadius::Slowest | SearchRadius::Max => BC45_RADIUS_MAX,
         SearchRadius::Fast => BC45_RADIUS_FAST,
     }
 }
@@ -132,6 +139,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
         }
         f => {
             let bs = f.block_bytes().expect("block format");
+            let max = e.bc45_search_radius == SearchRadius::Max;
             for (blk, src) in o.chunks_mut(bs).zip(b.chunks(BLOCK_TEXELS)) {
                 let src: &[[u8; 4]; 16] = src.try_into().unwrap();
                 match f {
@@ -161,6 +169,12 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         e.perceptual,
                         bc1_search(e.bc1_search),
                     )),
+                    Format::Bc3 if max => blk.copy_from_slice(&bcenc::bc3_encode_block_max_with(
+                        src,
+                        bc3_cut(alpha_cut(&p.alpha)),
+                        e.perceptual,
+                        bc1_search(e.bc1_search),
+                    )),
                     Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block_with(
                         src,
                         radius(e.bc45_search_radius),
@@ -169,11 +183,13 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         bc1_search(e.bc1_search),
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
+                    Format::Bc4 if max => blk.copy_from_slice(&bcenc::bc4_encode_block_max(src, 0)),
                     Format::Bc4 => blk.copy_from_slice(&bcenc::bc4_encode_block(
                         src,
                         0,
                         radius(e.bc45_search_radius),
                     )),
+                    Format::Bc5 if max => blk.copy_from_slice(&bcenc::bc5_encode_block_max(src)),
                     Format::Bc5 => blk.copy_from_slice(&bcenc::bc5_encode_block(
                         src,
                         radius(e.bc45_search_radius),
