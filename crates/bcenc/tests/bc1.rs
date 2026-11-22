@@ -2,15 +2,20 @@
 //! plain or perceptual weights) on every block class and on solid colours. Solid blocks take rgbcx's
 //! `encode_bc1_solid_block`, so the solid tests also prove the single-colour tables (`equals_1` with three-colour off,
 //! `half` too with it on). `Bc1Search::Fast` equals rgbcx at `BC1_FAST_LEVEL` on the same classes and, in its
-//! `#[ignore]` twins, on the same long runs.
+//! `#[ignore]` twins, on the same long runs. Every comparison with rgbcx runs on every code path the machine has
+//! (`support/paths.rs`), through the hidden `bc1_encode_block_on`.
 use bcenc::bc1::palette::{dual_err, dual_palette};
 use bcenc::bc1::{PERCEPTUAL, PLAIN};
-use bcenc::{bc1_encode_block, bc1_encode_block_with, Bc1Search, BC1_FAST_LEVEL};
+use bcenc::{
+    bc1_encode_block, bc1_encode_block_on, bc1_encode_block_with, Bc1Search, Path, BC1_FAST_LEVEL,
+};
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
 #[path = "support/gen.rs"]
 mod gen;
+#[path = "support/paths.rs"]
+mod paths;
 
 use bc1_block::{colours, sel};
 
@@ -22,25 +27,42 @@ fn same(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
     same_with(px, allow_3color, perceptual, Bc1Search::Default)
 }
 
-/// `bc1_encode_block_with(.., search)` against rgbcx at the level `search` stands for (level 18 for `Default`).
+/// `bc1_encode_block_on(path, .., search)` on every path against rgbcx at the level `search` stands for (level 18 for
+/// `Default`).
 fn same_with(
     px: &[[u8; 4]; 16],
     allow_3color: bool,
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 8] {
-    let got = bc1_encode_block_with(px, allow_3color, perceptual, search);
     let want = match search {
         Bc1Search::Default => encoders_sys::bc1_encode_block(px, allow_3color, false, perceptual),
         Bc1Search::Fast => {
             encoders_sys::bc1_encode_block_level(px, BC1_FAST_LEVEL, allow_3color, perceptual)
         }
     };
-    assert_eq!(
-        got, want,
-        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
-    got
+    for path in paths::paths() {
+        let got = bc1_encode_block_on(path, px, allow_3color, perceptual, search);
+        assert_eq!(
+            got, want,
+            "bc1 {search:?} on path {}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+            path.name()
+        );
+    }
+    want
+}
+
+/// The paths the tests run and the ones the paths line prints as skipped are every path, each once, in `Path::ALL`
+/// order.
+#[test]
+fn the_paths_line_covers_every_path() {
+    let ran = paths::paths();
+    let skipped: Vec<Path> = paths::skipped().into_iter().map(|(p, _)| p).collect();
+    let not_skipped: Vec<Path> = Path::ALL
+        .into_iter()
+        .filter(|p| !skipped.contains(p))
+        .collect();
+    assert_eq!(ran, not_skipped, "skipped {skipped:?}");
 }
 
 fn solid(r: u8, g: u8, b: u8) -> [[u8; 4]; 16] {

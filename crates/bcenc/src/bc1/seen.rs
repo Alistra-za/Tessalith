@@ -36,6 +36,7 @@ impl Seen {
         m
     };
 
+    #[inline(always)]
     pub(crate) fn new() -> Self {
         Seen {
             slots: [0; Seen::SLOTS],
@@ -43,11 +44,13 @@ impl Seen {
     }
 
     /// Records `e`. True when it was recorded before.
+    #[inline(always)]
     pub(crate) fn insert(&mut self, e: &Ends) -> bool {
         self.insert_key(Self::key(e))
     }
 
     /// [`Seen::insert`] for the pair whose key is `key`.
+    #[inline(always)]
     pub(crate) fn insert_key(&mut self, key: u32) -> bool {
         let stored = key as u64 + 1;
         let mut i = Self::first_slot_of(stored);
@@ -66,6 +69,7 @@ impl Seen {
     }
 
     /// The pair as 32 bits, one key per pair: 5 + 6 + 5 bits for each endpoint (`l` low, `h` high).
+    #[inline(always)]
     pub(crate) fn key(e: &Ends) -> u32 {
         debug_assert!(e.l[0] < 32 && e.l[1] < 64 && e.l[2] < 32);
         debug_assert!(e.h[0] < 32 && e.h[1] < 64 && e.h[2] < 32);
@@ -74,6 +78,7 @@ impl Seen {
     }
 
     /// The pair whose key is `key`: the inverse of [`Seen::key`].
+    #[inline(always)]
     pub(crate) fn ends_of(key: u32) -> Ends {
         Ends {
             l: [
@@ -90,6 +95,7 @@ impl Seen {
     }
 
     /// A multiplicative hash of the stored value onto 10 bits.
+    #[inline(always)]
     fn first_slot_of(stored: u64) -> usize {
         (stored.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 54) as usize
     }

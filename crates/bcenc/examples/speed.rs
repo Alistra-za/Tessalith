@@ -4,8 +4,12 @@
 //! to compare between runs, because both encoders run in alternating passes under the same load):
 //!
 //! ```text
-//! cargo run --offline --release -p bcenc --example speed -- <runs> [<png>...]
+//! cargo run --offline --release -p bcenc --example speed -- [--path=<base|avx2|best>] <runs> [<png>...]
 //! ```
+//!
+//! `--path` picks the code path `bcenc` runs on, through its hidden `_on` entries (default `best`, the one the public
+//! functions take on this CPU); a path this machine cannot run, or an unknown name, exits with status 2 and says why.
+//! The path goes to stderr.
 //!
 //! Every 4x4 block of level 0 of the PNGs (`image::open(..).to_rgba8()`, cut by `encoders_sys::gather_blocks` as
 //! `tests/corpus.rs` does) is encoded `runs` times by each encoder in alternating passes; rgbcx goes first in even
@@ -18,18 +22,17 @@
 //! when any format printed `NO`; the index of the first differing block then goes to stderr, as the block count
 //! does.
 //!
-//! Formats and the arguments the engine passes: `bc1` = `bc1_encode_block(b, true, false)`; `bc1p` = the same
-//! perceptual; `bc1-4` = `allow_3color` false (BC3's colour half); `bc1a` = `bc1_encode_block_alpha(b, mask, false)`
-//! with bit i of `mask` set when texel i's green is below 64; `bc3` = radius 5, cut 128; `bc4` = channel 0, radius 5;
-//! `bc5` = radius 5. Then the fast search (`Bc1Search::Fast`) against rgbcx at `BC1_FAST_LEVEL`: `bc1-fast` = `bc1`
-//! and `bc3-fast` = `bc3` through the `_with` functions.
+//! Formats and the arguments the engine passes, each through the `_on` entry of the public function named:
+//! `bc1` = `bc1_encode_block(b, true, false)`; `bc1p` = the same perceptual; `bc1-4` = `allow_3color` false (BC3's
+//! colour half); `bc1a` = `bc1_encode_block_alpha(b, mask, false)` with bit i of `mask` set when texel i's green is
+//! below 64; `bc3` = radius 5, cut 128; `bc4` = channel 0, radius 5; `bc5` = radius 5. Then the fast search
+//! (`Bc1Search::Fast`) against rgbcx at `BC1_FAST_LEVEL`: `bc1-fast` = `bc1` and `bc3-fast` = `bc3` at that search.
 
 use std::hint::black_box;
-use std::num::NonZeroU8;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use bcenc::{Bc1Search, BC1_FAST_LEVEL};
+use bcenc::{Bc1Search, Path, BC1_FAST_LEVEL};
 
 #[path = "../tests/support/gen.rs"]
 mod gen;
@@ -133,86 +136,117 @@ fn load(paths: &[String]) -> Vec<Block> {
     blocks
 }
 
+/// The path `--path=<name>` names: `best`, or a path of `Path::ALL` this machine can run.
+fn named_path(name: &str) -> Result<Path, String> {
+    if name == "best" {
+        return Ok(Path::best());
+    }
+    let Some(path) = Path::ALL.into_iter().find(|p| p.name() == name) else {
+        let names: Vec<&str> = Path::ALL.iter().map(|p| p.name()).collect();
+        return Err(format!(
+            "unknown path {name}; the paths are {} and best",
+            names.join(", ")
+        ));
+    };
+    match path.missing() {
+        Some(why) => Err(format!("path {name} is not available: {why}")),
+        None => Ok(path),
+    }
+}
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let path = match args.first().and_then(|a| a.strip_prefix("--path=")) {
+        None => Path::best(),
+        Some(name) => match named_path(name) {
+            Ok(p) => {
+                args.remove(0);
+                p
+            }
+            Err(why) => {
+                eprintln!("{why}");
+                return ExitCode::from(2);
+            }
+        },
+    };
     let Some(runs) = args
         .first()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n >= 1)
     else {
-        eprintln!("usage: speed <runs (1 or more)> [<png>...]");
+        eprintln!("usage: speed [--path=<base|avx2|best>] <runs (1 or more)> [<png>...]");
         return ExitCode::from(2);
     };
+    eprintln!("path {}", path.name());
     let blocks = load(&args[1..]);
     if blocks.is_empty() {
         eprintln!("no 4x4 block in the given PNGs");
         return ExitCode::from(2);
     }
     eprintln!("{} blocks, {runs} runs", blocks.len());
-    let cut = NonZeroU8::new(CUT).unwrap();
     let ok = [
         measure(
             "bc1",
             &blocks,
             runs,
             |b| encoders_sys::bc1_encode_block(b, true, false, false),
-            |b| bcenc::bc1_encode_block(b, true, false),
+            |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Default),
         ),
         measure(
             "bc1p",
             &blocks,
             runs,
             |b| encoders_sys::bc1_encode_block(b, true, false, true),
-            |b| bcenc::bc1_encode_block(b, true, true),
+            |b| bcenc::bc1_encode_block_on(path, b, true, true, Bc1Search::Default),
         ),
         measure(
             "bc1-4",
             &blocks,
             runs,
             |b| encoders_sys::bc1_encode_block(b, false, false, false),
-            |b| bcenc::bc1_encode_block(b, false, false),
+            |b| bcenc::bc1_encode_block_on(path, b, false, false, Bc1Search::Default),
         ),
         measure(
             "bc1a",
             &blocks,
             runs,
             |b| encoders_sys::bc1_encode_block_alpha(b, mask(b), false),
-            |b| bcenc::bc1_encode_block_alpha(b, mask(b), false),
+            |b| bcenc::bc1_encode_block_alpha_on(path, b, mask(b), false, Bc1Search::Default),
         ),
         measure(
             "bc3",
             &blocks,
             runs,
             |b| encoders_sys::bc3_encode_block(b, RADIUS, CUT, false),
-            |b| bcenc::bc3_encode_block(b, RADIUS, cut, false),
+            |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Default),
         ),
         measure(
             "bc4",
             &blocks,
             runs,
             |b| encoders_sys::bc4_encode_block(b, 0, RADIUS),
-            |b| bcenc::bc4_encode_block(b, 0, RADIUS),
+            |b| bcenc::bc4_encode_block_on(path, b, 0, RADIUS),
         ),
         measure(
             "bc5",
             &blocks,
             runs,
             |b| encoders_sys::bc5_encode_block(b, RADIUS),
-            |b| bcenc::bc5_encode_block(b, RADIUS),
+            |b| bcenc::bc5_encode_block_on(path, b, RADIUS),
         ),
         measure(
             "bc1-fast",
             &blocks,
             runs,
             |b| encoders_sys::bc1_encode_block_level(b, BC1_FAST_LEVEL, true, false),
-            |b| bcenc::bc1_encode_block_with(b, true, false, Bc1Search::Fast),
+            |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Fast),
         ),
         measure(
             "bc3-fast",
             &blocks,
             runs,
             |b| encoders_sys::bc3_encode_block_level(b, RADIUS, CUT, BC1_FAST_LEVEL, false),
-            |b| bcenc::bc3_encode_block_with(b, RADIUS, cut, false, Bc1Search::Fast),
+            |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Fast),
         ),
     ];
     if ok.iter().all(|&s| s) {

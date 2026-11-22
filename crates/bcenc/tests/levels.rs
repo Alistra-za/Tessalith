@@ -1,12 +1,15 @@
 //! `bcenc`'s BC1 encode at every level it ports (`bcenc::bc1::LEVELS`) equals the vendored rgbcx at that level
 //! (`encode_bc1(level, .., allow_3color, false)` through `encoders_sys`, plain or perceptual weights), and so do the
 //! two callers rgbcx passes the level to: one-bit alpha with no bit set and BC3's colour half (Note HY15). The inputs
-//! are the colour classes in the four modes and every grey, solid and as a two-value block.
+//! are the colour classes in the four modes and every grey, solid and as a two-value block. Every comparison runs on
+//! every code path the machine has (`support/paths.rs`), through the hidden `_on` entries.
 use bcenc::bc1::LEVELS;
-use bcenc::{bc1_encode_block_level, bc4_encode_alpha};
+use bcenc::{bc1_encode_block_level_on, bc4_encode_alpha_on};
 
 #[path = "support/gen.rs"]
 mod gen;
+#[path = "support/paths.rs"]
+mod paths;
 
 /// The `(allow_3color, perceptual)` combinations.
 const MODES: [(bool, bool); 4] = [(false, false), (false, true), (true, false), (true, true)];
@@ -33,13 +36,16 @@ fn every_level_is_rgbcx() {
     for level in LEVELS {
         for (allow_3color, perceptual) in MODES {
             for px in &blocks {
-                let got = bc1_encode_block_level(px, level, allow_3color, perceptual);
                 let want =
                     encoders_sys::bc1_encode_block_level(px, level, allow_3color, perceptual);
-                assert_eq!(
-                    got, want,
-                    "bc1 level {level}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-                );
+                for path in paths::paths() {
+                    let got = bc1_encode_block_level_on(path, px, level, allow_3color, perceptual);
+                    assert_eq!(
+                        got, want,
+                        "bc1 level {level} on path {}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+                        path.name()
+                    );
+                }
             }
         }
     }
@@ -52,12 +58,15 @@ fn opaque_alpha_at_every_level_is_rgbcx() {
     for level in LEVELS {
         for perceptual in [false, true] {
             for px in &blocks {
-                let got = bc1_encode_block_level(px, level, true, perceptual);
                 let want = encoders_sys::bc1_encode_block_alpha_level(px, 0, level, perceptual);
-                assert_eq!(
-                    got, want,
-                    "bc1 alpha level {level}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-                );
+                for path in paths::paths() {
+                    let got = bc1_encode_block_level_on(path, px, level, true, perceptual);
+                    assert_eq!(
+                        got, want,
+                        "bc1 alpha level {level} on path {}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+                        path.name()
+                    );
+                }
             }
         }
     }
@@ -83,11 +92,14 @@ fn bc3_at_every_level_is_rgbcx() {
         for perceptual in [false, true] {
             for px in with_alpha.iter().chain(&opaque) {
                 let want = encoders_sys::bc3_encode_block_level(px, 5, 128, level, perceptual);
-                assert_eq!(
-                    want[8..],
-                    bc1_encode_block_level(px, level, false, perceptual),
-                    "bc3 colour, level {level}, perceptual {perceptual}: texels {px:?}"
-                );
+                for path in paths::paths() {
+                    assert_eq!(
+                        want[8..],
+                        bc1_encode_block_level_on(path, px, level, false, perceptual),
+                        "bc3 colour, level {level} on path {}, perceptual {perceptual}: texels {px:?}",
+                        path.name()
+                    );
+                }
             }
             for px in &with_alpha {
                 let a: [u8; 16] = std::array::from_fn(|k| px[k][3]);
@@ -95,11 +107,14 @@ fn bc3_at_every_level_is_rgbcx() {
                     for cut in [1u8, 128, 255] {
                         let want =
                             encoders_sys::bc3_encode_block_level(px, rad, cut, level, perceptual);
-                        assert_eq!(
-                            want[..8],
-                            bc4_encode_alpha(&a, rad, cut),
-                            "bc3 alpha, level {level}, radius {rad}, cut {cut}: texels {px:?}"
-                        );
+                        for path in paths::paths() {
+                            assert_eq!(
+                                want[..8],
+                                bc4_encode_alpha_on(path, &a, rad, cut),
+                                "bc3 alpha, level {level} on path {}, radius {rad}, cut {cut}: texels {px:?}",
+                                path.name()
+                            );
+                        }
                     }
                 }
             }

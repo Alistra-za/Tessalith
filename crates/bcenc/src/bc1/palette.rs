@@ -57,6 +57,7 @@ pub struct DualPalette {
 }
 
 /// `bc1_get_dual_palette`: `l*` and `h*` are the unexpanded 5/6/5-bit endpoint codes.
+#[inline(always)]
 pub fn dual_palette(
     three: bool,
     lr: i32,

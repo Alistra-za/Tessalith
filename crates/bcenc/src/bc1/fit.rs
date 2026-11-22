@@ -44,12 +44,14 @@ pub(crate) struct Hist4(pub [u8; 4]);
 
 impl Hist4 {
     /// `hist4::any_16`.
+    #[inline(always)]
     fn any_16(&self) -> bool {
         let h = &self.0;
         h[0] == 16 || h[1] == 16 || h[2] == 16 || h[3] == 16
     }
 
     /// `hist4::lookup_total_ordering_index`.
+    #[inline(always)]
     pub(crate) fn lookup_total_ordering_index(&self) -> usize {
         let h = &self.0;
         if h[0] == 16 {
@@ -119,12 +121,14 @@ pub(crate) struct Hist3(pub [u8; 3]);
 
 impl Hist3 {
     /// `hist3::any_16`.
+    #[inline(always)]
     fn any_16(&self) -> bool {
         let h = &self.0;
         h[0] == 16 || h[1] == 16 || h[2] == 16
     }
 
     /// `hist3::lookup_total_ordering_index`.
+    #[inline(always)]
     pub(crate) fn lookup_total_ordering_index(&self) -> usize {
         let h = &self.0;
         if h[0] == 16 {
@@ -254,6 +258,7 @@ pub(crate) fn ls_endpoints4_ordered(
 /// The selector form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1 scale,
 /// as the 3/255 factor puts it) for selectors `sels` (rgbcx's linear order). `None` when every texel has one
 /// selector (the C++ returns false). Returns (xl, xh).
+#[inline(always)]
 pub(crate) fn ls_endpoints4(
     px: &[[u8; 4]; 16],
     sels: &[u8; 16],
@@ -337,6 +342,7 @@ pub(crate) fn ls_endpoints3_ordered(
 ///
 /// Selector 3 (transparent black) comes only from `encode_bc1_alpha`, which gives it to every masked texel; those
 /// texels add nothing to the sums or the totals. `try_3color_block`'s selectors never hold 3.
+#[inline(always)]
 pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32; 3], [f32; 3])> {
     const S_TRAN: [i32; 3] = [0, 2, 1];
     let mut uq00 = [0i32; 3];
@@ -406,6 +412,7 @@ pub(super) const MIDPOINT6: [f32; 64] = [
 ];
 
 /// The C++ `x = ((uint32_t)x > max) ? (~x >> 31) & max : x`: a negative code becomes 0, one above `max` becomes `max`.
+#[inline(always)]
 fn clamp_code(x: i32, max: i32) -> i32 {
     if (x as u32) > max as u32 {
         (!x >> 31) & max
@@ -422,6 +429,7 @@ fn clamp_code(x: i32, max: i32) -> i32 {
 /// integer; 3-colour: det = 16 n0 n1 + 4 n2 (n0 + n1) over the texels not on selector 3 is 0 or at least 4, z <= 64,
 /// so |iz| <= 2/255 * 64 / 4) times the sums (<= 3 * 16 * 255), the bounding-box inputs are clamped to 0..1, so
 /// `as i32` never saturates and no NaN reaches it (cvttss2si would give 0x80000000 there).
+#[inline(always)]
 pub(crate) fn precise_round_565(xl: &[f32; 3], xh: &[f32; 3]) -> ([i32; 3], [i32; 3]) {
     let mut trial_lr = (xl[0] * 31.0) as i32;
     let mut trial_lg = (xl[1] * 63.0) as i32;

@@ -1,12 +1,17 @@
 //! `bcenc`: rgbcx's block encoders in Rust. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain, `crates/encoders-sys/vendor/bc7enc_rdo/LICENSE`). The vendored C++ in `encoders-sys` is the
 //! specification and the reference every test compares with. No dependencies, no mutable global state (two sets of
-//! tables are built once in a `OnceLock`). `unsafe` has one use: calling a `#[target_feature(enable = "sse2")]`
-//! function of a module compiled only where the target has SSE2 (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and
-//! `mod sse2` in `bc4.rs`), each call with a `// SAFETY:` comment; Rust asks for the block even though the feature is
-//! always on there. A target without SSE2 runs portable code instead, which the unit tests run on every target.
+//! tables are built once in a `OnceLock`). `unsafe` has two uses, each call with a `// SAFETY:` comment: calling a
+//! `#[target_feature(enable = "sse2")]` function of a module compiled only where the target has SSE2
+//! (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and `mod sse2` in `bc4.rs`), where Rust asks for the block even though
+//! the feature is always on; and calling a `#[target_feature(enable = "avx2")]` function (the AVX2 frames of
+//! `bc1/frames.rs` and `bc4.rs`, and the AVX2 kernels) while holding a `path::Avx2`, a token only `Avx2::require`
+//! creates, after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the
+//! unit tests run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
-//! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16).
+//! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16). Each call runs on
+//! the widest code path the CPU has, picked per call; `Path` and the `_on` entries are hidden, for tests and the speed
+//! example.
 //! The `_max` functions run a search the C++ does not have (Note LI); their reference is
 //! `bc4::tests::search_max_reference`, a literal port of the bench measurement, and `tests/bc4.rs` pins bytes taken
 //! from the bench code itself.
@@ -14,6 +19,19 @@
 use std::num::NonZeroU8;
 
 mod hits;
+
+mod path;
+#[doc(hidden)]
+pub use path::Path;
+
+// `tests/support/paths.rs` names the crate `bcenc`, as the integration tests see it.
+#[cfg(test)]
+extern crate self as bcenc;
+
+// The path list of `tests/support/paths.rs`, for `path::tested_paths`.
+#[cfg(test)]
+#[path = "../tests/support/paths.rs"]
+mod test_paths;
 
 #[doc(hidden)]
 pub mod bc4;
@@ -64,14 +82,33 @@ const _: () = {
 /// `rgbcx::encode_bc4_hq(.., BC4_USE_ALL_MODES | BC4_SDC_SEARCH)` for one channel of a 4x4 block.
 /// Panics if `channel >= 4`.
 pub fn bc4_encode_block(px: &[[u8; 4]; 16], channel: usize, search_radius: u32) -> [u8; 8] {
-    bc4::search(&channel_of(px, channel), search_radius, None)
+    bc4_encode_block_on(Path::best(), px, channel, search_radius)
+}
+
+/// [`bc4_encode_block`] on `path`. Panics if this machine cannot run `path`, or if `channel >= 4`.
+#[doc(hidden)]
+pub fn bc4_encode_block_on(
+    path: Path,
+    px: &[[u8; 4]; 16],
+    channel: usize,
+    search_radius: u32,
+) -> [u8; 8] {
+    path.assert_available();
+    bc4::search_on(path, &channel_of(px, channel), search_radius, None)
 }
 
 /// `rgbcx::encode_bc5_hq`: channel 0 then channel 1, each as [`bc4_encode_block`].
 pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
+    bc5_encode_block_on(Path::best(), px, search_radius)
+}
+
+/// [`bc5_encode_block`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc5_encode_block_on(path: Path, px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
+    path.assert_available();
     let mut out = [0u8; 16];
-    out[..8].copy_from_slice(&bc4_encode_block(px, 0, search_radius));
-    out[8..].copy_from_slice(&bc4_encode_block(px, 1, search_radius));
+    out[..8].copy_from_slice(&bc4_encode_block_on(path, px, 0, search_radius));
+    out[8..].copy_from_slice(&bc4_encode_block_on(path, px, 1, search_radius));
     out
 }
 
@@ -80,14 +117,28 @@ pub const MAX_SEARCH_RADIUS: u32 = 10;
 
 /// [`bc4_encode_block`] with the Max search ([`bc4::search_max`], no guard). Panics if `channel >= 4`.
 pub fn bc4_encode_block_max(px: &[[u8; 4]; 16], channel: usize) -> [u8; 8] {
-    bc4::search_max(&channel_of(px, channel), None)
+    bc4_encode_block_max_on(Path::best(), px, channel)
+}
+
+/// [`bc4_encode_block_max`] on `path`. Panics if this machine cannot run `path`, or if `channel >= 4`.
+#[doc(hidden)]
+pub fn bc4_encode_block_max_on(path: Path, px: &[[u8; 4]; 16], channel: usize) -> [u8; 8] {
+    path.assert_available();
+    bc4::search_max_on(path, &channel_of(px, channel), None)
 }
 
 /// [`bc5_encode_block`] with the Max search: channel 0 then channel 1, each as [`bc4_encode_block_max`].
 pub fn bc5_encode_block_max(px: &[[u8; 4]; 16]) -> [u8; 16] {
+    bc5_encode_block_max_on(Path::best(), px)
+}
+
+/// [`bc5_encode_block_max`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc5_encode_block_max_on(path: Path, px: &[[u8; 4]; 16]) -> [u8; 16] {
+    path.assert_available();
     let mut out = [0u8; 16];
-    out[..8].copy_from_slice(&bc4_encode_block_max(px, 0));
-    out[8..].copy_from_slice(&bc4_encode_block_max(px, 1));
+    out[..8].copy_from_slice(&bc4_encode_block_max_on(path, px, 0));
+    out[8..].copy_from_slice(&bc4_encode_block_max_on(path, px, 1));
     out
 }
 
@@ -95,7 +146,13 @@ pub fn bc5_encode_block_max(px: &[[u8; 4]; 16]) -> [u8; 16] {
 /// ignored). `allow_3color` lets the encoder pick a three-colour block; `perceptual` weights the colour error by
 /// Rec.709 luma (rgbcx's `set_bc1_perceptual`). [`bc1_encode_block_with`] at [`Bc1Search::Default`].
 pub fn bc1_encode_block(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
-    bc1_encode_block_with(px, allow_3color, perceptual, Bc1Search::Default)
+    bc1_encode_block_on(
+        Path::best(),
+        px,
+        allow_3color,
+        perceptual,
+        Bc1Search::Default,
+    )
 }
 
 /// [`bc1_encode_block`] at the rgbcx level `search` stands for: `encode_bc1(18, ..)` for [`Bc1Search::Default`],
@@ -106,10 +163,23 @@ pub fn bc1_encode_block_with(
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 8] {
+    bc1_encode_block_on(Path::best(), px, allow_3color, perceptual, search)
+}
+
+/// [`bc1_encode_block_with`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc1_encode_block_on(
+    path: Path,
+    px: &[[u8; 4]; 16],
+    allow_3color: bool,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 8] {
+    path.assert_available();
     let w = bc1::weights(perceptual);
     match search {
-        Bc1Search::Default => bc1::encode::encode::<18>(px, allow_3color, w),
-        Bc1Search::Fast => bc1::encode::encode::<BC1_FAST_LEVEL>(px, allow_3color, w),
+        Bc1Search::Default => bc1::frames::encode_on::<18>(path, px, allow_3color, w),
+        Bc1Search::Fast => bc1::frames::encode_on::<BC1_FAST_LEVEL>(path, px, allow_3color, w),
     }
 }
 
@@ -124,13 +194,34 @@ pub fn bc1_encode_block_level(
     allow_3color: bool,
     perceptual: bool,
 ) -> [u8; 8] {
-    bc1::encode::encode_level(px, level, allow_3color, bc1::weights(perceptual))
+    bc1_encode_block_level_on(Path::best(), px, level, allow_3color, perceptual)
+}
+
+/// [`bc1_encode_block_level`] on `path`. Panics if this machine cannot run `path`, or on a level not in
+/// [`bc1::LEVELS`].
+#[doc(hidden)]
+pub fn bc1_encode_block_level_on(
+    path: Path,
+    px: &[[u8; 4]; 16],
+    level: u32,
+    allow_3color: bool,
+    perceptual: bool,
+) -> [u8; 8] {
+    path.assert_available();
+    bc1::frames::encode_level_on(path, px, level, allow_3color, bc1::weights(perceptual))
 }
 
 /// The alpha half of `rgbcx::encode_bc3_hq`: the BC4 search with the alpha-test guard at `cut` (BC4_SDC_GUARD128).
 /// A `cut` of 0 is 128, as `encode_bc4_hq` reads bits 8..15 of its flags (sdc patch "bc4 guard cut").
 pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8] {
-    bc4::search(alpha, search_radius, Some(read_cut(cut)))
+    bc4_encode_alpha_on(Path::best(), alpha, search_radius, cut)
+}
+
+/// [`bc4_encode_alpha`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc4_encode_alpha_on(path: Path, alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8] {
+    path.assert_available();
+    bc4::search_on(path, alpha, search_radius, Some(read_cut(cut)))
 }
 
 /// A cut as rgbcx's flags carry it: 0 is 128.
@@ -152,7 +243,14 @@ fn channel_of(px: &[[u8; 4]; 16], channel: usize) -> [u8; 16] {
 
 /// [`bc4_encode_alpha`] with the Max search ([`bc4::search_max`] with the guard at `cut`); a `cut` of 0 is 128.
 pub fn bc4_encode_alpha_max(alpha: &[u8; 16], cut: u8) -> [u8; 8] {
-    bc4::search_max(alpha, Some(read_cut(cut)))
+    bc4_encode_alpha_max_on(Path::best(), alpha, cut)
+}
+
+/// [`bc4_encode_alpha_max`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc4_encode_alpha_max_on(path: Path, alpha: &[u8; 16], cut: u8) -> [u8; 8] {
+    path.assert_available();
+    bc4::search_max_on(path, alpha, Some(read_cut(cut)))
 }
 
 /// `rgbcx::encode_bc1_alpha(18, ..)` in `cBC1Dual` mode: BC1 with one-bit alpha, bit i of `transparent` marking
@@ -161,7 +259,13 @@ pub fn bc4_encode_alpha_max(alpha: &[u8; 16], cut: u8) -> [u8; 8] {
 /// RGB of a masked texel and every alpha value are never read. `perceptual` as in [`bc1_encode_block`].
 /// [`bc1_encode_block_alpha_with`] at [`Bc1Search::Default`].
 pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
-    bc1_encode_block_alpha_with(px, transparent, perceptual, Bc1Search::Default)
+    bc1_encode_block_alpha_on(
+        Path::best(),
+        px,
+        transparent,
+        perceptual,
+        Bc1Search::Default,
+    )
 }
 
 /// [`bc1_encode_block_alpha`] at the rgbcx level `search` stands for (`encode_bc1_alpha(level, ..)`); only a
@@ -172,10 +276,23 @@ pub fn bc1_encode_block_alpha_with(
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 8] {
+    bc1_encode_block_alpha_on(Path::best(), px, transparent, perceptual, search)
+}
+
+/// [`bc1_encode_block_alpha_with`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc1_encode_block_alpha_on(
+    path: Path,
+    px: &[[u8; 4]; 16],
+    transparent: u16,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 8] {
+    path.assert_available();
     let w = bc1::weights(perceptual);
     match search {
-        Bc1Search::Default => bc1::alpha::encode_alpha::<18>(px, transparent, w),
-        Bc1Search::Fast => bc1::alpha::encode_alpha::<BC1_FAST_LEVEL>(px, transparent, w),
+        Bc1Search::Default => bc1::frames::encode_alpha_on::<18>(path, px, transparent, w),
+        Bc1Search::Fast => bc1::frames::encode_alpha_on::<BC1_FAST_LEVEL>(path, px, transparent, w),
     }
 }
 
@@ -202,7 +319,14 @@ pub fn bc3_encode_block_with(
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 16] {
-    bc3_raw_cut_with(px, search_radius, cut.get(), perceptual, search)
+    bc3_encode_block_raw_cut_on(
+        Path::best(),
+        px,
+        search_radius,
+        cut.get(),
+        perceptual,
+        search,
+    )
 }
 
 /// [`bc3_encode_block_with`] with the Max search on the alpha half: bytes 0..8 are [`bc4_encode_alpha_max`] of the
@@ -213,10 +337,23 @@ pub fn bc3_encode_block_max_with(
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 16] {
+    bc3_encode_block_max_on(Path::best(), px, cut, perceptual, search)
+}
+
+/// [`bc3_encode_block_max_with`] on `path`. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn bc3_encode_block_max_on(
+    path: Path,
+    px: &[[u8; 4]; 16],
+    cut: NonZeroU8,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 16] {
+    path.assert_available();
     let alpha = channel_of(px, 3);
     let mut out = [0u8; 16];
-    out[..8].copy_from_slice(&bc4_encode_alpha_max(&alpha, cut.get()));
-    out[8..].copy_from_slice(&bc1_encode_block_with(px, false, perceptual, search));
+    out[..8].copy_from_slice(&bc4_encode_alpha_max_on(path, &alpha, cut.get()));
+    out[8..].copy_from_slice(&bc1_encode_block_on(path, px, false, perceptual, search));
     out
 }
 
@@ -229,20 +366,31 @@ pub fn bc3_encode_block_raw_cut(
     cut: u8,
     perceptual: bool,
 ) -> [u8; 16] {
-    bc3_raw_cut_with(px, search_radius, cut, perceptual, Bc1Search::Default)
+    bc3_encode_block_raw_cut_on(
+        Path::best(),
+        px,
+        search_radius,
+        cut,
+        perceptual,
+        Bc1Search::Default,
+    )
 }
 
-/// [`bc3_encode_block_with`] with the cut as rgbcx's flags carry it.
-fn bc3_raw_cut_with(
+/// [`bc3_encode_block_with`] on `path`, with the cut as rgbcx's flags carry it. Panics if this machine cannot run
+/// `path`.
+#[doc(hidden)]
+pub fn bc3_encode_block_raw_cut_on(
+    path: Path,
     px: &[[u8; 4]; 16],
     search_radius: u32,
     cut: u8,
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 16] {
+    path.assert_available();
     let alpha = channel_of(px, 3);
     let mut out = [0u8; 16];
-    out[..8].copy_from_slice(&bc4_encode_alpha(&alpha, search_radius, cut));
-    out[8..].copy_from_slice(&bc1_encode_block_with(px, false, perceptual, search));
+    out[..8].copy_from_slice(&bc4_encode_alpha_on(path, &alpha, search_radius, cut));
+    out[8..].copy_from_slice(&bc1_encode_block_on(path, px, false, perceptual, search));
     out
 }
