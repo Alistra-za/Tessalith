@@ -51,6 +51,20 @@ impl AppModel {
 
     /// Change (`Some`) or reset (`None`) `key`'s sub-type, with the PBR follow-on for its set, as one step.
     pub(super) fn edit_subtype(&mut self, label: &str, key: &str, new: Option<Subtype>) {
+        // E8: a choice that takes may make a set; the settled plan says (`note_new_sets`). The listed cards are read
+        // before the write and kept only once it took (a read-only, rejected or equal write queues nothing).
+        let held = new
+            .filter(|_| self.project.as_ref().is_some_and(|p| !p.read_only()))
+            .map(|st| (st, self.own_subtype(key), self.cards_now()));
+        self.edit_subtype_step(label, key, new);
+        if let Some((st, was, cards)) = held {
+            if was != Some(json!(st)) && self.own_subtype(key) == Some(json!(st)) {
+                self.queue_new_set_note(key, st, cards);
+            }
+        }
+    }
+
+    fn edit_subtype_step(&mut self, label: &str, key: &str, new: Option<Subtype>) {
         // Owner 2026-10-27 (Note DQ): a diffuse made Advanced skin takes its set's packed `_rmaos` to `_rfaos`, and one
         // taken off it goes back, in the same step (`set_packing_recipe` keeps `_rmaos` when `_rfaos` cannot be built).
         if let Some((packed, recipe)) = self.packed_recipe_follow(key, new) {

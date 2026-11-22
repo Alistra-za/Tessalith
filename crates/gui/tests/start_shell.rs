@@ -55,7 +55,11 @@ fn after_open_one_line_says_the_next_step() {
             .count(),
         0
     );
-    assert!(h.state().status_note.is_none());
+    // The next step is gone; the type made a set, which the status line points to (E8).
+    assert_eq!(
+        h.state().status_note.as_deref(),
+        Some("New set textures/mystery_0: see Messages.")
+    );
     h.state_mut().undo();
     settle(&mut h);
     assert_eq!(h.state().undecided(), 12);

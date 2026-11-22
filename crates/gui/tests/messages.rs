@@ -3,10 +3,11 @@ mod support;
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use engine::config::Subtype;
 use sdc_gui::model::messages::{
     EntryAction, Messages, Severity, FADE, FADE_WARN, LOG_CAP, MAX_SHOWN,
 };
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::ui::actions;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -695,4 +696,220 @@ fn a_hovered_toast_asks_for_no_short_timer() {
     assert_eq!(paint(&h, "Saved").expect("held").frame, rest.frame);
     let d = h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
     assert!(d >= Duration::from_secs(1), "{d:?}");
+}
+
+// Task 8 (E8): a type choice that makes a set says so, once, after the final plan.
+
+/// The `m.items` key whose relative path ends with `name`.
+fn item_key_ending(m: &AppModel, name: &str) -> String {
+    m.items
+        .iter()
+        .find(|i| i.key.ends_with(name))
+        .unwrap_or_else(|| panic!("no item ending {name}"))
+        .key
+        .clone()
+}
+
+/// Writes each `textures/<name>` as a 64x64 gradient, opens the folder as the app does and waits idle.
+fn lone(dir: &std::path::Path, names: &[&str]) -> AppModel {
+    for n in names {
+        let p = dir.join("textures").join(n);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+        })
+        .save(&p)
+        .unwrap();
+    }
+    let mut m = support::opened_as_the_app(dir.join("textures"), dir.join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+/// Hands the parked plan results back (stale ones are dropped by generation) and waits for the model to settle.
+fn release(m: &mut AppModel) {
+    m.hold_plan_results = false;
+    for x in m.take_held() {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+fn new_set_lines(m: &AppModel, from: usize) -> Vec<String> {
+    m.messages
+        .entries()
+        .skip(from)
+        .filter(|e| e.text.contains("New set") || e.text.contains("new sets"))
+        .map(|e| e.text.clone())
+        .collect()
+}
+
+#[test]
+fn a_type_that_makes_a_set_says_so_with_show() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let last = m.messages.entries().last().unwrap();
+    assert_eq!(
+        last.text,
+        "teeth_albedo2.png is now Diffuse. New set actors/teeth_albedo2 (1 texture)."
+    );
+    assert!(
+        matches!(&last.action, Some(EntryAction::ShowSet { root, id })
+        if Some(root) == m.root.as_ref() && id == "actors/teeth_albedo2")
+    );
+    assert_eq!(
+        m.status_note.as_deref(),
+        Some("New set actors/teeth_albedo2: see Messages.")
+    );
+}
+
+#[test]
+fn a_type_on_a_file_in_a_carded_set_logs_no_new_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let diffuse = item_key_ending(&m, "rock01.png");
+    m.set_field(&diffuse, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let start = m.messages.entries().count();
+    let key = item_key_ending(&m, "rock01_normal.png");
+    let set_of = |m: &AppModel| {
+        m.sets
+            .iter()
+            .find(|s| s.members.contains(&key))
+            .map(|s| s.key.clone())
+    };
+    let rock = set_of(&m).expect("premise: rock01_normal.png is in a set before the choice");
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.key == rock),
+        "premise: that set has a card"
+    );
+    m.set_field(&key, "subtype", serde_json::json!("height"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        set_of(&m).as_deref(),
+        Some(rock.as_str()),
+        "premise: the file is still in rock01's set"
+    );
+    assert!(new_set_lines(&m, start).is_empty());
+}
+
+#[test]
+fn an_undone_choice_logs_no_new_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    // A: a choice undone before its plan lands logs nothing.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.undo();
+    release(&mut m);
+    assert!(new_set_lines(&m, before).is_empty());
+    // B: undo, then another choice, before the plan lands: the line names the type that stands.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.undo();
+    m.decide(&key, Answer::Subtype(Subtype::Height));
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(
+        lines[0],
+        "teeth_albedo2.png is now Height (parallax). New set actors/teeth_albedo2 (1 texture)."
+    );
+}
+
+#[test]
+fn several_type_edits_announce_one_card_after_the_final_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&key, Answer::Subtype(Subtype::Height));
+    assert!(
+        new_set_lines(&m, before).is_empty(),
+        "nothing before a plan lands"
+    );
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with("teeth_albedo2.png is now Height (parallax)."));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(new_set_lines(&m, before).len(), 1, "later plans add none");
+}
+
+#[test]
+fn a_repeated_choice_that_changes_nothing_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let after_first = m.messages.entries().count();
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, after_first).is_empty());
+}
+
+#[test]
+fn a_choice_held_across_opening_another_folder_announces_nothing_there() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mut m = lone(a.path(), &["actors/teeth_albedo2.png"]);
+    lone(b.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.hold_plan_results = false;
+    m.open_folder(b.path().join("textures"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    release(&mut m);
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn two_choices_that_make_two_sets_log_one_line_with_show_for_the_first() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(
+        d.path(),
+        &["actors/teeth_albedo2.png", "actors/hair_albedo3.png"],
+    );
+    let (a, b) = (
+        item_key_ending(&m, "teeth_albedo2.png"),
+        item_key_ending(&m, "hair_albedo3.png"),
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&a, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&b, Answer::Subtype(Subtype::Diffuse));
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(
+        lines,
+        ["2 new sets: actors/hair_albedo3 and actors/teeth_albedo2."]
+    );
+    assert!(matches!(&m.messages.entries().last().unwrap().action,
+        Some(EntryAction::ShowSet { id, .. }) if id == "actors/hair_albedo3"));
+    assert_eq!(m.status_note.as_deref(), Some("2 new sets: see Messages."));
+}
+
+#[test]
+fn a_choice_the_read_only_project_refuses_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures/actors")).unwrap();
+    std::fs::write(d.path().join("textures/sdc.toml"), "target = [\n").unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    assert!(m.project.as_ref().unwrap().read_only(), "premise");
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, before).is_empty());
 }

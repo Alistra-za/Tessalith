@@ -30,6 +30,7 @@ pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod new_set_note;
 mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
@@ -1072,6 +1073,10 @@ pub struct AppModel {
     type_pending: Option<encoding_follow::Pending>,
     /// The sub-types before the plan chain in flight (`settle_types` compares them with the final pass).
     type_base: Option<std::collections::HashMap<String, Subtype>>,
+    /// Type choices waiting for the plan that settles them: the settled plan says which made a new set (E8).
+    pending_new_sets: Vec<new_set_note::NewSetNote>,
+    /// The folder the pending choices were made in and every card ID listed before the first of them.
+    carded_before: Option<(PathBuf, Vec<String>)>,
     /// A user step started the chain in flight: its cleanup folds into that step.
     type_cause: bool,
     /// One-shot guard: the chain in flight is a cleanup's own replan.
@@ -1378,6 +1383,8 @@ impl AppModel {
             auto_replans: 0,
             type_pending: None,
             type_base: None,
+            pending_new_sets: vec![],
+            carded_before: None,
             type_cause: false,
             type_cleaned: false,
             votes_gen: 0,
@@ -2095,6 +2102,7 @@ impl AppModel {
                 self.root = None;
                 self.project = None;
                 self.sets_doc = None;
+                self.forget_new_sets();
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
@@ -2416,6 +2424,7 @@ impl AppModel {
             }
         }
         self.plan_failed = true;
+        self.forget_new_sets();
         self.status_line = format!("Planning failed: {}", f.message);
         self.raise_error(f.message);
     }
@@ -3921,6 +3930,8 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
+        // E8: the settled plan says which type choices made a set; the post-open next step below still wins the note.
+        self.note_new_sets();
         if std::mem::take(&mut self.next_step_pending) {
             self.status_note = self.next_step_text();
             self.shown_next_step.clone_from(&self.status_note);
