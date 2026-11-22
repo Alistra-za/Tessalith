@@ -447,6 +447,12 @@ ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH
 
+ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH
+
 ## Digest
 
 ARCHIVED (wording before the edit; superseded in part by Note JW6, 2026-11-20)
@@ -1758,7 +1764,18 @@ Three tests count allocation calls against a budget: a warm full plan and a one-
 
 - **LF3 Splits without allocating.** `group::split_suffix` and `group::split_vocab` compare bytes through a private `cut_tail` and allocate only the returned base (and suffix), and `sets::no_set_paths` builds its `KeyIndex` only when an edit is a `SetEdit::NoSet`; every result is unchanged. The budgets were lowered to the new counts: `WARM_PLAN_CALLS` 130,000 (measured 112683), `REPLAN_CALLS` 31,000 (27376), `FRAME_CALLS` 3,100 (2744).
 
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LF3 Splits without allocating.** `group::split_suffix` and `group::split_vocab` compare bytes through a private `cut_tail` and allocate only the returned base (and suffix), and `sets::no_set_paths` builds its `KeyIndex` only when an edit is a `SetEdit::NoSet`; every result is unchanged. The budgets were lowered to `WARM_PLAN_CALLS` 130,000, `REPLAN_CALLS` 31,000 and `FRAME_CALLS` 3,100; LH4 and LH5 give the latest measured counts.
+
 ## Note HJ — Rename outputs through slots (main team, 2026-11-09)
 
 ARCHIVED (wording before the edit; superseded in part by Note LJ, 2026-11-22)
 - **HJ1 Rename outputs is for PGPatcher PBR sets only (owner).** `AppModel::renames_outputs` (`v.pbr` on the Community Shaders target, the old `record_ignored`) decides it. The Outputs entry is absent, not greyed, from the set menu, the texture menu and the palette when no selected set qualifies; a mixed selection lists the qualifying sets with their count in the label. F2 on a selection with no qualifying set opens Inputs mode, and the dialog's mode switch hides Outputs then. `set_output_name` refuses a name on any other set ("output names are for PGPatcher PBR sets"); only `None` clears.
+
+## Note LH - Rust audit follow-ups (main team, 2026-11-22)
+
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LH4 Enum ids are names.** `RawMap::id`, `Subtype::id` and `Format::id` return the serde name as a `&'static str` from a `match` (as `PackRecipe::id` does), not a `String` serialised through `serde_json`; the generic `serde_id` is gone. `config::tests::ids_are_the_serde_names_of_every_variant` reads every name from the schema and compares, and `alloc_budget::enum_ids_do_not_allocate` pins that an id allocates nothing. No allocation budget moved under the LF1 rule (measured 2026-11-22 after Task 10: warm plan 106921, re-plan 25691, frame 2738; measured again after Task 11 and the merge of main, 5 runs each with `--exact`: warm plan 106931, frame 2738 in all five frames of all five runs).
+
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LH5 The re-plan shares what it does not change.** `Prepared`'s `registry`, `user_config`, `files`, `grouped`, `joined`, `sets`, `hand`, `typed`, `dup_idx`, `gen_replaced` and `packed_outputs`, the skeleton's own indexes (`set_of`, `key_sets`, `pbr_sets`, `fuzz_sets`, `f_sets`) and `FileScopes::forms` are `Arc`s, so `Skeleton::patch`'s copy of the skeleton shares them with the session's skeleton; a set whose `typed` members change is rewritten through `Arc::make_mut`, which leaves the kept skeleton as it was. Copies remain: the `[files]` documents, the request and the `[files]` layer, which patch writes (a `shortcut:` in `patch`); a clone of `typed` per patch for its checks, kept in a fresh `Arc` even when no member changes; a copy of `grouped` at the join check; and a copy of `sets` in the shared-output check, with `Arc::make_mut` cloning the set vector on the first suffix write. `alloc_budget.rs` pins the patch alone at `PATCH_CALLS` 20000 (measured 17888; 20446 before). The one-edit re-plan, which goes through `patch`, measured 23132 calls (5 runs, `--exact`: 23132 four times, 23133 once; 25691 before, LH4); `REPLAN_CALLS` was not lowered: the LF1 rule gives 26,000, which is not below the old count (25691), so a lowered budget would not fail the old code (the test PATCH_CALLS passed); `fast_replan.rs` shows a partial plan still equals the full plan.

@@ -1,0 +1,6 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+LF3	LF		back	LK1		partial	2026-11-22		WARM_PLAN_CALLS and REPLAN_CALLS are set by LK1; FRAME_CALLS is unchanged.
+LH4	LH		back	LK1		partial	2026-11-22		The owner lowered the warm plan and re-plan budgets after the measurement (LK1).
+LH5	LH		back	LK1		partial	2026-11-22		REPLAN_CALLS is lowered to 26,000 by the owner (LK1).
+Index¶- Engine policy (formats, alpha gate, versions, writes):	Index	12	back	LK		partial	2026-11-22		goes: the line without LK (LK1 governs it)
+Index¶- Process and docs:	Index	34	back	LK		partial	2026-11-22		goes: the line without LK (LK1 governs the docs)

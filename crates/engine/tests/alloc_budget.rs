@@ -83,14 +83,15 @@ fn counted_here<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
 
 // A run with captured output reads 2 calls higher; the cause is not traced. The counter is process-wide, so allocations
 // by the test harness's own threads can land in the measured window (`MEASURE` keeps out only this file's tests).
-// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1, after the suffix and vocabulary splits stopped
-// allocating (Note LF3): 112683 calls in all five (11090098 bytes, 34 jobs). 112683 * 1.10 = 123952, rounded up to two
-// significant figures.
-const WARM_PLAN_CALLS: u64 = 130_000;
-// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1, after the same change and `no_set_paths` building its
-// index only for a `NoSet` edit: 27376 calls in all five (2531208 bytes, 5 jobs). 27376 * 1.10 = 30114, rounded up to
-// two significant figures.
-const REPLAN_CALLS: u64 = 31_000;
+// Measured 2026-11-22 with `--nocapture`, 5 runs, jobs = 1, after the Rust audit changes (Notes LH4, LH5):
+// 106930 to 106932 calls (106931 in three, 11053705 bytes, 34 jobs); 112683 calls before (Note LF3).
+// 106932 * 1.10 = 117625, rounded up to two significant figures. The owner lowered it below the old code's count on
+// purpose (2026-11-22, Note LK1).
+const WARM_PLAN_CALLS: u64 = 120_000;
+// Measured 2026-11-22 with `--nocapture`, 5 runs, jobs = 1, after the same changes: 23133 calls in all five (2211771
+// bytes, 5 jobs); 25691 calls before (Note LH4). 23133 * 1.10 = 25447, rounded up to two significant figures. The
+// owner lowered it below the old code's count on purpose (2026-11-22, Note LK1).
+const REPLAN_CALLS: u64 = 26_000;
 // Measured 2026-11-22 with `--nocapture`, 5 runs, jobs = 1, after the re-plan began sharing what a patch does not
 // write (Note LH5): 17888 calls in all five (1550583 bytes); 20446 calls in all five before (1859388 bytes).
 // 17888 * 1.10 = 19677, rounded up to two significant figures.
