@@ -50,7 +50,7 @@ mod fixtures;
 mod frame;
 #[allow(
     dead_code,
-    reason = "the doc-shot manifest's fields are read only by the doc shots"
+    reason = "this driver reads the doc-shot manifest's render settings and adapter, but not its shot and exempt lists, the render fonts or `Manifest::png`; the doc_shots test does"
 )]
 #[path = "../doc_shots/manifest.rs"]
 mod manifest;

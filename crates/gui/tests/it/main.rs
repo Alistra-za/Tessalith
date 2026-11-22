@@ -9,7 +9,7 @@
 
 #![allow(
     clippy::duplicate_mod,
-    reason = "each file declares mod support (and a few another crate's fixture builder) for itself, as it did as its own binary"
+    reason = "each file declares mod support (and a few the nif, esp or modscan fixture builder) for itself, as it did as its own binary"
 )]
 
 #[path = "../accepted_037.rs"]

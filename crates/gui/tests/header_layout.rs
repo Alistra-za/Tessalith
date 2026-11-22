@@ -1420,7 +1420,7 @@ fn the_set_header_input_name_box_never_overlaps() {
 /// Note BH: renders the header (with rock01 selected, so the set row shows under it) to `SDC_TOOLBAR_PNG` for the
 /// owner. Needs a GPU: `cargo test -p sdc-gui --test it header_layout::render_the_toolbar -- --ignored`.
 #[test]
-#[ignore = "needs a GPU and SDC_TOOLBAR_PNG"]
+#[ignore = "needs a GPU; SDC_TOOLBAR_PNG names the output file"]
 fn render_the_toolbar() {
     let out = std::env::var("SDC_TOOLBAR_PNG").unwrap_or_else(|_| "toolbar-after.png".into());
     let d = tempfile::tempdir().unwrap();
