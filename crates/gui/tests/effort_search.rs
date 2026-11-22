@@ -177,13 +177,13 @@ fn pick(h: &mut Harness<'static, AppModel>, entries: &[(String, Rect, bool)], la
 
 #[test]
 fn effort_offers_what_each_format_reads() {
-    let three = ["Fast", "Default", "Max"];
+    let ladder = ["Fast", "Default", "Slowest", "Max"];
     for (format, offered, writes) in [
         (Format::Bc7, &LEVELS[..], &["encoder.effort"][..]),
-        (Format::Bc4, &three[..], &[RADIUS][..]),
-        (Format::Bc5, &three[..], &[RADIUS][..]),
+        (Format::Bc4, &ladder[..], &[RADIUS][..]),
+        (Format::Bc5, &ladder[..], &[RADIUS][..]),
         (Format::Bc1, &["Fast", "Default"][..], &[BC1][..]),
-        (Format::Bc3, &three[..], &[BC1, RADIUS][..]),
+        (Format::Bc3, &ladder[..], &[BC1, RADIUS][..]),
     ] {
         let d = tempfile::tempdir().unwrap();
         let mut h = harness(single(d.path(), format));
@@ -211,6 +211,7 @@ fn bc3_choices_write_the_spec_pairs() {
     for (choice, label, bc1, radius) in [
         ("fast", "Fast", "fast", "fast"),
         ("default", "Default", "default", "default"),
+        ("slowest", "Slowest", "default", "slowest"),
         ("max", "Max", "default", "max"),
     ] {
         // A pair no choice names, so every pick changes both fields.
@@ -237,6 +238,23 @@ fn bc3_choices_write_the_spec_pairs() {
 }
 
 #[test]
+fn slowest_writes_slowest_on_bc4_and_bc3() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(single(d.path(), Format::Bc4));
+    let entries = open_effort(&mut h);
+    pick(&mut h, &entries, "Slowest");
+    assert_eq!(file(h.state(), ROCK, RADIUS), Some(json!("slowest")));
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(single(d.path(), Format::Bc3));
+    let entries = open_effort(&mut h);
+    pick(&mut h, &entries, "Slowest");
+    assert_eq!(file(h.state(), ROCK, BC1), Some(json!("default")));
+    assert_eq!(file(h.state(), ROCK, RADIUS), Some(json!("slowest")));
+    assert_eq!(h.state().undo_label(), Some("Change Effort"));
+}
+
+#[test]
 fn a_mixed_bc3_pair_shows_custom_and_a_pick_writes_both() {
     let d = tempfile::tempdir().unwrap();
     let mut m = single(d.path(), Format::Bc3);
@@ -247,9 +265,12 @@ fn a_mixed_bc3_pair_shows_custom_and_a_pick_writes_both() {
     const CUSTOM: &str = "Custom: search fast, radius max";
     assert_eq!(effort_value(&h).as_deref(), Some(CUSTOM));
     let entries = open_effort(&mut h);
-    assert_eq!(labels(&entries), ["Fast", "Default", "Max", CUSTOM]);
-    assert!(entries[3].2, "Custom is shown, never picked");
-    assert!(entries[..3].iter().all(|e| !e.2), "{entries:?}");
+    assert_eq!(
+        labels(&entries),
+        ["Fast", "Default", "Slowest", "Max", CUSTOM]
+    );
+    assert!(entries[4].2, "Custom is shown, never picked");
+    assert!(entries[..4].iter().all(|e| !e.2), "{entries:?}");
     pick(&mut h, &entries, "Default");
     assert_eq!(file(h.state(), ROCK, BC1), Some(json!("default")));
     assert_eq!(file(h.state(), ROCK, RADIUS), Some(json!("default")));
@@ -291,7 +312,9 @@ fn every_bc3_pair_maps_to_one_entry() {
     for (bc1, radius, entry) in [
         ("fast", "fast", "fast"),
         ("default", "default", "default"),
+        ("default", "slowest", "slowest"),
         ("default", "max", "max"),
+        ("fast", "slowest", "custom"),
         ("fast", "default", "custom"),
         ("fast", "max", "custom"),
         ("default", "fast", "custom"),
@@ -375,12 +398,12 @@ fn an_uncompressed_texture_greys_effort() {
 
 #[test]
 fn bulk_effort_follows_the_shared_field() {
-    // Two BC4 textures: the radius's three choices, written to both in one step.
+    // Two BC4 textures: the radius's four choices, written to both in one step.
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pair(d.path(), Format::Bc4, Format::Bc4));
     h.get_by_label("2 textures selected");
     let entries = open_effort(&mut h);
-    assert_eq!(labels(&entries), ["Fast", "Default", "Max"]);
+    assert_eq!(labels(&entries), ["Fast", "Default", "Slowest", "Max"]);
     pick(&mut h, &entries, "Max");
     for k in [ROCK, LEAF] {
         assert_eq!(file(h.state(), k, RADIUS), Some(json!("max")), "{k}");
@@ -457,7 +480,7 @@ fn a_bulk_bc3_pick_writes_both_fields_on_every_texture() {
     let mut h = harness(pair(d.path(), Format::Bc3, Format::Bc3));
     h.get_by_label("2 textures selected");
     let entries = open_effort(&mut h);
-    assert_eq!(labels(&entries), ["Fast", "Default", "Max"]);
+    assert_eq!(labels(&entries), ["Fast", "Default", "Slowest", "Max"]);
     pick(&mut h, &entries, "Max");
     for k in [ROCK, LEAF] {
         assert_eq!(file(h.state(), k, BC1), Some(json!("default")), "{k}");

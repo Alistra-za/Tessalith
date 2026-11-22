@@ -443,10 +443,11 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
     })
 }
 
-/// Note JI4: Fast, Default and (with `max`) Max, the search fields' choices in that order.
-fn search_options(max: bool) -> Options {
+/// Note JI4, Note LH: Fast and Default, then (with `slow`) Slowest and Max, the search fields' choices in that order.
+fn search_options(slow: bool) -> Options {
     let mut v = vec![opt(json!("fast"), "Fast"), opt(json!("default"), "Default")];
-    if max {
+    if slow {
+        v.push(opt(json!("slowest"), "Slowest"));
         v.push(opt(json!("max"), "Max"));
     }
     v
@@ -454,7 +455,7 @@ fn search_options(max: bool) -> Options {
 
 /// Note JI4: the hover of the BC3 Effort row's read-only entry for a pair no choice names.
 const CUSTOM_HOVER: &str =
-    "Mixed values from a preset or [files]; pick Fast, Default or Max to set both";
+    "Mixed values from a preset or [files]; pick Fast, Default, Slowest or Max to set both";
 
 /// The layouts a user can pick, in display order. `Faces` (a six-file set) is not chosen but detected.
 const PICKABLE_LAYOUTS: [(CubeLayout, &str); 4] = [
