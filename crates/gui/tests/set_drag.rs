@@ -775,6 +775,18 @@ fn a_flipped_strip_takes_the_drop_before_the_card_under_it() {
         strip.bottom() <= card.top() && card_of(&h, &under).contains(strip.center()),
         "{strip:?} above {card:?}"
     );
+    // 3d-T5-3: the letter grid is the side next to the card, a 2 px bridge away; the captions sit above it
+    assert_eq!(strip.height(), 40.0, "the owned rect is the letter grid");
+    assert!(
+        (card.top() - strip.bottom() - 2.0).abs() <= 0.5,
+        "the grid touches the card side: {strip:?} over {card:?}"
+    );
+    let captions = flipped_captions(&h, strip);
+    assert_eq!(
+        captions.len(),
+        4,
+        "one caption per empty slot: {captions:?}"
+    );
     h.hover_at(egui::pos2(
         strip.center().x,
         (strip.bottom() + card.top()) / 2.0,
@@ -792,6 +804,102 @@ fn a_flipped_strip_takes_the_drop_before_the_card_under_it() {
         matches!(&h.state().1.drops.pending, Some(Pending::Choice { set, .. } | Pending::Replace { set, .. }) if set == ROCK),
         "the earlier card left the drop for rock01: {:?}",
         h.state().1.drops.pending
+    );
+}
+
+/// The painted "...: no file yet" captions of a flipped strip whose letter grid is `grid`: each whole inside its paint
+/// clip, above the grid (the last may reach 2 px into the grid's own padding, above its boxes), in grid order
+/// top to bottom. Returns their rects.
+fn flipped_captions(h: &H, grid: egui::Rect) -> Vec<egui::Rect> {
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        let mut stack = vec![&c.shape];
+        while let Some(s) = stack.pop() {
+            match s {
+                egui::Shape::Vec(v) => stack.extend(v),
+                egui::Shape::Text(t) if t.galley.text().ends_with(": no file yet") => {
+                    let b = t.galley.rect.translate(t.pos.to_vec2());
+                    assert!(
+                        c.clip_rect.contains_rect(b),
+                        "{b:?} inside the clip {:?}",
+                        c.clip_rect
+                    );
+                    assert!(
+                        b.max.y <= grid.min.y + 2.01,
+                        "a caption lies above the grid: {b:?} against {grid:?}"
+                    );
+                    out.push(b);
+                }
+                _ => {}
+            }
+        }
+    }
+    out.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+    out
+}
+
+/// 3d-T5-3: a release over the captions of a flipped strip lands on the card under the pointer, not on the strip's
+/// card (only its grid and the 2 px bridge own a release).
+#[test]
+fn a_release_over_a_flipped_strips_captions_goes_to_the_card_under_them() {
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let m = three_cards(d.path());
+    assert_eq!(set_views(&m).last().map(|v| v.id.as_str()), Some(ROCK));
+    let mut h = harness(m);
+    h.run();
+    let cards = drawn_cards(&h);
+    let first = cards[0].1;
+    let bottom = first.top() + h.state().1.drops.view.unwrap().1;
+    let height = 1000.0 - (bottom - card_of(&h, ROCK).bottom()) + 8.0;
+    h.set_size(egui::vec2(1600.0, height));
+    h.run();
+    let card = card_of(&h, ROCK);
+    let member = view(&h.state().0, ROCK).members[0].clone();
+    let source = h.state().0.item(&member).unwrap();
+    let from = if source.helper.is_some() {
+        helper_source(&h, &source.name)
+    } else {
+        outside_sets(&h, &source.name).rect().center()
+    };
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    assert!(egui::DragAndDrop::payload::<DragItem>(&h.ctx).is_some_and(|p| p.0 == member));
+    let (owner, grid, _) = h.state().1.drops.strip.clone().expect("strip on rock01");
+    assert_eq!(owner, ROCK);
+    assert!(
+        grid.bottom() <= card.top(),
+        "premise: the strip flipped above its card"
+    );
+    let captions = flipped_captions(&h, grid);
+    let at = captions[0].center();
+    let (target, _) = drawn_cards(&h)
+        .into_iter()
+        .find(|(id, r)| id != ROCK && r.contains(at))
+        .expect("premise: the first caption lies over another card");
+    for step in 1..=3 {
+        let p = card.center() + (at - card.center()) * (step as f32 / 3.0);
+        h.event(egui::Event::PointerMoved(p));
+        h.run_steps(2);
+    }
+    assert_ne!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK),
+        "a pointer over a caption does not keep the strip"
+    );
+    h.event(pointer_button(at, false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    let landed = match &h.state().1.drops.pending {
+        Some(Pending::Replace { set, .. }) | Some(Pending::Choice { set, .. }) => Some(set.clone()),
+        Some(other) => panic!("{other:?}"),
+        None => set_views(&h.state().0)
+            .into_iter()
+            .find(|v| v.id == target && v.members.contains(&member))
+            .map(|v| v.id),
+    };
+    assert_eq!(
+        landed.as_deref(),
+        Some(target.as_str()),
+        "dropped on {target}, not on rock01's strip"
     );
 }
 
@@ -858,7 +966,9 @@ fn a_centre_drop_on_the_next_card_lands_there_while_the_card_above_shows_its_cap
         h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
         Some(above.as_str())
     );
-    let grid = h.state().1.drops.strip.as_ref().unwrap().1;
+    // the letter grid (40 high) at the strip's top, whichever rect the strip reports
+    let strip = h.state().1.drops.strip.as_ref().unwrap().1;
+    let grid = egui::Rect::from_min_size(strip.min, egui::vec2(strip.width(), 40.0));
     let captions = captions_union(&h);
     let outer = egui::Rect::from_min_max(grid.min, egui::pos2(grid.max.x, captions.max.y + 4.0));
     assert!(

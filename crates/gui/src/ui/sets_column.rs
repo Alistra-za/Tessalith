@@ -454,10 +454,34 @@ fn strip_layout(
     }
 }
 
-/// Note JW1: paint only. The clip can cut through a box, without moving its letter.
-fn paint_strip(p: &egui::Painter, style: &egui::Style, rect: egui::Rect, lay: &StripLayout) {
+/// Whether `rect`, the placed outer rect, lies above `card` (the strip flipped up).
+fn strip_flipped(rect: egui::Rect, card: egui::Rect) -> bool {
+    rect.bottom() <= card.top()
+}
+
+/// The letter grid inside the placed outer rect `rect`: at its top, or at its bottom when the strip is `flipped`
+/// above its card, so the grid is always the side next to the card (3d-T5-3).
+fn strip_grid_rect(rect: egui::Rect, lay: &StripLayout, flipped: bool) -> egui::Rect {
+    let min = if flipped {
+        egui::pos2(rect.min.x, rect.max.y - lay.grid.y)
+    } else {
+        rect.min
+    };
+    egui::Rect::from_min_size(min, lay.grid)
+}
+
+/// Note JW1: paint only. The clip can cut through a box, without moving its letter. Captions go under the grid, or
+/// above it when `flipped`.
+fn paint_strip(
+    p: &egui::Painter,
+    style: &egui::Style,
+    rect: egui::Rect,
+    lay: &StripLayout,
+    flipped: bool,
+) {
     let vis = &style.visuals;
     let per_row = lay.per_row;
+    let grid = strip_grid_rect(rect, lay, flipped);
     p.rect(
         rect,
         2.0,
@@ -465,7 +489,11 @@ fn paint_strip(p: &egui::Painter, style: &egui::Style, rect: egui::Rect, lay: &S
         vis.window_stroke(),
         egui::StrokeKind::Inside,
     );
-    let mut y = rect.min.y + lay.grid.y - STRIP_PAD + CAPTION_TOP_GAP;
+    let mut y = if flipped {
+        rect.min.y + STRIP_PAD
+    } else {
+        rect.min.y + lay.grid.y - STRIP_PAD + CAPTION_TOP_GAP
+    };
     for g in &lay.captions {
         p.galley(
             egui::pos2(rect.min.x + STRIP_PAD, y),
@@ -480,7 +508,7 @@ fn paint_strip(p: &egui::Painter, style: &egui::Style, rect: egui::Rect, lay: &S
             (i / per_row) as f32 * (CHIP + DOCK_GAP_Y),
         );
         let cell = egui::Rect::from_min_size(
-            rect.min + egui::Vec2::splat(STRIP_PAD) + offset,
+            grid.min + egui::Vec2::splat(STRIP_PAD) + offset,
             egui::Vec2::splat(CHIP),
         );
         p.rect(
@@ -3328,16 +3356,16 @@ fn pill(
             // The captions are measured first: the outer rect holds them before it flips or clamps into the clip.
             let lay = strip_layout(&p, ui.style(), v, zone.rect.width(), look.frame_x, clip);
             let rect = strip_rect(zone.rect, lay.size, clip);
-            paint_strip(&p, ui.style(), rect, &lay);
+            let flipped = strip_flipped(rect, zone.rect);
+            paint_strip(&p, ui.style(), rect, &lay, flipped);
             // Note 3d-T5-1: the captions are painted over whatever lies below, but only the letter grid owns a
             // release, so a drop where the user sees another card goes to that card.
-            let painted = egui::Rect::from_min_size(rect.min, lay.grid).intersect(clip);
+            let painted = strip_grid_rect(rect, &lay, flipped).intersect(clip);
             let mut hit = painted;
             if rect.top() >= zone.rect.bottom() {
                 hit.min.y = zone.rect.bottom();
-            } else if rect.bottom() <= zone.rect.top() {
-                // shortcut: a strip flipped above its card keeps the captions between the grid and the card in the
-                // bridge, or the grid could not be reached from the card; upgrade if captions should never own a drop.
+            } else if flipped {
+                // the captions are above the grid (3d-T5-3), so the bridge is only the gap to the card
                 hit.max.y = zone.rect.top();
             }
             // The bridge reaches only the part of the strip that faces the card.
@@ -3559,11 +3587,10 @@ fn chip_row<'a>(
             }
             SlotShown::Replaced { item, by } => {
                 let file = model.item(item).map_or(item, |i| i.name.as_str());
-                let slot = k
-                    .game_slot()
-                    .map_or_else(|| "this slot".to_string(), |n| format!("game slot {n}"));
+                // `slot_shown` yields Replaced only for a kind on a game slot
+                let slot = k.game_slot().unwrap_or_default();
                 let r = letter_box(ui, &letter(), None, None).on_hover_text(format!(
-                    "{} (empty)\n{}: the link to {} supplies {slot}, so {file} is not written here",
+                    "{} (empty)\n{}: the link to {} supplies game slot {slot}, so {file} is not written here",
                     v.slot_text(k),
                     set_slot_label(v, k),
                     by.path
