@@ -7,11 +7,11 @@
 //!
 //! A corpus run keeps its per-file hashes (`CODING_STANDARDS.md`, the long-run results rule): with `SDC_BCENC_CORPUS`
 //! set, `SDC_BCENC_CORPUS_HASHES=<dir>` is required. If `<dir>\<test>.txt` is missing, the run is a baseline: every
-//! path is compared with rgbcx, and after a run with no mismatch the file is written (first line `# commit <text>
+//! path is compared with rgbcx, and after a run with no mismatch and at least one readable file the file is written (first line `# commit <text>
 //! input <folder> every <n>`, needs `SDC_BCENC_CORPUS_COMMIT=<text>`; then `<relative path> <blocks> <fnv1a64 of the
 //! first path's output bytes>` per image). If the file exists, the run is a check: no rgbcx encode, every path is
 //! compared with the first one, and each image's block count and digest must equal its line. The file is never
-//! rewritten by a check.
+//! rewritten by a check, and its header's `input` and `every` must equal the run's (a panic otherwise).
 use bcenc::{Bc1Search, BC1_FAST_LEVEL};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
@@ -198,10 +198,28 @@ struct Summary {
     line: String,
 }
 
-/// The saved lines, by path, as (block count, digest as 16 hex). The first line is the header; a CRLF file reads too.
-fn read_saved(file: &Path) -> BTreeMap<String, (u64, String)> {
+/// The saved lines, by path, as (block count, digest as 16 hex). The first line is the header, whose `input` and
+/// `every` must equal the run's (a panic otherwise); a CRLF file reads too; a path listed twice panics.
+fn read_saved(file: &Path, input: &Path, every: usize) -> BTreeMap<String, (u64, String)> {
     let text = std::fs::read_to_string(file)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+    let header = text.lines().next().unwrap_or_default();
+    let parsed = header
+        .rsplit_once(" every ")
+        .and_then(|(rest, e)| Some((rest.split_once(" input ")?.1, e)));
+    let Some((saved_input, saved_every)) = parsed else {
+        panic!(
+            "{}: the first line is not a header (# commit <text> input <folder> every <n>): {header:?}",
+            file.display()
+        );
+    };
+    assert!(
+        saved_input == input.display().to_string() && saved_every.trim() == every.to_string(),
+        "{} was saved for input {saved_input} every {}; this run is input {} every {every}",
+        file.display(),
+        saved_every.trim(),
+        input.display()
+    );
     let mut out = BTreeMap::new();
     for line in text.lines().skip(1).filter(|l| !l.trim().is_empty()) {
         // Paths may contain spaces: the digest and the block count come from the right.
@@ -213,7 +231,12 @@ fn read_saved(file: &Path) -> BTreeMap<String, (u64, String)> {
         let blocks = blocks
             .parse::<u64>()
             .unwrap_or_else(|_| panic!("{}: bad block count in {line:?}", file.display()));
-        out.insert(path.to_string(), (blocks, digest.to_string()));
+        let again = out.insert(path.to_string(), (blocks, digest.to_string()));
+        assert!(
+            again.is_none(),
+            "{}: {path:?} is listed twice",
+            file.display()
+        );
     }
     out
 }
@@ -237,7 +260,7 @@ fn run_in(
             file.as_ref().expect("file with hashes").display()
         );
     }
-    let mut expected = saved.map(|f| read_saved(f));
+    let mut expected = saved.map(|f| read_saved(f, dir, every));
     let vs_rgbcx = expected.is_none();
     // The paths line, and any `SDC_BCENC_PATHS` panic, before the walk.
     let names: Vec<&str> = paths::paths().iter().map(|p| p.name()).collect();
@@ -297,7 +320,11 @@ fn run_in(
         println!("MISMATCH {rel}: listed in the saved file, but no image was compared");
     }
     let how = match saved {
-        Some(f) => format!("checked against {}", f.display()),
+        Some(f) => format!(
+            "paths {}, checked against {}",
+            names.join(", "),
+            f.display()
+        ),
         None => format!("paths {}", names.join(", ")),
     };
     let clean = mismatches == 0 && unreadable < files.len() as u64;
@@ -309,6 +336,7 @@ fn run_in(
             dir.display()
         );
         std::fs::write(file, head + &lines).expect("hash file");
+        println!("wrote {}", file.display());
     }
     let line = format!(
         "{name}: {how}, files compared {compared}, skipped {skipped}, unreadable {unreadable}, blocks compared {blocks}, mismatches {mismatches}, {:.1} s",
@@ -324,7 +352,7 @@ fn run_in(
 
 fn run(name: &str, wanted: fn(&[[u8; 4]]) -> bool, check: impl Fn(&Block, &mut Sink) + Sync) {
     let Some(dir) = std::env::var_os("SDC_BCENC_CORPUS") else {
-        println!("skipped: SDC_BCENC_CORPUS is not set");
+        eprintln!("skipped: SDC_BCENC_CORPUS is not set");
         return;
     };
     let Some(hash_dir) = std::env::var_os("SDC_BCENC_CORPUS_HASHES") else {
@@ -657,4 +685,90 @@ fn the_digest_is_the_saved_format() {
     );
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&hashes.dir);
+}
+
+/// Every path but the first returns something else, so every block differs between paths.
+fn split_check(px: &Block, s: &mut Sink) {
+    let _ = px;
+    cmp(
+        s,
+        || "split".to_string(),
+        |p| {
+            if p == paths::paths()[0] {
+                [1u8; 4]
+            } else {
+                [2u8; 4]
+            }
+        },
+        || panic!("the rgbcx encode ran in a check run"),
+    );
+}
+
+/// All paths agree, so a baseline of it has no mismatch (its rgbcx side is the same constant).
+fn flat_check(px: &Block, s: &mut Sink) {
+    let _ = px;
+    cmp(s, || "flat".to_string(), |_| [1u8; 4], || [1u8; 4]);
+}
+
+#[test]
+fn a_check_run_never_encodes_with_rgbcx_and_flags_a_path_that_differs() {
+    if paths::paths().len() < 2 {
+        eprintln!("skipped: needs two code paths");
+        return;
+    }
+    let dir = two_images("lazy");
+    let hashes = HashMode {
+        dir: scratch("lazy-hashes"),
+        commit: "test".to_string(),
+    };
+    let base = run_in("flat", &dir, 1, Some(&hashes), every_image, flat_check);
+    assert_eq!(base.mismatches, 0, "{}", base.line);
+    // 4 + 2 blocks, each differing between paths; the digests (first path only) still match.
+    let checked = run_in("flat", &dir, 1, Some(&hashes), every_image, split_check);
+    assert_eq!(checked.mismatches, 6, "{}", checked.line);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&hashes.dir);
+}
+
+#[test]
+#[should_panic(expected = "every 1")]
+fn a_check_run_with_another_every_panics() {
+    let dir = two_images("every");
+    let hashes = HashMode {
+        dir: scratch("every-hashes"),
+        commit: "test".to_string(),
+    };
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    run_in("bc4", &dir, 2, Some(&hashes), every_image, bc4_check);
+}
+
+#[test]
+#[should_panic(expected = "was saved for input")]
+fn a_check_run_with_another_input_panics() {
+    let dir = two_images("input");
+    let other = two_images("input-other");
+    let hashes = HashMode {
+        dir: scratch("input-hashes"),
+        commit: "test".to_string(),
+    };
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    bc4_run(&other, &hashes);
+}
+
+#[test]
+#[should_panic(expected = "is listed twice")]
+fn a_saved_list_with_a_path_twice_panics() {
+    let dir = two_images("twice");
+    let hashes = HashMode {
+        dir: scratch("twice-hashes"),
+        commit: "test".to_string(),
+    };
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    let file = hashes.dir.join("bc4.txt");
+    let mut text = std::fs::read_to_string(&file).expect("file");
+    let again = text.lines().nth(1).expect("entry").to_string();
+    text.push_str(&again);
+    text.push('\n');
+    std::fs::write(&file, text).expect("write");
+    bc4_run(&dir, &hashes);
 }
