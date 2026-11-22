@@ -2123,7 +2123,11 @@ fn sdc_profile_writes_one_report_beside_the_same_outputs() {
     let o = c.output().unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     let (a, b) = (read_all(&fx.p("out_a")), read_all(&fx.p("out_b")));
-    assert!(!a.is_empty() && a == b);
+    assert!(!a.is_empty(), "the plain run wrote no .dds");
+    assert!(
+        a == b,
+        "the profiled run's outputs differ from the plain run's"
+    );
     let reports: Vec<PathBuf> = std::fs::read_dir(fx.p("prof"))
         .unwrap()
         .map(|e| e.unwrap().path())
@@ -2150,6 +2154,26 @@ fn sdc_profile_writes_one_report_beside_the_same_outputs() {
     assert!(!text(&plain.stderr).contains("profile: "));
     #[cfg(windows)]
     assert!(r["process"]["peak_working_set"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn an_empty_sdc_profile_writes_no_report() {
+    let fx = profile_fixture();
+    let mut c = fx.convert_cmd("out", &PROFILE_ARGS);
+    c.env("SDC_PROFILE", "");
+    c.current_dir(fx.p("in"));
+    let o = c.output().unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(!text(&o.stderr).contains("profile"), "{}", text(&o.stderr));
+    assert!(!read_all(&fx.p("out")).is_empty());
+    // An empty value must not create a folder named "" or write a report beside the inputs.
+    let stray = std::fs::read_dir(fx.p("in")).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("profile-")
+    });
+    assert!(!stray);
 }
 
 #[test]

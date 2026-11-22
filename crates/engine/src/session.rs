@@ -529,10 +529,7 @@ impl Session {
             .plan(req, rep, cancel)
             .and_then(|p| self.run(p, rep, cancel));
         if let Some((dir, rec)) = profiled {
-            match rec.write_report(dir, &rep.batch, std::env::args().collect()) {
-                Ok(path) => eprintln!("profile: {}", path.display()),
-                Err(e) => eprintln!("warning: profile report not written: {e}"),
-            }
+            rec.write_and_note(dir, &rep.batch, false);
         }
         result
     }

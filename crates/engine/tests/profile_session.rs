@@ -47,4 +47,10 @@ fn only_export_creates_a_recorder() {
         assert_eq!(r.calls.iter().filter(|c| c.kind == kind).count(), 1);
     }
     assert!(spans(&r, Stage::File).count() > 0);
+
+    // A folder that does not exist yet is created by the export, as the CLI creates it.
+    let fresh = f.dir.path().join("new").join("prof");
+    session.set_profile_out(Some(fresh.clone()));
+    session.export(req("out_fresh"), &rep, &cancel).unwrap();
+    assert_eq!(std::fs::read_dir(&fresh).unwrap().count(), 1);
 }

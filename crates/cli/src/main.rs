@@ -45,23 +45,9 @@ fn profile_dir(v: Option<std::ffi::OsString>) -> Result<Option<std::path::PathBu
         return Ok(None);
     };
     let path = std::path::PathBuf::from(v);
-    let fail = |why: String| format!("SDC_PROFILE must name a folder: {}: {why}", path.display());
-    if path.exists() {
-        if !path.is_dir() {
-            return Err(fail("not a folder".into()));
-        }
-    } else {
-        std::fs::create_dir_all(&path).map_err(|e| fail(e.to_string()))?;
-    }
+    engine::profile::Recorder::ensure_dir(&path)
+        .map_err(|e| format!("SDC_PROFILE must name a folder: {}: {e}", path.display()))?;
     Ok(Some(path))
-}
-
-/// Write the report after a batch; a failure is a warning and never changes the exit code.
-fn write_profile(rec: &engine::profile::Recorder, dir: &std::path::Path, batch: &str) {
-    match rec.write_report(dir, batch, std::env::args().collect()) {
-        Ok(p) => err!("profile: {}", p.display()),
-        Err(e) => err!("warning: profile report not written: {e}"),
-    }
 }
 
 fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
@@ -126,7 +112,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             &cancel,
         );
         if let Some((dir, rec)) = &profile {
-            write_profile(rec, dir, &new_batch_id());
+            rec.write_and_note(dir, &new_batch_id(), true);
         }
         let sum = sum?;
         // Plain lines on stderr (stdout carries the JSON lines): the files this export did not write, and the sets left out.
@@ -143,7 +129,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         .plan(req, &rep, &cancel)
         .and_then(|plan| engine.run(plan, &rep, &cancel));
     if let Some((dir, rec)) = &profile {
-        write_profile(rec, dir, &rep.batch);
+        rec.write_and_note(dir, &rep.batch, true);
     }
     Ok(result?.exit_code())
 }

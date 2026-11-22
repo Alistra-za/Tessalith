@@ -100,6 +100,7 @@ fn presets_schema_prints_one_schema_or_writes_all() {
 fn sdc_in(appdata: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     let o = Command::new(env!("CARGO_BIN_EXE_sdc"))
         .env("APPDATA", appdata)
+        .env_remove("SDC_PROFILE")
         .args(args)
         .output()
         .unwrap();

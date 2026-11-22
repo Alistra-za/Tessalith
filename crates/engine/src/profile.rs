@@ -519,6 +519,30 @@ impl Recorder {
         }
     }
 
+    /// The `SDC_PROFILE` folder rule, shared by the CLI and the GUI: a missing folder is created, a path that is a
+    /// file (or cannot be created) is an error.
+    pub fn ensure_dir(dir: &Path) -> io::Result<()> {
+        std::fs::create_dir_all(dir)
+    }
+
+    /// `ensure_dir` + `write_report` with this process's arguments, and the one message for the outcome: a write error
+    /// always goes to stderr (never a panic on a closed stderr), the `profile: <path>` line only with `announce`.
+    pub fn write_and_note(&self, dir: &Path, batch: &str, announce: bool) {
+        use io::Write as _;
+        let args = std::env::args_os()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        match Self::ensure_dir(dir).and_then(|()| self.write_report(dir, batch, args)) {
+            Ok(path) if announce => {
+                let _ = writeln!(io::stderr(), "profile: {}", path.display());
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let _ = writeln!(io::stderr(), "warning: profile report not written: {e}");
+            }
+        }
+    }
+
     pub fn write_report(&self, dir: &Path, batch: &str, args: Vec<String>) -> io::Result<PathBuf> {
         let name = format!("profile-{batch}.json");
         if Path::new(&name).file_name() != Some(name.as_ref()) {

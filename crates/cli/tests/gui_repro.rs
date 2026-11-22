@@ -103,6 +103,7 @@ fn a_gui_export_and_sdc_convert_agree() {
         .args(["--recursive", "-o"])
         .arg(d.path().join("cli-out"))
         .env("APPDATA", d.path().join("no-appdata"))
+        .env_remove("SDC_PROFILE")
         .output()
         .unwrap();
     assert!(
