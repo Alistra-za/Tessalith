@@ -898,6 +898,35 @@ fn a_hand_edited_value_in_the_way_is_skipped_not_counted() {
     skipped_everywhere(&mut m, LEAF, &rows, way);
 }
 
+/// `skin.Roughness = { old = 1 }`: the final item is an inline table, which the write would replace whole.
+#[test]
+fn an_inline_table_in_the_way_is_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), &["a", "b"]);
+    let (a, b) = (skin_id(&m, "x/a"), skin_id(&m, "x/b"));
+    let text = format!(
+        "[[sets]]\nid = \"{a}\"\nskin = {{ Roughness = 0.5 }}\n\n[[sets]]\nid = \"{b}\"\nskin = {{ Roughness = {{ old = 1 }} }}\n"
+    );
+    std::fs::write(d.path().join("sdc-project.toml"), text).unwrap();
+    m.sets_doc = Some(SetsDoc::open(d.path()));
+    let doc = m.sets_doc.as_ref().unwrap();
+    assert!(!doc.read_only());
+    assert!(
+        !doc.path_open(&b, "skin.Roughness"),
+        "premise: the inline table blocks the path"
+    );
+    assert!(
+        doc.path_open(&a, "skin.Roughness"),
+        "control: a plain value is open"
+    );
+    let rows = m.json_rows(&a);
+    assert_eq!(
+        pairs(&rows),
+        vec![(JsonGroup::Skin, "Roughness".to_string())]
+    );
+    skipped_everywhere(&mut m, &b, &rows, "has a hand-edited value in the way");
+}
+
 #[test]
 fn glint_ownership_is_decided_once_per_target() {
     use sdc_gui::model::cs_pbr::mato_synced;
@@ -1427,6 +1456,153 @@ fn a_mapped_colour_row_carries_the_source_writers_value() {
         leaf_json_entry(&mut m)["subsurface_color"],
         json!([10.0, 0.5, 0.0]),
         "the source's own record says the same"
+    );
+}
+
+/// The W14b skip ("no CS form of this value") is gone: no stored value of a mapped key lacks a texture-set form, so a
+/// target with a block always takes a mapped row and the report never counts a write that landed nowhere.
+#[test]
+fn every_value_of_a_mapped_key_has_a_texture_set_form() {
+    use sdc_gui::model::cs_pbr::{pgp_to_cs, PGP_MAP};
+    let values = [
+        json!(0.5),
+        json!(7),
+        json!(true),
+        json!("x"),
+        json!([1, 2, 3]),
+        json!([0.1, 0.2, 0.3]),
+        json!([255, 128, 0]),
+        json!([]),
+        Value::Null,
+    ];
+    for (_, key) in PGP_MAP {
+        for v in &values {
+            assert!(
+                matches!(pgp_to_cs(key, Some(v)), Some((_, Some(_)))),
+                "{key}: {v}"
+            );
+        }
+    }
+}
+
+/// Block presence is read from the document: an apply made while the plan of a just-added texture-set block is still
+/// landing routes a mapped row into that block. A pin, not a RED: the plan's views copy their blocks from the same
+/// document entry and are rebuilt when it changes, so the two readers cannot differ today.
+#[test]
+fn a_block_just_added_takes_a_mapped_row_before_the_plan_lands() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    idle(&mut m);
+    let rows = pick(m.json_rows(ROCK), &["roughness_scale"]);
+    // The plans the block and the apply start are held, so the plan's view of leaf still says it has no block.
+    m.hold_plan_results = true;
+    m.add_cs_block(LEAF, Kind::Txst);
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    m.hold_plan_results = false;
+    for x in m.take_held() {
+        m.sender().send(x).unwrap();
+    }
+    idle(&mut m);
+    assert_eq!(
+        m.cs_block(LEAF, Kind::Txst)
+            .and_then(|b| b.values.get("roughnessScale").cloned()),
+        Some(json!(0.8))
+    );
+}
+
+/// Parks the partial and the full plan a `[files]` edit starts, lands the partial (`apply_partial`), then the full plan.
+/// `note` is the status line's start before; it must lead after each.
+fn note_survives_the_partial_and_the_full_plan(m: &mut AppModel, note: &str, st: Subtype) {
+    use sdc_gui::worker::WorkerMsg;
+    use std::time::Instant;
+    m.hold_plan_results = true;
+    m.decide("landscape/odd.png", Answer::Subtype(st));
+    let end = Instant::now() + Duration::from_secs(60);
+    let (mut partials, mut full) = (vec![], vec![]);
+    while partials.is_empty() || full.is_empty() {
+        m.poll();
+        for x in m.take_held() {
+            if matches!(x, WorkerMsg::Partial { .. }) {
+                partials.push(x);
+            } else {
+                full.push(x);
+            }
+        }
+        assert!(
+            Instant::now() < end,
+            "plan messages did not arrive: {} partial, {} full",
+            partials.len(),
+            full.len()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let applied = m.applied_seq;
+    for x in partials {
+        m.handle_held(x);
+    }
+    m.poll();
+    assert!(m.applied_seq > applied, "premise: the partial landed");
+    assert!(
+        m.status_line.starts_with(note),
+        "after the partial: {:?}",
+        m.status_line
+    );
+    m.hold_plan_results = false;
+    for x in full {
+        m.sender().send(x).unwrap();
+    }
+    idle(m);
+    assert!(
+        m.status_line.starts_with(note),
+        "after the full plan: {:?}",
+        m.status_line
+    );
+}
+
+/// Final fix wave: a set edit (a copy) sends no partial, so the later `[files]` edit's partial and full plan are the two
+/// ways a plan can rewrite the status line; each keeps W9 and W16 in front.
+#[test]
+fn the_result_lines_survive_a_partial_plan_and_the_full_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    idle(&mut m);
+    select(&mut m, &[ROCK]);
+    m.run_menu(MenuAction::CopyJsonToClip);
+    let w9 = m.status_line.clone();
+    assert!(w9.starts_with("Copied 1 JSON settings from "), "{w9}");
+    note_survives_the_partial_and_the_full_plan(&mut m, &w9, Subtype::PbrAlbedo);
+    // W16 of an apply.
+    let rows = m.json_rows(ROCK);
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    idle(&mut m);
+    let w16 = "Copy JSON settings from rock: 1 written, 0 skipped (see Messages)".to_string();
+    assert!(m.status_line.starts_with(&w16), "{:?}", m.status_line);
+    note_survives_the_partial_and_the_full_plan(&mut m, &w16, Subtype::PbrNormal);
+}
+
+/// An unmapped colour key (`fuzz.color` has no texture-set form) is converted as the number keys are: its row carries
+/// what the source's writer emits, and a colour written to a PGPatcher entry is clamped at the destination.
+#[test]
+fn an_unmapped_colour_row_is_clamped_like_a_number() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "fuzz.color", json!([12.0, 0.5, 0.0]));
+    idle(&mut m);
+    let rows = pick(m.json_rows(ROCK), &["fuzz.color"]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].value, json!([10.0, 0.5, 0.0]), "the writer's value");
+    // A value outside the range reaching the destination (a hand-made row) is stored clamped.
+    let hot = JsonRow {
+        value: json!([12.0, 0.5, 0.0]),
+        ..rows[0].clone()
+    };
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &[hot]);
+    idle(&mut m);
+    assert_eq!(
+        entry(&m, LEAF).unwrap().settings.get("fuzz.color"),
+        Some(&json!([10.0, 0.5, 0.0]))
     );
 }
 

@@ -709,6 +709,11 @@ impl AppModel {
 
     /// Open the rename dialog in `mode` over the selection, with the last recipe of this session.
     pub fn open_rename(&mut self, mode: RenameMode) {
+        // As `set_rename_mode`: Inputs is offered over texture selections only.
+        // As `set_rename_mode`: Inputs is offered over texture selections only.
+        if mode == RenameMode::Inputs && !self.inputs_rename_offered() {
+            return;
+        }
         let keys = self.rename_keys(mode);
         if keys.is_empty() {
             return;

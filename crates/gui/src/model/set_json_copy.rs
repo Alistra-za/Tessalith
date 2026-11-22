@@ -67,6 +67,23 @@ impl JsonRow {
     }
 }
 
+/// Which blocks a set holds in the sets document.
+#[derive(Debug, Clone, Copy, Default)]
+struct Blocks {
+    txst: bool,
+    mato: bool,
+    cm: bool,
+    xpmf: bool,
+}
+
+/// One target of an apply: its view (with the feature switches the plan has turned on so far), its glint ownership
+/// and its blocks, each decided once before the first write.
+struct PlannedTarget {
+    view: SetView,
+    follows: bool,
+    blocks: Blocks,
+}
+
 /// The session clipboard: a snapshot of a set's rows at Copy. `source` is the copied set's card name. It is kept across
 /// opening another project and never saved.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +187,11 @@ fn cs_mapped(name: &str) -> bool {
         .any(|(cs, _)| cs.split('.').next() == Some(name))
 }
 
+/// A colour as the PGPatcher writer emits it (clamped to its range); a value it cannot read stays as it is.
+fn writer_colour(v: &Value) -> Value {
+    colour(v, false).map_or_else(|| v.clone(), |n| n.to_value())
+}
+
 fn numbers(v: &Value, lens: &[usize]) -> bool {
     v.as_array()
         .is_some_and(|a| lens.contains(&a.len()) && a.iter().all(Value::is_number))
@@ -203,11 +225,12 @@ fn pgp_rows(e: &SetEntry) -> Vec<JsonRow> {
                     clamped(v, range)
                 }
             }),
+            // As a number: a mapped key on a set with a block is raw, any other colour is what the writer emits.
             KeyKind::Rgb => numbers(v, &[3]).then(|| {
-                if mapped && !block {
-                    colour(v, false).map_or_else(|| v.clone(), |n| n.to_value())
-                } else {
+                if mapped && block {
                     v.clone()
+                } else {
+                    writer_colour(v)
                 }
             }),
             KeyKind::Rgba => numbers(v, &[3, 4]).then(|| v.clone()),
@@ -359,10 +382,10 @@ impl AppModel {
     }
 
     /// The dotted paths a write of `row` to `target` lands on, in the document, for the hand-edit check.
-    fn json_paths(&self, target: &SetView, follows: bool, row: &JsonRow) -> Vec<String> {
+    fn json_paths(&self, blocks: Blocks, follows: bool, row: &JsonRow) -> Vec<String> {
         let key = row.key.as_str();
         match row.group {
-            JsonGroup::Pgp if target.cs_block(Kind::Txst).is_some() && pgp_mapped(key) => {
+            JsonGroup::Pgp if blocks.txst && pgp_mapped(key) => {
                 let Some((cs, _)) = pgp_to_cs(key, None) else {
                     return vec![key.to_string()];
                 };
@@ -384,13 +407,41 @@ impl AppModel {
     /// Why `target` would not take `row` (a W14 reason), or `None` when it would. `follows` is the target's glint
     /// ownership, decided once per apply (`glint_follows`). The reason may name a feature the target already uses.
     pub fn json_skip(&self, target: &SetView, follows: bool, row: &JsonRow) -> Option<String> {
+        self.json_skip_with(target, follows, self.blocks_of(&target.id), row)
+    }
+
+    /// The blocks set `id` holds in the document (not the plan's view, which can lag an edit that adds one).
+    fn blocks_of(&self, id: &str) -> Blocks {
+        let Some(doc) = self.sets_doc.as_ref() else {
+            return Blocks::default();
+        };
+        let entries = doc.entries();
+        entries
+            .iter()
+            .find(|e| same_id(&e.id, id))
+            .map_or_else(Blocks::default, |e| Blocks {
+                txst: e.cs_txst.is_some(),
+                mato: e.cs_mato.is_some(),
+                cm: e.cm.is_some(),
+                xpmf: e.xpmf.is_some(),
+            })
+    }
+
+    /// `json_skip` with the target's blocks read once (`blocks_of`), as an apply does per target.
+    fn json_skip_with(
+        &self,
+        target: &SetView,
+        follows: bool,
+        blocks: Blocks,
+        row: &JsonRow,
+    ) -> Option<String> {
         let missing = match row.group {
             JsonGroup::Pgp => {
                 // A target with a texture-set block takes a mapped key there, whatever its PGPatcher eligibility.
-                if pgp_mapped(&row.key) && target.cs_block(Kind::Txst).is_some() {
-                    // The block takes the CS form of the value; a value with none has nowhere to go.
-                    (!matches!(pgp_to_cs(&row.key, Some(&row.value)), Some((_, Some(_)))))
-                        .then_some("has no Community Shaders form of this value")
+                if pgp_mapped(&row.key) && blocks.txst {
+                    // `pgp_to_cs` gives every value of a mapped key a CS form (it converts or copies, never
+                    // refuses), so the block always takes it and there is nothing to skip.
+                    None
                 } else if !is_json_set(target, self.target) {
                     Some("writes no PGPatcher JSON")
                 } else if is_pbr_grass(target) && grass_ignores(&row.key) {
@@ -399,12 +450,9 @@ impl AppModel {
                     None
                 }
             }
-            JsonGroup::CsTxst => target
-                .cs_block(Kind::Txst)
-                .is_none()
-                .then_some("has no CS PBR texture set"),
+            JsonGroup::CsTxst => (!blocks.txst).then_some("has no CS PBR texture set"),
             JsonGroup::CsMato => {
-                if target.cs_block(Kind::Mato).is_none() {
+                if !blocks.mato {
                     Some("has no CS PBR material object")
                 } else if follows && row.key.starts_with("glintParameters.") {
                     Some("follows its texture set")
@@ -412,18 +460,8 @@ impl AppModel {
                     None
                 }
             }
-            JsonGroup::Cm => self
-                .cm_block(&target.id)
-                .is_none()
-                .then_some("has no complex material JSON"),
-            JsonGroup::Xpmf => {
-                let has = self.sets_doc.as_ref().is_some_and(|d| {
-                    d.entries()
-                        .iter()
-                        .any(|e| same_id(&e.id, &target.id) && e.xpmf.is_some())
-                });
-                (!has).then_some("writes no XPMF profile")
-            }
+            JsonGroup::Cm => (!blocks.cm).then_some("has no complex material JSON"),
+            JsonGroup::Xpmf => (!blocks.xpmf).then_some("writes no XPMF profile"),
             JsonGroup::Skin => {
                 let diffuse = target.slots.get(&SlotKind::Diffuse);
                 if target.shared {
@@ -444,7 +482,7 @@ impl AppModel {
             return Some(why);
         }
         let doc = self.sets_doc.as_ref()?;
-        self.json_paths(target, follows, row)
+        self.json_paths(blocks, follows, row)
             .iter()
             .any(|p| !doc.path_open(&target.id, p))
             .then(|| "has a hand-edited value in the way".to_string())
@@ -598,14 +636,14 @@ impl AppModel {
     /// (and a glint key to the synced material object too), any other PGPatcher key to the entry converted to its
     /// range, the other groups to their block. Never `set_shared_value` (it decides glint ownership again on every
     /// write) and never `set_skin_value` (it prunes the target's unknown skin keys and rounds floats).
-    fn write_json_row(&mut self, target: &SetView, follows: bool, row: &JsonRow, label: &str) {
-        let id = target.id.as_str();
+    fn write_json_row(&mut self, t: &PlannedTarget, row: &JsonRow, label: &str) {
+        let (id, follows) = (t.view.id.as_str(), t.follows);
         let key = row.key.as_str();
         let v = row.value.clone();
         match row.group {
             JsonGroup::Pgp => {
-                if pgp_mapped(key) && target.cs_block(Kind::Txst).is_some() {
-                    // `json_skip` refuses a value with no CS form, so this always lands in the block.
+                if pgp_mapped(key) && t.blocks.txst {
+                    // `pgp_to_cs` always gives a mapped key's value a CS form, so this always lands in the block.
                     if let Some((cs, Some(cv))) = pgp_to_cs(key, Some(&v)) {
                         self.set_cs_value(id, Kind::Txst, cs, Some(cv.clone()));
                         if follows && cs.starts_with("glintParameters.") {
@@ -617,6 +655,7 @@ impl AppModel {
                 let spec = KEYS.iter().find(|s| edit_key(s.key) == key);
                 let v = match spec.map(|s| s.kind) {
                     Some(KeyKind::Number(range)) if v.is_number() => clamped(&v, range),
+                    Some(KeyKind::Rgb) if numbers(&v, &[3]) => writer_colour(&v),
                     _ => v,
                 };
                 self.set_json_value(id, key, Some(v));
@@ -657,13 +696,18 @@ impl AppModel {
         // Each target's glint ownership is decided here, before the first write, and every glint skip and write of
         // the target uses it for the whole batch.
         // A target with no view any more stays in the plan, skipped for every row, so "of n" counts it.
-        let mut targets: Vec<(String, Option<(SetView, bool)>)> = to
+        // Its blocks are read from the document here too, once (a copy never adds or removes one).
+        let mut targets: Vec<(String, Option<PlannedTarget>)> = to
             .iter()
             .map(|id| {
                 let view = all.iter().find(|v| same_id(&v.id, id));
                 (
                     id.clone(),
-                    view.map(|v| (v.clone(), self.glint_follows(&v.id))),
+                    view.map(|v| PlannedTarget {
+                        view: v.clone(),
+                        follows: self.glint_follows(&v.id),
+                        blocks: self.blocks_of(&v.id),
+                    }),
                 )
             })
             .collect();
@@ -673,12 +717,12 @@ impl AppModel {
             for (id, target) in targets.iter_mut() {
                 let change = match target {
                     None => Change::Skip("is no longer in the project".to_string()),
-                    Some((t, follows)) => match self.json_skip(t, *follows, r) {
+                    Some(t) => match self.json_skip_with(&t.view, t.follows, t.blocks, r) {
                         Some(why) => Change::Skip(why),
                         None => {
                             // Later rows meet the feature switch this one turns on or off.
                             if is_switch(r) {
-                                t.settings.insert(r.key.clone(), r.value.clone());
+                                t.view.settings.insert(r.key.clone(), r.value.clone());
                             }
                             Change::Write
                         }
@@ -691,8 +735,8 @@ impl AppModel {
         self.batch_edit(&label, |m| {
             for (r, row_plan) in rows.iter().zip(&plan) {
                 for ((_, target), (_, change)) in targets.iter().zip(row_plan) {
-                    if let (Some((t, follows)), Change::Write) = (target, change) {
-                        m.write_json_row(t, *follows, r, &label);
+                    if let (Some(t), Change::Write) = (target, change) {
+                        m.write_json_row(t, r, &label);
                     }
                 }
             }

@@ -66,6 +66,19 @@ fn set_key_of(m: &AppModel, item: &str) -> String {
         .clone()
 }
 
+/// The Textures-view selection of every member of `item`'s set (Rename inputs is not offered over a set selection).
+fn select_members(m: &mut AppModel, item: &str) {
+    let members = sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.members.iter().any(|k| k == item))
+        .expect("the item's set")
+        .members
+        .clone();
+    for (n, k) in members.iter().enumerate() {
+        m.click_item(k, n > 0, false);
+    }
+}
+
 #[test]
 fn an_input_alias_is_written_read_and_undone_in_one_step() {
     let d = tempfile::tempdir().unwrap();
@@ -248,7 +261,7 @@ fn packed_outputs_and_locked_slots_are_skipped_in_inputs_mode() {
         .unwrap();
     m.set_slot_lock(&set, diffuse, true).unwrap();
     idle(&mut m);
-    m.click_set(&set_key_of(&m, ROCK), false, false);
+    select_members(&mut m, ROCK);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m).recipe.prefix = "x_".into();
     let p = plan(&m);
@@ -414,7 +427,7 @@ fn rename_inputs_moves_set_entry_with_automatic_id() {
     assert_eq!(set, "landscape/rock01");
     m.set_json_value(&set, "specular_level", Some(serde_json::json!(0.5)));
     idle(&mut m);
-    m.click_set(&set_key_of(&m, ROCK), false, false);
+    select_members(&mut m, ROCK);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m).recipe.prefix = "steel_".into();
     let steps = m.history.undo.len();
@@ -448,7 +461,7 @@ fn rename_inputs_on_a_read_only_sdc_toml_moves_nothing() {
     let set = set_id_of(&m, ROCK);
     m.set_json_value(&set, "specular_level", Some(serde_json::json!(0.5)));
     idle(&mut m);
-    m.click_set(&set_key_of(&m, ROCK), false, false);
+    select_members(&mut m, ROCK);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m).recipe.prefix = "steel_".into();
     let bad = d.path().join("bad");
@@ -473,7 +486,7 @@ fn rename_inputs_onto_an_existing_entry_says_the_entry_was_kept() {
         Some(serde_json::json!(0.25)),
     );
     idle(&mut m);
-    m.click_set(&set_key_of(&m, ROCK), false, false);
+    select_members(&mut m, ROCK);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m).recipe.prefix = "steel_".into();
     assert!(m.apply_rename());
@@ -1198,4 +1211,21 @@ fn set_rename_mode_never_turns_a_set_selection_to_inputs() {
     m.open_rename(RenameMode::Outputs);
     m.set_rename_mode(RenameMode::Inputs);
     assert_eq!(dialog(&mut m).mode, RenameMode::Outputs);
+}
+
+/// Final fix wave M4: opening the dialog in Inputs mode over a set selection is refused too, by the mode call and by
+/// the menu action, with one set selected and with two.
+#[test]
+fn open_rename_refuses_inputs_over_a_set_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_leaf(d.path());
+    let (a, b) = (set_key_of(&m, ROCK), set_key_of(&m, LEAF));
+    m.click_set(&a, false, false);
+    m.open_rename(RenameMode::Inputs);
+    assert!(m.dialog.is_none(), "one set: {:?}", m.dialog);
+    m.run_menu(MenuAction::RenameInputs);
+    assert!(m.dialog.is_none(), "one set, menu: {:?}", m.dialog);
+    m.click_set(&b, true, false);
+    m.open_rename(RenameMode::Inputs);
+    assert!(m.dialog.is_none(), "two sets: {:?}", m.dialog);
 }

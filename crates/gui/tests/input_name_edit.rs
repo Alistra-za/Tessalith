@@ -1579,7 +1579,16 @@ fn rename_inputs_moves_the_input_name_box() {
         .unwrap()
         .key
         .clone();
-    m.click_set(&key, false, false);
+    // Rename inputs is a Textures-view command: select the set's members, not the set.
+    let members = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key == key)
+        .unwrap()
+        .members
+        .clone();
+    for (n, k) in members.iter().enumerate() {
+        m.click_item(k, n > 0, false);
+    }
     m.open_rename(RenameMode::Inputs);
     let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_mut() else {
         panic!("the rename dialog")
@@ -1631,7 +1640,10 @@ fn a_set_with_raw_twins_takes_an_input_name_and_a_bulk_rename() {
     let plan = m.input_name_plan(&v.id, "new");
     assert!(plan.is_ok(), "{:?}", plan.err());
     // `Rename inputs…`.
-    m.click_set(&v.key, false, false);
+    // Rename inputs is a Textures-view command: select the set's members, not the set.
+    for (n, k) in v.members.iter().enumerate() {
+        m.click_item(k, n > 0, false);
+    }
     m.open_rename(RenameMode::Inputs);
     let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_ref() else {
         panic!("the rename dialog")
@@ -1696,7 +1708,10 @@ fn an_aliased_member_keeps_its_alias_under_an_input_name_and_a_suffix_rename() {
     assert_eq!(row.new, "new_zz9.png");
     assert_eq!(row.output, "new_n.dds");
     // `Rename inputs…` with a suffix.
-    m.click_set(&v.key, false, false);
+    // Rename inputs is a Textures-view command: select the set's members, not the set.
+    for (n, k) in v.members.iter().enumerate() {
+        m.click_item(k, n > 0, false);
+    }
     m.open_rename(RenameMode::Inputs);
     let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_ref() else {
         panic!("the rename dialog")
