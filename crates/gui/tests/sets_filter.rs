@@ -248,7 +248,7 @@ fn ctrl_a_with_every_set_hidden_keeps_the_selection() {
 #[test]
 fn no_false_no_match_while_the_first_plan_runs() {
     // A pill is on, then a folder opens: until the views exist there is no "No sets match" and no Clear filter
-    // that would wipe it. (Pills are not restored from gui.toml, E19, so the test sets it on the model.)
+    // that would wipe it. (Pills are not restored from gui.toml, review E19, so the test sets it on the model.)
     let d = tempfile::tempdir().unwrap();
     let root = mod_folder(d.path());
     let s = GuiSettings {
@@ -486,7 +486,7 @@ fn the_shader_persists_and_the_pills_and_search_do_not() {
         },
         "the pills are not restored; the search is the model's own"
     );
-    m.sets_filter.ready = false;
+    m.sets_filter.ready = true;
     m.sets_filter.attention = true;
     let ctx = egui::Context::default();
     let cur = sdc_gui::layout::capture(

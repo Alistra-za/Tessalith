@@ -6,7 +6,8 @@ use crate::model::view::{Channel, ViewState};
 use crate::model::viewport3d::Look;
 use crate::model::Filter;
 use crate::settings::{
-    LayoutSettings, LookSettings, WindowSettings, DETAILS_NAMES, WIDTH_IDS, WIDTH_RANGE,
+    LayoutSettings, LookSettings, WindowSettings, DETAILS_NAMES, HIDE_HELPERS, WIDTH_IDS,
+    WIDTH_RANGE,
 };
 use crate::ui::panel_ids;
 use eframe::egui::{self, pos2, vec2, Rect};
@@ -306,9 +307,9 @@ pub fn capture(
         }
     }
     l.meshes_view = crate::ui::header::meshes_view_active(ctx);
-    // Only hide-helpers is kept; the status pills start off after a restart (E19).
+    // Only hide-helpers is kept; the status pills start off after a restart (review E19).
     l.filters = if filter.hide_helpers {
-        vec!["hide-helpers".to_string()]
+        vec![HIDE_HELPERS.to_string()]
     } else {
         vec![]
     };
@@ -457,7 +458,7 @@ pub fn restore_model(
         subtype: l.filter_subtype.clone(),
         format: l.filter_format.clone(),
         set: SetFilter::from_name(&l.filter_set).unwrap_or_default(),
-        hide_helpers: has("hide-helpers"),
+        hide_helpers: has(HIDE_HELPERS),
         ..Filter::default()
     };
     *prefs = ColumnPrefs {

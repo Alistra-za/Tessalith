@@ -336,7 +336,10 @@ fn the_app_writes_a_changed_layout_once_per_two_seconds_and_on_exit() {
     // A change after that waits for its own 2 s, but the exit writes it.
     app.model.prefs.tile = 150.0;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2300));
-    assert_eq!(GuiSettings::load(&path).0.layout.tile, 96.0);
+    assert_eq!(
+        GuiSettings::load(&path).0.layout.tile,
+        LayoutSettings::default().tile
+    );
     eframe::App::on_exit(&mut app);
     assert_eq!(GuiSettings::load(&path).0.layout.tile, 150.0);
 }
@@ -359,7 +362,7 @@ fn a_new_app_starts_from_the_saved_layout() {
     model.open_folder(dir.path().to_owned());
     assert!(model.wait_idle(Duration::from_secs(60)));
     let mut app = SdcApp::new(model);
-    // The fixture's status pills are an old file's: ignored (E19). Hide-helpers is kept.
+    // The fixture's status pills are an old file's: ignored (review E19). Hide-helpers is kept.
     assert!(app.model.filter.hide_helpers);
     assert!(!app.model.filter.warnings && !app.model.filter.not_in_set);
     assert!(!app.model.filter.failed && !app.model.filter.needs_decision);
@@ -386,7 +389,7 @@ fn a_new_app_starts_from_the_saved_layout() {
     // The same layout comes back out of the context, the partial set look included.
     app.sync_layout_at(&ctx, Instant::now());
     let mut want = full();
-    // The old pills are dropped on the way out (E19).
+    // The old pills are dropped on the way out (review E19).
     want.filters = vec!["hide-helpers".into()];
     want.sets_filters = vec![];
     want.set_look = Some(LookSettings {
@@ -557,6 +560,63 @@ fn a_start_that_changes_nothing_writes_nothing() {
         GuiSettings::load(&path).0.layout.filters,
         vec!["hide-helpers".to_string()]
     );
+}
+
+/// Review E19 (fix round 1): an old gui.toml with status pills is not rewritten by a start (the first frame's capture
+/// is the silent starting point, so the loaded pills are replaced without a write); the next save that something else
+/// causes writes the file without them. A pin of that existing behaviour: it also passes with the loader keeping the
+/// pill names.
+#[test]
+fn an_old_file_with_pills_is_not_rewritten_by_a_start_but_loses_them_on_the_next_save() {
+    use sdc_gui::app::SdcApp;
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("sdc/gui.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        "[layout]\nfilters = [\"warnings\", \"hide-helpers\", \"failed\"]\nsets_filters = [\"ready\", \"no-json\"]\n",
+    )
+    .unwrap();
+    let before = std::fs::read_to_string(&path).unwrap();
+    let (settings, err) = GuiSettings::load(&path);
+    assert_eq!(err, None);
+    let model = sdc_gui::model::AppModel::new(settings, Some(path.clone()), support::session());
+    let mut app = SdcApp::new(model);
+    let ctx = egui::Context::default();
+    let t0 = Instant::now();
+    app.sync_layout_at(&ctx, t0);
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(3));
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(6));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "a start on an old file rewrote gui.toml"
+    );
+    eframe::App::on_exit(&mut app);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "and so did the exit"
+    );
+    // A change something else causes writes the file, and the pills are gone from it.
+    app.model.prefs.tile = 150.0;
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(7));
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(10));
+    let (back, _) = GuiSettings::load(&path);
+    assert_eq!(back.layout.tile, 150.0);
+    let raw: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let layout = raw["layout"].as_table().unwrap();
+    let names = |k: &str| -> Vec<String> {
+        layout.get(k).map_or(vec![], |v| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect()
+        })
+    };
+    assert_eq!(names("filters"), ["hide-helpers"]);
+    assert!(names("sets_filters").is_empty());
 }
 
 #[test]
