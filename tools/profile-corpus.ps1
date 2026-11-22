@@ -15,7 +15,7 @@
   -MaxGB    byte cap of the whole corpus (default 15).
   -SelfTest builds a fake mods tree under a new folder and leaves it in place; checks picks, alpha formats, seeds,
             source hashes and every -Dest refusal against a stand-in protected tree. Writes nothing elsewhere.
-  -SelfTestRoot  parent of the self-test folder (default: a folder in the temp folder). Checked like -Dest.
+  (A hidden -SelfTestRoot sets the parent of the self-test folder, default a folder in the temp folder; checked like -Dest.)
 
   Output: <Dest>\<mod>\textures\... (each file's path kept below its mod), sources.csv, coverage.md.
   Quotas (files unless noted): 4K normals 40; matched PBR sets 30 (sets); source images 100; raw packing maps 40;
@@ -29,12 +29,20 @@ param(
     [int]$Seed = 20261121,
     [double]$MaxGB = 15,
     [switch]$SelfTest,
-    [string]$SelfTestRoot
+    [Parameter(DontShow)][string]$SelfTestRoot
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'profile-paths.ps1')
 
-$MixedCorpus = 'F:\ai\dds\bench\profile\mixed-corpus'
+# The one protected entry that is allowed as a new destination, read from the shared list (not a second literal).
+function Get-MixedCorpusPath { @(Get-ProtectedList | Where-Object { (Split-Path -Leaf $_.TrimEnd('\')) -ieq 'mixed-corpus' })[0] }
+$MixedCorpus = Get-MixedCorpusPath
+
+# Relative arguments resolve against PowerShell's location, the same base Test-Path uses.
+foreach ($n in 'Mods', 'Dest', 'SelfTestRoot') {
+    $v = Get-Variable $n -ValueOnly
+    if ($v) { Set-Variable $n ($PSCmdlet.GetUnresolvedProviderPathFromPSPath($v)) }
+}
 
 # ---------------------------------------------------------------- new-file writers
 
@@ -60,11 +68,13 @@ function Copy-NewFile([string]$src, [string]$dst) {
             $h.AppendData($buf, 0, $n)
             $out.Write($buf, 0, $n)
         }
+        $hex = [Convert]::ToHexString($h.GetHashAndReset())
     } finally {
         $in.Dispose()
         if ($out) { $out.Dispose() }
+        $h.Dispose()
     }
-    [Convert]::ToHexString($h.GetHashAndReset())
+    $hex
 }
 
 # ---------------------------------------------------------------- image headers
@@ -82,7 +92,10 @@ function Read-DdsHeader([string]$path) {
     $h = [int][BitConverter]::ToUInt32($buf, 12)
     $w = [int][BitConverter]::ToUInt32($buf, 16)
     $pf = [BitConverter]::ToUInt32($buf, 80)
-    $fcc = if ([BitConverter]::ToUInt32($buf, 84) -ne 0) { [Text.Encoding]::ASCII.GetString($buf, 84, 4) } else { '' }
+    $fccVal = [BitConverter]::ToUInt32($buf, 84)
+    $hasFcc = ($pf -band 4) -ne 0 -and $fccVal -ne 0    # DDPF_FOURCC
+    $d3d = if ($hasFcc -and $fccVal -lt 0x100) { $fccVal } else { 0 }    # numeric D3DFMT code in the FourCC field
+    $fcc = if ($hasFcc -and $fccVal -ge 0x100) { [Text.Encoding]::ASCII.GetString($buf, 84, 4) } else { '' }
     $fmt = ''
     $alpha = $false
     if ($fcc -eq 'DX10') {
@@ -110,6 +123,8 @@ function Read-DdsHeader([string]$path) {
             { $_ -in 'ATI2', 'BC5U', 'BC5S' } { $fmt = 'BC5' }
             default { $fmt = "FOURCC-$fcc" }
         }
+    } elseif ($d3d) {
+        $fmt = "D3DFMT$d3d"
     } else {
         $fmt = 'RAW' + [BitConverter]::ToUInt32($buf, 88)
         $alpha = (($pf -band 1) -ne 0)
@@ -134,13 +149,14 @@ function Read-PngSize([string]$path) {
 
 # Reason a -Dest is refused, or $null. Overlap is compared after resolving junctions (Resolve-Real inside
 # Get-RunRootProblem and Test-Overlap), on whole path components.
-function Get-DestProblem([string]$dest, [string]$mods, [string[]]$protected) {
+function Get-DestProblem([string]$dest, [string]$mods, [string[]]$protected, [string]$mixed = $MixedCorpus) {
     $full = [IO.Path]::GetFullPath($dest)
     if (Test-Path -LiteralPath $full) { return 'already exists (the builder never reuses a folder)' }
-    $list = @($protected | Where-Object { $_ -ine $MixedCorpus })
+    $mixedNorm = if ($mixed) { [IO.Path]::GetFullPath($mixed).TrimEnd('\') } else { $null }
+    $list = @($protected | Where-Object { -not $mixedNorm -or [IO.Path]::GetFullPath($_).TrimEnd('\') -ine $mixedNorm })
     $why = Get-RunRootProblem $full $list
     if ($why) { return $why }
-    if ((Test-Path -LiteralPath $MixedCorpus) -and (Test-Contained $full $MixedCorpus)) { return 'is inside the existing mixed corpus' }
+    if ($mixedNorm -and (Test-Path -LiteralPath $mixedNorm) -and (Test-Contained $full $mixedNorm)) { return 'is inside the existing mixed corpus' }
     if (Test-Overlap $full $mods) { return 'overlaps -Mods' }
     $null
 }
@@ -209,9 +225,13 @@ function Select-Corpus([string]$mods, [int]$seed, [double]$maxGB) {
     $opt = [IO.EnumerationOptions]::new()
     $opt.RecurseSubdirectories = $true
     $opt.IgnoreInaccessible = $true
+    # shortcut: junctions and symlinks (a mod folder, its textures folder, or any folder or file below) are skipped, not followed, so a link cannot lead the scan out of -Mods; upgrade when an owner mod is a link.
     $opt.AttributesToSkip = [IO.FileAttributes]::ReparsePoint
-    foreach ($modDir in [IO.Directory]::EnumerateDirectories($modsFull)) {
-        $tex = Get-ChildItem -LiteralPath $modDir -Directory -Filter 'textures' -Force | Select-Object -First 1
+    $top = [IO.EnumerationOptions]::new()
+    $top.IgnoreInaccessible = $true
+    $top.AttributesToSkip = [IO.FileAttributes]::ReparsePoint
+    foreach ($modDir in [IO.Directory]::EnumerateDirectories($modsFull, '*', $top)) {
+        $tex = Get-ChildItem -LiteralPath $modDir -Directory -Filter 'textures' -Force | Where-Object { -not $_.LinkType } | Select-Object -First 1
         if (-not $tex) { continue }
         foreach ($f in [IO.Directory]::EnumerateFiles($tex.FullName, '*', $opt)) {
             $rel = $f.Substring($modsFull.Length + 1)
@@ -222,28 +242,24 @@ function Select-Corpus([string]$mods, [int]$seed, [double]$maxGB) {
         }
     }
 
-    # Matched sets by base name in one folder.
-    $pbrGroups = @{}
-    $byBase = @{}
+    # Matched groups by base name in one folder: roles c (colour), n (_n) and r (_rmaos); sets and pairs both read this table.
+    $groups = @{}
     foreach ($rel in $dds) {
         $name = [IO.Path]::GetFileName($rel).ToLowerInvariant()
         $folder = [IO.Path]::GetDirectoryName($rel).ToLowerInvariant()
         if ($name -match '^(.+)_rmaos\.dds$') { $role = 'r'; $base = $Matches[1] }
         elseif ($name -match '^(.+)_n\.dds$') { $role = 'n'; $base = $Matches[1] }
         else { $role = 'c'; $base = $name.Substring(0, $name.Length - 4) }
-        $gk = "$folder|$base"
-        foreach ($pair in @(@($pbrGroups, $gk), @($byBase, "$folder|$base"))) {
-            $tbl = $pair[0]; $key = $pair[1]
-            if (-not $tbl.ContainsKey($key)) { $tbl[$key] = @{} }
-            if (-not $tbl[$key].ContainsKey($role)) { $tbl[$key][$role] = $rel }
-        }
+        $key = "$folder|$base"
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = @{} }
+        if (-not $groups[$key].ContainsKey($role)) { $groups[$key][$role] = $rel }
     }
 
-    $sets = @($pbrGroups.Keys | Where-Object { $g = $pbrGroups[$_]; $g.c -and $g.n -and $g.r })
+    $sets = @($groups.Keys | Where-Object { $g = $groups[$_]; $g.c -and $g.n -and $g.r })
     $script:Ctx.Cov['pbr-set'].Candidates = $sets.Count
     foreach ($k in (Sort-Seeded $sets)) {
         if ($script:Ctx.Cov['pbr-set'].Sets -ge 30) { break }
-        $g = $pbrGroups[$k]
+        $g = $groups[$k]
         if (Add-Pick @($g.c, $g.n, $g.r) 'pbr-set') { $script:Ctx.Cov['pbr-set'].Sets++ }
     }
 
@@ -251,11 +267,11 @@ function Select-Corpus([string]$mods, [int]$seed, [double]$maxGB) {
     $script:Ctx.Cov['normal-4k'].Candidates = $nCands.Count
     Pick-Files 'normal-4k' $nCands 40 { param($h) [Math]::Max($h.Width, $h.Height) -ge 4096 }
 
-    $pairs = @($byBase.Keys | Where-Object { $g = $byBase[$_]; $g.c -and $g.n -and -not $g.r })
+    $pairs = @($groups.Keys | Where-Object { $g = $groups[$_]; $g.c -and $g.n -and -not $g.r })
     $script:Ctx.Cov['pair-1k-2k'].Candidates = $pairs.Count
     foreach ($k in (Sort-Seeded $pairs)) {
         if ($script:Ctx.Cov['pair-1k-2k'].Files -ge 100) { break }
-        $g = $byBase[$k]
+        $g = $groups[$k]
         $ok = $true
         foreach ($r in @($g.c, $g.n)) {
             $h = Get-Hdr $r
@@ -299,6 +315,9 @@ function Invoke-Build([string]$mods, [string]$dest, [int]$seed, [double]$maxGB, 
 
     Select-Corpus $modsFull $seed $maxGB
     $c = $script:Ctx
+    # The scan can take long: check the destination again right before creating it.
+    $why = Get-DestProblem $destFull $modsFull $protected
+    if ($why) { throw "refused: -Dest $dest $why" }
     New-Item -ItemType Directory -Path $destFull | Out-Null    # no -Force: fails if the folder exists
 
     $rows = [Collections.Generic.List[object]]::new()
@@ -338,9 +357,10 @@ function Invoke-Build([string]$mods, [string]$dest, [int]$seed, [double]$maxGB, 
         $note = if ($unit -lt $v.Quota) { "short by $($v.Quota - $unit)" } else { '' }
         [void]$md.Append("| $k | $($v.Quota) | $($v.Files) | $(if ($k -eq 'pbr-set') { $v.Sets } else { '' }) | $($v.Bytes) | $($v.Candidates) | $note |`r`n")
     }
+    [void]$md.Append("`r`nCandidates are the files (or complete groups, for pbr-set and pair-1k-2k) that match the category's name rule, counted before the header size and alpha tests.`r`n")
     if ($c.Capped) { [void]$md.Append("`r`nThe byte cap skipped at least one pick.`r`n") }
     Write-NewText (Join-Path $destFull 'coverage.md') $md.ToString()
-    [pscustomobject]@{ Dest = $destFull; Rows = $rows; Capped = $c.Capped }
+    [pscustomobject]@{ Dest = $destFull; Rows = $rows; Capped = $c.Capped; Cov = $c.Cov }
 }
 
 # ---------------------------------------------------------------- self-test
@@ -356,8 +376,10 @@ function New-Dds([string]$path, [int]$w, [int]$h, [string]$kind) {
     $pf = 4
     if ($kind -eq 'DXT1A') { $pf = 5 }
     Add-Bytes $b 80 $pf
-    $fcc = switch ($kind) { 'DXT1' { 'DXT1' } 'DXT1A' { 'DXT1' } 'DXT5' { 'DXT5' } default { 'DX10' } }
-    [Text.Encoding]::ASCII.GetBytes($fcc).CopyTo($b, 84)
+    if ($kind -eq 'D3D113') { Add-Bytes $b 84 113 } else {    # numeric D3DFMT code in the FourCC field
+        $fcc = switch ($kind) { 'DXT1' { 'DXT1' } 'DXT1A' { 'DXT1' } 'DXT5' { 'DXT5' } default { 'DX10' } }
+        [Text.Encoding]::ASCII.GetBytes($fcc).CopyTo($b, 84)
+    }
     if ($dx10) {
         $dxgi = switch ($kind) { 'BC7' { 98 } 'BC5' { 83 } default { 71 } }
         Add-Bytes $b 128 $dxgi; Add-Bytes $b 132 3; Add-Bytes $b 140 1
@@ -426,6 +448,12 @@ function Invoke-SelfTest {
     New-Dds (& $tex 'ModD' 'ground\lone.dds') 1024 1024 'BC7'
     New-Dds (& $tex 'ModD' 'ground\big.dds') 4096 4096 'BC7'
     New-Dds (& $tex 'ModD' 'ground\bigx_n.dds') 4096 4096 'BC5'
+    # Matched pairs outside 1K-2K that normal-4k cannot take first: both 512, and a 4096 colour with a 2048 normal.
+    New-Dds (& $tex 'ModD' 'ground\s.dds') 512 512 'BC7'
+    New-Dds (& $tex 'ModD' 'ground\s_n.dds') 512 512 'BC5'
+    New-Dds (& $tex 'ModD' 'ground\t.dds') 4096 4096 'BC7'
+    New-Dds (& $tex 'ModD' 'ground\t_n.dds') 2048 2048 'BC5'
+    New-Dds (& $tex 'ModD' 'ground\odd.dds') 512 512 'D3D113'
 
     $before = @{}
     foreach ($f in Get-ChildItem -LiteralPath $mods -Recurse -File) { $before[$f.FullName] = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash }
@@ -460,14 +488,19 @@ function Invoke-SelfTest {
     Case '4K normals: 40 of the 46 at 4096 (small ones and set members never)' {
         $by['normal-4k'].Count -eq 40 -and -not (@($by['normal-4k']) -match 'small') -and -not (@($by['normal-4k']) -match 'pbr')
     }
-    Case 'big.dds at 4096 is not a 1K-2K pair' { -not (@($by['pair-1k-2k']) -match 'big') }
+    Case 'matched pairs outside 1K-2K (s 512, t 4096 + 2048) are candidates but neither member is picked as a pair' {
+        $r1.Cov['pair-1k-2k'].Candidates -eq 5 -and -not (@($by['pair-1k-2k']) -match '\\(s|t|big)(_n)?\.dds$')
+    }
+    Case 'a numeric D3DFMT code in the FourCC field reads as D3DFMT113, not control bytes' { (Read-DdsHeader (& $tex 'ModD' 'ground\odd.dds')).Format -eq 'D3DFMT113' }
     Case 'pairs: the three matched 2K pairs (6 files), not lone.dds' { $by['pair-1k-2k'].Count -eq 6 -and (Names 'pair-1k-2k') -eq 'g1.dds,g1_n.dds,g2.dds,g2_n.dds,g3.dds,g3_n.dds' }
     Case 'foliage: BC7, BC3, BC1 with alpha bits and DX10 BC1 with straight alpha; not DXT1 without alpha, not DX10 opaque' {
         (Names 'foliage') -eq 'fbc1a.dds,fbc3.dds,fbc7.dds,fdx.dds'
     }
     Case 'icons: 60 of the 65 at 128 px, none of the 512 px ones' { $by['icon'].Count -eq 60 -and -not (@($by['icon']) -match 'big') }
     Case 'raw packing maps: the roughness, metallic and AO sources' { (Names 'raw-map') -eq 'rock_ao.tif,rock_metallic.tga,rock_roughness.png' }
-    Case 'source images: 100 of the 120, no raw map among them' { $by['source-image'].Count -eq 100 -and -not (@($by['source-image']) -match 'rock_') }
+    Case 'source images: 100 of the 120, no raw map among them or among their candidates (120 vs 3 raw)' {
+        $by['source-image'].Count -eq 100 -and -not (@($by['source-image']) -match 'rock_') -and $r1.Cov['source-image'].Candidates -eq 120 -and $r1.Cov['raw-map'].Candidates -eq 3
+    }
     Case 'BC7 and BC3 count as alpha formats, DXT1 without alpha bits does not, DXT1 with them does' {
         (Read-DdsHeader (& $tex 'ModF' 'landscape\fbc7.dds')).Alpha -and (Read-DdsHeader (& $tex 'ModF' 'landscape\fbc3.dds')).Alpha -and
         -not (Read-DdsHeader (& $tex 'ModF' 'landscape\fbc1.dds')).Alpha -and (Read-DdsHeader (& $tex 'ModF' 'landscape\fbc1a.dds')).Alpha
@@ -514,6 +547,16 @@ function Invoke-SelfTest {
         foreach ($k in $before.Keys) { if ((Get-FileHash -LiteralPath $k -Algorithm SHA256).Hash -ne $before[$k]) { $same = $false } }
         $same -and @(Get-ChildItem -LiteralPath $mods -Recurse -File).Count -eq $before.Count
     }
+    Case 'the mixed-corpus exemption (stand-in): a new destination there is allowed, inside an existing one it is refused, without the exemption it is refused' {
+        $mx = Join-Path $t 'mixedstand'
+        $list = @($mx) + @(Get-ProtectedList)
+        $new = -not (Get-DestProblem $mx $mods $list $mx)
+        $no = [bool](Get-DestProblem $mx $mods $list '')
+        New-Item -ItemType Directory -Path $mx | Out-Null
+        $inside = (Get-DestProblem (Join-Path $mx 'sub') $mods $list $mx) -like '*existing mixed corpus*'
+        $new -and $no -and $inside -and (Get-ChildItem -LiteralPath $mx -Force).Count -eq 0
+    }
+    Case 'the real mixed-corpus entry comes from the shared protected list' { $MixedCorpus -and (Get-ProtectedList) -contains $MixedCorpus -and $MixedCorpus -like '*mixed-corpus' }
     Case 'the real protected list refuses its own folders as -Dest (string check, nothing created)' {
         (Get-DestProblem 'G:\Acherus\corpus-never' $mods @(Get-ProtectedList)) -and (Get-DestProblem 'B:\testdata\x-never' $mods @(Get-ProtectedList))
     }
