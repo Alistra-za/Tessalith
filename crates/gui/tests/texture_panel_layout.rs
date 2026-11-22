@@ -91,6 +91,67 @@ fn controls(h: &Harness<'static, AppModel>, area: Rect) -> Vec<(&'static str, Re
     v
 }
 
+fn open_combo(h: &mut Harness<'static, AppModel>, name: &str) {
+    let c = centre(h);
+    let at = control(h, Role::ComboBox, name, c);
+    h.query_all(by().role(Role::ComboBox).label(name))
+        .find(|n| n.rect() == at)
+        .unwrap()
+        .click();
+    h.run();
+}
+
+#[test]
+fn the_tag_and_normal_entries_read_plainly() {
+    use sdc_gui::model::labels::{RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(model(d.path()), 1280.0);
+    instant_tips(&h.ctx); // the file's harness keeps egui's tooltip delay
+    open_combo(&mut h, "DDS tag");
+    let entry = h
+        .query_all_by_label_contains(UNORM_LABEL)
+        .next()
+        .expect("the UNORM entry");
+    entry.hover();
+    h.run();
+    assert!(h.query_by_label(UNORM_HOVER).is_some());
+    assert!(h.query_by_label_contains("UNORM (linear)").is_none());
+    // a PBR normal shows Normal handling
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01_normal.png");
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    open_combo(&mut h, "Normal handling");
+    // The set may already have chosen the bake, so the label can also be the combo's shown text; the popup's entry
+    // is built after the panel, so it is the last match.
+    h.query_all_by_label(RENORM_BAKE_LABEL)
+        .last()
+        .expect("the popup's entry")
+        .hover();
+    h.run();
+    assert!(h.query_by_label(RENORM_BAKE_HOVER).is_some());
+}
+
+#[test]
+fn the_variance_bake_provenance_explains_itself() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01_normal.png");
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    h.run();
+    let c = centre(&h);
+    h.query_all(by().role(Role::ComboBox).label("Normal handling"))
+        .find(|n| c.contains_rect(n.rect()))
+        .expect("normal handling on this normal")
+        .hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains(sdc_gui::model::labels::VARIANCE_BAKE_HOVER)
+        .is_some());
+}
+
 #[test]
 fn every_control_starts_at_the_same_x() {
     let d = tempfile::tempdir().unwrap();
@@ -508,8 +569,7 @@ fn alpha_row_shows_the_proposal() {
 #[test]
 fn a_linked_control_keeps_its_label_under_a_hover() {
     const NORMAL: &str = "landscape/rock01_normal.png";
-    const HOVER: &str =
-        "Renormalise and bake also bakes this set's complex _m gloss (anti-shimmer)";
+    const HOVER: &str = sdc_gui::model::labels::RENORM_BAKE_HOVER;
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
@@ -523,7 +583,7 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
     h.hover_at(combo.center());
     h.run();
     assert!(
-        h.query_all_by_label_contains("anti-shimmer")
+        h.query_all_by_label_contains("smaller mips of the _m green channel")
             .next()
             .is_some()
             || h.query_all_by_value(HOVER).next().is_some(),
@@ -538,12 +598,54 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
     let named_by_hover: Vec<String> = h
         .query_all_by_role(Role::ComboBox)
         .filter_map(|n| n.accesskit_node().label())
-        .filter(|l| l.contains("anti-shimmer"))
+        .filter(|l| l.contains("_m green channel"))
         .collect();
     assert!(
         named_by_hover.is_empty(),
         "no combo is named by the hover: {named_by_hover:?}"
     );
+}
+
+/// The explicit choice of the bake on a plain normal in a complex material set says what it does to the _m gloss, and
+/// the active bake also says what it does to an XYZ normal kept as authored (Table B).
+#[test]
+fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
+    use sdc_gui::model::labels::VARIANCE_BAKE_HOVER;
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize_bake"));
+    m.set_field(NORMAL, "mips.normal_base", serde_json::json!("keep"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    instant_tips(&h.ctx);
+    h.run();
+    let c = centre(&h);
+    let at = control(&h, Role::ComboBox, "Normal handling", c);
+    h.hover_at(at.center());
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("smaller mips of the _m green channel")
+            .next()
+            .is_some(),
+        "the gloss sentence"
+    );
+    assert!(
+        h.query_by_label_contains("preserves average length")
+            .is_some(),
+        "the Keep as authored sentence"
+    );
+    assert!(
+        h.query_by_label_contains("The bake uses unit directions")
+            .is_some(),
+        "the unit direction sentence"
+    );
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_some());
 }
 
 /// Note HI14: the proposal is display only.

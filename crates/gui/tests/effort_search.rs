@@ -20,11 +20,11 @@ const BC1: &str = "encoder.bc1_search";
 /// The BC3 row's id (`fields::BC3_SEARCH`), spelt out so these tests compile before it exists.
 const BC3: &str = "encoder.bc3_search";
 const LEVELS: [&str; 7] = [
-    "Ultrafast",
-    "Veryfast",
+    "Ultra fast",
+    "Very fast",
     "Fast",
     "Basic",
-    "Veryslow",
+    "Very slow",
     "Slowest",
     "Max",
 ];

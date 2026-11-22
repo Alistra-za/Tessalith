@@ -375,7 +375,7 @@ fn the_presets_tab_has_no_project_block() {
     assert!(h.query_by_label_contains("This project").is_none());
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h
-        .query_by_label("Wins over a preset's own Target.")
+        .query_by_label("This beats the Target set in a preset.")
         .is_none());
 }
 

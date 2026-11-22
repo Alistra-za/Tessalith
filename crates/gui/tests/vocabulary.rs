@@ -13,7 +13,7 @@ const SET: &str = "landscape/rock01";
 
 /// Words the UI no longer uses for a concept that has one name (FC9): the old names of "undecided" and "not ready",
 /// the id-with-spaces sub-type label, and the two half-size names Review does not use.
-const STRAYS: [&str; 15] = [
+const STRAYS: [&str; 17] = [
     "need a decision",
     "Need a decision",
     "Needs a decision",
@@ -30,6 +30,9 @@ const STRAYS: [&str; 15] = [
     "sub-type",
     "Sub-type",
     "spec §",
+    // Table B: the Effort level and the DDS tag read as words.
+    "Veryslow",
+    "UNORM (linear)",
 ];
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {

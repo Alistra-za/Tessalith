@@ -300,8 +300,9 @@ fn the_bc6h_effort_dropdown_still_offers_veryslow() {
         combos[0].click();
     }
     h.run();
-    h.get_by_label("Veryslow");
+    h.get_by_label("Very slow");
     assert!(h.query_all_by_label("Slowest").count() >= 1);
+    assert!(h.query_by_label("Veryslow").is_none());
 }
 
 /// FM42: on BC1 and BC3 the BC7 weighting row is hidden and a Perceptual tick edits `encoder.perceptual`; on BC7 the

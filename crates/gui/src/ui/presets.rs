@@ -669,7 +669,7 @@ fn field_row(
         r.response.on_disabled_hover_text(why);
     } else if default_effort {
         r.response
-            .on_hover_text("BC6H default: no preset sets the effort, so BC6H encodes at slowest (the peak-preserving mode). Pick Veryslow for the plain mode.");
+            .on_hover_text("BC6H default: no preset sets the effort, so BC6H encodes at slowest (the peak-preserving mode). Pick Very slow for the plain mode.");
     }
     if let Some(v) = r.inner.0 {
         acts.push(set(st, scope, field, v));

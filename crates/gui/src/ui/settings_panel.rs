@@ -15,7 +15,10 @@ use crate::model::fields::{
     WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
-use crate::model::labels::type_hover;
+use crate::model::labels::{
+    effort_label, type_hover, RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL,
+    VARIANCE_BAKE_HOVER,
+};
 use crate::model::{Answer, AppModel};
 use eframe::egui;
 use engine::codes::{Code, Warning};
@@ -264,13 +267,6 @@ pub fn alpha_hint(policy: AlphaPolicy) -> &'static str {
     }
 }
 
-fn capitalised(s: &str) -> String {
-    let mut c = s.chars();
-    c.next()
-        .map(|f| f.to_uppercase().chain(c).collect())
-        .unwrap_or_default()
-}
-
 /// Options for the fields that pick from a list; `None` for the checkboxes and the slider.
 pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
     Some(match field {
@@ -302,7 +298,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .filter_map(|((_, t), label)| {
                 let name = match t {
                     ColorTag::Srgb => "_SRGB",
-                    ColorTag::Unorm => "UNORM (linear)",
+                    ColorTag::Unorm => UNORM_LABEL,
                     ColorTag::NotApplicable => return None,
                 };
                 let mark = if label.ends_with(NOT_VALID) {
@@ -328,7 +324,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         }
         "mips.normal" => vec![
             opt(json!("renormalize"), "Renormalise"),
-            opt(json!("renormalize_bake"), "Renormalise and bake"),
+            opt(json!("renormalize_bake"), RENORM_BAKE_LABEL),
         ],
         "mips.normal_base" => vec![
             opt(json!("renormalize"), "Renormalise to unit length"),
@@ -388,7 +384,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             "max",
         ]
         .into_iter()
-        .map(|e| opt(json!(e), &capitalised(e)))
+        .map(|e| opt(json!(e), effort_label(e)))
         .collect(),
         // Note JI4: the Effort row's choices on BC4 and BC5, BC1, and BC3 (both fields, `BC3_CHOICES`).
         "encoder.bc45_search_radius" => search_options(true),
@@ -533,6 +529,10 @@ pub(super) fn combo_for(
                         if let Ok(p) = serde_json::from_value::<AlphaPolicy>(v.clone()) {
                             r = r.on_hover_text(alpha_hint(p));
                         }
+                    } else if field == "color.tag" && *v == json!(ColorTag::Unorm) {
+                        r = r.on_hover_text(UNORM_HOVER);
+                    } else if field == "mips.normal" && *v == json!("renormalize_bake") {
+                        r = r.on_hover_text(RENORM_BAKE_HOVER);
                     }
                     if r.clicked() {
                         picked = Some(v.clone());
@@ -956,18 +956,20 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         .inner
     });
     let r = own_name_after_link(r, f.field);
-    // Note CL40: on a `normal` in a complex material set, renormalize_bake is the opt-in gloss bake.
-    let r = if f.field == "mips.normal"
+    // Note CL40: on a `normal` in a complex material set, the bake is the opt-in gloss bake, so its hover shows
+    // before the choice. Elsewhere the hover (and the variance line) belongs to the active bake only.
+    let bake_active = f.field == "mips.normal" && f.value == json!("renormalize_bake");
+    let gloss_opt_in = f.field == "mips.normal"
         && cx.job.profile.subtype == Subtype::Normal
         && cx
             .job
             .shader
             .as_ref()
-            .is_some_and(|s| s.shader == engine::shader::Shader::ComplexMaterial)
-    {
-        r.on_hover_text(
-            "Renormalise and bake also bakes this set's complex _m gloss (anti-shimmer)",
-        )
+            .is_some_and(|s| s.shader == engine::shader::Shader::ComplexMaterial);
+    let r = if bake_active {
+        r.on_hover_text(format!("{RENORM_BAKE_HOVER}\n{VARIANCE_BAKE_HOVER}"))
+    } else if gloss_opt_in {
+        r.on_hover_text(RENORM_BAKE_HOVER)
     } else {
         r
     };

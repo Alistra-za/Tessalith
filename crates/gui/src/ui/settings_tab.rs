@@ -1,8 +1,9 @@
 //! Note JI1: the Settings tab of the centre column (or its own window when popped out, Note FB7). "This project" (Mode,
 //! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml). Drawing
 //! only: every edit is collected and applied once the tab is drawn.
-use super::header::{self, target_help, target_name};
+use super::header::{self, target_help};
 use crate::look::Combo036 as _;
+use crate::model::code_text::target_label;
 use crate::model::{AppModel, CentreTab, EXPORT_WITHOUT_REVIEW_WAIT};
 use crate::settings::ChecksSettings;
 use eframe::egui;
@@ -148,10 +149,10 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
         row_label(ui, "Mode");
         ui.add_enabled_ui(off.is_none(), |ui| {
             let r = egui::ComboBox::from_id_salt("mode")
-                .selected_text(target_name(model.target))
+                .selected_text(target_label(model.target))
                 .show_ui_036(ui, |ui| {
                     for t in [Target::Cs, Target::Vanilla] {
-                        ui.selectable_value(&mut picked, t, target_name(t))
+                        ui.selectable_value(&mut picked, t, target_label(t))
                             .on_hover_text(target_help(t));
                     }
                 })
@@ -161,7 +162,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
                 egui::WidgetInfo::labeled(
                     egui::Role::ComboBox,
                     enabled,
-                    format!("Mode (this project): {}", target_name(model.target)),
+                    format!("Mode (this project): {}", target_label(model.target)),
                 )
             });
             match &off {
@@ -178,7 +179,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
     });
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + ui.spacing().item_spacing.x);
-        ui.weak("Wins over a preset's own Target.").on_hover_text(
+        ui.weak("This beats the Target set in a preset.").on_hover_text(
             "The project's target in sdc.toml is used before the preset's Target (sdc.exe does the same).",
         );
     });

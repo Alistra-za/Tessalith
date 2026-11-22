@@ -141,6 +141,31 @@ pub const LEGEND: [&str; 18] = [
     "Empty slots: the letters shown while you drag have no file yet.",
 ];
 
+/// The Effort choice for an `Effort` id (`ultrafast` ... `max`), as the combo and the presets editor show it.
+pub fn effort_label(id: &str) -> &'static str {
+    match id {
+        "ultrafast" => "Ultra fast",
+        "veryfast" => "Very fast",
+        "fast" => "Fast",
+        "basic" => "Basic",
+        "veryslow" => "Very slow",
+        "slowest" => "Slowest",
+        "max" => "Max",
+        _ => "Unknown effort",
+    }
+}
+
+/// The DDS tag choice "UNORM" and what it means for the game.
+pub const UNORM_LABEL: &str = "UNORM (as stored)";
+pub const UNORM_HOVER: &str = "The game reads the colours as stored. Right for everything except the colour maps of a PBR set under Community Shaders.";
+
+/// The Normal handling choice that bakes the normal's lost detail into roughness or gloss.
+pub const RENORM_BAKE_LABEL: &str = "Bake normal detail into roughness or gloss";
+pub const RENORM_BAKE_HOVER: &str = "The bake reads unit directions. Where they vary, the smaller mips gain roughness. On a plain normal in a complex material set, choosing this also reduces gloss in the smaller mips of the _m green channel.";
+
+/// Shown on Normal handling while the bake is active, beside `RENORM_BAKE_HOVER`.
+pub const VARIANCE_BAKE_HOVER: &str = "Keep as authored preserves average length in smaller XYZ tangent-space base and coat normal mips. The bake uses unit directions with either base setting.";
+
 /// Words kept upper case (compared lower case).
 const INITIALISMS: [&str; 5] = ["ao", "uv", "rgb", "sss", "f0"];
 
