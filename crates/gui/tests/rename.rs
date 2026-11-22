@@ -935,3 +935,117 @@ fn the_item_and_set_menus_keep_their_rename_entries_in_order() {
         ]
     );
 }
+
+const EXPORT_COMMENT: &str = "# rocks stay out of Vanilla";
+
+/// Writes `EXPORT_COMMENT` above `skip` inside `[export]`, through the document's public text and restore (SM-R6).
+fn comment_the_export_table(m: &mut AppModel) {
+    m.edit_docs("Comment [export]", None, false, |p, _| {
+        let text = p.text();
+        let at = text.find("skip").expect("an [export] skip line");
+        let mut seeded = text.clone();
+        seeded.insert_str(at, &format!("{EXPORT_COMMENT}\n"));
+        p.restore(&seeded);
+    });
+}
+
+fn project_text(m: &AppModel) -> String {
+    m.project.as_ref().unwrap().text()
+}
+
+/// SM-O6: a Textures-view rename of a set's diffuse moves the set's Also export opt-out with it (inside the one
+/// undo step), and keeps the `[export]` comments.
+#[test]
+fn a_textures_view_rename_moves_the_also_opt_out() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_skip_also("landscape/rock01", true);
+    idle(&mut m);
+    comment_the_export_table(&mut m);
+    idle(&mut m);
+    assert!(m.also_skipped("landscape/rock01"));
+    assert!(project_text(&m).contains(EXPORT_COMMENT));
+    let before_project = project_text(&m);
+    let before_sets = m.sets_doc.as_ref().unwrap().text();
+    m.click_item(ROCK, false, false);
+    m.open_rename(RenameMode::Inputs);
+    dialog(&mut m).recipe.prefix = "steel_".into();
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert!(
+        m.also_skipped("landscape/steel_rock01"),
+        "the opt-out follows"
+    );
+    assert!(
+        !m.also_skipped("landscape/rock01"),
+        "none left on the old id"
+    );
+    assert!(
+        project_text(&m).contains(EXPORT_COMMENT),
+        "the [export] comment survives"
+    );
+    m.undo();
+    idle(&mut m);
+    assert_eq!(project_text(&m), before_project);
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before_sets);
+    assert!(m.also_skipped("landscape/rock01"));
+}
+
+/// One direction of the chain: both diffuses read under unused aliases (physical paths are always reserved, so a
+/// chain runs over aliases), `skipped` is the only opted-out set, and the typed names make the retargets
+/// `from_a -> to_a` and `from_b -> to_b`, where one's new name is the other's old one.
+fn chain(skipped: &str, typed: [(&str, &str); 2], expect_skipped: &str, expect_not: &[&str]) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.decide(LEAF, Answer::Subtype(Subtype::PbrAlbedo));
+    idle(&mut m);
+    m.edit_docs("aliases", None, true, |p, _| {
+        p.set_read_as(ROCK, Some("landscape/a.png"));
+        p.set_read_as(LEAF, Some("landscape/b.png"));
+    });
+    idle(&mut m);
+    assert_eq!(set_id_of(&m, ROCK), "landscape/a");
+    assert_eq!(set_id_of(&m, LEAF), "landscape/b");
+    m.set_skip_also(skipped, true);
+    idle(&mut m);
+    let before = project_text(&m);
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    m.open_rename(RenameMode::Inputs);
+    for (k, v) in typed {
+        dialog(&mut m).typed.insert(k.into(), v.into());
+    }
+    assert!(
+        plan(&m).can_apply(),
+        "the chain can apply: {:?}",
+        plan(&m).rows
+    );
+    assert!(m.apply_rename());
+    idle(&mut m);
+    assert!(m.also_skipped(expect_skipped), "the opt-out moved once");
+    for id in expect_not {
+        assert!(!m.also_skipped(id), "{id} must not be skipped");
+    }
+    m.undo();
+    idle(&mut m);
+    assert_eq!(project_text(&m), before);
+    assert!(m.also_skipped(skipped));
+}
+
+/// SM-O6 (SM-R3): `a -> b`, `b -> c` in one Apply moves each opt-out once: a skip on `a` ends on `b`, never `c`.
+#[test]
+fn a_rename_chain_moves_each_opt_out_once() {
+    chain(
+        "landscape/a",
+        [(ROCK, "landscape/b.png"), (LEAF, "landscape/c.png")],
+        "landscape/b",
+        &["landscape/c", "landscape/a"],
+    );
+    // Reverse order: leaf takes rock's alias, rock goes to a new name.
+    chain(
+        "landscape/b",
+        [(LEAF, "landscape/a.png"), (ROCK, "landscape/c.png")],
+        "landscape/a",
+        &["landscape/c", "landscape/b"],
+    );
+}

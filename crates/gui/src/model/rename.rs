@@ -806,6 +806,8 @@ impl AppModel {
             for (from, to) in &retargets {
                 m.edit_docs(&label, None, true, |_, d| d.retarget_auto(from, to));
             }
+            // The Also opt-outs follow in one pass over the whole mapping, so a chain moves each once (Note FT1).
+            m.edit_docs(&label, None, true, |p, _| p.rename_skips_also(&retargets));
             for r in &rows {
                 match d.mode {
                     RenameMode::Inputs => {
