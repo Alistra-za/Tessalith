@@ -6,7 +6,7 @@ use crate::bc1::frames::{encode_alpha_on, encode_level_on, encode_on};
 use crate::bc1::palette::{build_single_tables, dual_palette, single_tables};
 use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6};
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
-use crate::bc4::{search_max_on, search_on};
+use crate::bc4::{search_max, search_max_on, search_on};
 use crate::gen;
 use crate::hits::{counts, Hit};
 use crate::path::{frame_runs, kernel_runs, tested_paths, Base, Wide};
@@ -358,6 +358,34 @@ fn the_public_functions_run_the_best_path() {
             }
         }
     }
+}
+
+/// The public `bc4::search_max` on the six bench blocks of `gen::MAX_BENCH_BYTES` gives the bench's bytes, unguarded
+/// and at cut 128, and its `_on` entry's on `Path::best()`, running frames on that path only (`on_best`). On
+/// `MAX_GUARD_FALLBACK` the guarded bytes differ from the unguarded ones, so a wrapper that drops the guard fails.
+#[test]
+fn search_max_is_the_bench_bytes_on_the_best_path() {
+    let best = Path::best();
+    for (v, [_, _, _, max, max128]) in gen::MAX_BENCH_BYTES {
+        for (guard, want) in [(None, max), (Some(128), max128)] {
+            let got = on_best("bc4::search_max", || search_max(&v, guard));
+            assert_eq!(got, want, "bc4::search_max guard {guard:?}: values {v:?}");
+            assert_eq!(
+                got,
+                search_max_on(best, &v, guard),
+                "bc4::search_max_on guard {guard:?}: values {v:?}"
+            );
+        }
+    }
+    let [_, _, _, max, max128] = gen::MAX_BENCH_BYTES
+        .iter()
+        .find(|(v, _)| *v == gen::MAX_GUARD_FALLBACK)
+        .unwrap()
+        .1;
+    assert_ne!(
+        max, max128,
+        "the guard fixture no longer tells a dropped guard"
+    );
 }
 
 /// Each frame entry runs its path's frame once per call: on every tested path, 4 blocks (one from each of the first 4

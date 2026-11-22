@@ -1061,6 +1061,8 @@ mod tests {
         for v in gen::bc4_classes(0xB4B4_0010, 12).iter().chain(&fixed) {
             for guard in [None, Some(1), Some(128), Some(201), Some(255)] {
                 let want = search_max_reference(v, guard);
+                // The public function as main's test called it, so a wrapper that drops an argument fails here.
+                assert_eq!(search_max(v, guard), want, "{v:?} guard {guard:?} public");
                 for path in tested_paths() {
                     assert_eq!(
                         search_max_on(path, v, guard),

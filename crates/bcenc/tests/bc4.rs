@@ -259,10 +259,29 @@ fn bc4_max_channel_picks_the_named_channel() {
     }
 }
 
+/// The panic of `f`, as text; panics itself when `f` returns.
+fn panic_text(f: impl FnOnce() -> [u8; 8] + std::panic::UnwindSafe) -> String {
+    let payload = std::panic::catch_unwind(f).expect_err("no panic");
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_default()
+}
+
+/// Channel 4 panics on every path and through the public function.
 #[test]
-#[should_panic(expected = "channel 4")]
 fn bc4_max_channel_out_of_range_panics() {
-    bc4_encode_block_max(&[[0; 4]; 16], 4);
+    for path in paths::paths() {
+        let text = panic_text(|| bc4_encode_block_max_on(path, &[[0; 4]; 16], 4));
+        assert!(
+            text.contains("channel 4"),
+            "path {}: panicked with {text:?}",
+            path.name()
+        );
+    }
+    let text = panic_text(|| bc4_encode_block_max(&[[0; 4]; 16], 4));
+    assert!(text.contains("channel 4"), "public: panicked with {text:?}");
 }
 
 #[test]

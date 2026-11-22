@@ -167,7 +167,7 @@ Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref
 
 The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Shipped as `max` (Note LI). On BC4, BC5 and BC3 at cut 128 the port in `bcenc` writes the bench's bytes (pinned against the bench code in `crates/bcenc/tests/bc4.rs`); at another alpha-test cut the BC3 guard tests that cut instead of 128, so those bytes can differ from the bench's.
 
-Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. The measurement ran while other builds were running, so both encoders were slowed alike; compare the ratio, not the times:
+Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. Measured on main 31a47d75, before the plan E merge gave Max an AVX2 frame (Note HY22), so both searches ran the base SSE2 code; on a CPU with AVX2 the example now runs a different build of both. The measurement ran while other builds were running, so both encoders were slowed alike; compare the ratio, not the times:
 
 | format | max over `slowest` (radius 10) |
 |---|---|
