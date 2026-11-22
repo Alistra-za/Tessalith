@@ -1535,8 +1535,8 @@ pub(crate) fn drop_typed_roles(
             .chain(&set.shares)
             .partition(|i| typed.contains(i));
         for r in typed_m.into_iter().filter_map(role) {
-            if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
-                set.suffixes.remove(&r);
+            if !raw_m.iter().any(|&j| role(j) == Some(r)) {
+                set.suffixes.remove(r);
             }
         }
     }

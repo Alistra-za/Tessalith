@@ -217,8 +217,8 @@ impl AppModel {
             formats.insert(p.format.id());
         }
         let o = Arc::new(FilterOptions {
-            subtypes: subtypes.into_iter().collect(),
-            formats: formats.into_iter().collect(),
+            subtypes: subtypes.into_iter().map(str::to_owned).collect(),
+            formats: formats.into_iter().map(str::to_owned).collect(),
         });
         c.options = Some((self.items_rev(), o.clone()));
         o

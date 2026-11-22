@@ -2878,7 +2878,7 @@ fn unscoped_kaiser_leaves_the_normal_on_box() {
 #[test]
 fn default_profiles_hash_as_before() {
     let d = tempfile::tempdir().unwrap();
-    let ids: Vec<String> = engine::config::Subtype::ALL
+    let ids: Vec<&str> = engine::config::Subtype::ALL
         .iter()
         .map(|s| s.id())
         .collect();
@@ -2907,7 +2907,7 @@ fn default_profiles_hash_as_before() {
     };
     for id in &ids {
         let p = &planned(&o, &format!("h/{id}.png"))["profile"];
-        assert_eq!(p["subtype"].as_str(), Some(id.as_str()));
+        assert_eq!(p["subtype"].as_str(), Some(*id));
         assert!(p["mips"].is_object(), "{id}: {p}");
         assert!(p.get("resize").is_none(), "{id}: {p}");
         assert!(p["mips"].get("edge").is_none(), "{id}: {p}");

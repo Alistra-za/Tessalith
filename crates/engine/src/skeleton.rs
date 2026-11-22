@@ -464,7 +464,7 @@ fn refresh_suffixes(set: &mut TextureSet, files: &[InputFile], typed: &BTreeSet<
         .members
         .iter()
         .chain(&set.shares)
-        .filter_map(|&i| raw_role(&files[i]).map(|r| r.id()))
+        .filter_map(|&i| raw_role(&files[i]).map(|r| r.id().to_owned()))
         .collect();
     set.suffixes.extend(roles);
     drop_typed_roles(std::slice::from_mut(set), files, typed);

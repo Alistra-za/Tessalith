@@ -107,7 +107,7 @@ impl Vocab {
             VocabRole::Normal(_) => Some("n".into()),
             VocabRole::Emissive => Some("g".into()),
             VocabRole::CoatColour => Some("s".into()),
-            VocabRole::PackingInput(r) => Some(r.id()),
+            VocabRole::PackingInput(r) => Some(r.id().to_owned()),
         }
     }
 }

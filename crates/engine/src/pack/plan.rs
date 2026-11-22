@@ -821,7 +821,7 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     // Fuzz-1: a fuzz map takes no part in the recipe test: `auto` with a fuzz map alone builds `_rmaos`.
     let roles: BTreeSet<RawMap> = RawMap::INPUTS
         .into_iter()
-        .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(&r.id()))
+        .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(r.id()))
         .collect();
     let raw: Vec<RawInput> = roles
         .iter()
@@ -936,7 +936,7 @@ pub fn skin_f_candidate(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bo
 /// The set lists a fuzz map, its own or one shared in (Note HH1): the gate of `set_is_advanced_skin`'s Fuzz-5
 /// evidence, and of the fast re-plan's `FUZZ_SUBTYPE` check (`skeleton.rs`), so the two never disagree.
 pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
-    set.suffixes.contains(&RawMap::Fuzz.id())
+    set.suffixes.contains(RawMap::Fuzz.id())
 }
 
 /// Pass 1 over every set. `jobs` holds every resolved job of the batch and is changed in place: consumed raw jobs

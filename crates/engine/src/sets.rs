@@ -210,16 +210,14 @@ pub fn apply_set_edits(
         s.members.sort_unstable();
         let members = &s.members;
         s.shares.retain(|i| !members.contains(i));
-        let suffixes = s
-            .members
-            .iter()
-            .filter_map(|&i| member_split(&stem_lower(&files[i]), s, aliases).suffix)
-            .chain(
-                s.shares
-                    .iter()
-                    .filter_map(|&i| crate::pack::plan::raw_role(&files[i]).map(|r| r.id())),
-            )
-            .collect();
+        let suffixes =
+            s.members
+                .iter()
+                .filter_map(|&i| member_split(&stem_lower(&files[i]), s, aliases).suffix)
+                .chain(s.shares.iter().filter_map(|&i| {
+                    crate::pack::plan::raw_role(&files[i]).map(|r| r.id().to_owned())
+                }))
+                .collect();
         s.suffixes = suffixes;
     }
     for (t, e) in shared {

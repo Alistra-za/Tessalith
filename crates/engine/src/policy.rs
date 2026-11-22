@@ -2323,7 +2323,7 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
         .flatten();
     match role {
         Some(crate::helper::HelperRole::Raw(r)) => {
-            return packing_input_job(ctx, f, &r.id(), r, true)
+            return packing_input_job(ctx, f, r.id(), r, true)
         }
         Some(crate::helper::HelperRole::NotHelper) => {
             if gras_diffuse {

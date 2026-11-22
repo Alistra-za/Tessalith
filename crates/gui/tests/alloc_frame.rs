@@ -27,7 +27,8 @@ fn add(n: usize) {
     let _ = BYTES.try_with(|b| b.set(b.get() + n as u64));
 }
 
-// The sibling counter is process-wide in `crates/engine/tests/alloc_budget.rs`; a fix to one is checked against the other.
+// The sibling counter in `crates/engine/tests/alloc_budget.rs` counts process-wide for the plans (rayon) and per thread
+// for `enum_ids_do_not_allocate`; a fix to one is checked against the other.
 struct Counting;
 // SAFETY: forwards every call to the system allocator; only adds two per-thread counters.
 unsafe impl GlobalAlloc for Counting {

@@ -1,15 +1,19 @@
 //! Allocation budgets (Note LF1): how many allocation calls a warm full plan and a one-edit re-plan of the fast
-//! fixture make. The counter is process-wide (the engine plans on a rayon pool), so every request runs with
+//! fixture make, and enum ids that do not allocate (Note LH4). The plan counter is process-wide (the engine plans on a rayon pool), so every request runs with
 //! `jobs = 1` to keep the count the same from run to run. The tests share the counter, so each measuring test holds
 //! one static `Mutex` (`MEASURE`) for its whole body; no two run their setup or measuring at the same time.
+//! `enum_ids_do_not_allocate` counts per thread instead (`counted_here`): its work runs on the test's own thread, and
+//! the harness's threads must not reach an exact-zero count.
 #[path = "common/fast_fixture.rs"]
 mod fast_fixture;
 
 use engine::api::{BatchRequest, CancelToken};
+use engine::config::{Format, RawMap, Subtype};
 use engine::events::{Reporter, VecSink};
 use engine::session::Session;
 use fast_fixture::{fast_fixture, with_entry};
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -17,13 +21,27 @@ static CALLS: AtomicU64 = AtomicU64::new(0);
 static BYTES: AtomicU64 = AtomicU64::new(0);
 static MEASURE: Mutex<()> = Mutex::new(());
 
-// The sibling counter is per-thread in `crates/gui/tests/alloc_frame.rs`; a fix to one is checked against the other.
+thread_local! {
+    static HERE_CALLS: Cell<u64> = const { Cell::new(0) };
+    static HERE_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Adds one allocation of `n` bytes to both the process-wide and this thread's counters. `try_with`: a thread that is
+/// starting or ending has no counter, and the allocator must not panic there.
+fn add(n: usize) {
+    CALLS.fetch_add(1, Ordering::Relaxed);
+    BYTES.fetch_add(n as u64, Ordering::Relaxed);
+    let _ = HERE_CALLS.try_with(|c| c.set(c.get() + 1));
+    let _ = HERE_BYTES.try_with(|b| b.set(b.get() + n as u64));
+}
+
+// The sibling counter in `crates/gui/tests/alloc_frame.rs` is per-thread only; this file counts process-wide for the
+// plans (rayon) and per thread for `enum_ids_do_not_allocate`. A fix to one is checked against the other.
 struct Counting;
-// SAFETY: forwards every call to the system allocator; only adds two process-wide counters.
+// SAFETY: forwards every call to the system allocator; only adds process-wide and per-thread counters.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        CALLS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(l.size() as u64, Ordering::Relaxed);
+        add(l.size());
         // SAFETY: the caller's layout contract passes straight through to `System`.
         unsafe { System.alloc(l) }
     }
@@ -32,8 +50,7 @@ unsafe impl GlobalAlloc for Counting {
         unsafe { System.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-        CALLS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(n as u64, Ordering::Relaxed);
+        add(n);
         // SAFETY: `p`, `l` and `n` come from this allocator's caller and pass straight through to `System`.
         unsafe { System.realloc(p, l, n) }
     }
@@ -51,6 +68,14 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
     let (c0, b0) = (CALLS.load(Ordering::Relaxed), BYTES.load(Ordering::Relaxed));
     let r = f();
     let (c1, b1) = (CALLS.load(Ordering::Relaxed), BYTES.load(Ordering::Relaxed));
+    (r, c1 - c0, b1 - b0)
+}
+
+/// The allocation calls and bytes `f` made on this thread only (freed bytes still count), and its result.
+fn counted_here<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
+    let (c0, b0) = (HERE_CALLS.with(Cell::get), HERE_BYTES.with(Cell::get));
+    let r = f();
+    let (c1, b1) = (HERE_CALLS.with(Cell::get), HERE_BYTES.with(Cell::get));
     (r, c1 - c0, b1 - b0)
 }
 
@@ -96,6 +121,25 @@ fn the_counter_counts_each_allocation() {
         (1000..=1010).contains(&calls),
         "1,000 boxes counted as {calls} allocation calls"
     );
+}
+
+/// Note LH4: an enum id is a name, not a new string. Counted on this thread only: the ids run here, and the
+/// harness's own threads must not reach an exact-zero count.
+#[test]
+fn enum_ids_do_not_allocate() {
+    let _x = exclusive();
+    let (len, calls, _) = counted_here(|| {
+        let mut len = 0;
+        for r in RawMap::INPUTS {
+            len += std::hint::black_box(r.id()).len();
+        }
+        for s in Subtype::ALL {
+            len += std::hint::black_box(s.id()).len();
+        }
+        len + std::hint::black_box(Format::Bc6hUf16.id()).len()
+    });
+    assert!(len > 0);
+    assert_eq!(calls, 0, "enum ids made {calls} allocation calls");
 }
 
 #[test]

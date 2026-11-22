@@ -105,11 +105,11 @@ impl Property {
 impl From<Property> for String {
     fn from(p: Property) -> String {
         match p {
-            Property::Format(f) => f.id(),
+            Property::Format(f) => f.id().to_owned(),
             Property::Alpha => "alpha".into(),
             Property::Cutout => "cutout".into(),
             Property::Mips => "mips".into(),
-            Property::Subtype(s) => s.id(),
+            Property::Subtype(s) => s.id().to_owned(),
         }
     }
 }

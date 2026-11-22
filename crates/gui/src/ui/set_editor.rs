@@ -1783,7 +1783,7 @@ fn role_label(ui: &egui::Ui, role: RawMap) -> Arc<RoleLabel> {
     let key = egui::Id::unique(("fill-role", role, &small, ui.pixels_per_point().to_bits()));
     super::paint_cached(ui.ctx(), key, || {
         let id = role.id();
-        let text = if role == RawMap::Ao { "AO" } else { &id };
+        let text = if role == RawMap::Ao { "AO" } else { id };
         let width = ui
             .painter()
             .layout_no_wrap(text.to_owned(), small, egui::Color32::PLACEHOLDER)
@@ -1795,7 +1795,7 @@ fn role_label(ui: &egui::Ui, role: RawMap) -> Arc<RoleLabel> {
             text: Arc::new(egui::RichText::new(text).small()),
             source: format!("{text} channel source"),
             fill: format!("{text} fill"),
-            id,
+            id: id.to_owned(),
         })
     })
 }
