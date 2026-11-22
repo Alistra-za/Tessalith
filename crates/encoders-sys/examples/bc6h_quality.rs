@@ -1,15 +1,15 @@
 //! BC6H quality measurement of the vendored ISPC TC kernel on the bench's HDR images, and the comparison of two runs.
 //!
 //!   cargo run --offline --release -p encoders-sys --example bc6h_quality -- run --root <bench root> --out <csv>
-//!       [--target sse2|avx2|avx512]
+//!       [--target sse2|avx2|avx512] [--threads N]
 //!   cargo run --offline --release -p encoders-sys --example bc6h_quality -- compare <before.csv> <after.csv>
 //!       [--pair <levelA>:<levelB>]
 //!
 //! `run` reads `<root>\images2\hdr_real` and `<root>\images3\hdr_real` (set `hdr_real`, 18 images) and
 //! `<root>\images2\hdr_grad` (set `hdr_grad`, 4 images), `.f16` files sorted by path. Each channel goes through the
 //! engine's `clamp_half` and back to half bits (alpha 1.0); the CSV column `clamped` counts channels that changed.
-//! Every level is encoded one 4-row strip per call (`bc6h_compress_rows_on`) with the strips spread over up to 8
-//! threads, decoded with `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak
+//! Every level is encoded one 4-row strip per call (`bc6h_compress_rows_on`) with the strips spread over `--threads`
+//! threads (default: every available thread; later runs of a measurement chain pass the same N), decoded with `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak
 //! ratio. The metrics are ported from branch `bench` 87c5539f (`crates/bench/src/metrics.rs`, `s7b.rs`
 //! `peak`, `bc6peak.rs` `mean_ci`, `corpus.rs` `load_f16`).
 //!
@@ -58,11 +58,11 @@ fn clamp_half(v: f32) -> f32 {
     }
 }
 
-/// Up to 8 threads: the measurement shares the machine with other sessions.
+/// `--threads N` of `run`; unset, every available thread.
+static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
 fn threads() -> usize {
-    std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(8)
+    *THREADS.get_or_init(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
 }
 
 struct HalfImage {
@@ -82,6 +82,13 @@ fn load_f16(path: &Path) -> Res<HalfImage> {
         return Err(format!("{}: not an F16 file", path.display()).into());
     }
     let (width, height) = (u(4), u(8));
+    if width % 4 != 0 || height % 4 != 0 {
+        return Err(format!(
+            "{}: {width}x{height} is not a multiple of 4 in both directions",
+            path.display()
+        )
+        .into());
+    }
     let n = width as usize * height as usize;
     if b.len() != 12 + n * 8 {
         return Err(format!("{}: truncated", path.display()).into());
@@ -179,6 +186,7 @@ fn peak(px: &[[f32; 3]]) -> f32 {
 
 // ---- run ----
 
+#[derive(Debug)]
 struct Row {
     set: String,
     image: String,
@@ -246,6 +254,12 @@ fn run(args: &[String]) -> Res<()> {
         match a.as_str() {
             "--root" => root = Some(PathBuf::from(val()?)),
             "--out" => out = Some(PathBuf::from(val()?)),
+            "--threads" => {
+                let n: usize = val()?.parse()?;
+                if n == 0 || THREADS.set(n).is_err() {
+                    return Err("--threads needs a number of 1 or more, given once".into());
+                }
+            }
             "--target" => {
                 target = match val()?.as_str() {
                     "sse2" => IspcTarget::Sse2,
@@ -362,11 +376,22 @@ fn mean_ci(d: &[f64]) -> (f64, f64) {
 
 fn read_csv(path: &str) -> Res<Vec<Row>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    let mut rows = Vec::new();
+    parse_csv(&text, path)
+}
+
+/// The rows of a CSV; a second row with the same (set, image, level) is an error.
+fn parse_csv(text: &str, path: &str) -> Res<Vec<Row>> {
+    let mut rows: Vec<Row> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for (n, line) in text.lines().enumerate().skip(1) {
         let f: Vec<&str> = line.split(',').collect();
         if f.len() != 10 {
             return Err(format!("{path}:{}: expected 10 fields", n + 1).into());
+        }
+        if !seen.insert((f[0], f[1], f[2])) {
+            return Err(
+                format!("{path}:{}: duplicate row {} {} {}", n + 1, f[0], f[1], f[2]).into(),
+            );
         }
         rows.push(Row {
             set: f[0].into(),
@@ -393,20 +418,46 @@ fn index<'a>(rows: &'a [Row], level: &str) -> Index<'a> {
         .collect()
 }
 
-/// The paired rows of one set: (image, before, after), in (set, image) order.
-fn joined<'a>(a: &Index<'a>, b: &Index<'a>, set: &str) -> Vec<(&'a str, &'a Row, &'a Row)> {
-    a.iter()
-        .filter(|((s, _), _)| *s == set)
-        .filter_map(|((_, img), ra)| b.get(&(set, *img)).map(|rb| (*img, *ra, *rb)))
-        .collect()
+/// The paired rows of one set: (image, before, after), in (set, image) order. An image in only one file is an error.
+fn joined<'a>(a: &Index<'a>, b: &Index<'a>, set: &str) -> Res<Vec<(&'a str, &'a Row, &'a Row)>> {
+    let names = |i: &Index<'a>| -> Vec<&'a str> {
+        i.keys()
+            .filter(|(s, _)| *s == set)
+            .map(|(_, n)| *n)
+            .collect()
+    };
+    let (na, nb) = (names(a), names(b));
+    let unpaired: Vec<&str> = na
+        .iter()
+        .filter(|n| !nb.contains(n))
+        .chain(nb.iter().filter(|n| !na.contains(n)))
+        .copied()
+        .collect();
+    if !unpaired.is_empty() {
+        return Err(format!("{set}: images in only one file: {}", unpaired.join(", ")).into());
+    }
+    Ok(na
+        .iter()
+        .map(|n| (*n, a[&(set, *n)], b[&(set, *n)]))
+        .collect())
+}
+
+fn known_level(l: &str) -> Res<()> {
+    if LEVELS.iter().any(|k| level_name(*k) == l) {
+        Ok(())
+    } else {
+        Err(format!("unknown level {l}").into())
+    }
 }
 
 fn compare_pair(before: &[Row], after: &[Row], la: &str, lb: &str) -> Res<String> {
+    known_level(la)?;
+    known_level(lb)?;
     let (ia, ib) = (index(before, la), index(after, lb));
     let mut s = String::new();
     writeln!(s, "== {la} (before) vs {lb} (after)")?;
-    let real = joined(&ia, &ib, "hdr_real");
-    let grad = joined(&ia, &ib, "hdr_grad");
+    let real = joined(&ia, &ib, "hdr_real")?;
+    let grad = joined(&ia, &ib, "hdr_grad")?;
     // After minus before; RMSLE flipped and scaled, so + is better for all three.
     let deltas = |r: &(&str, &Row, &Row)| {
         [
@@ -505,5 +556,54 @@ fn main() {
     if let Err(e) = res {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+}
+
+// Run with `cargo test --offline -p encoders-sys --example bc6h_quality` (plain `cargo test` does not build examples
+// with the test harness).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEAD: &str = "set,image,level,target,clamped,mpsnr,rmsle,peak_ratio,seconds,sha256\n";
+
+    fn csv(rows: &[(&str, &str, &str)]) -> Vec<Row> {
+        let mut t = String::from(HEAD);
+        for (s, i, l) in rows {
+            t += &format!("{s},{i},{l},avx2,0,50.0000,0.003000,0.900000,1.000,aa\n");
+        }
+        parse_csv(&t, "t.csv").unwrap()
+    }
+
+    #[test]
+    fn compare_rejects_an_unknown_level() {
+        let r = csv(&[("hdr_real", "a", "veryslow")]);
+        let e = compare_pair(&r, &r, "veryslow", "veryslowpeak").unwrap_err();
+        assert!(e.to_string().contains("unknown level veryslowpeak"), "{e}");
+    }
+
+    #[test]
+    fn a_duplicate_key_is_an_error() {
+        let t = format!("{HEAD}hdr_real,a,veryslow,avx2,0,50.0,0.003,0.9,1.0,aa\nhdr_real,a,veryslow,avx2,0,50.0,0.003,0.9,1.0,bb\n");
+        let e = parse_csv(&t, "t.csv").unwrap_err();
+        assert!(
+            e.to_string().contains("duplicate row hdr_real a veryslow"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn an_unpaired_image_is_an_error_naming_it() {
+        let a = csv(&[("hdr_real", "a", "veryslow"), ("hdr_real", "b", "veryslow")]);
+        let b = csv(&[("hdr_real", "a", "veryslow")]);
+        let e = compare_pair(&a, &b, "veryslow", "veryslow").unwrap_err();
+        assert!(e.to_string().contains("only one file: b"), "{e}");
+    }
+
+    #[test]
+    fn paired_rows_compare() {
+        let a = csv(&[("hdr_real", "a", "veryslow"), ("hdr_grad", "g", "veryslow")]);
+        let s = compare_pair(&a, &a, "veryslow", "veryslow").unwrap();
+        assert!(s.contains("hdr_real: n = 1"), "{s}");
     }
 }

@@ -377,7 +377,7 @@ fn strip(mut block: impl FnMut() -> [[u16; 3]; 16]) -> Vec<[u16; 4]> {
 /// decode is at most 0x7BFF by construction, so a bound on the output could not fail.
 ///
 /// Four strips: (a) every channel of every texel a random half; (b) two clusters, each one random colour plus noise
-/// of up to 64 half codes, split like a partition; (c) narrow spans; (d) black beside bright neutral texels.
+/// of up to 64 half codes, a random 8/8 texel split; (c) narrow spans; (d) black beside bright neutral texels.
 #[test]
 fn random_blocks_encode_at_every_level_on_every_path() {
     let mut r = Lcg(0x1234_5678);
