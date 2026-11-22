@@ -17,8 +17,9 @@ use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, chip_letter, fill_proposals, is_shareable_helper, kind_text, member_tail,
-    shader_options, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
-    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
+    shader_options, shows_json_panel, slot_shown, view_row, BorrowOccupant, BorrowOutcome,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
+    SlotShown, EDIT_MATCH_OFF,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -341,6 +342,8 @@ enum Act {
     Shader(String, Option<Shader>),
     /// A pill click with its modifiers (F3a D1).
     Click(String, bool, bool),
+    /// The card menu's Edit match…: select the set and open its Matching group on the first match.
+    EditMatch(String),
     RightClick(String),
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
@@ -2463,6 +2466,22 @@ pub fn draw(
             Act::Click(id, ctrl, shift) => after_card_commit(&ctx, model, id, move |m, target| {
                 m.click_set(target, ctrl, shift)
             }),
+            // Every step runs in the deferred callback, against the card as it is after a focused field commits.
+            Act::EditMatch(id) => {
+                let c = ctx.clone();
+                after_card_commit(&ctx, model, id, move |m, t| {
+                    m.select_target(t);
+                    let v = m.resolved_selection().view().cloned();
+                    if let Some(v) = v {
+                        super::set_editor::focus_set_field(
+                            &c,
+                            m,
+                            &v.id,
+                            &crate::model::sets::edit_match_field(&v),
+                        );
+                    }
+                });
+            }
             Act::RightClick(id) => after_card_commit(&ctx, model, id, AppModel::right_click_set),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
@@ -3805,8 +3824,16 @@ fn menu(
         }
     });
     tip(rename.response);
-    if tip(ui.button("Edit match…")).clicked() {
-        acts.push(Act::Click(v.id.clone(), false, false));
+    // Off on a set the editor draws no Matching group for; the reason sits on the disabled entry.
+    let on = shows_json_panel(v, model.target);
+    let r = ui.add_enabled(on, egui::Button::new("Edit match…"));
+    let r = if on {
+        tip(r)
+    } else {
+        r.on_disabled_hover_text(EDIT_MATCH_OFF)
+    };
+    if r.clicked() {
+        acts.push(Act::EditMatch(v.id.clone()));
         ui.close();
     }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {

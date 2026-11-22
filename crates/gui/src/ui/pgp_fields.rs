@@ -503,13 +503,25 @@ fn matching(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     } else {
         value(format!("{n} match{}", if n == 1 { "" } else { "es" }))
     };
+    let request = focus_request(ui.ctx());
+    let open = request
+        .as_ref()
+        .is_some_and(|(s, k)| s == c.set && k.starts_with("match"));
+    // Edit match… on a set with no match row asks for `match`, which no field answers to: bring the group into view
+    // instead, and drop the request (it opens through `open` this frame).
+    if request.is_some_and(|(s, k)| s == c.set && k == "match") {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+        ui.data_mut(|d| {
+            d.remove::<(String, String, u64)>(egui::Id::unique(super::problems::FOCUS_FIELD))
+        });
+    }
     super::group::group_with(
         ui,
         ("pgp-matching-group", c.set),
         "Matching",
         head,
         true,
-        focus_request(ui.ctx()).is_some_and(|(s, k)| s == c.set && k.starts_with("match")),
+        open,
         |ui| matching_body(ui, c, edits),
     );
 }

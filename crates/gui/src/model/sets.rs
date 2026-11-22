@@ -208,6 +208,19 @@ pub struct SlotMatch {
     pub path: String,
 }
 
+/// Why Edit match… is off on a set the editor shows no JSON panel for (no Matching group to open).
+pub const EDIT_MATCH_OFF: &str =
+    "This set has no PGPatcher JSON settings, so it has no match rules";
+
+/// The field Edit match… focuses: the first Matching row (`match<N>`), else `match`, which no field answers to, so the
+/// group opens and nothing takes focus.
+pub fn edit_match_field(v: &SetView) -> String {
+    match slot_matches(v).0.first() {
+        Some(m) => format!("match{}", m.n),
+        None => "match".to_string(),
+    }
+}
+
 /// The Matching header of `v`: its active slot matches plus the empty rows (`matchN = ""`, N ≥ 2: added by + and not
 /// filled in yet; `match1 = ""` is the diffuse turned off), and the + menu, which offers slots 3–8 without a row. A
 /// slot the set fills starts from `slot_match_path` (DECISIONS V1); any other starts empty (owner, 2026-10-12).

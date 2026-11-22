@@ -628,6 +628,23 @@ pub(super) fn show_main_tab(ctx: &egui::Context) {
     });
 }
 
+/// Show set `id`'s editor on its main tab and ask for focus on its `field` (Fix path, Edit match…): the 3D view is off
+/// so the editor is drawn, and `pgp_fields` takes the one-shot request.
+pub(super) fn focus_set_field(ctx: &egui::Context, model: &mut AppModel, id: &str, field: &str) {
+    if model.settings.set_view_3d {
+        model.settings.set_view_3d = false;
+        model.save_settings();
+    }
+    show_main_tab(ctx);
+    let at = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::unique(super::problems::FOCUS_FIELD),
+            (id.to_string(), field.to_string(), at),
+        )
+    });
+}
+
 /// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
 pub fn show_also_tab(ctx: &egui::Context) {
     ctx.data_mut(|d| {

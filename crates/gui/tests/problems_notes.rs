@@ -5220,7 +5220,8 @@ fn the_model_keeps_ids_out_of_modified_clicks_and_select_all() {
 #[test]
 fn a_right_click_on_a_key_less_card_selects_that_set_and_edit_match_closes_the_menu() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = key_less_sets(d.path());
+    // Edit match… is off on a set with no JSON, so these sets carry some.
+    let mut m = key_less_json_sets(d.path());
     let texture = "landscape/rock01.png";
     m.expand(texture);
     let mut h = harness(m);
