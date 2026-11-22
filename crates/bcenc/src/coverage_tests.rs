@@ -131,10 +131,28 @@ fn every_path_gives_the_base_bytes() {
     }
 }
 
+/// `f`, which calls a public function, and checks the frame counters around it: the call ran frames on
+/// `Path::best()` and on no other path (the bytes are the same on every path, so they cannot tell).
+fn on_best<T>(what: &str, f: impl FnOnce() -> T) -> T {
+    let before = frame_runs();
+    let out = f();
+    let after = frame_runs();
+    for q in Path::ALL {
+        let ran = after[q as usize] - before[q as usize];
+        if q == Path::best() {
+            assert!(ran > 0, "{what} ran no frame on the best path {}", q.name());
+        } else {
+            assert_eq!(ran, 0, "{what} ran {ran} frames on path {}", q.name());
+        }
+    }
+    out
+}
+
 /// Every public function is its `_on` entry on `Path::best()`, argument for argument: the differential tests go
 /// through the `_on` entries, so this is what ties the public functions to rgbcx. The arguments differ from each
 /// other and from the defaults (radius 4 and 10, cuts 0, 1 and 201, channels 0, 2 and 3, both searches, every level),
-/// so a wrapper that drops or swaps one gives other bytes.
+/// so a wrapper that drops or swaps one gives other bytes. The frame counters around each public call (`on_best`) say
+/// it ran on `Path::best()` and on no other path.
 #[test]
 fn the_public_functions_run_the_best_path() {
     let best = Path::best();
@@ -147,14 +165,23 @@ fn the_public_functions_run_the_best_path() {
             let what =
                 || format!("allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}");
             assert_eq!(
-                bc1_encode_block(px, allow_3color, perceptual),
+                on_best("bc1_encode_block", || bc1_encode_block(
+                    px,
+                    allow_3color,
+                    perceptual
+                )),
                 bc1_encode_block_on(best, px, allow_3color, perceptual, Bc1Search::Default),
                 "bc1_encode_block, {}",
                 what()
             );
             for search in [Bc1Search::Default, Bc1Search::Fast] {
                 assert_eq!(
-                    bc1_encode_block_with(px, allow_3color, perceptual, search),
+                    on_best("bc1_encode_block_with", || bc1_encode_block_with(
+                        px,
+                        allow_3color,
+                        perceptual,
+                        search
+                    )),
                     bc1_encode_block_on(best, px, allow_3color, perceptual, search),
                     "bc1_encode_block_with {search:?}, {}",
                     what()
@@ -162,7 +189,12 @@ fn the_public_functions_run_the_best_path() {
             }
             for level in LEVELS {
                 assert_eq!(
-                    bc1_encode_block_level(px, level, allow_3color, perceptual),
+                    on_best("bc1_encode_block_level", || bc1_encode_block_level(
+                        px,
+                        level,
+                        allow_3color,
+                        perceptual
+                    )),
                     bc1_encode_block_level_on(best, px, level, allow_3color, perceptual),
                     "bc1_encode_block_level {level}, {}",
                     what()
@@ -172,14 +204,18 @@ fn the_public_functions_run_the_best_path() {
         for perceptual in [false, true] {
             let what = || format!("mask {mask:#06x}, perceptual {perceptual}: texels {px:?}");
             assert_eq!(
-                bc1_encode_block_alpha(px, mask, perceptual),
+                on_best("bc1_encode_block_alpha", || bc1_encode_block_alpha(
+                    px, mask, perceptual
+                )),
                 bc1_encode_block_alpha_on(best, px, mask, perceptual, Bc1Search::Default),
                 "bc1_encode_block_alpha, {}",
                 what()
             );
             for search in [Bc1Search::Default, Bc1Search::Fast] {
                 assert_eq!(
-                    bc1_encode_block_alpha_with(px, mask, perceptual, search),
+                    on_best("bc1_encode_block_alpha_with", || {
+                        bc1_encode_block_alpha_with(px, mask, perceptual, search)
+                    }),
                     bc1_encode_block_alpha_on(best, px, mask, perceptual, search),
                     "bc1_encode_block_alpha_with {search:?}, {}",
                     what()
@@ -190,14 +226,18 @@ fn the_public_functions_run_the_best_path() {
                     || format!("radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}");
                 let nz = NonZeroU8::new(cut).unwrap();
                 assert_eq!(
-                    bc3_encode_block(px, rad, nz, perceptual),
+                    on_best("bc3_encode_block", || bc3_encode_block(
+                        px, rad, nz, perceptual
+                    )),
                     bc3_encode_block_raw_cut_on(best, px, rad, cut, perceptual, Bc1Search::Default),
                     "bc3_encode_block, {}",
                     what()
                 );
                 for search in [Bc1Search::Default, Bc1Search::Fast] {
                     assert_eq!(
-                        bc3_encode_block_with(px, rad, nz, perceptual, search),
+                        on_best("bc3_encode_block_with", || {
+                            bc3_encode_block_with(px, rad, nz, perceptual, search)
+                        }),
                         bc3_encode_block_raw_cut_on(best, px, rad, cut, perceptual, search),
                         "bc3_encode_block_with {search:?}, {}",
                         what()
@@ -205,7 +245,9 @@ fn the_public_functions_run_the_best_path() {
                 }
                 for raw in [0, cut] {
                     assert_eq!(
-                        bc3_encode_block_raw_cut(px, rad, raw, perceptual),
+                        on_best("bc3_encode_block_raw_cut", || {
+                            bc3_encode_block_raw_cut(px, rad, raw, perceptual)
+                        }),
                         bc3_encode_block_raw_cut_on(
                             best,
                             px,
@@ -225,21 +267,21 @@ fn the_public_functions_run_the_best_path() {
         let px = channels(v);
         for (channel, rad) in [(0, 4), (2, 10), (3, 5)] {
             assert_eq!(
-                bc4_encode_block(&px, channel, rad),
+                on_best("bc4_encode_block", || bc4_encode_block(&px, channel, rad)),
                 bc4_encode_block_on(best, &px, channel, rad),
                 "bc4_encode_block channel {channel}, radius {rad}: texels {px:?}"
             );
         }
         for (rad, cut) in [(4, 0), (10, 1), (5, 201)] {
             assert_eq!(
-                bc4_encode_alpha(v, rad, cut),
+                on_best("bc4_encode_alpha", || bc4_encode_alpha(v, rad, cut)),
                 bc4_encode_alpha_on(best, v, rad, cut),
                 "bc4_encode_alpha radius {rad}, cut {cut}: values {v:?}"
             );
         }
         for rad in [4, 10] {
             assert_eq!(
-                bc5_encode_block(&px, rad),
+                on_best("bc5_encode_block", || bc5_encode_block(&px, rad)),
                 bc5_encode_block_on(best, &px, rad),
                 "bc5_encode_block radius {rad}: texels {px:?}"
             );

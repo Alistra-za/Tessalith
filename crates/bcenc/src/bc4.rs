@@ -830,9 +830,14 @@ fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8
 mod tests {
     use super::*;
     use crate::gen;
-    use crate::path::Base;
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     use crate::path::{avx2_tested, Avx2};
+    use crate::path::{tested_paths, Base};
+
+    /// The name of the path `_isa` stands for, for assert messages.
+    fn isa_name<I: Isa>(_isa: I) -> &'static str {
+        I::PATH.name()
+    }
 
     /// The endpoint pairs tried for a block: every pair with both ends on a stride of 5, then every pair within 3 of
     /// the block's least and greatest value.
@@ -854,26 +859,52 @@ mod tests {
         out
     }
 
+    /// Runs `$body` once per tested path with `$isa` bound to that path's `Isa` (`Base`, or the AVX2 token), so a
+    /// test of a generic search function covers every path the machine has. `$body` must not `break`/`continue` out
+    /// of the macro's loop.
+    macro_rules! on_each_path {
+        ($isa:ident, $body:block) => {
+            for path in tested_paths() {
+                match path {
+                    Path::Base => {
+                        let $isa = Base;
+                        $body
+                    }
+                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                    Path::Avx2 => {
+                        let $isa = Avx2::require();
+                        $body
+                    }
+                    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+                    Path::Avx2 => unreachable!("tested_paths named avx2 on a build without it"),
+                }
+            }
+        };
+    }
+
     #[test]
     fn v0_from_the_two_modes_equals_the_shared_search() {
         let (mut six, mut eight, mut solid) = (0usize, 0usize, 0usize);
-        for v in gen::bc4_classes(0xB4B4_0006, 200) {
-            for rad in [0, 1, 4, 5, 10] {
-                let (a, b) = (v0(Base, &v, rad), v0_reference(&v, rad));
-                assert_eq!(
-                    (a.err, a.e0, a.e1, a.sels),
-                    (b.err, b.e0, b.e1, b.sels),
-                    "{v:?} radius {rad}"
-                );
-                if minmax(&v).0 == minmax(&v).1 {
-                    solid += 1;
-                } else if a.e0 > a.e1 {
-                    eight += 1;
-                } else {
-                    six += 1;
+        on_each_path!(isa, {
+            for v in gen::bc4_classes(0xB4B4_0006, 200) {
+                for rad in [0, 1, 4, 5, 10] {
+                    let (a, b) = (v0(isa, &v, rad), v0_reference(&v, rad));
+                    assert_eq!(
+                        (a.err, a.e0, a.e1, a.sels),
+                        (b.err, b.e0, b.e1, b.sels),
+                        "{v:?} radius {rad} path {}",
+                        isa_name(isa)
+                    );
+                    if minmax(&v).0 == minmax(&v).1 {
+                        solid += 1;
+                    } else if a.e0 > a.e1 {
+                        eight += 1;
+                    } else {
+                        six += 1;
+                    }
                 }
             }
-        }
+        });
         assert!(
             six > 0 && eight > 0 && solid > 0,
             "a kind was never reached: 6-value {six}, 8-value {eight}, solid {solid}"
@@ -883,24 +914,27 @@ mod tests {
     #[test]
     fn each_mode_equals_the_other_mode_search() {
         let mut blocks = 0usize;
-        for v in gen::bc4_classes(0xB4B4_0007, 200) {
-            if v.iter().all(|&x| x == v[0]) {
-                continue;
-            }
-            for rad in [0, 1, 4, 5, 10] {
-                let m = v0_modes(Base, &v, rad);
-                for mode8 in [false, true] {
-                    // `other_mode_reference(.., mode8, ..)` searches the mode opposite to `mode8`.
-                    let (a, b) = (m[usize::from(mode8)], other_mode_reference(&v, mode8, rad));
-                    assert_eq!(
-                        (a.err, a.e0, a.e1, a.sels),
-                        (b.err, b.e0, b.e1, b.sels),
-                        "{v:?} radius {rad} {mode8}"
-                    );
+        on_each_path!(isa, {
+            for v in gen::bc4_classes(0xB4B4_0007, 200) {
+                if v.iter().all(|&x| x == v[0]) {
+                    continue;
                 }
+                for rad in [0, 1, 4, 5, 10] {
+                    let m = v0_modes(isa, &v, rad);
+                    for mode8 in [false, true] {
+                        // `other_mode_reference(.., mode8, ..)` searches the mode opposite to `mode8`.
+                        let (a, b) = (m[usize::from(mode8)], other_mode_reference(&v, mode8, rad));
+                        assert_eq!(
+                            (a.err, a.e0, a.e1, a.sels),
+                            (b.err, b.e0, b.e1, b.sels),
+                            "{v:?} radius {rad} {mode8} path {}",
+                            isa_name(isa)
+                        );
+                    }
+                }
+                blocks += 1;
             }
-            blocks += 1;
-        }
+        });
         assert!(
             blocks > 0,
             "the classes held no block of two or more values"
@@ -911,8 +945,10 @@ mod tests {
     fn a_tie_between_the_modes_keeps_the_8_value_block() {
         // Values 0 and 255 only: both modes reach error 0; `v0` must return e0 > e1.
         let v: [u8; 16] = std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 });
-        let b = v0(Base, &v, 5);
-        assert!(b.err == 0 && b.e0 > b.e1);
+        on_each_path!(isa, {
+            let b = v0(isa, &v, 5);
+            assert!(b.err == 0 && b.e0 > b.e1, "path {}", isa_name(isa));
+        });
     }
 
     #[test]
@@ -1052,7 +1088,10 @@ mod tests {
             // The best falls as in `the_pair_kernel_equals_the_scalar_one`, so later pairs meet a low best.
             let mut best = Best::new();
             let pairs = pairs_for(&v);
+            // `pairs_for` has an even count, so there is no remainder here; the lone last pair is tested by
+            // `a_lone_last_pair_is_flushed`.
             let (twos, rest) = pairs.as_chunks::<2>();
+            assert!(rest.is_empty(), "pairs_for gave an odd count");
             for &[a, b] in twos {
                 let (pa, pb) = (pal(a.0, a.1), pal(b.0, b.1));
                 let [ra, rb] = avx2::pair2(t, &v, &pa, &pb);
@@ -1082,23 +1121,44 @@ mod tests {
                     what()
                 );
             }
-            // A lone last pair goes through `try_pair`, as `flush` sends it. `pairs_for` pushes the near pairs two at a
-            // time after 52 x 52 grid pairs, so today its count is even and this never runs.
-            for &(e0, e1) in rest {
-                let mut want = best;
-                want.try_pair_reference(&v, e0, e1);
-                best.try_pair(&v, e0, e1);
-                assert_eq!(
-                    (best.err, best.e0, best.e1, best.sels),
-                    (want.err, want.e0, want.e1, want.sels),
-                    "{v:?} last pair {:?}",
-                    (e0, e1)
-                );
-            }
         }
         assert!(
             kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0,
             "a kind was never reached: [low, high] x [8-value, 6-value] {kinds:?}, taken {taken}, refused {refused}"
+        );
+    }
+
+    /// An odd number of pushes: the lone last pair waits in the batch and only `flush` decides it. Here it is the
+    /// unique winner (error 0 on a flat block), so a `flush` that drops it ends on another best.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn a_lone_last_pair_is_flushed() {
+        if !avx2_tested() {
+            return;
+        }
+        let t = Avx2::require();
+        let v = [77u8; 16];
+        let pairs = [(255, 254), (254, 253), (77, 77)];
+        let mut best = Best::new();
+        let mut batch = Batch::new(t);
+        for (e0, e1) in pairs {
+            batch.push(&mut best, &v, e0, e1);
+        }
+        batch.flush(&mut best, &v);
+        let mut want = Best::new();
+        for (e0, e1) in pairs {
+            want.try_pair_reference(&v, e0, e1);
+        }
+        assert_eq!(
+            (best.err, best.e0, best.e1, best.sels),
+            (want.err, want.e0, want.e1, want.sels)
+        );
+        assert!(
+            want.err == 0 && (want.e0, want.e1) == (77, 77),
+            "the last pair is not the winner: ends ({}, {}), error {}",
+            want.e0,
+            want.e1,
+            want.err
         );
     }
 }

@@ -6,8 +6,9 @@ use bcenc::Path;
 use std::sync::OnceLock;
 
 /// The paths this machine runs, in `Path::ALL` order. The first call in a test binary prints one line to stderr:
-/// "bcenc paths: ran base, avx2; skipped avx512 (CPU lacks avx512bw)". With SDC_BCENC_PATHS=<name,...> set, panics
-/// when a named path is not available, or with "unknown path <name>" when no path has that name.
+/// "bcenc paths: ran base, avx2; skipped none" (a build without SSE2 prints "ran base; skipped avx2 (not built for
+/// x86_64 with SSE2)"). With SDC_BCENC_PATHS=<name,...> set, panics when a named path is not available, or with
+/// "unknown path <name>" when no path has that name.
 pub fn paths() -> Vec<Path> {
     // A panic leaves the cell empty, so every later call panics too: no test runs on fewer paths than named.
     static RAN: OnceLock<Vec<Path>> = OnceLock::new();

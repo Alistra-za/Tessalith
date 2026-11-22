@@ -341,7 +341,24 @@ mod tests {
         use super::super::super::encode::round_ls;
         use super::super::super::fit::{MIDPOINT5, MIDPOINT6};
         use super::super::super::seen::Seen;
+        use super::super::keys4;
         use super::super::sse2::round_key_of;
+        use super::{avx2_tested, Avx2, MAX_TOTAL_ORDERINGS4, N3, N4};
+        use crate::bc1::fit::OrderTables;
+
+        // 41,500 is above the largest real fit: |iz| is at most 3/255 x 144 and the sums at most 12,240, two terms.
+        const CLAMP_VALUES: [f32; 10] = [
+            -41_500.0,
+            -1.0,
+            -1e-6,
+            -0.0,
+            0.0,
+            1.0,
+            1.0f32.next_up(),
+            1.02,
+            2.5,
+            41_500.0,
+        ];
 
         /// The kernel's rounding of (`xl`, `xh`) against the scalar code's.
         fn check(xl: [f32; 3], xh: [f32; 3]) {
@@ -377,21 +394,67 @@ mod tests {
             }
         }
 
+        /// The threshold, grid and clamp probes of the tests above and below, as one list.
+        fn probes() -> Vec<f32> {
+            let mut out = Vec::new();
+            for &m in MIDPOINT5[..31].iter().chain(&MIDPOINT6[..63]) {
+                out.extend([m.next_down(), m, m.next_up()]);
+            }
+            out.extend((0..=31).map(|c| c as f32 / 31.0));
+            out.extend((0..=63).map(|c| c as f32 / 63.0));
+            out.extend(CLAMP_VALUES);
+            out
+        }
+
+        /// The same probes through the AVX2 stamp of the ordering kernel (`keys4_avx2`, which `keys4` picks for the
+        /// AVX2 token), against the scalar code's rounding. Ordering 0 is [0, 8, 2, 6], so it reads the prefix sums at
+        /// positions 0, 8 and 10: with the sums of channel `c` 1 from position 10 on (a real, non-decreasing prefix
+        /// sum) and `total[c]` 1, channel `c` has q = 1 and uq = 2, and the other channels 0. Factors (0, a, b) then
+        /// give xl = a and xh = 2a + b, exactly: (0, x, -x) puts x in both, (0, x, -2x) in `xl` only, and (0, 0, x) in
+        /// `xh` only.
+        #[test]
+        fn the_avx2_stamp_rounds_the_probes_as_the_scalar_code() {
+            if !avx2_tested() {
+                return;
+            }
+            let t = Avx2::require();
+            let mut tables = OrderTables {
+                hash: [0; 4096],
+                factors: [[0.0; 3]; N4],
+                hash3: [0; 256],
+                factors3: [[0.0; 3]; N3],
+            };
+            let row = [0u16; MAX_TOTAL_ORDERINGS4];
+            for x in probes() {
+                for c in 0..3 {
+                    let mut sums = [[0u32; 17]; 3];
+                    sums[c][10..].fill(1);
+                    let mut total = [0; 3];
+                    total[c] = 1;
+                    let modes = [
+                        (x, 0.0, [0.0, x, -2.0 * x]),
+                        (0.0, x, [0.0, 0.0, x]),
+                        (x, x, [0.0, x, -x]),
+                    ];
+                    for (xl, xh, iz) in modes {
+                        tables.factors[0] = iz;
+                        let key = keys4::<18>(t, total, &sums, &row, &tables, 0xDEAD_BEEF)[0];
+                        let (mut l, mut h) = ([0.0f32; 3], [0.0f32; 3]);
+                        l[c] = xl;
+                        h[c] = xh;
+                        assert_eq!(
+                            key,
+                            Seen::key(&round_ls(&l, &h)),
+                            "AVX2 stamp: xl {l:?} xh {h:?}"
+                        );
+                    }
+                }
+            }
+        }
+
         #[test]
         fn out_of_range_fits_clamp_as_the_scalar_code() {
-            // 41,500 is above the largest real fit: |iz| is at most 3/255 x 144 and the sums at most 12,240, two terms.
-            let values = [
-                -41_500.0,
-                -1.0,
-                -1e-6,
-                -0.0,
-                0.0,
-                1.0,
-                1.0f32.next_up(),
-                1.02,
-                2.5,
-                41_500.0,
-            ];
+            let values = CLAMP_VALUES;
             // Positions 0..3 are xl's r, g, b and 3..6 xh's.
             let groups: [&[usize]; 9] = [
                 &[0],
