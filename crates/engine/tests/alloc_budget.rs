@@ -56,12 +56,14 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
 
 // A run with captured output reads 2 calls higher; the cause is not traced. The counter is process-wide, so allocations
 // by the test harness's own threads can land in the measured window (`MEASURE` keeps out only this file's tests).
-// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 262031 calls in all five (11990059 bytes, 34 jobs). A run
-// with captured output reads 262033. 262031 * 1.10 = 288235, rounded up to two significant figures.
-const WARM_PLAN_CALLS: u64 = 290_000;
-// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 67591 calls in all five (2797628 bytes, 5 jobs). A run
-// with captured output reads 2 calls higher. 67591 * 1.10 = 74351, rounded up to two significant figures.
-const REPLAN_CALLS: u64 = 75_000;
+// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1, after the suffix and vocabulary splits stopped
+// allocating (Note LF3): 112683 calls in all five (11090098 bytes, 34 jobs). 112683 * 1.10 = 123952, rounded up to two
+// significant figures.
+const WARM_PLAN_CALLS: u64 = 130_000;
+// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1, after the same change and `no_set_paths` building its
+// index only for a `NoSet` edit: 27376 calls in all five (2531208 bytes, 5 jobs). 27376 * 1.10 = 30114, rounded up to
+// two significant figures.
+const REPLAN_CALLS: u64 = 31_000;
 
 fn reporter() -> Reporter {
     Reporter::new(Arc::new(VecSink::default()), "t")

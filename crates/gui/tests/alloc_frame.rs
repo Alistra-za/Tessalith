@@ -54,9 +54,10 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
     (r, c1 - c0, b1 - b0)
 }
 
-// Measured 2026-11-21, 5 runs of the binary, 5 frames each: 4071 calls in all 25 frames (634260 bytes). 4071 * 1.10 =
-// 4479, rounded up to two significant figures.
-const FRAME_CALLS: u64 = 4_500;
+// Measured 2026-11-21, 5 runs of the binary, 5 frames each: 2744 calls in all 25 frames (627239 bytes), after the
+// suffix and vocabulary splits stopped allocating (Note LF3). 2744 * 1.10 = 3019, rounded up to two significant
+// figures.
+const FRAME_CALLS: u64 = 3_100;
 
 #[test]
 fn the_counter_counts_each_allocation() {

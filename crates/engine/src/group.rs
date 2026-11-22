@@ -50,18 +50,22 @@ pub fn is_generated(stem: &str) -> bool {
 /// (`rock_p_generated` → `rock`, `p`).
 pub fn split_suffix(stem: &str) -> (String, Option<String>) {
     let stem = split_generated(stem).0;
-    let lower = stem.to_ascii_lowercase();
     for s in SUFFIXES {
-        let tail = format!("_{s}");
-        if lower.ends_with(&tail) && lower.len() > tail.len() {
-            // The tail is ASCII, so the cut falls on a char boundary even in non-ASCII stems.
-            return (
-                stem[..stem.len() - tail.len()].to_string(),
-                Some(s.to_string()),
-            );
+        if let Some(base) = cut_tail(stem, s) {
+            return (base.to_string(), Some(s.to_string()));
         }
     }
     (stem.to_string(), None)
+}
+
+/// `stem` without a trailing `_<term>` (ASCII `term`, compared case-insensitively), or `None` when `stem` does not
+/// end so or nothing would be left before the `_` (a stem that is only `_n` stays whole). Compares bytes, so it
+/// allocates nothing.
+fn cut_tail<'a>(stem: &'a str, term: &str) -> Option<&'a str> {
+    let (s, t) = (stem.as_bytes(), term.as_bytes());
+    let cut = s.len().checked_sub(t.len() + 1)?;
+    // The byte at `cut` is `_`, which is ASCII and so never inside a multi-byte char: the slice is on a boundary.
+    (cut > 0 && s[cut] == b'_' && s[cut + 1..].eq_ignore_ascii_case(t)).then(|| &stem[..cut])
 }
 
 /// A source stem without its exporter or Skyrim suffix (`rock01_roughness` → `rock01`, `rock01_n` → `rock01`): the
@@ -163,13 +167,9 @@ pub static VOCABULARY: [Vocab; 37] = {
 pub fn split_vocab(stem: &str) -> Option<(String, &'static Vocab)> {
     // Note CO: the generated marker comes off first.
     let stem = split_generated(stem).0;
-    let lower = stem.to_ascii_lowercase();
-    VOCABULARY.iter().find_map(|v| {
-        let tail = format!("_{}", v.term);
-        // The tail is ASCII, so the cut falls on a char boundary even in non-ASCII stems.
-        (lower.ends_with(&tail) && lower.len() > tail.len())
-            .then(|| (stem[..stem.len() - tail.len()].to_string(), v))
-    })
+    VOCABULARY
+        .iter()
+        .find_map(|v| cut_tail(stem, v.term).map(|base| (base.to_string(), v)))
 }
 
 /// The vocabulary entry a stem ends in, if any (`split_vocab` without the base).
@@ -833,6 +833,87 @@ pub fn generated_losers(
 
 #[cfg(test)]
 mod tests {
+    /// The `format!` version `split_suffix` had before `cut_tail`.
+    fn old_split_suffix(stem: &str) -> (String, Option<String>) {
+        let stem = super::split_generated(stem).0;
+        let lower = stem.to_ascii_lowercase();
+        for s in super::SUFFIXES {
+            let tail = format!("_{s}");
+            if lower.ends_with(&tail) && lower.len() > tail.len() {
+                return (
+                    stem[..stem.len() - tail.len()].to_string(),
+                    Some(s.to_string()),
+                );
+            }
+        }
+        (stem.to_string(), None)
+    }
+
+    /// The `format!` version `split_vocab` had before `cut_tail`.
+    fn old_split_vocab(stem: &str) -> Option<(String, &'static super::Vocab)> {
+        let stem = super::split_generated(stem).0;
+        let lower = stem.to_ascii_lowercase();
+        super::VOCABULARY.iter().find_map(|v| {
+            let tail = format!("_{}", v.term);
+            (lower.ends_with(&tail) && lower.len() > tail.len())
+                .then(|| (stem[..stem.len() - tail.len()].to_string(), v))
+        })
+    }
+
+    /// Pins the behaviour `cut_tail` keeps: the new splits equal the old `format!` ones on every stem built from
+    /// each term (passes on the old code too).
+    #[test]
+    fn cut_tail_matches_the_old_string_splits() {
+        let terms: Vec<&str> = super::SUFFIXES
+            .iter()
+            .copied()
+            .chain(super::VOCABULARY.iter().map(|v| v.term))
+            .collect();
+        let mut stems: Vec<String> = Vec::new();
+        for t in terms {
+            // One character shorter than `_term`.
+            let short = format!("_{}", &t[..t.len() - 1]);
+            stems.extend([
+                t.to_string(),
+                format!("_{t}"),
+                format!("x_{t}"),
+                format!("rock_{}", t.to_ascii_uppercase()),
+                format!("rock{t}"),
+                format!("möbel_{t}"),
+                format!("石_{t}"),
+                format!("rock_{t}_generated"),
+                short,
+            ]);
+        }
+        assert!(stems.len() > 500, "{} stems", stems.len());
+        for stem in &stems {
+            assert_eq!(
+                super::split_suffix(stem),
+                old_split_suffix(stem),
+                "suffix {stem}"
+            );
+            assert_eq!(
+                super::split_vocab(stem).map(|(b, v)| (b, v.term)),
+                old_split_vocab(stem).map(|(b, v)| (b, v.term)),
+                "vocab {stem}"
+            );
+        }
+    }
+
+    #[test]
+    fn cut_tail_cuts_only_after_an_underscore_with_something_before_it() {
+        for (stem, term, want) in [
+            ("rock_n", "n", Some("rock")),
+            ("rock_N", "n", Some("rock")),
+            ("_n", "n", None),
+            ("n", "n", None),
+            ("rockn", "n", None),
+            ("möbel_n", "n", Some("möbel")),
+        ] {
+            assert_eq!(super::cut_tail(stem, term), want, "{stem} {term}");
+        }
+    }
+
     /// Audit 08e-10: set keys fold Unicode (Note BF), so the skin `_wet` join must too.
     #[test]
     fn wet_split_folds_like_set_keys() {
