@@ -561,7 +561,8 @@ fn score_prepared(
         score.row["why"] = json!("layout mismatch");
         return Ok(());
     }
-    score.isa_skipped = p.format == Format::Bc7 && isa != dispatched_isa();
+    score.isa_skipped =
+        matches!(p.format, Format::Bc7 | Format::Bc6hUf16) && isa != dispatched_isa();
     if !score.isa_skipped {
         let mut mismatches = Vec::new();
         let last = prep.inputs.len() - 1;
@@ -576,6 +577,11 @@ fn score_prepared(
             score.row["why"] = json!("rebuild mismatch");
             return Ok(());
         }
+    }
+    // HDR participates in the byte self-check above. The quality metrics use LDR codes.
+    if p.format.is_hdr() {
+        score.row["why"] = json!("hdr");
+        return Ok(());
     }
     let baseline = coverage_baseline(prep, p);
     score.row["per_level"] = (0..dds.levels.len())
@@ -601,8 +607,6 @@ fn score_record(
         Some("cube")
     } else if p.subtype == Subtype::ComplexGrass {
         Some("complex grass")
-    } else if p.format.is_hdr() {
-        Some("hdr")
     } else {
         None
     };
@@ -899,12 +903,12 @@ fn a_failed_corpus_job_is_recorded_and_the_other_jobs_are_scored() {
 }
 
 #[test]
-fn unscored_classes_do_not_require_a_readable_source() {
+fn cube_and_grass_skip_unreadable_sources_and_hdr_reports_prepare_failure() {
     let (dir, jobs) = fixture(true);
     for (name, reason) in [
         ("plain.dds", "cube"),
         ("glass.dds", "complex grass"),
-        ("lamp_g.dds", "hdr"),
+        ("lamp_g.dds", "prepare failed"),
     ] {
         let mut job = named(&jobs, name).clone();
         job.input = dir.path().join("absent.png");
@@ -920,6 +924,14 @@ fn unscored_classes_do_not_require_a_readable_source() {
         }
         let score = score_job(&job, &dir.path().join("out"));
         assert_eq!(score.row["why"], reason);
+        if job.profile.format.is_hdr() {
+            assert!(score.row["detail"].as_str().is_some_and(|s| !s.is_empty()));
+            assert_eq!(
+                score.row["output"],
+                output_key(&dir.path().join("out"), &job.output)
+            );
+            assert!(score.row.get("per_level").is_none());
+        }
         assert!(score.row["levels"].as_u64().unwrap() > 0);
         assert!(!score.isa_skipped);
     }
@@ -1343,7 +1355,7 @@ fn self_check_skips_only_isa_dependent_encoders_on_a_different_isa() {
     for (name, skip) in [
         ("plain.dds", true),
         ("onebit.dds", false),
-        ("lamp_g.dds", false),
+        ("lamp_g.dds", true),
     ] {
         let mut job = named(&jobs, name).clone();
         let mut bytes = fs::read(&job.output).unwrap();
@@ -1352,22 +1364,65 @@ fn self_check_skips_only_isa_dependent_encoders_on_a_different_isa() {
         bytes[at] ^= 1;
         job.output = dir.path().join(name);
         fs::write(&job.output, bytes).unwrap();
-        for isa in ["other ISA", dispatched_isa()] {
-            let score = score_record(
+        let check = |isa| {
+            score_record(
                 &job,
                 name,
                 &json!({"isa":isa,"validation":{"levels":dds.mip_count}}),
                 prepare_job,
-            );
-            assert_eq!(score.isa_skipped, skip && isa != dispatched_isa());
-            if job.profile.format.is_hdr() {
-                assert_eq!(score.row["why"], "hdr");
-            } else if score.isa_skipped {
-                assert!(score.row["per_level"].is_array());
-            } else {
-                assert_eq!(score.row["why"], "rebuild mismatch");
-            }
+            )
+        };
+        let score = check("other ISA");
+        assert_eq!(score.isa_skipped, skip);
+        assert_eq!(score.row["why"] == "rebuild mismatch", !skip);
+        if job.profile.format.is_hdr() {
+            assert_eq!(score.row["why"], "hdr");
+            assert!(score.row.get("per_level").is_none());
+        } else if skip {
+            assert!(score.row["per_level"].is_array());
         }
+        let same = check(dispatched_isa());
+        assert_eq!(same.row["why"], "rebuild mismatch");
+        assert_eq!(same.row["mismatched_levels"], json!([1]));
+        assert!(!same.isa_skipped);
+    }
+}
+
+#[test]
+fn rgba16f_checks_the_smallest_level_on_both_isas_before_skipping_metrics() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("in");
+    let out = dir.path().join("out");
+    crate::profile_fixture::write_project(&input).unwrap();
+    let plan = plan(&input, &out, "file:**/lamp_g.hdr.format=rgba16f");
+    let mut job = named(&plan.jobs, "lamp_g.dds").clone();
+    assert_eq!(job.profile.format, Format::Rgba16f);
+    Engine::new()
+        .unwrap()
+        .run(plan, &reporter(), &CancelToken::default())
+        .unwrap();
+    let key = output_key(&out, &job.output);
+    let mut record = Manifest::at(&out).read().unwrap()[&key].raw.clone();
+    let intact = score_record(&job, &key, &record, prepare_job);
+    assert_eq!(intact.row["why"], "hdr");
+    assert!(!intact.isa_skipped);
+    assert!(intact.row.get("per_level").is_none());
+
+    let mut bytes = fs::read(&job.output).unwrap();
+    let dds = read_dds(&bytes).unwrap();
+    let last = dds.levels.len() - 1;
+    assert!(last > 1);
+    let at = bytes.len() - dds.data.len() + dds.levels[last].2.start;
+    bytes[at] ^= 1;
+    job.output = dir.path().join("changed.dds");
+    fs::write(&job.output, bytes).unwrap();
+    for isa in [dispatched_isa(), "other ISA"] {
+        record["isa"] = json!(isa);
+        let score = score_record(&job, &key, &record, prepare_job);
+        assert_eq!(score.row["why"], "rebuild mismatch");
+        assert_eq!(score.row["mismatched_levels"], json!([last]));
+        assert!(!score.isa_skipped);
+        assert!(score.row.get("per_level").is_none());
     }
 }
 
