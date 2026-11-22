@@ -602,6 +602,51 @@ fn the_revealed_set_is_on_screen_with_headers_above_it() {
     );
 }
 
+/// Task 7: a Messages row's Show reveals a set in a folded group, through the same `nav.reveal_set` path
+/// (`sets_column::open_groups_of`). A pin of that existing behaviour, driven by the button.
+#[test]
+fn a_messages_show_button_opens_the_folded_group_of_its_set() {
+    use sdc_gui::model::bottom::BottomTab;
+    use sdc_gui::model::messages::{EntryAction, Severity};
+    let d = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..36).map(|i| format!("s{i:02}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut m = sets_named(d.path(), &refs);
+    for (name, from) in [("One", 20), ("Two", 24), ("Three", 28)] {
+        let ids: Vec<String> = (from..from + 4).map(|i| format!("g/s{i:02}")).collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        group(&mut m, name, &ids);
+        m.set_group_collapsed(name, true);
+    }
+    let root = m.root.clone().unwrap();
+    m.messages.log_with(
+        Severity::Info,
+        "made s30",
+        EntryAction::ShowSet {
+            root,
+            id: "g/s30".into(),
+        },
+    );
+    m.toggle_tab(BottomTab::Messages);
+    let mut h = harness(m);
+    h.run();
+    assert!(card(&h, "g/s30").is_none(), "folded: no card");
+    h.get_by_label("Show g/s30").click();
+    h.run();
+    h.run();
+    assert!(!h.state().group_collapsed("Three"), "its group opened");
+    assert!(h.state().group_collapsed("One") && h.state().group_collapsed("Two"));
+    let (panel, r) = (sets_panel(&h), card_rect(&h, "g/s30"));
+    assert!(
+        r.top() >= panel.top() && r.bottom() <= panel.bottom(),
+        "the card {r:?} is whole in the column {panel:?}"
+    );
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(key_of(h.state(), "g/s30"))
+    );
+}
+
 // ---- Drops ----
 
 #[test]

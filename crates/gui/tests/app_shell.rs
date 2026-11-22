@@ -344,6 +344,12 @@ fn a_show_button_reveals_its_set_from_meshes() {
         "subtype",
         serde_json::json!("diffuse"),
     );
+    // Cards ahead of rock01: it starts below the Sets column's view.
+    m.edit_docs("t", None, true, |_, s| {
+        for i in 0..40 {
+            s.create_set(&format!("aaa/pad{i:02}"));
+        }
+    });
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     let rock = "landscape/rock01";
     let target = sdc_gui::model::sets::views(&m)
@@ -362,6 +368,17 @@ fn a_show_button_reveals_its_set_from_meshes() {
     h.get_by_label(&tab).click();
     app_harness::settle(&mut h, 3);
     h.get_by_label("from the log");
+    let in_view = |h: &app_harness::H| {
+        h.query_all_by_label_contains("Set landscape/rock01, position ")
+            .any(|n| support::in_sets_column(h, n.rect()))
+    };
+    // Back in Textures the card would be off-screen: the click must reveal it, not just select it.
+    h.state_mut().model.centre_over_meshes = false;
+    header::set_meshes_view(&h.ctx, false);
+    app_harness::settle(&mut h, 3);
+    assert!(!in_view(&h), "the card starts below the Sets column's view");
+    h.get_by_label("Meshes view").click();
+    app_harness::settle(&mut h, 3);
     h.get_by_label(&format!("Show {rock}")).click();
     app_harness::settle(&mut h, 3);
     assert!(!header::meshes_view_active(&h.ctx));
@@ -384,14 +401,26 @@ fn a_show_button_is_bound_to_its_project() {
     app_data();
     let wait = std::time::Duration::from_secs(60);
     let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let wall = |dir: &std::path::Path| {
+    // A has enough cards before `arch/wall` that it starts below the Sets column's view.
+    let wall = |dir: &std::path::Path, pads: usize| {
         let mut m = support::opened(dir);
-        m.edit_docs("t", None, true, |_, s| s.create_set("arch/wall"));
+        m.edit_docs("t", None, true, |_, s| {
+            for i in 0..pads {
+                s.create_set(&format!("aaa/pad{i:02}"));
+            }
+            s.create_set("arch/wall");
+        });
         assert!(m.wait_idle(wait));
         m.save().unwrap();
         m.root.clone().unwrap()
     };
-    let (root_a, root_b) = (wall(da.path()), wall(db.path()));
+    let (root_a, root_b) = (wall(da.path(), 40), wall(db.path(), 0));
+    // The oracle is the fixture's own ID, not the resolver's output: a document-only card is selected by its ID.
+    let wall_sel = || sdc_gui::model::Selection::SetId("arch/wall".into());
+    let in_view = |h: &app_harness::H| {
+        h.query_all_by_label_contains("Set arch/wall, position ")
+            .any(|n| support::in_sets_column(h, n.rect()))
+    };
     let mut m = AppModel::new(
         sdc_gui::settings::GuiSettings::default(),
         None,
@@ -413,14 +442,13 @@ fn a_show_button_is_bound_to_its_project() {
     h.get_by_label(&tab).click();
     app_harness::settle(&mut h, 3);
     h.get_by_label("logged in A");
-    let target_a = h
-        .state()
-        .model
-        .logged_set_target(&action)
-        .expect("A lists arch/wall");
+    assert!(!in_view(&h), "the card starts below the Sets column's view");
     h.get_by_label("Show arch/wall").click();
     app_harness::settle(&mut h, 3);
-    assert_eq!(h.state().model.selection, target_a.clone().selection());
+    assert_eq!(h.state().model.selection, wall_sel());
+    // The column took the reveal (`nav.reveal_set` is consumed by its frame) and scrolled the card into view.
+    assert!(h.state().model.nav.reveal_set.is_none());
+    assert!(in_view(&h), "the revealed card is in the Sets column");
     // Project B has a card of the same ID.
     h.state_mut().model.open_folder(root_b);
     app_harness::settle(&mut h, 3);
@@ -449,9 +477,13 @@ fn a_show_button_is_bound_to_its_project() {
         .get_by_label("Show arch/wall")
         .accesskit_node()
         .is_disabled());
+    h.state_mut().model.selection = sdc_gui::model::Selection::None;
+    app_harness::settle(&mut h, 3);
+    assert!(!in_view(&h), "reopened A starts at the top again");
     h.get_by_label("Show arch/wall").click();
     app_harness::settle(&mut h, 3);
-    assert_eq!(h.state().model.selection, target_a.selection());
+    assert_eq!(h.state().model.selection, wall_sel());
+    assert!(in_view(&h), "the link is back: the card is revealed");
 }
 
 #[test]

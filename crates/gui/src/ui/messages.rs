@@ -121,6 +121,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     });
     ui.separator();
     let mut shown: Option<EntryAction> = None;
+    let views = crate::model::sets::views(model);
     egui::ScrollArea::vertical().show(ui, |ui| {
         for e in model.messages.entries().rev() {
             ui.horizontal_wrapped(|ui| {
@@ -134,7 +135,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     return;
                 };
                 let EntryAction::ShowSet { id, .. } = action;
-                let listed = model.logged_set_target(action).is_some();
+                let listed = model.logged_set_in(&views, action).is_some();
                 let b = ui.add_enabled(listed, egui::Button::new("Show").small());
                 // The visible word is short; the name says which set.
                 b.widget_info(|| {
@@ -149,10 +150,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     });
     if let Some(action) = shown {
         let ctx = ui.ctx().clone();
-        let at = ctx.clone();
-        super::after_commit(&at, model, move |m| {
+        super::after_commit(ui.ctx(), model, move |m| {
             // The project can change before a deferred click runs: the root is checked again there.
             if m.show_logged_set(&action) {
+                // Redundant in the app, kept for a host that draws no `SdcApp`: `go_to_target` sets `reveal_centre`,
+                // and `SdcApp::ui` (app.rs, the `reveal_centre` branch of the Meshes view) switches the view back.
                 super::header::set_meshes_view(&ctx, false);
             }
         });

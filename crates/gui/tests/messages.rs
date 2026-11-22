@@ -267,7 +267,7 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(egui::vec2(1200.0, 800.0))
+        .with_size(egui::vec2(1280.0, 800.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model)
 }
 
@@ -388,7 +388,16 @@ fn a_show_button_clears_a_sets_filter_that_hides_its_card() {
     m.sets_filter.search = "no such set".into();
     assert!(m.show_logged_set(&action));
     assert!(!m.sets_filter_active(), "the hiding filter is cleared");
-    assert!(m.nav.reveal_set.is_some());
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/rock01")
+        .map(|v| v.key.clone())
+        .unwrap();
+    assert_eq!(
+        m.nav.reveal_set,
+        Some(sdc_gui::model::SetTarget::Key(key.clone()))
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(key));
 }
 
 /// A set deleted after its row was logged: Show finds nothing and changes nothing.

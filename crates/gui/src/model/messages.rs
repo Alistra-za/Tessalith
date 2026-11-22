@@ -56,31 +56,36 @@ pub enum EntryAction {
 impl super::AppModel {
     /// The card a row's Show names, in the current list; `None` when another project is open or the card went.
     pub fn logged_set_target(&self, action: &EntryAction) -> Option<super::SetTarget> {
+        self.logged_set_in(&super::sets::views(self), action)
+            .map(|(_, target)| target)
+    }
+
+    /// [`Self::logged_set_target`] over a list the caller already holds (`sets::views` is cached by revision, but a
+    /// row per frame should not rebuild the `Arc` each), with the card's index in it.
+    pub fn logged_set_in(
+        &self,
+        views: &[super::sets::SetView],
+        action: &EntryAction,
+    ) -> Option<(usize, super::SetTarget)> {
         let EntryAction::ShowSet { root, id } = action;
         if self.root.as_ref() != Some(root) {
             return None;
         }
-        super::sets::views(self)
+        let i = views
             .iter()
-            .find(|v| engine::sets::same_id(&v.id, id))
-            .map(super::SetTarget::view)
+            .position(|v| engine::sets::same_id(&v.id, id))?;
+        Some((i, super::SetTarget::view(&views[i])))
     }
 
-    /// A row's Show: leaves the Meshes overlay, selects the card and asks the Sets column to reveal it, clearing a
-    /// Sets filter that hides it. False when the card is no longer listed.
+    /// A row's Show: leaves the Meshes overlay, selects the card and asks the Sets column to reveal it (it opens a
+    /// folded group of the card, `sets_column::open_groups_of`), clearing a Sets filter that hides it. False when the
+    /// card is no longer listed.
     pub fn show_logged_set(&mut self, action: &EntryAction) -> bool {
-        let Some(target) = self.logged_set_target(action) else {
+        let views = super::sets::views(self);
+        let Some((index, target)) = self.logged_set_in(&views, action) else {
             return false;
         };
-        let hidden = {
-            let views = super::sets::views(self);
-            let visible = self.visible_sets();
-            views
-                .iter()
-                .position(|v| target.matches(v))
-                .is_some_and(|i| visible.binary_search(&i).is_err())
-        };
-        if hidden {
+        if !self.visible_sets().contains(&index) {
             self.clear_sets_filter();
         }
         self.centre_over_meshes = false;
