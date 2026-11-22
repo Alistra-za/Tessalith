@@ -17,6 +17,7 @@ static CALLS: AtomicU64 = AtomicU64::new(0);
 static BYTES: AtomicU64 = AtomicU64::new(0);
 static MEASURE: Mutex<()> = Mutex::new(());
 
+// The sibling counter is per-thread in `crates/gui/tests/alloc_frame.rs`; a fix to one is checked against the other.
 struct Counting;
 // SAFETY: forwards every call to the system allocator; only adds two process-wide counters.
 unsafe impl GlobalAlloc for Counting {
@@ -53,8 +54,10 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
     (r, c1 - c0, b1 - b0)
 }
 
+// A run with captured output reads 2 calls higher; the cause is not traced. The counter is process-wide, so allocations
+// by the test harness's own threads can land in the measured window (`MEASURE` keeps out only this file's tests).
 // Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 262031 calls in all five (11990059 bytes, 34 jobs). A run
-// with captured output reads 2 calls higher (262033). 262031 * 1.25 = 327539, rounded up to two significant figures.
+// with captured output reads 262033. 262031 * 1.25 = 327539, rounded up to two significant figures.
 const WARM_PLAN_CALLS: u64 = 330_000;
 // Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 67591 calls in all five (2797628 bytes, 5 jobs). A run
 // with captured output reads 2 calls higher. 67591 * 1.25 = 84489, rounded up to two significant figures.
@@ -106,9 +109,13 @@ fn a_warm_full_plan_stays_within_its_allocation_budget() {
             .unwrap()
     });
     let jobs = plan.jobs.len();
+    assert!(
+        jobs > 0,
+        "the warm plan held no job, so its allocation count would mean nothing"
+    );
     eprintln!(
         "warm full plan: {calls} calls, {bytes} bytes, {jobs} jobs, {} calls per job",
-        calls / jobs.max(1) as u64
+        calls / jobs as u64
     );
     assert!(
         calls <= WARM_PLAN_CALLS,
@@ -130,9 +137,13 @@ fn a_one_edit_replan_stays_within_its_allocation_budget() {
     let (partial, calls, bytes) =
         counted(|| session.replan_sets(&req, &edit, &rep, &cancel).unwrap());
     let jobs = partial.plan.jobs.len();
+    assert!(
+        jobs > 0,
+        "the one-edit re-plan held no job, so its allocation count would mean nothing"
+    );
     eprintln!(
         "one-edit re-plan: {calls} calls, {bytes} bytes, {jobs} jobs, {} calls per job",
-        calls / jobs.max(1) as u64
+        calls / jobs as u64
     );
     assert!(
         calls <= REPLAN_CALLS,
