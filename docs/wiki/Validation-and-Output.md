@@ -34,7 +34,7 @@ Tessalith writes its own headers: legacy or DX10, picked from the format and the
 
 ## What is checked
 
-Every converted file is decoded again before it is written, and the decoded result is checked. Mip quality, cutout coverage and the BC6H peak need the encoder input, so they run only during a conversion. The other checks also work on DDS files you already have, from the command line: [CLI reference](CLI-Reference.md#sdc-validate).
+Complex material `_m` and complex grass outputs are always checked; other outputs are checked when you ask (`sdc convert --validate`, or **Validate exported DDS** in the GUI's Settings). Mip quality, coverage and the BC6H peak need the encoder input, so only a conversion runs them. A checking run also checks, in place and against the rebuilt encoder input, the outputs an earlier run left unchecked; their files are not written. Some outputs wait for a re-encode instead: an output kept for an older encode version (`--ev`) or for a lower quality target, a packed output whose channel pick would differ now, and every Vanilla copy made by an Also export. <!-- D:LF9,LF10,LF11 --> The other checks also work on DDS files you already have, from the command line: [CLI reference](CLI-Reference.md#sdc-validate).
 
 The thresholds are fixed; only `validation.mips` is a setting.
 
@@ -51,11 +51,13 @@ The thresholds are fixed; only `validation.mips` is a setting.
 | BC6H peak | The decoded peak divided by the source peak is at least 0.8. | `VAL-BC6H-PEAK` | warning |
 | Complex grass corner | The encoded bottom-left texel still passes Community Shaders' detection test. | `VAL-GRASS-DETECT` | error |
 
-- A file with a validation error is still written and counted under "failed validation". The next `if-changed` run re-encodes it.
+- A file written this run with a validation error stays on disk. The summary counts it under "failed validation".
+- An earlier output that fails its check in place is left alone and counted under "checked in place".
+- The next `if-changed` run re-encodes either one.
 
 ## The manifest
 
-Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2` or `sse2`; `avx` and `sse4` appear only in records an older version wrote), the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
+Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2` or `sse2`; `avx` and `sse4` appear only in records an older version wrote), the validation summary (or `skipped` when the run did not check) and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
 
 ## Re-runs and if-changed
 
@@ -64,7 +66,7 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 - a source file's content (by SHA-256), including packing sources and the baked normal map;
 - the output file's size or modified time, so touching or replacing an output by hand counts;
 - a resolved setting, other than a quality target set lower;
-- the record failed validation.
+- the record failed validation. <!-- D:LF4 -->
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 -->
 

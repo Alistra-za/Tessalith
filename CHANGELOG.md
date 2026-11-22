@@ -136,6 +136,7 @@
 ### Added
 
 - **Problems** warns when a PGPatcher entry or skin material uses a borrowed slot and none of those entries or materials uses the set's own DDS. Export still writes the DDS. For a shared pack input, the warning names the set it came from when known. Remove the share or your set's own file, drop the borrow, or choose **Mark as intended** if a mesh or another mod uses the file.
+- `sdc convert` and GUI exports no longer decode and check every DDS after encoding, so they finish sooner. Complex material `_m` and complex grass textures are still always checked. `sdc convert --validate` and the new **Validate exported DDS** in Settings (App settings, Export) turn the check on for every type. With it on, outputs an earlier run left unchecked are checked where they are, without encoding them again, and the `done` line counts them. The files are byte for byte the same either way. Without it, `sdc convert` no longer exits 4 for most files that fail a check: add `--validate` to a script that relies on exit 4. See docs/wiki/Validation-and-Output.md#what-is-checked.
 
 ## 3.0.0
 
