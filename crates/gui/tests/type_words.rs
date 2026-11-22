@@ -148,7 +148,8 @@ fn a_restricted_picker_skips_an_unavailable_likely_type() {
 
 /// Four textures in four folders. `p_wait.png` and `q_wait.png` wait for a type, with one engine suggestion each
 /// (Normal and Height, which no real file name gives a waiting texture, so they are set on the jobs); `r_wait.png`
-/// is written Gray and `s_wait.png` Envmask. Returns the model and the keys of p and q.
+/// is written Gray, `s_wait.png` and then `a_wait.png` Envmask (so the first Envmask file in lexical order is the one
+/// written last, in the folder made last). Returns the model and the keys of p and q.
 fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     use engine::config::Subtype;
     for (folder, name) in [
@@ -156,6 +157,7 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
         ("two", "q_wait.png"),
         ("three", "r_wait.png"),
         ("four", "s_wait.png"),
+        ("five", "a_wait.png"),
     ] {
         let f = dir.join("textures").join(folder);
         std::fs::create_dir_all(&f).unwrap();
@@ -166,14 +168,16 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     idle(&mut m);
     let key = |m: &AppModel, n: &str| key_of(m, n);
-    let (p, q, r, s) = (
+    let (p, q, r, s, a) = (
         key(&m, "p_wait.png"),
         key(&m, "q_wait.png"),
         key(&m, "r_wait.png"),
         key(&m, "s_wait.png"),
+        key(&m, "a_wait.png"),
     );
     m.set_field(&r, "subtype", serde_json::json!(Subtype::Gray));
     m.set_field(&s, "subtype", serde_json::json!(Subtype::Envmask));
+    m.set_field(&a, "subtype", serde_json::json!(Subtype::Envmask));
     idle(&mut m);
     for (k, st, why) in [
         (&p, Subtype::Normal, "the engine reads p as a normal"),
@@ -194,7 +198,7 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     (m, p, q)
 }
 
-/// The bulk card's buttons in drawing order, with the selection taken in `order`.
+/// The bulk card drawn with the two waiting textures selected in `order`.
 fn bulk_buttons(m: AppModel, order: [&String; 2]) -> Harness<'static, AppModel> {
     let mut m = m;
     m.select_item(order[0]);
@@ -215,7 +219,14 @@ fn tie_break_run(reversed: bool) {
         let j = m.item(k).and_then(|i| i.job.as_ref()).unwrap();
         assert_eq!(j.suggestions.len(), 1);
         assert_eq!(j.suggestions[0].subtype, st);
-        assert!(m.type_offered_to(k, Subtype::Gray) && m.type_offered_to(k, Subtype::Envmask));
+        for t in [
+            Subtype::Normal,
+            Subtype::Height,
+            Subtype::Gray,
+            Subtype::Envmask,
+        ] {
+            assert!(m.type_offered_to(k, t), "{t:?} is offered to {k}");
+        }
     }
     let doc = m.project.as_ref().unwrap();
     let written: Vec<_> = doc
@@ -224,7 +235,7 @@ fn tie_break_run(reversed: bool) {
         .filter(|k| k.ends_with("_wait.png"))
         .map(|k| (k.clone(), doc.file_value(&k, "subtype")))
         .collect();
-    assert_eq!(written.len(), 2, "only r and s are written: {written:?}");
+    assert_eq!(written.len(), 3, "only r, s and a are written: {written:?}");
     for (k, v) in &written {
         let want = if k.ends_with("r_wait.png") {
             serde_json::json!(Subtype::Gray)
@@ -242,7 +253,7 @@ fn tie_break_run(reversed: bool) {
             Subtype::Normal,
             "the engine reads p as a normal".to_string(),
         ),
-        (Subtype::Envmask, "s_wait.png has this type.".to_string()),
+        (Subtype::Envmask, "a_wait.png has this type.".to_string()),
     ];
     let keys = vec![p.clone(), q.clone()];
     assert_eq!(sdc_gui::model::likely::likely_types(&m, &keys), want);
@@ -261,12 +272,23 @@ fn tie_break_run(reversed: bool) {
     );
     assert!(a < b && b < c, "{a:?} {b:?} {c:?}");
     assert!(h.query_by_label("Use Grey map").is_none());
+    // The visible text is the bare label (the AccessKit name is "Use {label}").
+    let texts: Vec<String> = shapes(&h)
+        .iter()
+        .filter_map(|s| match s {
+            eframe::egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+            _ => None,
+        })
+        .collect();
+    for label in ["Height (parallax)", "Normal map", "Environment mask"] {
+        assert!(texts.iter().any(|t| t == label), "{label} in {texts:?}");
+    }
     // Each button's hover is its reason.
     instant_tips(&h.ctx);
     for (label, why) in [
         ("Use Height (parallax)", "the engine reads q as a height"),
         ("Use Normal map", "the engine reads p as a normal"),
-        ("Use Environment mask", "s_wait.png has this type."),
+        ("Use Environment mask", "a_wait.png has this type."),
     ] {
         h.get_by_label(label).hover();
         h.run();
@@ -289,6 +311,41 @@ fn tie_break_run(reversed: bool) {
 fn the_bulk_picker_breaks_likely_type_ties_by_id() {
     tie_break_run(false);
     tie_break_run(true);
+}
+
+#[test]
+fn a_reason_comes_from_the_first_key_in_lexical_order() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, p, q) = bulk_fixture(d.path());
+    // Both waiting textures are suggested Diffuse, each with its own reason.
+    for (k, why) in [(&p, "reason from p"), (&q, "reason from q")] {
+        let job = m
+            .items
+            .iter_mut()
+            .find(|i| &i.key == k)
+            .and_then(|i| i.job.as_mut())
+            .expect("a job");
+        job.suggestions = vec![engine::suggest::Suggestion {
+            subtype: Subtype::Diffuse,
+            confidence: engine::suggest::Confidence::High,
+            reason: why.to_string(),
+        }];
+    }
+    assert!(p < q, "p is the lexically first key");
+    // Two files written Envmask: the one first in key order is `a_wait.png`, written and listed last.
+    let want = vec![
+        (Subtype::Diffuse, "reason from p".to_string()),
+        (Subtype::Envmask, "a_wait.png has this type.".to_string()),
+        (Subtype::Gray, "r_wait.png has this type.".to_string()),
+    ];
+    for keys in [vec![p.clone(), q.clone()], vec![q.clone(), p.clone()]] {
+        assert_eq!(
+            sdc_gui::model::likely::likely_types(&m, &keys),
+            want,
+            "{keys:?}"
+        );
+    }
 }
 
 #[test]

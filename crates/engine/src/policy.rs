@@ -1387,7 +1387,6 @@ fn contradictions(p: &Profile, f: &FileFacts) -> Vec<String> {
                 .into(),
         );
     }
-    // A tangent-space normal decodes to unit length with Z >= 0, so blue sits high.
     if p.category == Category::Color && a.looks_like_tangent_normal() {
         v.push(format!(
             "{} source looks like a tangent-space normal map (unit length, blue mostly high)",

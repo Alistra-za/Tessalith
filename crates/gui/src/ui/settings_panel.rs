@@ -1401,6 +1401,7 @@ fn decision_box(
                             ui.label(m);
                         }
                         if *code == Code::CfgUnavailable {
+                            // No likely-type buttons: this type is decided but blocked, not undecided (3d-T11-2).
                             subtype_decision(ui, cx, left, None, &[], actions);
                         }
                     }
@@ -1474,10 +1475,10 @@ fn cached_likely(ui: &egui::Ui, model: &AppModel, key: &str) -> Vec<(Subtype, St
 /// Task 11: the likely types of an undecided card as buttons (the label, the reason on hover, "Use {label}" as the
 /// name). Returns the one clicked: it picks the type in the combo and writes nothing.
 pub(super) fn likely_buttons(ui: &mut egui::Ui, likely: &[(Subtype, String)]) -> Option<Subtype> {
-    let mut picked = None;
     if likely.is_empty() {
         return None;
     }
+    let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         for (st, why) in likely {
             let label = subtype_label(*st);
