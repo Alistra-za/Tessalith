@@ -326,6 +326,37 @@ fn a_validating_run_checks_a_skipped_output_in_place() {
     assert_eq!((third.checked, third.converted), (0, 0));
 }
 
+/// Note LF10: a dry run decides before the manifest is opened, so a validating one checks nothing in place and
+/// writes neither a record nor a DDS, even with unchecked records and a new source to convert.
+#[test]
+fn a_validating_dry_run_over_skipped_records_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let out = d.path().join("out");
+    let first = run(request(d.path(), "out", false, OnExisting::IfChanged)).0;
+    assert!(first.converted > 0, "{first:?}");
+    assert!(
+        records(&out)
+            .values()
+            .all(|rec| rec["validation"]["skipped"] == true),
+        "the first run must leave unchecked records"
+    );
+    put(d.path(), "extra.png", rgb64());
+    let manifest = std::fs::read(Manifest::at(&out).path()).unwrap();
+    let bytes = dds_files(&out);
+    let mut req = request(d.path(), "out", true, OnExisting::IfChanged);
+    req.overrides
+        .push(engine::overrides::parse_set("file:**/extra.png.subtype=diffuse").unwrap());
+    req.dry_run = true;
+    let summary = run(req).0;
+    assert_eq!((summary.checked, summary.converted), (0, 0), "{summary:?}");
+    assert!(
+        std::fs::read(Manifest::at(&out).path()).unwrap() == manifest,
+        "the manifest changed"
+    );
+    assert!(dds_files(&out) == bytes, "a DDS changed or appeared");
+}
+
 #[test]
 fn a_current_copy_record_is_not_checked_in_place() {
     let dir = tempfile::tempdir().unwrap();
