@@ -843,20 +843,28 @@ fn copy_skips_with_reasons_in_one_undo_step() {
         )]
     );
     let (before, undo) = (doc_text(&m), m.history.undo.len());
+    let toasts = m.messages.toasts().len() + m.messages.queued();
     m.apply_copy_set_json(&source, paste, &to, &ticked(&rows));
-    // Before the plan the edit starts lands and rewrites the status line.
-    assert_eq!(
-        m.status_line,
-        format!("Copy JSON settings from {short}: 1 written, 1 skipped (see Messages)")
-    );
+    // SM-T3-1: the plan the write starts rewrites the status line from its counts; the result stays in front of them.
     idle(&mut m);
+    let summary = format!("Copy JSON settings from {short}: 1 written, 1 skipped (see Messages)");
+    assert!(
+        m.status_line.starts_with(&summary),
+        "after the replan: {:?}",
+        m.status_line
+    );
+    assert_eq!(
+        m.messages.toasts().len() + m.messages.queued(),
+        toasts + 1,
+        "one summary toast"
+    );
     let leaf = entry(&m, LEAF).expect("leaf gets an entry, as any edit in its panel does");
     assert_eq!(
         leaf.settings.into_iter().collect::<Vec<_>>(),
         vec![("roughness_scale".to_string(), json!(0.8))]
     );
     assert_eq!(m.history.undo.len(), undo + 1);
-    let line = "Roughness scale: written to 1 of 2; skipped on 1 of 2: writes no PGPatcher JSON";
+    let line = "PGPatcher JSON: Roughness scale: written to 1 of 2; skipped on 1 of 2: writes no PGPatcher JSON";
     assert_eq!(report_lines(&m), [line]);
     assert!(logged(&m).contains(&line.to_string()), "{:?}", logged(&m));
     m.undo();
@@ -880,6 +888,13 @@ fn one_apply_is_one_undo_step_for_every_write() {
     assert_eq!(leaf.settings.get("roughness_scale"), Some(&json!(0.8)));
     assert_eq!(leaf.settings.get("emissive"), Some(&json!(true)));
     assert_eq!(m.history.undo.len(), undo + 1, "one step for two writes");
+    // SM-T3-1 on the common path: one target, every row written, and the line still says so after the replan.
+    assert!(
+        m.status_line
+            .starts_with("Copy JSON settings from rock: 2 written, 0 skipped (see Messages)"),
+        "{:?}",
+        m.status_line
+    );
     m.undo();
     assert_eq!(doc_text(&m), before);
     let leaf = entry(&m, LEAF);
@@ -1188,4 +1203,191 @@ fn a_copy_never_creates_a_block_and_says_why() {
             "{reason}: {lines:?}"
         );
     }
+}
+
+/// SM-T3-2: a row that would give the target two features that exclude each other is skipped, the reason names the
+/// feature the target already uses, and nothing is written or counted as written.
+fn clash_skipped(row_key: &str, target_key: &str, reason: &str) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, row_key, json!(true));
+    set(&mut m, LEAF, target_key, json!(true));
+    idle(&mut m);
+    let rows = pick(m.json_rows(ROCK), &[row_key]);
+    assert_eq!(rows.len(), 1, "premise: rock has the {row_key} row");
+    let (text, undo) = (doc_text(&m), m.history.undo.len());
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    idle(&mut m);
+    assert_eq!(m.history.undo.len(), undo, "no undo step");
+    assert_eq!(doc_text(&m), text, "the document is unchanged");
+    let leaf = entry(&m, LEAF).unwrap();
+    assert_eq!(leaf.settings.get(row_key), None);
+    assert_eq!(leaf.settings.get(target_key), Some(&json!(true)));
+    let end = format!("written to 0 of 1; skipped on 1 of 1: {reason}");
+    assert!(
+        report_lines(&m).iter().any(|l| l.ends_with(&end)),
+        "{:?}",
+        report_lines(&m)
+    );
+    assert!(
+        m.status_line.contains("0 written, 1 skipped"),
+        "{:?}",
+        m.status_line
+    );
+}
+
+#[test]
+fn hair_is_skipped_beside_multilayer() {
+    clash_skipped(
+        "hair",
+        "multilayer",
+        "already uses multilayer, which excludes hair",
+    );
+}
+
+#[test]
+fn subsurface_is_skipped_beside_subsurface_foliage() {
+    clash_skipped(
+        "subsurface",
+        "subsurface_foliage",
+        "already uses subsurface_foliage, which excludes subsurface",
+    );
+}
+
+#[test]
+fn foliage_is_skipped_beside_subsurface_and_hair_beside_any_engine_pair() {
+    clash_skipped(
+        "subsurface_foliage",
+        "subsurface",
+        "already uses subsurface, which excludes subsurface_foliage",
+    );
+    // `blocked_by` names the pair: hair excludes emissive too.
+    clash_skipped(
+        "hair",
+        "emissive",
+        "already uses emissive, which excludes hair",
+    );
+}
+
+/// SM-T3-2: the rows of one apply meet each other's switches, so two rows that exclude each other never both land.
+#[test]
+fn two_exclusive_rows_of_one_apply_do_not_both_land() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "hair", json!(true));
+    set(&mut m, ROCK, "multilayer", json!(true));
+    idle(&mut m);
+    let rows = pick(m.json_rows(ROCK), &["hair", "multilayer"]);
+    assert_eq!(rows.len(), 2, "premise: {rows:?}");
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    idle(&mut m);
+    let leaf = entry(&m, LEAF).unwrap();
+    assert_eq!(leaf.settings.get("hair"), Some(&json!(true)));
+    assert_eq!(leaf.settings.get("multilayer"), None);
+    let lines = report_lines(&m);
+    assert!(
+        lines[0].ends_with("written to 1 of 1"),
+        "hair lands first: {lines:?}"
+    );
+    assert!(
+        lines[1].ends_with("skipped on 1 of 1: already uses hair, which excludes multilayer"),
+        "{lines:?}"
+    );
+}
+
+/// SM-T3-3 minor 2: a report line starts with its group, so rows of one label in two groups can be told apart.
+#[test]
+fn a_report_line_names_its_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    idle(&mut m);
+    let rows = m.json_rows(ROCK);
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string()], &rows);
+    idle(&mut m);
+    let line = "PGPatcher JSON: Roughness scale: written to 1 of 1";
+    assert_eq!(report_lines(&m), [line]);
+    assert!(logged(&m).contains(&line.to_string()), "{:?}", logged(&m));
+}
+
+/// SM-T3-3 minor 3: one toast per apply, however many rows skip; the per-row lines go to the log only.
+#[test]
+fn one_apply_raises_one_summary_toast_and_logs_each_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    set(&mut m, ROCK, "emissive", json!(true));
+    idle(&mut m);
+    let rows = m.json_rows(ROCK);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let (toasts, logs) = (
+        m.messages.toasts().len() + m.messages.queued(),
+        m.messages.entries().count(),
+    );
+    m.apply_copy_set_json("rock", false, &[LEAF.to_string(), ODD.to_string()], &rows);
+    idle(&mut m);
+    assert_eq!(
+        m.messages.toasts().len() + m.messages.queued(),
+        toasts + 1,
+        "one toast"
+    );
+    assert_eq!(
+        m.messages.entries().count(),
+        logs + 3,
+        "two row lines and the summary: {:?}",
+        logged(&m)
+    );
+    let summary = "Copy JSON settings from rock: 2 written, 2 skipped (see Messages)";
+    assert!(logged(&m).iter().any(|l| l == summary), "{:?}", logged(&m));
+}
+
+/// SM-T3-3 minor 9: a target with no view is reported and counted in "of n", never dropped silently.
+#[test]
+fn a_dropped_target_is_reported_and_counted() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    set(&mut m, ROCK, "roughness_scale", json!(0.8));
+    idle(&mut m);
+    let rows = m.json_rows(ROCK);
+    let to = [LEAF.to_string(), "landscape/gone".to_string()];
+    m.apply_copy_set_json("rock", false, &to, &rows);
+    idle(&mut m);
+    assert_eq!(
+        report_lines(&m),
+        ["PGPatcher JSON: Roughness scale: written to 1 of 2; skipped on 1 of 2: is no longer in the project"]
+    );
+    assert_eq!(
+        entry(&m, LEAF).unwrap().settings.get("roughness_scale"),
+        Some(&json!(0.8))
+    );
+}
+
+/// SM-T3-3 minor 8: a skin write and another group's write of one apply share the one undo step.
+#[test]
+fn a_skin_write_and_another_groups_write_share_one_undo_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = skin_project(d.path(), &["a", "b"]);
+    let (a, b) = (skin_id(&m, "x/a"), skin_id(&m, "x/b"));
+    m.edit_docs("seed", None, false, |_, s| {
+        s.set_value(&a, "skin.Roughness", Some(json!(0.5)));
+        s.set_xpmf(&a, json!({"shelterFade": 32}).as_object().cloned());
+        s.set_xpmf(&b, json!({}).as_object().cloned());
+    });
+    idle(&mut m);
+    let rows = m.json_rows(&a);
+    for g in [JsonGroup::Skin, JsonGroup::Xpmf] {
+        assert!(rows.iter().any(|r| r.group == g), "a {g:?} row: {rows:?}");
+    }
+    let (before, undo) = (doc_text(&m), m.history.undo.len());
+    m.apply_copy_set_json("a", false, std::slice::from_ref(&b), &rows);
+    idle(&mut m);
+    let e = entry(&m, &b).unwrap();
+    assert_eq!(e.skin.get("Roughness"), Some(&json!(0.5)));
+    assert_eq!(
+        e.xpmf.as_ref().and_then(|x| x.get("shelterFade")),
+        Some(&json!(32))
+    );
+    assert_eq!(m.history.undo.len(), undo + 1, "one step for both groups");
+    m.undo();
+    assert_eq!(doc_text(&m), before);
 }

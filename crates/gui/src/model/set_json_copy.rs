@@ -13,6 +13,9 @@ use super::skin::{skin_field, skin_value_problem};
 use super::xpmf_json::FieldKind as XpmfKind;
 use super::{cm_json, labels, skin, xpmf_json, AppModel, Dialog, Selection};
 use crate::pgp::schema::{grass_ignores, Group, KeyKind, KEYS};
+use crate::pgp::settings::{
+    blocked_by, feature_key, sub_mode, Feature, Settings, SubMode, FEATURE_KEYS, FOLIAGE_KEY,
+};
 use crate::pgp::writer::{clamped, colour};
 use crate::sets_doc::SetEntry;
 use crate::ui::pgp_fields::edit_key;
@@ -87,6 +90,43 @@ fn copy_report(label: &str, plan: &[(String, Change)]) -> String {
         s.push_str(&format!("; skipped on {k} of {n}: {r}"));
     }
     s
+}
+
+/// The switch a row turns on, by the name the app shows for it: a feature's key without the GUI-only `_on`, or the
+/// Foliage subsurface key. `None` for any other row and for a switch turned off.
+fn feature_turned_on(row: &JsonRow) -> Option<&str> {
+    (is_switch(row) && row.value == Value::Bool(true)).then(|| row.key.trim_end_matches("_on"))
+}
+
+/// Whether `row` is a feature switch (or the Foliage subsurface switch), on or off.
+fn is_switch(row: &JsonRow) -> bool {
+    row.group == JsonGroup::Pgp
+        && (row.key == FOLIAGE_KEY || FEATURE_KEYS.iter().any(|(_, k)| *k == row.key))
+}
+
+/// Why turning on `row`'s feature would give `settings` two features that exclude each other, naming the one the set
+/// already uses. The engine's own rules decide: `blocked_by` for the feature pairs, `sub_mode` for Standard and Foliage
+/// subsurface (a Foliage row counts as Subsurface for the pairs, as the Subsurface card does).
+fn feature_clash(settings: &Settings, row: &JsonRow) -> Option<String> {
+    let name = feature_turned_on(row)?;
+    let used: Option<&str> = if row.key == FOLIAGE_KEY {
+        if sub_mode(settings) == SubMode::Standard {
+            Some("subsurface")
+        } else {
+            blocked_by(settings, Feature::Subsurface).map(feature_name)
+        }
+    } else if row.key == "subsurface" && sub_mode(settings) == SubMode::Foliage {
+        Some(FOLIAGE_KEY)
+    } else {
+        let f = FEATURE_KEYS.iter().find(|(_, k)| *k == row.key)?.0;
+        blocked_by(settings, f).map(feature_name)
+    };
+    let used = used?;
+    Some(format!("already uses {used}, which excludes {name}"))
+}
+
+fn feature_name(f: Feature) -> &'static str {
+    feature_key(f).trim_end_matches("_on")
 }
 
 fn row(group: JsonGroup, key: &str, label: String, value: &Value) -> JsonRow {
@@ -326,18 +366,15 @@ impl AppModel {
     }
 
     /// Why `target` would not take `row` (a W14 reason), or `None` when it would. `follows` is the target's glint
-    /// ownership, decided once per apply (`glint_follows`).
-    pub fn json_skip(
-        &self,
-        target: &SetView,
-        follows: bool,
-        row: &JsonRow,
-    ) -> Option<&'static str> {
+    /// ownership, decided once per apply (`glint_follows`). The reason may name a feature the target already uses.
+    pub fn json_skip(&self, target: &SetView, follows: bool, row: &JsonRow) -> Option<String> {
         let missing = match row.group {
             JsonGroup::Pgp => {
                 // A target with a texture-set block takes a mapped key there, whatever its PGPatcher eligibility.
                 if pgp_mapped(&row.key) && target.cs_block(Kind::Txst).is_some() {
-                    None
+                    // The block takes the CS form of the value; a value with none has nowhere to go.
+                    (!matches!(pgp_to_cs(&row.key, Some(&row.value)), Some((_, Some(_)))))
+                        .then_some("has no CS form of this value")
                 } else if !is_json_set(target, self.target) {
                     Some("writes no PGPatcher JSON")
                 } else if is_pbr_grass(target) && grass_ignores(&row.key) {
@@ -384,14 +421,17 @@ impl AppModel {
                 }
             }
         };
-        if missing.is_some() {
-            return missing;
+        if let Some(why) = missing {
+            return Some(why.to_string());
+        }
+        if let Some(why) = feature_clash(&target.settings, row) {
+            return Some(why);
         }
         let doc = self.sets_doc.as_ref()?;
         self.json_paths(target, follows, row)
             .iter()
             .any(|p| !doc.path_open(&target.id, p))
-            .then_some("has a hand-edited value in the way")
+            .then(|| "has a hand-edited value in the way".to_string())
     }
 
     /// The active set's card name (its `short`) and its document id; with no view resolved, the selected key or id and
@@ -470,14 +510,15 @@ impl AppModel {
         let v = row.value.clone();
         match row.group {
             JsonGroup::Pgp => {
-                if target.cs_block(Kind::Txst).is_some() {
+                if pgp_mapped(key) && target.cs_block(Kind::Txst).is_some() {
+                    // `json_skip` refuses a value with no CS form, so this always lands in the block.
                     if let Some((cs, Some(cv))) = pgp_to_cs(key, Some(&v)) {
                         self.set_cs_value(id, Kind::Txst, cs, Some(cv.clone()));
                         if follows && cs.starts_with("glintParameters.") {
                             self.set_cs_value(id, Kind::Mato, cs, Some(cv));
                         }
-                        return;
                     }
+                    return;
                 }
                 let spec = KEYS.iter().find(|s| edit_key(s.key) == key);
                 let v = match spec.map(|s| s.kind) {
@@ -521,30 +562,42 @@ impl AppModel {
         let all = views(self);
         // Each target's glint ownership is decided here, before the first write, and every glint skip and write of
         // the target uses it for the whole batch.
-        let targets: Vec<(SetView, bool)> = to
+        // A target with no view any more stays in the plan, skipped for every row, so "of n" counts it.
+        let mut targets: Vec<(String, Option<(SetView, bool)>)> = to
             .iter()
-            .filter_map(|id| all.iter().find(|v| same_id(&v.id, id)))
-            .map(|v| (v.clone(), self.glint_follows(&v.id)))
-            .collect();
-        let plan: Vec<Vec<(String, Change)>> = rows
-            .iter()
-            .map(|r| {
-                targets
-                    .iter()
-                    .map(|(t, follows)| {
-                        let change = match self.json_skip(t, *follows, r) {
-                            Some(why) => Change::Skip(why.to_string()),
-                            None => Change::Write,
-                        };
-                        (t.id.clone(), change)
-                    })
-                    .collect()
+            .map(|id| {
+                let view = all.iter().find(|v| same_id(&v.id, id));
+                (
+                    id.clone(),
+                    view.map(|v| (v.clone(), self.glint_follows(&v.id))),
+                )
             })
             .collect();
+        let mut plan: Vec<Vec<(String, Change)>> = vec![];
+        for r in rows {
+            let mut row_plan = vec![];
+            for (id, target) in targets.iter_mut() {
+                let change = match target {
+                    None => Change::Skip("is no longer in the project".to_string()),
+                    Some((t, follows)) => match self.json_skip(t, *follows, r) {
+                        Some(why) => Change::Skip(why),
+                        None => {
+                            // Later rows meet the feature switch this one turns on or off.
+                            if is_switch(r) {
+                                t.settings.insert(r.key.clone(), r.value.clone());
+                            }
+                            Change::Write
+                        }
+                    },
+                };
+                row_plan.push((id.clone(), change));
+            }
+            plan.push(row_plan);
+        }
         self.batch_edit(&label, |m| {
             for (r, row_plan) in rows.iter().zip(&plan) {
-                for ((t, follows), (_, change)) in targets.iter().zip(row_plan) {
-                    if *change == Change::Write {
+                for ((_, target), (_, change)) in targets.iter().zip(row_plan) {
+                    if let (Some((t, follows)), Change::Write) = (target, change) {
                         m.write_json_row(t, *follows, r, &label);
                     }
                 }
@@ -556,22 +609,25 @@ impl AppModel {
             .filter(|(_, c)| *c == Change::Write)
             .count();
         let skipped = plan.iter().flatten().count() - written;
+        // Each line names its group: two groups can hold a row of the same label ("Specular level").
         let lines: Vec<(String, bool)> = rows
             .iter()
             .zip(&plan)
             .map(|(r, p)| {
                 (
-                    copy_report(&r.label, p),
+                    copy_report(&format!("{}: {}", r.group.heading(), r.label), p),
                     p.iter().any(|(_, c)| matches!(c, Change::Skip(_))),
                 )
             })
             .collect();
+        // The rows go to the log; the one toast is the summary.
         for (line, with_skip) in &lines {
-            if *with_skip {
-                self.messages.notify(Severity::Warning, line.clone());
+            let severity = if *with_skip {
+                Severity::Warning
             } else {
-                self.messages.log(Severity::Info, line.clone());
-            }
+                Severity::Info
+            };
+            self.messages.log(severity, line.clone());
         }
         self.bulk.report = Some(
             lines
@@ -580,6 +636,15 @@ impl AppModel {
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
-        self.status_line = format!("{label}: {written} written, {skipped} skipped (see Messages)");
+        let summary = format!("{label}: {written} written, {skipped} skipped (see Messages)");
+        let severity = if skipped > 0 {
+            Severity::Warning
+        } else {
+            Severity::Info
+        };
+        self.messages.notify(severity, summary.clone());
+        // The replan the writes start rewrites the status line from its counts; a note stays in front of them.
+        self.status_line.clone_from(&summary);
+        self.status_note = Some(summary);
     }
 }

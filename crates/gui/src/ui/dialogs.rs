@@ -248,14 +248,35 @@ fn copy_settings(
             );
         }
     });
-    let close = clicked == Some(0) || k.cancel;
+    let ticked: Vec<String> = fields.iter().filter(|f| f.1).map(|f| f.0.clone()).collect();
+    copy_tail(
+        model,
+        (clicked, k.cancel, any),
+        |m| m.apply_copy_settings(from, to, &ticked),
+        |d| {
+            if let Dialog::CopySettings { fields: kept, .. } = d {
+                *kept = fields;
+            }
+        },
+    );
+}
+
+/// What a copy checklist does after its frame: Apply (with something ticked) applies, Cancel and Esc close, anything
+/// else keeps the ticks in the open dialog. `press` is the clicked button, whether Esc was pressed and whether
+/// anything is ticked.
+fn copy_tail(
+    model: &mut AppModel,
+    press: (Option<usize>, bool, bool),
+    apply: impl FnOnce(&mut AppModel),
+    keep: impl FnOnce(&mut Dialog),
+) {
+    let (clicked, cancel, any) = press;
     if clicked == Some(1) && any {
-        let ticked: Vec<String> = fields.iter().filter(|f| f.1).map(|f| f.0.clone()).collect();
-        model.apply_copy_settings(from, to, &ticked);
-    } else if close {
+        apply(model);
+    } else if clicked == Some(0) || cancel {
         model.dialog = None;
-    } else if let Some(Dialog::CopySettings { fields: kept, .. }) = model.dialog.as_mut() {
-        *kept = fields;
+    } else if let Some(d) = model.dialog.as_mut() {
+        keep(d);
     }
 }
 
@@ -309,14 +330,17 @@ fn copy_set_json(
                 }
             });
     });
-    let close = clicked == Some(0) || k.cancel;
-    if clicked == Some(1) && any {
-        model.apply_copy_set_json(source, paste, to, &ticked(&rows));
-    } else if close {
-        model.dialog = None;
-    } else if let Some(Dialog::CopySetJson { rows: kept, .. }) = model.dialog.as_mut() {
-        *kept = rows;
-    }
+    let chosen = ticked(&rows);
+    copy_tail(
+        model,
+        (clicked, k.cancel, any),
+        |m| m.apply_copy_set_json(source, paste, to, &chosen),
+        |d| {
+            if let Dialog::CopySetJson { rows: kept, .. } = d {
+                *kept = rows;
+            }
+        },
+    );
 }
 
 /// F3a D4: Reset all asks first; it names how many textures lose their settings.
