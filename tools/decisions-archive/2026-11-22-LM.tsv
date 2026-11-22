@@ -17,3 +17,4 @@ GU2	GU	1165	back	LM		partial	2026-11-22		goes: the quoted message ending Change 
 IB9	IB	1310	back	LM		partial	2026-11-22		goes: the quoted stdout line no sub-type from the name (LM3: no type from the name); stays: the rest
 HI4	HI	1330	back	LM		partial	2026-11-22		goes: the row name Sub-type (LM3: the row reads Texture type); stays: the rest
 JL¶- **A link under the clip is scrolled to.**	JL	1651	back	LM		partial	2026-11-22		goes: the link name Show in Meshes (LM13: Show all in Meshes); stays: the rest
+Digest¶- Sort: Name (default)	Digest	382	back	LM		partial	2026-11-22		goes: "Filters" as the saved set (LM12: the status pills are not saved; the combos, hide-helpers, sort and tile size are); stays: the sort order and the bad-value fallback; fix round 1

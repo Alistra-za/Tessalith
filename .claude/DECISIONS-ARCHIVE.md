@@ -884,6 +884,9 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - Meshes list: picking a mod never deselects; a reload keeps the picked mod while it has NIFs and is not derived, else Any mod, and reselects the NIF it holds (picked under Any mod, or under a picked mod while the store is not settled) once the store settles. Winning hides under Any mod; Overridden lists every losing copy; Conflicted is `n_copies > 1`; Problems is a problem or an LE mesh. Search matches path (no `meshes/`) or mod, ASCII case-insensitive, `\` as `/`; the texture chip (`users_of_texture`) combines with it; "Show in Meshes" sets Any mod, clears search and chips. Row chips list warnings first; "In game" is short, full text as its AccessKit name. [BT5, GC4, GC6, GC7, GC8, GC9, GC10, GC16, GC17, GC19, GC20, GQ4]
 
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Sort: Name (default), Source size (largest first) or Status (errors, warnings, undecided, ok); ties by name. Filters, sort and tile size live in `gui.toml`; a bad value falls back to its default. [AG4, AG47, AG50]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
