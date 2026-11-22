@@ -104,6 +104,18 @@ impl TextureItem {
     pub fn kept_dds(&self) -> bool {
         self.kind == ItemKind::Dds && self.job.is_none()
     }
+
+    /// The thumbnail's alpha is data (a packed map's specular) or absent from the output, never opacity: the tile
+    /// draws it opaque. A colour map (Blend, Cutout, CutoutBlend) and an item with no job keep their transparency.
+    pub fn alpha_is_data(&self) -> bool {
+        self.kind == ItemKind::Packed
+            || self.job.as_ref().is_some_and(|j| {
+                matches!(
+                    j.profile.alpha.policy,
+                    AlphaPolicy::Data | AlphaPolicy::Remove
+                )
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
