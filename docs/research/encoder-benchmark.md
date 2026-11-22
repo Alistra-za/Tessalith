@@ -750,9 +750,9 @@ Method: the 16 textures above (1,048,576 blocks), one thread, `speed.exe` with f
 | BC1, `fast` | 9.18 | 1.60 | 0.174 | 1.43 | 0.156 | 0.896 |
 | BC3, `fast` | 6.53 | 1.49 | 0.229 | 1.39 | 0.213 | 0.933 |
 
-**BC1 changes alone, Ryzen 7 9800X3D (Zen 5), Windows 11, build c2df2021 (2026-11-15); 3 of 3 clean rounds.** The BC3 and `bc3-fast` rows show only the gain of BC3's colour half, and BC4 and BC5 are unchanged, because these rows are from before the BC4 change:
+**BC1 changes alone, Ryzen 7 9800X3D (Zen 5), Windows 11, build c2df2021 (2026-11-15); 3 of 3 clean rounds.** The BC3 and `bc3-fast` rows show only the gain of BC3's colour half, and BC4 and BC5 are unchanged, because these rows are from before the BC4 change. The last column here is (`avx2` / C++) / (`base` / C++), the two C++-normalised times, not the ratio of the Rust times; HY21's figures are the same quantity:
 
-| Row | C++ µs | `base` µs | `base` / C++ | `avx2` µs | `avx2` / C++ | `avx2` / `base` |
+| Row | C++ µs | `base` µs | `base` / C++ | `avx2` µs | `avx2` / C++ | (`avx2` / C++) / (`base` / C++) |
 |---|--:|--:|--:|--:|--:|--:|
 | BC1 | 27.12 | 3.94 | 0.145 | 3.53 | 0.130 | 0.898 |
 | BC1, perceptual | 26.86 | 3.90 | 0.145 | 3.50 | 0.130 | 0.897 |
@@ -767,8 +767,8 @@ Method: the 16 textures above (1,048,576 blocks), one thread, `speed.exe` with f
 BC4's change alone, `avx2` after over before: on the i9-13900K VM `bc4` 0.901, `bc5` 0.904, `bc3` 0.988, `bc3-fast` 0.965, the BC1 rows 0.995 to 1.001 (3 of 3 clean rounds). On the 9800X3D it gave `bc4` 0.975, `bc5` 0.976, `bc3` 0.990, but only one round of three was clean, so read that as a hint, not a result. BC4 and BC5 gain about 10% on that Intel CPU and 2 to 3% on the Zen 5 desktop. On the VM the `base` path stayed within 0.952 to 1.003 of its earlier time on every row.
 
 Tried and not shipped (the two measured ones had to cut a targeted row's `rust/cpp` by 3%, with no row more than 2% worse):
-- **BC4 palettes from a 4 KB table indexed by endpoint difference**, on the 9800X3D: `bc4` went from 0.063-0.064 to 0.067-0.070 and `bc3-fast` from 0.225-0.232 to 0.242-0.253. Looking the entry up costs more than computing it.
-- **BC1 ordering fits two at a time in 256-bit vectors**, on the 9800X3D, after over before: BC1 rows 0.983 to 0.991, `bc3-fast` 1.001. A steady 1 to 1.7% is under the 3% bar.
+- **BC4 palettes from a 4 KB table indexed by endpoint difference**, on the 9800X3D (verdict on round 3, the clean one): `bc4` went from 0.063-0.064 to 0.067-0.070 and `bc3-fast` from 0.225-0.232 to 0.242-0.253. Looking the entry up costs more than computing it.
+- **BC1 ordering fits two at a time in 256-bit vectors**, on the 9800X3D (3 of 3 clean rounds), after over before: BC1 rows 0.983 to 0.991, `bc3-fast` 1.001. A steady 1 to 1.7% is under the 3% bar.
 - **An AVX-512 path** (a frame, plus BC4 scoring four pairs per vector): dropped on the owner's word with no quiet measurement. The one reading, from a busy machine, had BC4 slower.
 
 ### Encoder maintenance (October 2026)
