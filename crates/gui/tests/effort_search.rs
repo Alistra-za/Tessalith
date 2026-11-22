@@ -244,6 +244,16 @@ fn slowest_writes_slowest_on_bc4_and_bc3() {
     let entries = open_effort(&mut h);
     pick(&mut h, &entries, "Slowest");
     assert_eq!(file(h.state(), ROCK, RADIUS), Some(json!("slowest")));
+    assert_eq!(h.state().undo_label(), Some("Change Effort"));
+    h.state_mut().clear_field(ROCK, RADIUS);
+    assert_eq!(h.state().undo_label(), Some("Reset Effort"));
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(single(d.path(), Format::Bc5));
+    let entries = open_effort(&mut h);
+    pick(&mut h, &entries, "Slowest");
+    assert_eq!(file(h.state(), ROCK, RADIUS), Some(json!("slowest")));
+    assert_eq!(h.state().undo_label(), Some("Change Effort"));
 
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(single(d.path(), Format::Bc3));
@@ -330,6 +340,16 @@ fn every_bc3_pair_maps_to_one_entry() {
     assert!(
         help.contains("On BC3 it sets both the BC1 colour search and the BC4 alpha radius."),
         "{help}"
+    );
+    // The Slowest and Max sentences (Note LH).
+    assert!(
+        help.contains("Slowest searches the alpha at radius 10, and Max also tries every alpha endpoint pair near the block's values."),
+        "{help}"
+    );
+    let radius_help = sdc_gui::model::fields::field_help(RADIUS).unwrap();
+    assert!(
+        radius_help.contains("Fast a radius of 4, Default 5, Slowest 10. Max runs the Slowest search, then tries every endpoint pair near the block's values; it takes longer for a small gain."),
+        "{radius_help}"
     );
     for f in [RADIUS, BC1] {
         let h = sdc_gui::model::fields::field_help(f).unwrap();
