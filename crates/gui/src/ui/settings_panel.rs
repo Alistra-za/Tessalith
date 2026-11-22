@@ -35,7 +35,7 @@ enum Action {
     Set(&'static str, Value),
     Clear(&'static str),
     Decide(Answer),
-    /// The single card's Confirm: decide, then select the next undecided texture in view.
+    /// The single card's Confirm and likely-type buttons: decide, then select the next undecided texture in view.
     DecideAndAdvance(Answer),
     Select(String),
     Reencode(bool),
@@ -1530,7 +1530,8 @@ fn cached_likely(ui: &egui::Ui, model: &AppModel, key: &str) -> Vec<(Subtype, St
 }
 
 /// Task 11: the likely types of an undecided card as buttons (the label, the reason on hover, "Use {label}" as the
-/// name). Returns the one clicked: it picks the type in the combo and writes nothing.
+/// name). Returns the one clicked; the caller acts on it (the single card writes it and moves on, the bulk card puts
+/// it in its combo).
 pub(super) fn likely_buttons(ui: &mut egui::Ui, likely: &[(Subtype, String)]) -> Option<Subtype> {
     if likely.is_empty() {
         return None;
@@ -1550,7 +1551,8 @@ pub(super) fn likely_buttons(ui: &mut egui::Ui, likely: &[(Subtype, String)]) ->
 }
 
 /// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button. Aligned,
-/// they stand in the control column under the sentence (Note HI13). `likely` are the buttons above the combo.
+/// they stand in the control column under the sentence (Note HI13). `likely` are the buttons above the combo; a click
+/// on one answers as Confirm does (ruling 3d-T12-1).
 fn subtype_decision(
     ui: &mut egui::Ui,
     cx: &Ctx,
@@ -1566,6 +1568,7 @@ fn subtype_decision(
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
     if let Some(st) = likely_buttons(ui, likely) {
         chosen = st;
+        actions.push(Action::DecideAndAdvance(Answer::Subtype(st)));
     }
     let mut controls = |ui: &mut egui::Ui| {
         let r = egui::ComboBox::from_id_salt(id)

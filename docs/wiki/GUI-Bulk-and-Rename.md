@@ -18,7 +18,7 @@ Every bulk edit is one undo step and one plan. A read-only `sdc.toml` takes none
 
 When some of the selected textures wait for a type, a card comes first: **What kind are these {n} textures?** (**What kind is this texture?** for one). It asks only about the textures you selected, whether or not they are in the current Review run. <!-- D:LM8 -->
 
-1. Click a likely-type button, or open **Type for {n} textures**, which starts on **Choose a type**. The buttons are the ones a single texture gets ([where they come from](GUI-Texture-Panel.md#picking-the-type)), pooled over the selection. The dropdown lists only types every one of those textures is offered, so no texture is skipped. <!-- D:LM8,LM9 -->
+1. Click a likely-type button, or open **Type for {n} textures**, which starts on **Choose a type**. The buttons come from the same sources as a single texture's ([where they come from](GUI-Texture-Panel.md#picking-the-type)), pooled over the selection. Here a button only fills the dropdown and writes nothing; on a single texture it sets the type and moves on. The dropdown lists only types every one of those textures is offered, so no texture is skipped. <!-- D:LM8,LM9 -->
 2. Click **Apply to {n}**. Every texture on the card gets the type as one undo step and one plan.
 
 Under **Apply** a line counts the selected textures that already have a type ("{m} other selected textures already have a type."); the card leaves them alone. **Apply** is off with "Pick a type from the list first" until you pick, and while a plan runs or `sdc.toml` is read-only. It reads your selection again at the click, so a texture that decided meanwhile is not touched. <!-- D:LM8 -->

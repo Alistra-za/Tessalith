@@ -71,22 +71,154 @@ fn two_bumps(dir: &Path) -> (AppModel, String, String) {
     (m, a, b)
 }
 
+/// Ruling 3d-T12-1: a likely-type button on the single card answers as Confirm does. It writes the type, then selects
+/// the next undecided texture the filter shows (c is hidden, so b moves to d), and on the last one the selection stays.
 #[test]
 fn the_card_shows_likely_buttons() {
-    let d = tempfile::tempdir().unwrap();
-    let (mut m, _a, b) = two_bumps(d.path());
+    use engine::config::Subtype;
+    use sdc_gui::model::Selection;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = four_bumps(dir.path());
+    let [a, b, c, d] = [
+        "a_keep_bump.png",
+        "b_keep_bump.png",
+        "c_hide_bump.png",
+        "d_keep_bump.png",
+    ]
+    .map(|name| key_of(&m, name));
+    m.prefs.sort = sdc_gui::model::texture_view::SortKey::Name;
+    // a's written type is every other `_bump` file's likely type.
+    m.decide_undecided_row(&a, Subtype::Height);
+    idle(&mut m);
+    m.search = "keep".into();
+    for k in [&b, &d] {
+        assert_eq!(
+            sdc_gui::model::likely::likely_types(&m, std::slice::from_ref(k))[0].0,
+            Subtype::Height,
+            "premise: {k} is offered Height"
+        );
+    }
+    assert!(m.subtype_question(&c).is_some(), "premise: c waits, hidden");
     m.select_item(&b);
     let mut h = harness(m);
     h.run();
-    h.run();
     h.get_by_label("Use Height (parallax)").click();
     h.run();
-    // The combo's value is the type the button picked; nothing is written before Confirm.
-    assert_eq!(
-        h.get_by_label("Type for this texture").value().as_deref(),
-        Some("Height (parallax)")
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    let written = |m: &AppModel, k: &str| m.project.as_ref().unwrap().file_value(k, "subtype");
+    assert_eq!(written(h.state(), &b), Some(serde_json::json!("height")));
+    assert_eq!(h.state().selection, Selection::Item(d.clone()));
+    h.get_by_label("Use Height (parallax)").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert_eq!(written(h.state(), &d), Some(serde_json::json!("height")));
+    assert!(
+        h.state().subtype_question(&c).is_some(),
+        "c is never reached"
     );
-    assert!(h.state().undecided_keys().contains(&b));
+    assert_eq!(h.state().selection, Selection::Item(d));
+}
+
+/// Ruling 3d-T12-1: only the single card moves on. A Problems row's type answer and the bulk card's buttons and Apply
+/// write (or fill the combo) and leave the selection where it was, though an undecided texture follows each time.
+#[test]
+fn bulk_and_problems_type_answers_keep_the_selection() {
+    use egui_kittest::kittest::NodeT;
+    use engine::config::Subtype;
+    use sdc_gui::model::Selection;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = four_bumps(dir.path());
+    let [a, b, c, d] = [
+        "a_keep_bump.png",
+        "b_keep_bump.png",
+        "c_hide_bump.png",
+        "d_keep_bump.png",
+    ]
+    .map(|name| key_of(&m, name));
+    m.prefs.sort = sdc_gui::model::texture_view::SortKey::Name;
+    m.decide_undecided_row(&a, Subtype::Height);
+    idle(&mut m);
+    let written = |m: &AppModel, k: &str| m.project.as_ref().unwrap().file_value(k, "subtype");
+    // A Problems row: b's Set type… picks Height; c would be next.
+    m.select_item(&b);
+    assert_eq!(m.next_undecided_after(&b), Some(c.clone()), "premise");
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let row_y = h
+        .query_all_by_label_contains("b_keep_bump.png")
+        .find(|n| n.accesskit_node().role() == eframe::egui::accesskit::Role::Unknown)
+        .expect("b's Problems row")
+        .rect()
+        .center()
+        .y;
+    let opener = h
+        .query_all_by_label("Set type…")
+        .find(|n| (n.rect().center().y - row_y).abs() <= 4.0)
+        .expect("Set type… on b's row");
+    let at = opener.rect();
+    opener.click();
+    h.run();
+    let nearest = |h: &Harness<'static, AppModel>| {
+        h.query_all_by_role_and_label(eframe::egui::accesskit::Role::Button, "Height (parallax)")
+            .min_by(|x, y| {
+                let dist = |n: &egui_kittest::Node<'_>| n.rect().center().distance(at.center());
+                dist(x).total_cmp(&dist(y))
+            })
+            .map(|n| n.rect())
+            .expect("Height in the picker")
+    };
+    let pick = nearest(&h);
+    h.query_all_by_role_and_label(eframe::egui::accesskit::Role::Button, "Height (parallax)")
+        .find(|n| n.rect() == pick)
+        .unwrap()
+        .scroll_to_me();
+    h.run();
+    let pick = nearest(&h);
+    h.query_all_by_role_and_label(eframe::egui::accesskit::Role::Button, "Height (parallax)")
+        .find(|n| n.rect() == pick)
+        .unwrap()
+        .click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert_eq!(written(h.state(), &b), Some(serde_json::json!("height")));
+    assert_eq!(h.state().selection, Selection::Item(b.clone()));
+    // The bulk card over d and c, c last clicked: d would be next.
+    h.state_mut().click_item(&d, false, false);
+    h.state_mut().click_item(&c, true, false);
+    h.run();
+    let selected = |h: &mut Harness<'static, AppModel>| {
+        let keys = h.state_mut().bulk_view().keys.clone();
+        (h.state().selection.clone(), keys)
+    };
+    let before = selected(&mut h);
+    assert_eq!(before.0, Selection::Item(c.clone()), "premise");
+    assert_eq!(
+        h.state().next_undecided_after(&c),
+        Some(d.clone()),
+        "premise"
+    );
+    let text = h.state().project.as_ref().unwrap().text();
+    h.get_by_label("Use Height (parallax)").click();
+    h.run();
+    assert_eq!(
+        h.state().project.as_ref().unwrap().text(),
+        text,
+        "a button only fills"
+    );
+    assert_eq!(selected(&mut h), before);
+    h.get_by_label("Apply to 2").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    for k in [&c, &d] {
+        assert_eq!(written(h.state(), k), Some(serde_json::json!("height")));
+    }
+    assert_eq!(selected(&mut h), before);
 }
 
 #[test]
