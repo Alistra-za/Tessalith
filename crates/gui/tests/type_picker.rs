@@ -199,8 +199,8 @@ fn subtype_button_is_disabled_on_a_read_only_sdc_toml() {
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run();
-    let b = h.get_by_role_and_label(Role::ComboBox, "Sub-type");
-    assert!(b.accesskit_node().is_disabled(), "Sub-type is enabled");
+    let b = h.get_by_role_and_label(Role::ComboBox, "Texture type");
+    assert!(b.accesskit_node().is_disabled(), "Type is enabled");
     b.click();
     h.run();
     h.run();
@@ -230,7 +230,7 @@ fn subtype_combo_uses_the_same_picker() {
     let combo = || {
         h.query_all_by_role(Role::ComboBox)
             .find(|n| n.value().as_deref() == Some("Diffuse"))
-            .expect("the sub-type control shows the current sub-type")
+            .expect("the type control shows the current type")
             .rect()
     };
     let at = combo();

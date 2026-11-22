@@ -14,7 +14,7 @@ use support::*;
 const KEY: &str = "landscape/rock01.png";
 
 const COMBOS: [&str; 17] = [
-    "Sub-type",
+    "Texture type",
     "Input content",
     "DDS tag",
     "Alpha",
@@ -100,7 +100,7 @@ fn every_control_starts_at_the_same_x() {
     for (n, r) in &all {
         assert!(
             (r.min.x - x).abs() <= 1.0,
-            "{n} starts at {}, Sub-type at {x}",
+            "{n} starts at {}, Type at {x}",
             r.min.x
         );
     }
@@ -112,20 +112,17 @@ fn the_helper_tick_sits_under_sub_type() {
     let d = tempfile::tempdir().unwrap();
     let h = harness(model(d.path()), 1280.0);
     let c = centre(&h);
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
-    assert!(
-        tick.min.y >= sub.max.y,
-        "tick {tick:?} below Sub-type {sub:?}"
-    );
+    assert!(tick.min.y >= sub.max.y, "tick {tick:?} below Type {sub:?}");
     // The next row: nothing else of the Type group between them.
     assert!(
         tick.min.y - sub.max.y < 2.0 * sub.height(),
-        "tick {tick:?} right under Sub-type {sub:?}"
+        "tick {tick:?} right under Type {sub:?}"
     );
 }
 
@@ -223,7 +220,7 @@ fn rows_stay_inside_the_column_at_1100() {
             let width = *combo_width.get_or_insert(r.width());
             assert!(
                 (r.width() - width).abs() <= 1.0,
-                "{n} is {} wide, Sub-type {width}",
+                "{n} is {} wide, Type {width}",
                 r.width()
             );
         }
@@ -595,7 +592,7 @@ fn the_sub_type_question_lines_up_too() {
         .map(|n| n.rect())
         .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
         .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the sub-type question's combo");
+        .expect("the type question's combo");
     let row = control(&h, Role::ComboBox, "Alpha", c);
     assert!(
         (combo.min.x - row.min.x).abs() <= 1.0,
@@ -898,7 +895,7 @@ fn picking_a_format_keeps_the_tag() {
             (st, srgb)
         })
         .find(|(_, s)| s.len() >= 2)
-        .expect("a sub-type with two sRGB formats");
+        .expect("a type with two sRGB formats");
     let d = tempfile::tempdir().unwrap();
     let mut m = model(d.path());
     m.decide(KEY, Answer::Subtype(st));
@@ -991,10 +988,10 @@ fn question_marks_line_up() {
         );
     }
     // At the end of the label column: left of every control.
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     assert!(
         x <= sub.min.x,
-        "the marks end at {x}, past Sub-type at {}",
+        "the marks end at {x}, past Type at {}",
         sub.min.x
     );
 }
@@ -1121,7 +1118,7 @@ fn the_sub_type_question_has_the_rows_width() {
         .map(|n| n.rect())
         .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
         .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the sub-type question's combo");
+        .expect("the type question's combo");
     let row = control(&h, Role::ComboBox, "Alpha", c);
     assert!(
         (combo.width() - row.width()).abs() <= 1.0,
@@ -1140,11 +1137,11 @@ fn a_no_set_image_has_the_helper_tick() {
     m.select_item(LEAF);
     let mut h = harness(m, 1280.0);
     let c = centre(&h);
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
     h.get_by_role_and_label(Role::CheckBox, "Helper").click();
     h.run();
@@ -1159,16 +1156,13 @@ fn the_helper_tick_at_1100_stays_in_the_control_column() {
     let c = centre(&h);
     let edge = h.ctx.content_rect().right() - 8.0;
     assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
-    assert!(
-        tick.min.y >= sub.max.y,
-        "tick {tick:?} below Sub-type {sub:?}"
-    );
+    assert!(tick.min.y >= sub.max.y, "tick {tick:?} below Type {sub:?}");
     assert!(tick.max.x <= c.max.x, "tick {tick:?} past the centre {c:?}");
 }
 

@@ -4912,7 +4912,7 @@ impl AppModel {
     pub fn set_field(&mut self, item_key: &str, field: &str, value: serde_json::Value) {
         if field == "subtype" {
             if let Ok(st) = serde_json::from_value::<Subtype>(value.clone()) {
-                return self.edit_subtype("Change subtype", item_key, Some(st));
+                return self.edit_subtype("Change type", item_key, Some(st));
             }
         }
         if !self.format_write_ok(item_key, field, &value) {
@@ -4983,7 +4983,7 @@ impl AppModel {
 
     pub fn clear_field(&mut self, item_key: &str, field: &str) {
         if field == "subtype" {
-            return self.edit_subtype("Reset subtype", item_key, None);
+            return self.edit_subtype("Reset type", item_key, None);
         }
         // Note JI4: the BC3 Effort row's ↺ clears both search fields, as one step.
         if field == fields::BC3_SEARCH {

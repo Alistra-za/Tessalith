@@ -203,7 +203,7 @@ fn the_subtype_combo_lists_the_pbr_group_first() {
     let combo = h
         .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
         .find(|n| n.value().as_deref() == Some("Diffuse"))
-        .expect("the sub-type combo shows the current sub-type");
+        .expect("the type combo shows the current type");
     combo.click();
     h.run();
     h.run();
@@ -235,7 +235,7 @@ fn a_msn_member_keeps_msn_when_its_diffuse_goes_pbr() {
         );
         m.decide("m/rock02.png", Answer::Subtype(diffuse));
         idle(&mut m);
-        assert_eq!(subtype(&m, MSN), None, "{diffuse:?} writes no sub-type");
+        assert_eq!(subtype(&m, MSN), None, "{diffuse:?} writes no type");
         assert_eq!(
             m.item(MSN).unwrap().job.as_ref().unwrap().profile.subtype,
             Subtype::Msn,
@@ -294,7 +294,7 @@ fn an_undecided_member_is_switched() {
             .iter()
             .any(|x| matches!(x, sdc_gui::model::items::Decision::Subtype { .. }))
     });
-    assert!(undecided, "a fixture member still needs its sub-type");
+    assert!(undecided, "a fixture member still needs its type");
     m.decide(DIFFUSE, Answer::Subtype(Subtype::PbrAlbedo));
     idle(&mut m);
     assert_eq!(subtype(&m, N), Some(json!("pbr_normal")));

@@ -3592,7 +3592,7 @@ fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
     assert_eq!(
         held(&m, IRON_N, "subtype"),
         typed,
-        "the pick leaves the sub-type"
+        "the pick leaves the type"
     );
     assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
 }

@@ -803,8 +803,8 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
     match n {
         0 => value_combo(
             ui,
-            ("Sub-type", "Sub-type filter"),
-            "Only textures of this sub-type (the sub-types in this folder)",
+            ("Filter by type", "Filter by type"),
+            "Only textures of this type (the types in this folder)",
             &mut model.filter.subtype,
             &o.subtypes,
             str::to_string,

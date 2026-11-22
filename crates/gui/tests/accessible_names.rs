@@ -240,7 +240,7 @@ const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
 const GROUP_ROW: &str =
     "a group header named after its main row, whose control carries the same name";
-const SUBTYPE_ROWS: &str = "two open sub-type rows draw the same tree with fixed labels";
+const SUBTYPE_ROWS: &str = "two open type rows draw the same tree with fixed labels";
 
 /// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
 /// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
@@ -636,7 +636,7 @@ fn the_textures_filters_have_short_names() {
     h.run();
     open_filters(&mut h);
     for n in [
-        "Sub-type filter",
+        "Filter by type",
         "Output format filter",
         "Set membership filter",
         "Sort order",

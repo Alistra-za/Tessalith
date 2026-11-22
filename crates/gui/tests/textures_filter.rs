@@ -314,7 +314,7 @@ fn filter_button<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a
 
 /// The filter combos drawn now: a combo's accessible text is its value ("Sub-type: Any").
 fn filter_combos(h: &Harness<'static, AppModel>) -> Vec<String> {
-    let names = ["Sub-type", "Output format", "Set membership", "Sort"];
+    let names = ["Filter by type", "Output format", "Set membership", "Sort"];
     h.query_all_by_role(egui::accesskit::Role::ComboBox)
         .filter_map(|n| n.accesskit_node().value())
         .filter(|v| names.iter().any(|c| v.starts_with(c)))
@@ -369,7 +369,7 @@ fn the_filter_popup_holds_the_combos_and_the_tile_buttons_step_by_16() {
     h.run();
     h.run();
     let combos = filter_combos(&h);
-    for c in ["Sub-type", "Output format", "Set membership", "Sort"] {
+    for c in ["Filter by type", "Output format", "Set membership", "Sort"] {
         assert!(combos.iter().any(|v| v.starts_with(c)), "{c} in {combos:?}");
     }
     h.get_by_label("Larger tiles").click();
@@ -577,7 +577,7 @@ fn two_filters_are_picked_through_the_filter_popup_without_reopening_it() {
     filter_button(&h).click();
     h.run();
     h.run();
-    combo(&h, "Sub-type").click();
+    combo(&h, "Filter by type").click();
     h.run();
     h.run();
     h.get_by_label("diffuse").click();

@@ -607,7 +607,7 @@ fn the_open_dropdown_draws_the_skin_group_after_pbr_and_other_last() {
     h.run();
     h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
         .find(|n| n.value().as_deref() == Some("PBR albedo"))
-        .expect("the sub-type combo")
+        .expect("the type combo")
         .click();
     h.run();
     h.run();

@@ -72,7 +72,7 @@ pub fn show(
             );
             let name = match kind {
                 TypeKind::SetType => "Search the types to set",
-                TypeKind::SubType => "Search the sub-types",
+                TypeKind::SubType => "Search the types",
             };
             r.widget_info(|| {
                 let mut i = egui::WidgetInfo::text_edit(true, "", &q, hint);

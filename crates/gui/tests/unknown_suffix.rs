@@ -230,7 +230,7 @@ fn assigning_a_type_brings_the_card() {
     let node = h
         .query_all_by_role(Role::ComboBox)
         .min_by_key(|n| (n.rect().min.y - confirm_y).abs() as i64)
-        .expect("the sub-type combo");
+        .expect("the type combo");
     let combo = node.rect();
     node.click();
     h.run();

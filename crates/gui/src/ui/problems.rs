@@ -683,7 +683,7 @@ fn fix_click(
         Fix::TagAsGrass(_) => button(
             ui,
             "Tag as grass",
-            "Set its sub-type to Complex grass (subtype = \"complex_grass\" in sdc.toml)",
+            "Set its type to Complex grass (subtype = \"complex_grass\" in sdc.toml)",
             off,
         ),
         Fix::StraightAlpha(_) => button(

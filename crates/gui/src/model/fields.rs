@@ -7,7 +7,7 @@ use serde_json::Value;
 /// The editable fields, with the label each row shows (Note JI3: the drawer's DDS header and Size rows included). The
 /// panel draws them by group (`group_of`, in `settings_panel::GROUPS` order), in this order within a group.
 pub const FIELDS: [(&str, &str); 21] = [
-    ("subtype", "Sub-type"),
+    ("subtype", "Texture type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
     (MSN_SOURCE, "Baked in"),
     ("alpha.policy", "Alpha"),
@@ -693,7 +693,7 @@ pub fn provenance_text(p: &str) -> String {
         "user_config" => "from your config.toml".into(),
         "suggestion" => "suggested".into(),
         "analysis" => "from the image analysis".into(),
-        "fallback" => "fallback value (sub-type or box filter)".into(),
+        "fallback" => "fallback value (type or box filter)".into(),
         "set" => "decided by the texture set".into(),
         "mesh:alpha" => "from the meshes that use this texture".into(),
         _ => match p.split_once(':') {
