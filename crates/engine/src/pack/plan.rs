@@ -1206,7 +1206,7 @@ pub fn plan_packing(
             let mut vin = virtual_input(members[&sources[0]], recipe.kind);
             let key = (set.key.clone(), recipe.kind.suffix().to_string());
             if let Some(p) = packed_outputs.get(&key) {
-                vin.output = p.clone();
+                vin.output.clone_from(p);
             }
             let writes = !sources
                 .iter()
@@ -1232,7 +1232,7 @@ pub fn plan_packing(
             if let Some(p) =
                 packed_outputs.get(&(set.key.clone(), recipe.kind.suffix().to_string()))
             {
-                vin.output = p.clone();
+                vin.output.clone_from(p);
                 explicit = true;
             }
             let st = recipe.kind.subtype();

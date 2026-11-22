@@ -1690,8 +1690,8 @@ impl AppModel {
             }
             c
         });
-        req.user_config = self.user_config.clone();
-        req.user_presets = self.user_presets.clone();
+        req.user_config.clone_from(&self.user_config);
+        req.user_presets.clone_from(&self.user_presets);
         let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
@@ -1701,8 +1701,8 @@ impl AppModel {
         req.pinned_files = sets::pinned_files(self);
         req.mesh_shaders = self.mesh_votes.clone();
         req.mesh_alpha = self.mesh_alpha.clone();
-        req.gras_diffuses = self.gras_diffuses.clone();
-        req.gras_all_diffuses = self.gras_all_diffuses.clone();
+        req.gras_diffuses.clone_from(&self.gras_diffuses);
+        req.gras_all_diffuses.clone_from(&self.gras_all_diffuses);
         req.cs_txst_sets = sets::cs_txst_sets(self);
         Some(req)
     }

@@ -735,7 +735,7 @@ fn do_copies(
             fail(sum, Stage::Write, e.to_string());
             continue;
         }
-        rec.output = key.clone();
+        rec.output.clone_from(&key);
         rec.ts = crate::manifest::now_rfc3339();
         rec.output_stamp = SourceStamp::of(&job.output);
         rec.copied_from = c.twin.output_stamp;

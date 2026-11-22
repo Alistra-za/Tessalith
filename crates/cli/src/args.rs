@@ -347,7 +347,7 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
     }
     // `--preset-file` loads without selecting (spec §3.7, §8).
     r.preset_files.extend(b.preset_file.iter().cloned());
-    r.project_config = b.config.clone();
+    r.project_config.clone_from(&b.config);
     r.user_config = engine::presets::user_config_path();
     r.user_presets = engine::presets::user_presets_dir();
     // Ruling FR-a: every bad `--set` and `--allow` in one error, so a pasted 1.x command is fixed in one pass.

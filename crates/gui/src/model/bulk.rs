@@ -1917,7 +1917,7 @@ impl AppModel {
     /// 08f-8: it was dropped).
     pub fn menu_picked(&mut self, a: MenuAction) {
         if let Some(e) = self.run_menu(a) {
-            self.status_line = e.clone();
+            self.status_line.clone_from(&e);
             self.messages.notify(super::messages::Severity::Warning, e);
         }
     }

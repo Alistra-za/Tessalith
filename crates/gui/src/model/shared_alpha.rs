@@ -172,7 +172,7 @@ pub(super) fn shared_into_regular(
             let Some(next) = borrows.get(&cur) else {
                 break None;
             };
-            cur = next.clone();
+            cur.clone_from(next);
         };
         // A chain that reaches no Normal-slot file shares nothing, whatever the shaders: it is read first.
         let Some((cur, n)) = owner else {

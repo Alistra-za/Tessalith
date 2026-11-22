@@ -457,7 +457,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             };
             if let Some(t) = took {
                 text.push_str(&t);
-                ghost = scan(ui, edit_id, &paths, &text).0.clone();
+                ghost.clone_from(&scan(ui, edit_id, &paths, &text).0);
                 let end = CCursor::new(text.chars().count());
                 state.cursor.set_char_range(Some(CCursorRange::one(end)));
                 state.store(ui.ctx(), edit_id);

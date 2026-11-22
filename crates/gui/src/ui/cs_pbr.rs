@@ -376,7 +376,7 @@ fn edids(
                 if let EdidCheck::Case(exact) = &c {
                     if ui.small_button(format!("Use {exact}")).clicked() {
                         let mut l = b.edids.clone();
-                        l[i] = exact.clone();
+                        l[i].clone_from(exact);
                         acts.push(Act::Edids(kind, l));
                     }
                 }

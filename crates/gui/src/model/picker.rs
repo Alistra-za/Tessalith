@@ -424,7 +424,7 @@ impl AppModel {
                 format!("Could not write the report to {}: {e}", path.display()),
             ),
         };
-        self.status_line = note.clone();
+        self.status_line.clone_from(&note);
         self.messages.notify(sev, note);
     }
 }

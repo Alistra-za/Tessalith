@@ -1627,9 +1627,9 @@ fn key_on_disk(root: &Path, key: &str) -> bool {
 /// A set's view from its plan alone: members, shader pick, warnings, recipes and its own (unborrowed) slots.
 fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     let mut v = SetView::new(s.key.clone(), set_id(root, &s.key), s.members.clone());
-    v.shader = s.shader.clone();
-    v.set_warnings = s.warnings.clone();
-    v.recipes = s.recipes.clone();
+    v.shader.clone_from(&s.shader);
+    v.set_warnings.clone_from(&s.warnings);
+    v.recipes.clone_from(&s.recipes);
     v.slots = own_fills(m, &s.members);
     drop_supplied_missing_maps(m, &mut v);
     v
@@ -1766,8 +1766,8 @@ fn entry_view(
     v.created = e.created;
     v.settings = e.settings.clone();
     v.shader_choice = e.shader;
-    v.locks = e.lock.clone();
-    v.txst = e.txst.clone();
+    v.locks.clone_from(&e.lock);
+    v.txst.clone_from(&e.txst);
     v.output_name.clone_from(&e.output_name);
     v.cs_txst = e.cs_txst.clone().map(Box::new);
     v.cs_mato = e.cs_mato.clone().map(Box::new);
@@ -2025,7 +2025,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
-        v.short = old.short.clone();
+        v.short.clone_from(&old.short);
         rebuilt.push(v);
     }
     // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project

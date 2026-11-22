@@ -190,7 +190,7 @@ pub(super) fn set_name(
     r.widget_info(move || {
         let mut i = egui::WidgetInfo::labeled(typ, enabled, name.clone());
         i.value = value;
-        i.current_text_value = text.clone();
+        i.current_text_value.clone_from(&text);
         i
     });
 }

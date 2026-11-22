@@ -895,7 +895,13 @@ impl PresetRegistry {
                 .get(&c)
                 .ok_or_else(|| PresetError::Unknown(c.clone()))?;
             out.push(p);
-            cur = p.base.clone();
+            #[allow(
+                clippy::assigning_clones,
+                reason = "`while let Some(c) = cur` moves `cur` out each pass, so `clone_from` would read a moved value"
+            )]
+            {
+                cur = p.base.clone();
+            }
         }
         out.reverse();
         Ok(out)

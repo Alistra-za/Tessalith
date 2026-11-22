@@ -1250,7 +1250,7 @@ impl NifEdit {
         let read = e.doc.ops.clone();
         e.reapply();
         if e.held_at.is_some() {
-            e.held_ops = read.clone(); // what the file this session opened from holds
+            e.held_ops.clone_from(&read); // what the file this session opened from holds
         }
         if !same_ops(&read, &e.doc.ops) {
             e.unsaved = true;
@@ -2768,7 +2768,7 @@ impl NifEdit {
             Ok(mut d) => {
                 d.export = std::mem::take(&mut self.doc.export);
                 d.source = self.doc.source.clone();
-                d.id = self.doc.id.clone();
+                d.id.clone_from(&self.doc.id);
                 self.doc = d;
             }
             Err(e) => {

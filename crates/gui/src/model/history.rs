@@ -105,15 +105,15 @@ impl History {
         let entries = crate::project::NewFileEntries::new(writes);
         let mut patched = std::collections::HashMap::<String, String>::new();
         let mut apply = |text: &mut String| {
-            *text = patched
+            let patched_text = patched
                 .entry(std::mem::take(text))
                 .or_insert_with_key(|original| {
                     entries
                         .as_ref()
                         .and_then(|new| new.appended(original))
                         .unwrap_or_else(|| crate::project::apply_auto(original, writes))
-                })
-                .clone();
+                });
+            text.clone_from(patched_text);
         };
         for command in self.undo.iter_mut().chain(&mut self.redo) {
             let removed = [&mut command.before, &mut command.after]

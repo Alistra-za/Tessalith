@@ -387,7 +387,7 @@ pub fn plan_derived(
             let own = input.output.clone();
             input.output = vanilla_rel(&input.output, &input.game_path);
             input.game_path = vanilla_game_path(&input.game_path);
-            input.path = job.sources[0].path.clone();
+            input.path.clone_from(&job.sources[0].path);
             let st = kind.subtype(job.landscape);
             let paths: Vec<PathBuf> = job.sources.iter().map(|s| s.path.clone()).collect();
             // P6 (TA22): sources of different aspect ratios fail at plan time, as a packing recipe does; smaller
