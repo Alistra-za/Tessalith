@@ -280,6 +280,176 @@ fn peak_mode_keeps_a_blue_zero_sun() {
     );
 }
 
+/// The paths the new tests walk, as `check_pins` does: every supported target up to `ispc_target()`. A default run
+/// covers SSE2 and AVX2; `SDC_TEST_AVX512=1` adds AVX-512 (Note HZ3).
+fn paths() -> impl Iterator<Item = IspcTarget> {
+    IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+}
+
+/// Encodes one 4x4 block (row-major texels) on `target`.
+fn encode_block(px: &[[u16; 4]; 16], level: Bc6hLevel, target: IspcTarget) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    bc6h_compress_rows_on(px, 4, 4, &mut out, level, target);
+    out
+}
+
+/// The block's decode as half bits (exact: every UF16 decode is a half).
+fn decode_halves(b: &[u8; 16]) -> [[u16; 3]; 16] {
+    let mut d = [0f32; 48];
+    bcdec_rs::bc6h_float(b, &mut d, 12, false);
+    std::array::from_fn(|t| std::array::from_fn(|c| f16::from_f32(d[t * 3 + c]).to_bits()))
+}
+
+/// `n` bits of the block starting at bit `lo`.
+fn field(b: &[u8; 16], lo: u32, n: u32) -> u32 {
+    ((u128::from_le_bytes(*b) >> lo) & ((1u128 << n) - 1)) as u32
+}
+
+/// A grey texel: R = G = B = `v`, alpha 1.0.
+fn neutral(v: f32) -> [u16; 4] {
+    let h = f16::from_f32(v).to_bits();
+    [h, h, h, f16::ONE.to_bits()]
+}
+
+#[test]
+fn neutral_blocks_encode_to_a_valid_mode_and_decode_close() {
+    for target in paths() {
+        for level in [
+            Bc6hLevel::Veryfast,
+            Bc6hLevel::Veryslow,
+            Bc6hLevel::VeryslowPeak,
+        ] {
+            for v in [1.0f32, 100.0] {
+                let b = encode_block(&[neutral(v); 16], level, target);
+                let m5 = field(&b, 0, 5);
+                let reserved = matches!(m5, 0b10011 | 0b10111 | 0b11011 | 0b11111);
+                assert!(
+                    !reserved,
+                    "{target:?} {level:?} {v}: reserved mode {m5:#07b}"
+                );
+                for (t, px) in decode_halves(&b).iter().enumerate() {
+                    for (c, &h) in px.iter().enumerate() {
+                        let d = f16::from_bits(h).to_f32();
+                        assert!(
+                            (d - v).abs() <= 0.02 * v,
+                            "{target:?} {level:?} {v} texel {t} ch {c}: {d}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A seeded LCG (the one `hdr_image` uses).
+struct Lcg(u32);
+
+impl Lcg {
+    fn next(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.0 >> 8
+    }
+    /// A value in `lo..=hi`.
+    fn range(&mut self, lo: u32, hi: u32) -> u16 {
+        (lo + self.next() % (hi - lo + 1)) as u16
+    }
+}
+
+const MAX_UF16: u32 = 0x7BFF;
+const STRIP_BLOCKS: usize = 2048;
+
+/// A strip of `STRIP_BLOCKS` blocks (8192 px wide, 4 rows), each block's 16 texels from `block`.
+fn strip(mut block: impl FnMut() -> [[u16; 3]; 16]) -> Vec<[u16; 4]> {
+    let w = STRIP_BLOCKS * 4;
+    let mut px = vec![[0u16; 4]; w * 4];
+    for b in 0..STRIP_BLOCKS {
+        for (t, c) in block().iter().enumerate() {
+            px[(t / 4) * w + b * 4 + t % 4] = [c[0], c[1], c[2], f16::ONE.to_bits()];
+        }
+    }
+    px
+}
+
+/// Every level on every path takes random HDR blocks without tripping an assert. The kernel is built with its asserts
+/// on, and an assert aborts the process, so this test fails if any block trips one. It checks nothing else: a UF16
+/// decode is at most 0x7BFF by construction, so a bound on the output could not fail.
+///
+/// Four strips: (a) every channel of every texel a random half; (b) two clusters, each one random colour plus noise
+/// of up to 64 half codes, split like a partition; (c) narrow spans; (d) black beside bright neutral texels.
+#[test]
+fn random_blocks_encode_at_every_level_on_every_path() {
+    let mut r = Lcg(0x1234_5678);
+    let strips = [
+        strip(|| std::array::from_fn(|_| std::array::from_fn(|_| r.range(0, MAX_UF16)))),
+        {
+            let mut r = Lcg(0x2345_6789);
+            strip(|| {
+                // A random half/half split: a shuffled texel order, the first eight in cluster 0.
+                let mut order: [usize; 16] = std::array::from_fn(|i| i);
+                for i in (1..16).rev() {
+                    order.swap(i, r.next() as usize % (i + 1));
+                }
+                let base: [[u16; 3]; 2] =
+                    std::array::from_fn(|_| std::array::from_fn(|_| r.range(0, MAX_UF16)));
+                let mut b = [[0u16; 3]; 16];
+                for (rank, &t) in order.iter().enumerate() {
+                    for c in 0..3 {
+                        let v = base[rank / 8][c] as u32 + r.range(0, 64) as u32;
+                        b[t][c] = v.min(MAX_UF16) as u16;
+                    }
+                }
+                b
+            })
+        },
+        {
+            let mut r = Lcg(0x3456_789a);
+            strip(|| {
+                let base: [u32; 3] = std::array::from_fn(|_| r.range(0x0400, 0x7000) as u32);
+                std::array::from_fn(|_| {
+                    std::array::from_fn(|c| (base[c] + r.range(0, 2048) as u32) as u16)
+                })
+            })
+        },
+        {
+            let mut r = Lcg(0x4567_89ab);
+            strip(|| {
+                let mut mask = r.range(0, 0xFFFF);
+                if mask == 0 {
+                    mask = 1;
+                } else if mask == 0xFFFF {
+                    mask = 0x7FFF;
+                }
+                std::array::from_fn(|t| {
+                    if mask >> t & 1 == 0 {
+                        [0; 3]
+                    } else {
+                        [r.range(0x6000, MAX_UF16); 3]
+                    }
+                })
+            })
+        },
+    ];
+    let levels = [
+        Bc6hLevel::Veryfast,
+        Bc6hLevel::Fast,
+        Bc6hLevel::Basic,
+        Bc6hLevel::Slow,
+        Bc6hLevel::Veryslow,
+        Bc6hLevel::VeryslowPeak,
+    ];
+    for target in paths() {
+        for (i, px) in strips.iter().enumerate() {
+            for level in levels {
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                eprintln!("strip {i} {target:?} {level:?} survived");
+            }
+        }
+    }
+}
+
 #[test]
 #[should_panic(expected = "multiple of 4")]
 fn rejects_unaligned_width() {
