@@ -72,7 +72,7 @@ path = "tests/device_lost.rs"
 name = "fonts_env"
 path = "tests/fonts_env.rs"
 
-# A global allocator is process-wide: it counts one settled frame of the real app (Note LF2).
+# Installs a global allocator (counts one settled frame, Note LF2).
 [[test]]
 name = "alloc_frame"
 path = "tests/alloc_frame.rs"

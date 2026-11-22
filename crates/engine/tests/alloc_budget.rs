@@ -53,11 +53,11 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
     (r, c1 - c0, b1 - b0)
 }
 
-// Measured 2026-11-21, 5 runs, jobs = 1: 262031 calls in all five (11990059 bytes, 34 jobs). 262031 * 1.25 = 327539,
-// rounded up to two significant figures.
+// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 262031 calls in all five (11990059 bytes, 34 jobs). A run
+// with captured output reads 2 calls higher (262033). 262031 * 1.25 = 327539, rounded up to two significant figures.
 const WARM_PLAN_CALLS: u64 = 330_000;
-// Measured 2026-11-21, 5 runs, jobs = 1: 67591 calls in all five (2797628 bytes, 5 jobs). 67591 * 1.25 = 84489,
-// rounded up to two significant figures.
+// Measured 2026-11-21 with `--nocapture`, 5 runs, jobs = 1: 67591 calls in all five (2797628 bytes, 5 jobs). A run
+// with captured output reads 2 calls higher. 67591 * 1.25 = 84489, rounded up to two significant figures.
 const REPLAN_CALLS: u64 = 85_000;
 
 fn reporter() -> Reporter {
@@ -86,6 +86,7 @@ fn the_counter_counts_each_allocation() {
         }
     });
     assert_eq!(keep.len(), 1000);
+    eprintln!("1,000 boxes counted as {calls} allocation calls");
     assert!(
         (1000..=1010).contains(&calls),
         "1,000 boxes counted as {calls} allocation calls"

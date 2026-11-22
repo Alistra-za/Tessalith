@@ -8,6 +8,7 @@ mod app_harness;
 mod manifest;
 mod support;
 
+use egui_kittest::kittest::Queryable;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -65,6 +66,7 @@ fn the_counter_counts_each_allocation() {
         }
     });
     assert_eq!(keep.len(), 1000);
+    eprintln!("1,000 boxes counted as {calls} allocation calls");
     assert!(
         (1000..=1010).contains(&calls),
         "1,000 boxes counted as {calls} allocation calls"
@@ -79,6 +81,10 @@ fn a_settled_frame_stays_within_its_allocation_budget() {
     let m = support::opened_as_the_app(root, tmp.path().join("export"));
     let mut h = app_harness::harness(m);
     app_harness::quiet(&mut h);
+    assert!(
+        h.query_by_label("stonewall.png").is_some(),
+        "the demo project is not on screen: no \"stonewall.png\" row, so an empty frame would pass as a cheap one"
+    );
     let frames: Vec<(u64, u64)> = (0..5)
         .map(|_| {
             let ((), calls, bytes) = counted(|| {

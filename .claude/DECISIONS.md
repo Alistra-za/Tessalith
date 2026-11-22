@@ -2186,7 +2186,7 @@ LE is provisional. At merge the controller rechecks the next free main-team lett
 
 ## Note LF — Allocation budgets (main team, 2026-11-21)
 
-A new engine test file counts the allocation calls of a warm full plan and of a one-edit re-plan, so a change that makes planning allocate far more fails a test. It changes no encoded byte.
+Three tests count allocation calls against a budget: a warm full plan and a one-edit re-plan (engine), and one settled frame of the demo project in the real app (GUI). A change that makes any of them allocate far more fails a test. It changes no encoded byte.
 
 - **LF1 Plan allocation budgets.** `crates/engine/tests/alloc_budget.rs` counts allocation calls with a process-wide counting allocator, for a warm full plan and for one `replan_sets` edit of the fast fixture, and fails above `WARM_PLAN_CALLS` or `REPLAN_CALLS`. Every request runs with `jobs = 1` so the count is the same from run to run. Each const is the largest of 5 measured runs times 1.25, rounded up to two significant figures; to raise one, re-measure 5 runs with `--nocapture`, apply that rule, and give the reason in the commit.
 
