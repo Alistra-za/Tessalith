@@ -43,6 +43,18 @@ class ProfileError(Exception):
     pass
 
 
+def shared_summary():
+    """tools/profile-summary.py holds the one Python copy of the spec 7.8 path check (it parses profile-paths.ps1).
+    Loaded by path, because -I keeps the script folder off sys.path."""
+    import importlib.util
+    sys.dont_write_bytecode = True  # no __pycache__ beside the tools
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profile-summary.py")
+    spec = importlib.util.spec_from_file_location("profile_summary", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def need(d, key, what):
     if not isinstance(d, dict) or key not in d:
         raise ProfileError("the profile has no %s (missing key %r)" % (what, key))
@@ -224,6 +236,39 @@ def self_test():
     except ProfileError:
         ok("a profile without a frameTable stops loudly", True)
     ok("the markdown lists the top functions and the never-seen frames", "## Top 30" in render(r, "x") and "powf" in render(r, "x"))
+    import contextlib
+    import io
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="profile-samply-selftest-")  # left in place (EP-R3)
+    src = os.path.join(tmp, "p.json")
+    with open(src, "x", encoding="utf-8") as f:
+        json.dump(synthetic_profile(), f)
+    with open(src + ".syms.json", "x", encoding="utf-8") as f:
+        json.dump(synthetic_syms(), f)
+    # a stand-in protected list that names a folder inside tmp, so a regressed check can only write into tmp
+    mod = shared_summary()
+    mod.PATHS_PS1 = os.path.join(tmp, "stand-in-paths.ps1")
+    prot_dir = os.path.join(tmp, "protected-area")
+    with open(mod.PATHS_PS1, "x", encoding="utf-8") as f:
+        f.write("function Get-ProtectedList {\n    @(\n        '%s'\n    )\n}\n" % prot_dir)
+    real = shared_summary
+    globals()["shared_summary"] = lambda: mod
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            code = main([src, "--out", os.path.join(prot_dir, "out.md")])
+    finally:
+        globals()["shared_summary"] = real
+    ok("a protected --out is refused before anything is created", code == 1 and "protected" in buf.getvalue()
+       and not os.path.exists(os.path.join(prot_dir, "out.md")), (code, buf.getvalue()))
+    out_md = os.path.join(tmp, "out.md")
+    with contextlib.redirect_stdout(io.StringIO()):
+        code1 = main([src, "--out", out_md])
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code2 = main([src, "--out", out_md])
+    ok("an existing --out is a FAIL line (not a traceback) and the file is not replaced", code1 == 0 and code2 == 1 and "FileExistsError" in buf.getvalue()
+       and "powf" in open(out_md, encoding="utf-8").read(), (code1, code2, buf.getvalue()))
     print("%s: %d failed" % ("FAIL" if fails else "ALL PASS", fails))
     return 1 if fails else 0
 
@@ -240,17 +285,21 @@ def main(argv=None):
     if not (args.profile and args.out):
         ap.error("a profile and --out are required")
     try:
+        why = shared_summary().out_problem(args.out)  # spec 7.8, before anything is read or created
+        if why:
+            print("FAIL --out %s %s" % (args.out, why))
+            return 1
         profile = load_json(args.profile)
         sp = args.syms or next((c for c in sidecar_candidates(args.profile) if os.path.isfile(c)), None)
         syms = check_sidecar(load_json(sp)) if sp else None
         if syms is None:
             print("warning: no .syms.json sidecar found; address-only frames stay unresolved", file=sys.stderr)
         text = render(attribute(profile, syms), os.path.basename(args.profile))
-    except (ProfileError, OSError, ValueError) as e:
-        print("FAIL %s" % e)
+        with open(args.out, "x", encoding="utf-8", newline="\n") as f:  # never replaces a file (EP-R3)
+            f.write(text)
+    except (ProfileError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        print("FAIL %s: %s" % (type(e).__name__, e))
         return 1
-    with open(args.out, "x", encoding="utf-8", newline="\n") as f:  # never replaces a file (EP-R3)
-        f.write(text)
     print("wrote %s" % args.out)
     return 0
 

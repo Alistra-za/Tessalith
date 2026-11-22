@@ -29,12 +29,18 @@ Clocks: the recorder's timeline and sampler.csv's t_ms share no zero. The CPU bu
 together (shortcut: the offset is tens of ms; the unrecorded-CPU column is informational only, spec 4.2).
 """
 import argparse
+import contextlib
 import csv
+import fnmatch
+import io
 import json
 import math
 import os
+import re
 import statistics
 import sys
+import tempfile
+import time
 from fractions import Fraction
 
 NS = 1_000_000_000
@@ -141,7 +147,8 @@ def nest(spans):
     return excl, children
 
 
-def analyse(report):
+def analyse(report, command_wall_ns=None):
+    """command_wall_ns is the runner's external wall (meta.json); the recorder's own wall is kept as a second figure."""
     stages = report["stages"]
     names = [s["name"] for s in stages]
     is_wait = [s["class"] == "wait" for s in stages]
@@ -151,10 +158,16 @@ def analyse(report):
     calls = sorted(report.get("calls", []), key=lambda c: c["start_ns"])
 
     def call_of(t):
+        """The one call a span start belongs to: the last call starting at or before t, when t is not past its end."""
+        hit = None
         for c in calls:
-            if c["start_ns"] <= t <= c["end_ns"]:
-                return c
-        return None
+            if c["start_ns"] <= t:
+                hit = c
+            else:
+                break
+        return hit if hit is not None and t <= hit["end_ns"] else None
+
+    per_acc = {c["call"]: [0, 0] for c in calls}  # work ns, encode ns per call
 
     work_ns, wait_ns, wait_threads = {}, {}, {}
     by_kind = {}
@@ -175,6 +188,9 @@ def analyse(report):
             work_ns[name] = work_ns.get(name, 0) + ns
             if c:
                 cap_num[name] = cap_num.get(name, 0) + ns
+                per_acc[c["call"]][0] += ns
+                if name == ENCODE_STAGE:
+                    per_acc[c["call"]][1] += ns
         by_kind.setdefault(kind, {})
         by_kind[kind][name] = by_kind[kind].get(name, 0) + ns
         union_ivs.setdefault(name, []).append(interval(s))
@@ -190,16 +206,14 @@ def analyse(report):
             (enc_ivs if name == ENCODE_STAGE else other_ivs).extend(own)
     total_work = sum(work_ns.values())
     encode = work_ns.get(ENCODE_STAGE, 0)
-    wall = report.get("process", {}).get("wall_ns") or max((s["end"] for s in spans), default=0)
+    recorder_wall = report.get("process", {}).get("wall_ns") or max((s["end"] for s in spans), default=0)
+    wall = command_wall_ns or recorder_wall
     enc_m, oth_m = merge(enc_ivs), merge(other_ivs)
     mixed = total(intersect(enc_m, oth_m))
     cap_den = sum(c["pool_threads"] * (c["end_ns"] - c["start_ns"]) for c in calls)
     per_call = []
     for c in calls:
-        w = sum(excl[s["i"]] for s in spans
-                if not is_wait[s["stage"]] and c["start_ns"] <= s["start"] <= c["end_ns"])
-        e = sum(excl[s["i"]] for s in spans
-                if names[s["stage"]] == ENCODE_STAGE and c["start_ns"] <= s["start"] <= c["end_ns"])
+        w, e = per_acc[c["call"]]
         den = c["pool_threads"] * (c["end_ns"] - c["start_ns"])
         per_call.append({"call": c["call"], "kind": c["kind"], "pool_threads": c["pool_threads"],
                          "wall_ns": c["end_ns"] - c["start_ns"], "work_ns": w, "encode_ns": e,
@@ -214,44 +228,58 @@ def analyse(report):
         "stop": total_work > 0 and 10 * encode > 9 * total_work,
         "capacity": {k: Fraction(v, cap_den) for k, v in cap_num.items()} if cap_den else {},
         "union_ns": {k: total(merge(v)) for k, v in union_ivs.items()}, "union_bound_ns": union_bound,
-        "split": {"wall_ns": wall, "encode_only_ns": total(enc_m) - mixed, "mixed_ns": mixed,
+        "split": {"wall_ns": wall, "recorder_wall_ns": recorder_wall, "encode_only_ns": total(enc_m) - mixed, "mixed_ns": mixed,
                   "no_encode_ns": wall - total(enc_m), "bound_ns": split_bound},
         "by_kind": by_kind, "per_call": per_call, "work_own": work_own, "admit_ivs": merge(admit_ivs),
-        "wall_ns": wall,
+        "wall_ns": wall, "recorder_wall_ns": recorder_wall,
     }
 
 
 def cpu_buckets(an, sampler, logical):
-    """Per 250 ms bucket (spec 4.2): cores used (sampler), idle cores, recorded work threads, unrecorded CPU."""
+    """Per 250 ms bucket (spec 4.2): cores used (sampler), idle cores, recorded work threads, unrecorded CPU.
+    One pass: the sampler is walked with a moving index and every work interval is added to the buckets it spans."""
     if len(sampler) < 2:
         return []
     ts = [r["t_ms"] for r in sampler]
     cpu = [r["cpu_ms"] for r in sampler]
+    n = int((ts[-1] + 1e-9) // BUCKET_MS)
+    if n <= 0:
+        return []
+    k = [1]
 
-    def cum(t):
+    def cum(t):  # t only grows between calls
         if t <= ts[0]:
             return cpu[0]
         if t >= ts[-1]:
             return cpu[-1]
-        for k in range(1, len(ts)):
-            if t <= ts[k]:
-                f = (t - ts[k - 1]) / (ts[k] - ts[k - 1]) if ts[k] > ts[k - 1] else 1.0
-                return cpu[k - 1] + f * (cpu[k] - cpu[k - 1])
-        return cpu[-1]
+        while ts[k[0]] < t:
+            k[0] += 1
+        j = k[0]
+        f = (t - ts[j - 1]) / (ts[j] - ts[j - 1]) if ts[j] > ts[j - 1] else 1.0
+        return cpu[j - 1] + f * (cpu[j] - cpu[j - 1])
 
+    width = BUCKET_MS * 1_000_000
+    rec = [0] * n
+    for x, y in an["work_own"]:
+        if y <= x:
+            continue
+        for i in range(max(0, x // width), min(n - 1, (y - 1) // width) + 1):
+            rec[i] += min(y, (i + 1) * width) - max(x, i * width)
+    adm = [False] * n
+    for x, y in an["admit_ivs"]:
+        for i in range(max(0, x // width), min(n - 1, (y - 1) // width) + 1):
+            adm[i] = True
     out = []
-    t = 0
-    while t + BUCKET_MS <= ts[-1] + 1e-9:
-        a, b = t * 1_000_000, (t + BUCKET_MS) * 1_000_000
-        used = (cum(t + BUCKET_MS) - cum(t)) / BUCKET_MS
-        recorded = sum(max(0, min(y, b) - max(x, a)) for x, y in an["work_own"]) / (b - a)
-        waiting = any(y > a and x < b for x, y in an["admit_ivs"])
-        out.append({"t_ms": t, "cores_used": used, "idle_cores": logical - used, "recorded": recorded,
+    prev = cum(0)
+    for i in range(n):
+        nxt = cum((i + 1) * BUCKET_MS)
+        used = (nxt - prev) / BUCKET_MS
+        prev = nxt
+        recorded = rec[i] / width
+        out.append({"t_ms": i * BUCKET_MS, "cores_used": used, "idle_cores": logical - used, "recorded": recorded,
                     "unrecorded": used - recorded, "too_many": recorded > logical,
-                    "idle_while_admitting": waiting and recorded < logical / 2})
-        t += BUCKET_MS
+                    "idle_while_admitting": adm[i] and recorded < logical / 2})
     return out
-
 
 # ---------------------------------------------------------------- statistics (spec 7.3)
 
@@ -287,6 +315,74 @@ def overhead_rounds(attempts):
                        "off_minus_base_pct": 100.0 * (off - base) / base,
                        "on_minus_off_pct": 100.0 * (on - off) / base})
     return {"rounds": rounds, "outcome": overhead_outcome([r["off_minus_base_pct"] for r in rounds]) if rounds else "none"}
+
+
+# ---------------------------------------------------------------- protected paths (spec 7.8)
+
+PATHS_PS1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profile-paths.ps1")
+
+
+def protected_list(ps1=None):
+    """The one definition lives in tools/profile-paths.ps1 (Get-ProtectedList); it is parsed, never copied, so the
+    Python and PowerShell tools cannot drift. Entries: quoted paths, and `(Join-Path $env:NAME 'sub')`."""
+    with open(ps1 or PATHS_PS1, "r", encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"function Get-ProtectedList \{(.*?)\n\}", text, re.S)
+    if not m:
+        raise ValueError("Get-ProtectedList not found in %s" % ps1)
+    out = []
+    for ln in m.group(1).splitlines():
+        ln = ln.strip().rstrip(",")
+        j = re.match(r"\(Join-Path \$env:(\w+) '([^']+)'\)$", ln)
+        if j:
+            base = os.environ.get(j.group(1))
+            if not base:
+                raise ValueError("%s is not set, so the protected path %s\\%s cannot be resolved" % (j.group(1), j.group(1), j.group(2)))
+            out.append(os.path.join(base, j.group(2)))
+        else:
+            out.extend(re.findall(r"'([^']+)'", ln))
+    if not out:
+        raise ValueError("Get-ProtectedList in %s holds no path" % ps1)
+    return out
+
+
+def _parts(p):
+    """Resolved (junctions followed where the path exists) whole components, case-folded."""
+    r = os.path.realpath(os.path.abspath(p))
+    drive, rest = os.path.splitdrive(r)
+    return [drive.casefold()] + [x.casefold() for x in re.split(r"[\\/]+", rest) if x]
+
+
+def _contained(child, parent):
+    c, p = _parts(child), _parts(parent)
+    return len(p) <= len(c) and c[:len(p)] == p
+
+
+def out_problem(path, protected=None):
+    """Why an output path is refused (spec 7.8, as Get-RunRootProblem does), or None."""
+    if path.startswith("\\\\") or path.startswith("//"):
+        return "is a UNC path (refused)"
+    for p in (protected if protected is not None else protected_list()):
+        if _contained(path, p) or _contained(p, path):
+            return "overlaps the protected path %s" % p
+    comp = _parts(path)
+    if len(comp) > 3 and comp[:3] == ["f:", "ai", "dds"] and fnmatch.fnmatch(comp[3], "converter-nif-*"):
+        return "is inside a converter-nif-* checkout"
+    cur = os.path.realpath(os.path.abspath(path))
+    while True:
+        for name in ("sdc.toml", "sdc-project.toml"):
+            if os.path.exists(os.path.join(cur, name)):
+                return "is inside %s, which holds %s (an owner project)" % (cur, name)
+        up = os.path.dirname(cur)
+        if up == cur:
+            return None
+        cur = up
+
+
+def check_out(path):
+    why = out_problem(path)
+    if why:
+        raise ValueError("--out %s %s" % (path, why))
 
 
 # ---------------------------------------------------------------- loading (disk to dicts)
@@ -402,7 +498,10 @@ def stale_span_problems(att, expected, copied):
     ids = {}
     for j in rep.get("jobs", []):
         ids.setdefault(j["output"], set()).add(j["id"])
-    spans = span_list(rep)
+    by_id = {}
+    for s in span_list(rep):  # grouped once: a scan per expected key would be quadratic
+        if s["stage"] in (idx["currency_hash"], idx["file"], idx["hash_source"]):
+            by_id.setdefault(s["id"], []).append(s)
     probs = []
     for key in sorted(expected):
         rec = copied.get(key)
@@ -412,7 +511,7 @@ def stale_span_problems(att, expected, copied):
         if not jid:
             probs.append("%s: no job in the report" % key)
             continue
-        mine = [s for s in spans if s["id"] in jid]
+        mine = [s for i in jid for s in by_id.get(i, [])]
         ch = [s for s in mine if s["stage"] == idx["currency_hash"]]
         files = [s for s in mine if s["stage"] == idx["file"]]
         hs = [s for s in mine if s["stage"] == idx["hash_source"]]
@@ -438,6 +537,8 @@ def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False
         p.append("the attempt did not finish" + (": " + m["error"] if m.get("error") else ""))
     elif m.get("exitCode") != 0:
         p.append("exit code %s, not 0" % m.get("exitCode"))
+    if not isinstance(m.get("externalWallMs"), (int, float)) or isinstance(m.get("externalWallMs"), bool):
+        p.append("meta.json has no numeric externalWallMs (the command wall)")
     cont = m.get("contention")
     if not isinstance(cont, dict) or "contaminated" not in cont:
         if not allow_contaminated:
@@ -502,9 +603,12 @@ def disk_figures(meta):
     if not d:
         return None
     out = {}
-    for which in ("corpus", "output"):
-        s, e = d["start"][which], d["end"][which]
-        out[which] = {"disk": e.get("name"), "read_bytes": e["read"] - s["read"], "write_bytes": e["write"] - s["write"]}
+    try:
+        for which in ("corpus", "output"):
+            s, e = d["start"][which], d["end"][which]
+            out[which] = {"disk": e.get("name"), "read_bytes": e["read"] - s["read"], "write_bytes": e["write"] - s["write"]}
+    except (KeyError, TypeError):
+        return {"unreadable": "meta.json disk counters are incomplete"}
     return out
 
 
@@ -520,18 +624,21 @@ def attempt_figures(att, runroot):
     rep = att["report"]
     if rep is None:
         return fig, None
-    an = analyse(rep)
-    logical = m.get("logicalCores") or rep["meta"].get("logical_cores") or 1
+    wall_ms = m.get("externalWallMs")
+    an = analyse(rep, int(wall_ms * 1_000_000) if wall_ms else None)  # the brief's command wall, from meta.json
+    logical = m.get("logicalCores") or rep.get("meta", {}).get("logical_cores") or 1
     buckets = cpu_buckets(an, att["sampler"], logical)
     fig["an"] = an
-    fig["isa"] = rep["meta"].get("isa")
+    fig["isa"] = rep.get("meta", {}).get("isa")
+    fig["recorder_wall_ms"] = an["recorder_wall_ns"] / 1e6
     fig["pool_threads"] = {str(c["call"]): c["pool_threads"] for c in rep["calls"]}
     last_file = max((s["start"] for s in span_list(rep)
                      if rep["stages"][s["stage"]]["name"] == "file"), default=None)
-    fig["tail_ms"] = (an["wall_ns"] - last_file) / 1e6 if last_file is not None else None
+    fig["tail_ms"] = (an["recorder_wall_ns"] - last_file) / 1e6 if last_file is not None else None
     fig["plan_wall_ms"] = sum(c["wall_ns"] for c in an["per_call"] if c["kind"] == "plan") / 1e6
     fig["run_wall_ms"] = sum(c["wall_ns"] for c in an["per_call"] if c["kind"] == "run") / 1e6
-    pr = rep["process"]
+    pr = {"peak_working_set": 0, "peak_commit": 0}
+    pr.update(rep.get("process", {}))
     peaks = [c["budget_peak"] for c in an["per_call"] if c.get("budget_peak")]
     fig["memory"] = {"peak_working_set": pr["peak_working_set"], "peak_commit": pr["peak_commit"],
                      "sampler_max_working_set": max((r["working_set"] for r in att["sampler"]), default=None),
@@ -634,9 +741,9 @@ def run_check(args):
         return 1
     expected, _, _ = load_expected(runroot, label)
     ref = load_attempt(os.path.abspath(args.reference)) if args.reference else None
-    probs = check_attempt(att, expected, ref, load_copied_manifest(runroot, att), args.allow_contaminated)
+    probs = check_attempt(att, expected, ref, load_copied_manifest(runroot, att))  # never relaxed here
     if ref is not None:
-        probs += ["reference: " + x for x in check_attempt(ref, expected, None, None, args.allow_contaminated)]
+        probs += ["reference: " + x for x in check_attempt(ref, expected, None, None)]
     for x in probs:
         print("FAIL %s: %s" % (att["name"], x))
     if not probs:
@@ -675,8 +782,16 @@ def build_summary(groups, refs, runroot, allow_contaminated):
                                    load_copied_manifest(runroot, att), allow_contaminated):
                 problems.append("%s: %s" % (name, x))
             g["loaded"].append(att)
+    for g in groups:
+        if not g["attempts"]:
+            problems.append("[%s %s] lists no attempts" % (g["label"], g["cohort"]))
     if problems:
         return None, problems
+    return summarise(groups, refs, expected_by, runroot, allow_contaminated), []
+
+
+def summarise(groups, refs, expected_by, runroot, allow_contaminated):
+    """The figures of already loaded and accepted attempts (g["loaded"]); pure but for the purge stamp read."""
     out = {"accepted": not allow_contaminated, "labels": {}, "groups": [], "overhead": {}}
     for label, (exp, pnw, sk) in expected_by.items():
         out["labels"][label] = {"expected_keys": len(exp), "planned_not_written": [r[:2] for r in pnw],
@@ -698,9 +813,11 @@ def build_summary(groups, refs, runroot, allow_contaminated):
             med = statistics.median(shares)
             stops = [a["stop"] for a in ans]
             grp["encode"] = {"share_median": float(med), "share_min": float(min(shares)), "share_max": float(max(shares)),
-                             "verdict": "stop" if 10 * med > 9 else "no stop",
                              "split": any(stops) and not all(stops),
                              "isa": sorted({f.get("isa") for f in figs if f.get("isa")})}
+            if g["cohort"] == "warm-fresh":  # spec 4.3: the corpus verdict is the warm-fresh median's; other cohorts are informational
+                grp["encode"]["verdict"] = "stop" if 10 * med > 9 else "no stop"
+                out["labels"][g["label"]]["stop_verdict"] = grp["encode"]["verdict"]
         if ans:
             names = sorted({n for a in ans for n in list(a["work_ns"]) + list(a["wait_ns"])})
             st = {}
@@ -710,7 +827,7 @@ def build_summary(groups, refs, runroot, allow_contaminated):
                          "share_of_work": stats([float(Fraction(a["work_ns"].get(n, 0), a["total_work_ns"]))
                                                  if a["total_work_ns"] else 0.0 for a in ans]),
                          "share_of_capacity": stats([float(a["capacity"].get(n, 0)) for a in ans]),
-                         "union_share_of_wall": stats([a["union_ns"].get(n, 0) / a["wall_ns"] if a["wall_ns"] else 0.0
+                         "union_share_of_command_wall": stats([a["union_ns"].get(n, 0) / a["wall_ns"] if a["wall_ns"] else 0.0
                                                        for a in ans]),
                          "union_bound_ms": max(a["union_bound_ns"].get(n, 0) for a in ans) / 1e6}
             grp["stages"] = st
@@ -731,7 +848,7 @@ def build_summary(groups, refs, runroot, allow_contaminated):
         out["groups"].append(grp)
         if g["cohort"] == "overhead":
             out["overhead"][g["label"]] = overhead_rounds(g["loaded"])
-    return (out, figs_by), []
+    return out, figs_by
 
 
 def timeline_rows(buckets):
@@ -789,27 +906,31 @@ def render_md(summary):
           "busy thread-seconds of work stages; wait seconds are exclusive time in wait stages and never count as work.", ""]
     for label, info in summary["labels"].items():
         L += ["## Corpus %s" % label, "",
-              "Expected keys: %d. Planned, not written: %d. Skipped inputs: %d. Reference: %s." % (
-                  info["expected_keys"], len(info["planned_not_written"]), info["skipped_inputs"], info["reference"]), ""]
+              "Expected keys: %d. Planned, not written: %d. Skipped inputs: %d. Reference: %s. Stop verdict (warm-fresh median): %s." % (
+                  info["expected_keys"], len(info["planned_not_written"]), info["skipped_inputs"], info["reference"],
+                  info.get("stop_verdict", "n/a (no warm-fresh group with a report)")), ""]
         for g in [x for x in summary["groups"] if x["label"] == label]:
             L += ["### %s (n = %d)" % (g["cohort"], g["wall_ms"]["n"]), "",
                   "Command wall (ms): %s" % fmt_stat(g["wall_ms"], 1.0, 0), ""]
             if "encode" in g:
                 e = g["encode"]
-                L += ["Encode share of work (EP-R1): median %s, min %s, max %s. Verdict: **%s**%s. ISA: %s. "
+                verdict = ("Verdict (the corpus verdict, from this warm-fresh median): **%s**%s." % (
+                    e["verdict"], " (split: the repeats straddle 90 %)" if e["split"] else "")) if "verdict" in e else \
+                    "Informational only, no verdict: the corpus verdict is the warm-fresh median's."
+                L += ["Encode share of work (EP-R1): median %s, min %s, max %s. %s ISA: %s. "
                       "Wall shares are reported, not deciding." % (pct(e["share_median"]), pct(e["share_min"]), pct(e["share_max"]),
-                                                                    e["verdict"], " (split: the repeats straddle 90 %)" if e["split"] else "",
-                                                                    ", ".join(e["isa"]) or "n/a"), ""]
+                                                                    verdict, ", ".join(e["isa"]) or "n/a"), ""]
                 ws = g["wall_split_share"]
-                L += ["Wall split (share of recorder wall; error bound %.3f ms): encode-only %s, no-encode %s, mixed %s." % (
+                L += ["Wall split (share of command wall from meta.json; recorder wall is a second figure per attempt below; "
+                      "error bound %.3f ms): encode-only %s, no-encode %s, mixed %s." % (
                     g["wall_split_bound_ms"], pct(ws["encode_only_ns"]["median"]), pct(ws["no_encode_ns"]["median"]),
                     pct(ws["mixed_ns"]["median"])), ""]
-                L += ["| stage | class | seconds | share of work | share of pool capacity | union of wall | union bound ms |",
+                L += ["| stage | class | seconds | share of work | share of pool capacity | union of command wall | union bound ms |",
                       "|---|---|---|---|---|---|---|"]
                 for n, s in sorted(g["stages"].items(), key=lambda kv: -kv[1]["seconds"]["median"]):
                     L.append("| %s | %s | %s | %s | %s | %s | %.3f |" % (
                         n, s["class"], fmt_stat(s["seconds"]), pct(s["share_of_work"]["median"]) if s["class"] == "work" else "wait",
-                        pct(s["share_of_capacity"]["median"]), pct(s["union_share_of_wall"]["median"]), s["union_bound_ms"]))
+                        pct(s["share_of_capacity"]["median"]), pct(s["union_share_of_command_wall"]["median"]), s["union_bound_ms"]))
                 L.append("")
             if "skip_work" in g:
                 L += ["Skip-work candidates (each gain is an **upper bound**; seconds are thread-seconds, median):", "",
@@ -820,16 +941,15 @@ def render_md(summary):
                     else:
                         L.append("| %s | %.3f | %s | %s |" % (r["candidate"], r["seconds_median"], pct(r["share_of_work_median"]), r["label"]))
                 L.append("")
-            cpu_rows = [a for a in g["per_attempt"] if a.get("per_call") is not None]
-            if cpu_rows:
-                L += ["Per attempt (unrecorded CPU is informational only and printed with its sign):", "",
-                      "| attempt | wall ms | plan ms | run ms | tail ms | cores used | idle cores | unrecorded CPU | peak WS MB | contaminated |",
-                      "|---|---|---|---|---|---|---|---|---|---|"]
+            L += ["Per attempt (n/a where the attempt has no recorder report; unrecorded CPU is informational only and printed with its sign):", "",
+                  "| attempt | command wall ms | recorder wall ms | plan ms | run ms | tail ms | cores used | idle cores | unrecorded CPU | peak WS MB | contaminated |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
             for a in g["per_attempt"]:
                 cpu = a.get("cpu") or {}
                 mem = a.get("memory") or {}
-                L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-                    a["attempt"], a["wall_ms"], "%.0f" % a["plan_wall_ms"] if "plan_wall_ms" in a else "n/a",
+                L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                    a["attempt"], a["wall_ms"], "%.0f" % a["recorder_wall_ms"] if "recorder_wall_ms" in a else "n/a",
+                    "%.0f" % a["plan_wall_ms"] if "plan_wall_ms" in a else "n/a",
                     "%.0f" % a["run_wall_ms"] if "run_wall_ms" in a else "n/a",
                     "%.0f" % a["tail_ms"] if a.get("tail_ms") is not None else "n/a",
                     "%.2f" % cpu["cores_used_mean"] if cpu.get("cores_used_mean") is not None else "n/a",
@@ -840,7 +960,9 @@ def render_md(summary):
             L += ["Disk (bytes during the run; the standby list was purged before a cold run, nothing more is claimed):", ""]
             for a in g["per_attempt"]:
                 d = a.get("disk")
-                if d:
+                if d and "unreadable" in d:
+                    L.append("- %s: %s" % (a["attempt"], d["unreadable"]))
+                elif d:
                     L.append("- %s: corpus disk read %d write %d; output disk read %d write %d%s" % (
                         a["attempt"], d["corpus"]["read_bytes"], d["corpus"]["write_bytes"], d["output"]["read_bytes"],
                         d["output"]["write_bytes"], "; purge stamp %s" % a["purgeStamp"] if a.get("purgeStamp") else ""))
@@ -856,6 +978,7 @@ def render_md(summary):
 
 
 def run_accept(args):
+    check_out(args.out)  # before anything is read or created
     runroot = os.path.abspath(args.runroot)
     groups, refs = parse_accept(read_text(args.accept))
     res, problems = build_summary(groups, refs, runroot, args.allow_contaminated)
@@ -978,6 +1101,7 @@ def render_mipq_md(agg):
 
 
 def run_mipq(args):
+    check_out(args.out)
     reps = {os.path.splitext(os.path.basename(p))[0]: read_json(p) for p in args.mipq}
     agg = aggregate_mipq(reps)
     os.makedirs(args.out)
@@ -1062,8 +1186,8 @@ def selftest_accounting(t):
          and not a["stop"] and a["work_ns"]["dispatch"] == S(1), (a["wait_ns"], a["work_ns"], a["encode_share"]))
     spans = [("plan_file", 0, 0, S(3))] + [("encode_band", i, S(3), S(10)) for i in range(16)]
     rep = mk_report(spans, [call(1, S(3), 0, "plan", 0), call(16, S(10), S(3), "run", 1)], wall=S(10))
-    a = analyse(rep)
-    t.ok("wall_shares_are_reported_not_deciding: 112/115 stop, no-encode wall 30 %", a["encode_share"] == Fraction(112, 115) and a["stop"]
+    a = analyse(rep, S(10))
+    t.ok("wall_shares_are_reported_not_deciding: 112/115 stop, no-encode wall 30 %",a["encode_share"] == Fraction(112, 115) and a["stop"]
          and a["split"]["no_encode_ns"] == S(3) and a["split"]["wall_ns"] == S(10), (a["encode_share"], a["split"]))
     # unrecorded_cpu_is_informational
     spans = []
@@ -1082,7 +1206,15 @@ def selftest_accounting(t):
     l9 = next(b for b in lo if b["t_ms"] == 9000)
     t.ok("unrecorded_cpu_is_informational: +3 with 3 extra cores", abs(b9["unrecorded"] - 3) < 1e-6 and abs(b9["recorded"] - 16) < 1e-6, b9)
     t.ok("unrecorded_cpu_is_informational: negative when cores used are below the recorded work", l9["unrecorded"] < 0, l9)
-    t.ok("unrecorded_cpu_is_informational: the verdict does not read the sampler", analyse(rep)["stop"] == base["stop"] and base["stop"], base["stop"])
+    fa = mk_att("u1", build="release", hashes={}, report=rep, logicalCores=16, externalWallMs=17500)
+    fa["sampler"] = sampler(19)
+    fb = mk_att("u2", build="release", hashes={}, report=rep, logicalCores=16, externalWallMs=17500)
+    fb["sampler"] = sampler(8)
+    f1, _ = attempt_figures(fa, None)
+    f2, _ = attempt_figures(fb, None)
+    t.ok("unrecorded_cpu_is_informational: attempt figures keep the verdict and share, only the unrecorded column moves (+ and -)",
+         f1["an"]["stop"] == f2["an"]["stop"] and f1["an"]["encode_share"] == f2["an"]["encode_share"]
+         and f1["cpu"]["unrecorded_mean_signed"] > 0 > f2["cpu"]["unrecorded_mean_signed"], (f1["cpu"], f2["cpu"]))
     # coalesced rows
     rep = mk_report([("encode_band", 1, 0, US(50), 0, US(30), 3)], [call(1, US(50))])
     a = analyse(rep)
@@ -1214,9 +1346,222 @@ def selftest_mipq(t):
     t.ok("mipq_aggregation_counts_skips_and_exact_levels: the format group counts it too", aggregate_mipq({"fx": rep})["corpora"]["fx"]["groups"]["format=bc7"]["skipped"] == 1)
 
 
+def _slow_cpu_buckets(an, sampler, logical):
+    """The first (quadratic) version, kept as the reference the linear one is checked against."""
+    if len(sampler) < 2:
+        return []
+    ts = [r["t_ms"] for r in sampler]
+    cpu = [r["cpu_ms"] for r in sampler]
+
+    def cum(t):
+        if t <= ts[0]:
+            return cpu[0]
+        if t >= ts[-1]:
+            return cpu[-1]
+        for k in range(1, len(ts)):
+            if t <= ts[k]:
+                f = (t - ts[k - 1]) / (ts[k] - ts[k - 1]) if ts[k] > ts[k - 1] else 1.0
+                return cpu[k - 1] + f * (cpu[k] - cpu[k - 1])
+        return cpu[-1]
+    out = []
+    t = 0
+    while t + BUCKET_MS <= ts[-1] + 1e-9:
+        a, b = t * 1_000_000, (t + BUCKET_MS) * 1_000_000
+        used = (cum(t + BUCKET_MS) - cum(t)) / BUCKET_MS
+        recorded = sum(max(0, min(y, b) - max(x, a)) for x, y in an["work_own"]) / (b - a)
+        waiting = any(y > a and x < b for x, y in an["admit_ivs"])
+        out.append({"t_ms": t, "cores_used": used, "idle_cores": logical - used, "recorded": recorded,
+                    "unrecorded": used - recorded, "too_many": recorded > logical,
+                    "idle_while_admitting": waiting and recorded < logical / 2})
+        t += BUCKET_MS
+    return out
+
+
+def _slow_stale(att, expected, copied):
+    """The first version of the stale span check (a scan of all spans per key), as the reference."""
+    rep = att["report"]
+    idx = {n: i for i, n in enumerate(s["name"] for s in rep["stages"])}
+    ids = {}
+    for j in rep.get("jobs", []):
+        ids.setdefault(j["output"], set()).add(j["id"])
+    spans = span_list(rep)
+    probs = []
+    for key in sorted(expected):
+        rec_ = copied.get(key)
+        if not rec_ or (rec_.get("validation") or {}).get("passed") is not True:
+            continue
+        jid = ids.get(key)
+        if not jid:
+            probs.append("%s: no job in the report" % key)
+            continue
+        mine = [s for s in spans if s["id"] in jid]
+        ch = [s for s in mine if s["stage"] == idx["currency_hash"]]
+        files = [s for s in mine if s["stage"] == idx["file"]]
+        hs = [s for s in mine if s["stage"] == idx["hash_source"]]
+        holding = [f for f in files if any(h["thread"] == f["thread"] and f["start"] <= h["start"]
+                                           and h["end"] <= f["end"] for h in hs)]
+        if len(ch) != 1:
+            probs.append("%s: %d currency_hash span(s), want 1" % (key, len(ch)))
+        if len(holding) != 1:
+            probs.append("%s: %d file span(s) holding a hash_source span, want 1" % (key, len(holding)))
+    return probs
+
+
+def selftest_paths(t):
+    n = "protected_out_paths"
+    prot = protected_list()
+    for path, refused in (("G:\\x", True), ("C:\\_mount\\x", True), ("B:\\testdata\\x", True), ("B:\\testdata2\\x", False),
+                          ("C:\\_mount2\\x", False), ("\\\\server\\share\\x", True),
+                          (os.path.join(os.environ.get("LOCALAPPDATA", "C:\\nolocal"), "sdc", "x"), True)):
+        why = out_problem(path, prot)
+        t.ok("%s: %s is %s" % (n, path, "refused" if refused else "allowed (a sibling prefix is not inside)"), (why is not None) == refused, why)
+    body = re.search(r"function Get-ProtectedList \{(.*?)\n\}", read_text(PATHS_PS1), re.S).group(1)
+    quoted = [q for q in re.findall(r"'([^']+)'", body) if q != "sdc"]
+    joins = len(re.findall(r"Join-Path \$env:", body))
+    t.ok(n + ": the parsed list is the .ps1's list (every quoted path and both env entries)", len(prot) == len(quoted) + joins and "G:\\" in prot
+         and "B:\\testdata" in prot and "C:\\_mount" in prot, (len(prot), len(quoted), joins))
+    tmp = tempfile.mkdtemp(prefix="profile-summary-selftest-")  # left in place (EP-R3)
+    fake = os.path.join(tmp, "paths.ps1")
+    write_new(fake, "function Get-ProtectedList {\n    @(\n        'Z:\\extra', 'G:\\',\n        (Join-Path $env:LOCALAPPDATA 'sdc')\n    )\n}\n")
+    got = protected_list(fake)
+    t.ok(n + ": a changed .ps1 list is what is read (the two cannot drift)", got[0] == "Z:\\extra" and got[1] == "G:\\" and len(got) == 3, got)
+    link = os.path.join(tmp, "link")
+    target = os.path.dirname(PATHS_PS1)
+    r = os.system('cmd /c mklink /J "%s" "%s" >nul' % (link, target))
+    t.ok(n + ": a junction into a protected folder is resolved and refused", r == 0 and out_problem(os.path.join(link, "x"), [target]) is not None, r)
+
+
+def selftest_scale(t):
+    n = "scale_and_equivalence"
+    # equivalence with the slow references on a small input
+    spans = []
+    for i in range(16):
+        o = S(0.5 * i)
+        spans += [("decode", i, o, o + S(0.5)), ("encode_band", i, o + S(0.5), o + S(10)), ("plan_admit_wait", i, o, o + S(0.2))]
+    rep = mk_report(spans, [call(16, S(17.5))])
+    an = analyse(rep)
+    smp = [{"t_ms": float(x), "cpu_ms": 13.0 * x + (x % 7), "working_set": 0, "private_bytes": 0, "threads": 1} for x in range(0, 17501, 130)]
+    fast, slow = cpu_buckets(an, smp, 16), _slow_cpu_buckets(an, smp, 16)
+    same = len(fast) == len(slow) and all(
+        abs(a[k] - b[k]) < 1e-6 for a, b in zip(fast, slow) for k in ("cores_used", "idle_cores", "recorded", "unrecorded")) and all(
+        a["too_many"] == b["too_many"] and a["idle_while_admitting"] == b["idle_while_admitting"] for a, b in zip(fast, slow))
+    t.ok(n + ": cpu_buckets equals the quadratic reference on a small input", same and len(fast) > 50, (len(fast), len(slow)))
+    jobs = [{"id": 0, "call": 0, "output": "a.dds"}, {"id": 1, "call": 0, "output": "b.dds"}, {"id": 2, "call": 0, "output": "c.dds"}]
+    sp = [("currency_hash", 0, 1, 2, 0), ("hash_source", 0, 4, 5, 0), ("file", 0, 3, 8, 0),
+          ("hash_source", 0, 14, 15, 1), ("file", 0, 13, 18, 1), ("currency_hash", 0, 21, 22, 2), ("currency_hash", 0, 23, 24, 2)]
+    srep = mk_report(sp, [call(1, 100)], jobs=jobs)
+    exp = {"a.dds", "b.dds", "c.dds"}
+    copied = {k: rec(k) for k in exp}
+    att = mk_att("sc", cohort="warm-stale", report=srep)
+    f, s = stale_span_problems(att, exp, copied), _slow_stale(att, exp, copied)
+    t.ok(n + ": stale_span_problems equals the per-key scan on a small input (and finds b.dds and c.dds)", f == s and len(f) == 3, (f, s))
+    # a large report: 5,000 keys, 205,000 spans
+    big_spans, big_jobs = [], []
+    for i in range(5000):
+        th, b = i % 16, (i // 16) * US(50000)
+        big_jobs.append({"id": i, "call": 0, "output": "k%d.dds" % i})
+        big_spans += [("currency_hash", th, b, b + US(1000), i), ("hash_source", th, b + US(2000), b + US(4000), i)]
+        big_spans += [("encode_band", th, b + US(5000 + 1000 * k), b + US(6000 + 1000 * k), i) for k in range(37)]
+        big_spans.append(("file", th, b, b + US(44000), i))
+    big = mk_report(big_spans, [call(16, S(20))], jobs=big_jobs)
+    sm = [{"t_ms": float(x), "cpu_ms": 8.0 * x, "working_set": 1, "private_bytes": 1, "threads": 16} for x in range(0, 20001, 250)]
+    keys = {"k%d.dds" % i for i in range(5000)}
+    battr = mk_att("big", cohort="warm-stale", report=big)
+    t0 = time.time()
+    a_big = analyse(big)
+    bk = cpu_buckets(a_big, sm, 16)
+    pr = stale_span_problems(battr, keys, {k: rec(k) for k in keys})
+    took = time.time() - t0
+    t.ok(n + ": %d spans and %d keys finish in under 10 s (took %.1f s) with consistent results" % (len(big["spans"]), len(keys), took),
+         len(big["spans"]) >= 200000 and took < 10 and len(bk) == 80 and pr == [] and a_big["work_ns"]["encode_band"] == 5000 * 37 * US(1000),
+         (len(big["spans"]), took, len(bk), pr[:2]))
+
+
+def selftest_cli(t):
+    n = "summary_cli_and_render"
+    # the summary's wall split (labelled) and the corpus verdict only from warm-fresh
+    spans = [("plan_file", 0, 0, S(3))] + [("encode_band", i, S(3), S(10)) for i in range(16)]
+    rep = mk_report(spans, [call(1, S(3), 0, "plan", 0), call(16, S(10), S(3), "run", 1)], wall=S(10))
+    mk = lambda name, cohort: mk_att(name, cohort=cohort, build="release", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")},
+                                     report=rep, externalWallMs=10000, logicalCores=16, **({"purgeStamp": "p"} if cohort == "cold-fresh" else {}))
+    groups = [{"label": "fx", "cohort": "warm-fresh", "attempts": ["w"], "loaded": [mk("w", "warm-fresh")]},
+              {"label": "fx", "cohort": "cold-fresh", "attempts": ["c"], "loaded": [mk("c", "cold-fresh")]}]
+    out, _ = summarise(groups, {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
+    md = render_md(out)
+    t.ok(n + ": the wall split reads no-encode 30.0 % and is labelled as command wall", "no-encode 30.0 %" in md and "command wall" in md, md[:400])
+    t.ok(n + ": one corpus verdict, from warm-fresh; the cold group is informational", out["labels"]["fx"]["stop_verdict"] == "stop"
+         and md.count("Verdict (the corpus verdict") == 1 and "Informational only" in md, md.count("Verdict"))
+    out2, _ = summarise(groups, {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, True)
+    t.ok(n + ": contaminated attempts allowed marks the markdown NOT ACCEPTANCE EVIDENCE", "NOT ACCEPTANCE EVIDENCE" in render_md(out2))
+    # disk-backed: run_check exit codes, build_summary and run_accept
+    tmp = tempfile.mkdtemp(prefix="profile-summary-selftest-")  # left in place (EP-R3)
+    rr = os.path.join(tmp, "runroot")
+    os.makedirs(rr)
+    write_new(os.path.join(rr, "expected-fx.txt"), "a.dds\nb.dds\n")
+
+    def mk_dir(name, cohort, build, exe, keys):
+        d = os.path.join(rr, name)
+        os.makedirs(os.path.join(d, "out", "_sdc"))
+        meta = {"attempt": name, "label": "fx", "cohort": cohort, "build": build, "exeSha256": exe, "finished": True, "exitCode": 0,
+                "externalWallMs": 100, "logicalCores": 16, "contention": {"contaminated": False, "reasons": []}}
+        write_new(os.path.join(d, "meta.json"), json.dumps(meta))
+        write_new(os.path.join(d, "hashes.csv"), "path,sha256\n" + "".join("%s,h%s\n" % (k, k) for k in keys))
+        write_new(os.path.join(d, "out", "_sdc", "manifest.jsonl"), "".join(json.dumps(rec(k)) + "\n" for k in keys))
+        return d
+    ref_d = mk_dir("ref", "warm-fresh", "base", "B1", ["a.dds", "b.dds"])
+    ok_d = mk_dir("ok", "warm-fresh", "release-off", "E1", ["a.dds", "b.dds"])
+    bad_d = mk_dir("bad", "warm-fresh", "release-off", "E1", ["a.dds"])
+    ns = lambda **k: argparse.Namespace(**dict(dict(check=None, reference=None, runroot=rr, out=None, accept=None, allow_contaminated=False), **k))
+
+    def captured(fn, *a):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = fn(*a)
+        return code, buf.getvalue()
+    code, text = captured(run_check, ns(check=ok_d, reference=ref_d))
+    t.ok(n + ": run_check exits 0 on a good attempt", code == 0 and text.startswith("OK"), (code, text))
+    code, text = captured(run_check, ns(check=bad_d, reference=ref_d))
+    t.ok(n + ": run_check exits 1 naming the missing key", code == 1 and "b.dds" in text and "not written" in text, (code, text))
+    code, text = captured(run_check, ns(check=ref_d))
+    t.ok(n + ": run_check on a reference alone checks it against the expected set", code == 0, (code, text))
+    acc = os.path.join(tmp, "accept.txt")
+    write_new(acc, "[fx warm-fresh]\nok\nreference ref\n")
+    out_dir = os.path.join(tmp, "summary-out")
+    code, text = captured(run_accept, ns(accept=acc, out=out_dir))
+    t.ok(n + ": run_accept writes summary.json and summary.md from accepted attempts", code == 0 and os.path.isfile(os.path.join(out_dir, "summary.md"))
+         and os.path.isfile(os.path.join(out_dir, "summary.json")), (code, text))
+    write_new(acc + "2", "[fx warm-fresh]\nbad\nreference ref\n")
+    code, text = captured(run_accept, ns(accept=acc + "2", out=os.path.join(tmp, "summary-out2")))
+    t.ok(n + ": run_accept refuses an attempt that fails its check (exit 1, reason, nothing created)",
+         code == 1 and "b.dds" in text and not os.path.exists(os.path.join(tmp, "summary-out2")), (code, text))
+    # the protected folder is one inside tmp, named by a stand-in list, so a regressed check can only write into tmp
+    global PATHS_PS1
+    keep, PATHS_PS1 = PATHS_PS1, os.path.join(tmp, "stand-in-paths.ps1")
+    try:
+        prot_dir = os.path.join(tmp, "protected-area")
+        write_new(PATHS_PS1, "function Get-ProtectedList {\n    @(\n        '%s'\n    )\n}\n" % prot_dir)
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            code = main(["--accept", acc, "--runroot", rr, "--out", os.path.join(prot_dir, "out")])
+    finally:
+        PATHS_PS1 = keep
+    t.ok(n + ": a protected --out is refused before anything is created", code == 1 and "protected" in buf.getvalue()
+         and not os.path.exists(os.path.join(prot_dir, "out")), (code, buf.getvalue()))
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            main(["--check", ok_d, "--runroot", rr, "--allow-contaminated"])
+        t.ok(n + ": --allow-contaminated is refused with --check", False)
+    except SystemExit as e:
+        t.ok(n + ": --allow-contaminated is refused with --check (usage error, exit 2)", e.code == 2, e.code)
+    write_new(acc + "3", "[fx warm-fresh]\nreference ref\n")
+    code, text = captured(run_accept, ns(accept=acc + "3", out=os.path.join(tmp, "summary-out3")))
+    t.ok(n + ": a header with no attempts is a named failure, not a traceback", code == 1 and "lists no attempts" in text, (code, text))
+    code, text = captured(main, ["--accept", acc, "--runroot", os.path.join(tmp, "nope"), "--out", os.path.join(tmp, "summary-out4")])
+    t.ok(n + ": a missing run root is a FAIL line, not a traceback", code == 1 and text.startswith("FAIL"), (code, text))
+
+
 def self_test():
     t = T()
-    for fn in (selftest_accounting, selftest_stats, selftest_acceptance, selftest_mipq):
+    for fn in (selftest_accounting, selftest_stats, selftest_acceptance, selftest_mipq, selftest_paths, selftest_scale, selftest_cli):
         try:
             fn(t)
         except Exception as e:  # a crashing case is a failure, with its traceback
@@ -1240,6 +1585,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.allow_contaminated and not args.accept:
+        ap.error("--allow-contaminated is only for --accept (a --check gate is never relaxed)")
     try:
         if args.check:
             if not args.runroot:
@@ -1253,8 +1600,12 @@ def main(argv=None):
             if not args.out:
                 ap.error("--mipq needs --out")
             return run_mipq(args)
-    except (FileNotFoundError, ValueError, FileExistsError) as e:
+    except ValueError as e:
+        # a protected --out is `--out <path> overlaps the protected path ...`
         print("FAIL %s" % e)
+        return 1
+    except (OSError, KeyError, TypeError, IndexError, AttributeError) as e:
+        print("FAIL %s: %s (a missing or malformed input, or an unusable path)" % (type(e).__name__, e))
         return 1
     ap.error("one of --accept, --check, --mipq or --self-test")
 
