@@ -608,7 +608,7 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
 }
 
 /// The explicit choice of the bake on a plain normal in a complex material set says what it does to the _m gloss, and
-/// the active bake also says what it does to an XYZ normal kept as authored (Table B).
+/// the active bake also says what it does to the average length of the smaller mips (Table B).
 #[test]
 fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
     use sdc_gui::model::labels::VARIANCE_BAKE_HOVER;
@@ -620,7 +620,6 @@ fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     complex_material(&mut m, "landscape/rock01");
     m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize_bake"));
-    m.set_field(NORMAL, "mips.normal_base", serde_json::json!("keep"));
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.select_item(NORMAL);
     let mut h = harness(m, 1600.0);
@@ -636,7 +635,7 @@ fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
             .is_some(),
         "the gloss sentence"
     );
-    // Keep as authored is set above, so the hover names preserved average length and unit bake directions.
+    // The active bake adds the variance line: preserved average length and unit bake directions.
     assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_some());
 }
 
@@ -666,20 +665,39 @@ fn the_bake_hover_shows_only_for_the_active_bake() {
     hovered(&mut h, "Normal handling");
     assert!(h.query_by_label_contains(RENORM_BAKE_HOVER).is_some());
     assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_none());
-    // Keep as authored under the plain renormalise: no bake, so neither explanation.
+    // Keep as authored under the plain renormalise in the same set: no bake, so no variance line. The opt-in hover
+    // shows on the combo (the anchor that a tooltip appeared).
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened(d.path());
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
     m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize"));
     m.set_field(NORMAL, "mips.normal_base", serde_json::json!("keep"));
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.select_item(NORMAL);
-    let mut h = harness(m, 1280.0);
+    let mut h = harness(m, 1600.0);
     instant_tips(&h.ctx);
     h.run();
     hovered(&mut h, "Normal handling");
-    assert!(h.query_by_label_contains("average length").is_none());
-    assert!(h.query_by_label_contains("unit directions").is_none());
-    // Another field of the same normal never carries either explanation.
+    assert!(h.query_by_label_contains(RENORM_BAKE_HOVER).is_some());
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_none());
+    // A normal whose bake the set chose ("set" provenance on Normal handling; the engine gives no other field that
+    // provenance, `bake/plan.rs` inserts it for `mips.normal` only): its other rows carry neither explanation. The
+    // "?" of Normal base level is the anchor that tooltips show in this harness.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    h.run();
+    h.get_by_role_and_label(Role::Label, "Help: Normal base level")
+        .hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains("Renormalise to unit length is the default")
+        .is_some());
     hovered(&mut h, "Normal base level");
     assert!(h.query_by_label_contains("average length").is_none());
     assert!(h.query_by_label_contains("unit directions").is_none());
