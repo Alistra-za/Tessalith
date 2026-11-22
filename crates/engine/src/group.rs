@@ -65,6 +65,8 @@ fn cut_tail<'a>(stem: &'a str, term: &str) -> Option<&'a str> {
     let (s, t) = (stem.as_bytes(), term.as_bytes());
     let cut = s.len().checked_sub(t.len() + 1)?;
     // The byte at `cut` is `_`, which is ASCII and so never inside a multi-byte char: the slice is on a boundary.
+    // That holds only because `.then(|| ..)` evaluates the slice after the `_` check; `then_some` would slice
+    // eagerly and could panic when `cut` lands inside a char.
     (cut > 0 && s[cut] == b'_' && s[cut + 1..].eq_ignore_ascii_case(t)).then(|| &stem[..cut])
 }
 
@@ -840,6 +842,7 @@ mod tests {
         for s in super::SUFFIXES {
             let tail = format!("_{s}");
             if lower.ends_with(&tail) && lower.len() > tail.len() {
+                // The tail is ASCII, so the cut falls on a char boundary even in non-ASCII stems.
                 return (
                     stem[..stem.len() - tail.len()].to_string(),
                     Some(s.to_string()),
@@ -851,10 +854,12 @@ mod tests {
 
     /// The `format!` version `split_vocab` had before `cut_tail`.
     fn old_split_vocab(stem: &str) -> Option<(String, &'static super::Vocab)> {
+        // Note CO: the generated marker comes off first.
         let stem = super::split_generated(stem).0;
         let lower = stem.to_ascii_lowercase();
         super::VOCABULARY.iter().find_map(|v| {
             let tail = format!("_{}", v.term);
+            // The tail is ASCII, so the cut falls on a char boundary even in non-ASCII stems.
             (lower.ends_with(&tail) && lower.len() > tail.len())
                 .then(|| (stem[..stem.len() - tail.len()].to_string(), v))
         })
@@ -892,10 +897,16 @@ mod tests {
                 old_split_suffix(stem),
                 "suffix {stem}"
             );
+            let (new, old) = (super::split_vocab(stem), old_split_vocab(stem));
             assert_eq!(
-                super::split_vocab(stem).map(|(b, v)| (b, v.term)),
-                old_split_vocab(stem).map(|(b, v)| (b, v.term)),
-                "vocab {stem}"
+                new.as_ref().map(|(b, _)| b),
+                old.as_ref().map(|(b, _)| b),
+                "vocab base {stem}"
+            );
+            assert_eq!(
+                new.map(|(_, v)| v as *const super::Vocab),
+                old.map(|(_, v)| v as *const super::Vocab),
+                "vocab entry {stem}"
             );
         }
     }
@@ -909,6 +920,10 @@ mod tests {
             ("n", "n", None),
             ("rockn", "n", None),
             ("möbel_n", "n", Some("möbel")),
+            // `cut` lands inside a multi-byte char (the byte before the term is its tail, not `_`).
+            ("石n", "n", None),
+            ("a石n", "n", None),
+            ("ön", "n", None),
         ] {
             assert_eq!(super::cut_tail(stem, term), want, "{stem} {term}");
         }
