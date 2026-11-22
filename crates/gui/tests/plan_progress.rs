@@ -134,17 +134,25 @@ fn a_plain_re_plan_during_an_open_still_says_planning() {
 
 #[test]
 fn an_edit_during_an_open_still_says_planning() {
+    // The items are empty while a folder opens, so the real key comes from the same fixture opened and settled.
+    let dk = tempfile::tempdir().unwrap();
+    let key = opened(dk.path())
+        .items
+        .iter()
+        .find(|i| i.key.ends_with("rock01_normal.png"))
+        .unwrap()
+        .key
+        .clone();
     let d = tempfile::tempdir().unwrap();
     let root = mod_folder(d.path());
     let mut m = AppModel::new(GuiSettings::default(), None, session());
     m.open_folder(root);
-    let key = m
-        .items
-        .iter()
-        .find(|i| i.key.ends_with("rock01_normal.png"))
-        .map(|i| i.key.clone())
-        .unwrap_or_else(|| "textures/landscape/rock01_normal.png".into());
+    assert!(m.can_cancel_open(), "the open is still in flight");
+    let (generation, pushes) = (m.generation(), m.history.pushes);
     m.set_field(&key, "subtype", serde_json::json!("height"));
+    // The edit recorded a step and started a new plan, which an open in progress still words as the open.
+    assert!(m.history.pushes > pushes, "the edit recorded a step");
+    assert!(m.generation() > generation, "the edit re-planned");
     assert_eq!(m.plan_cause, PlanCause::Open);
     assert_eq!(m.status_line, "Planning…");
     assert!(m.wait_idle(Duration::from_secs(60)));
