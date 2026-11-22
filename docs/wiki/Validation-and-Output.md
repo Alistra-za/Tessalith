@@ -57,7 +57,7 @@ The thresholds are fixed; only `validation.mips` is a setting.
 
 ## The manifest
 
-Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2` or `sse2`; `avx` and `sse4` appear only in records an older version wrote), the validation summary (or `skipped` when the run did not check) and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
+Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2` or `sse2`; `avx` and `sse4` appear only in records an older version wrote), the validation summary (or `skipped` when that output was not checked) and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
 
 ## Re-runs and if-changed
 
@@ -68,7 +68,7 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 - a resolved setting, other than a quality target set lower;
 - the record failed validation. <!-- D:LF4 -->
 
-So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 -->
+So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 --> A current output stays as it is, except that a checking run checks it in place if an earlier run left it unchecked ([what is checked](#what-is-checked)).
 
 Two kinds of output are kept and counted instead. Every run says how many: the CLI on its `done` line and, with `--json`, by format ([the log](CLI-Reference.md#reading-the-log)); the GUI in the bottom panel's **Files** tab, under its **Export details (n)** heading.
 

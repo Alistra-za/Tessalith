@@ -191,7 +191,7 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists: `if-changed` encodes it again only when something changed, `skip` keeps it, `overwrite` encodes it again ([below](#re-runs-and-if-changed)). |
 | `--ev` (alias `--encoder-version`) | off | With `if-changed`, also encode again the outputs written by an older encode version ([after an update](#re-encoding-after-an-update)). |
 | `--property <words>` | none | With `--ev`, only the outputs that have every word of the list. Repeatable: any list may match ([the words](#property-words)). |
-| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off`. With it, earlier unchecked outputs are checked where they lie. <!-- D:LF1,LF10 --> |
+| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LF1,LF10 --> |
 | `--dry-run` | off | Plan and report, write nothing. |
 
 The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
@@ -233,11 +233,10 @@ done: ..., N cancelled, N kept at a higher target
 - With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
-- A file is checked when the run has `--validate`, and always when it is a complex material `_m` or complex grass output. <!-- D:LF1,LF9 -->
-- Two failures read differently. A new output that fails prints `ok ... [VALIDATION FAILED]` and counts under "failed validation". <!-- D:LF1 -->
-- An old output that fails prints `skip ... up to date; checked in place: failed validation` and counts under "checked in place (M failed)"; the next `if-changed` run encodes it again. <!-- D:LF10 -->
-- Both make `sdc convert` exit 4 if nothing worse happened.
-- The `done` line says `validation off` when the run did not check, or `N failed validation (complex types only)` when it did not check and a complex file failed. It names "checked in place" only when N is above 0, as it does for kept counts. <!-- D:LF5,LF10 -->
+- A file is checked when the run has `--validate`, and always when it is a complex material `_m` or complex grass output. <!-- D:LF1,LF9 --> A failed check reads differently by kind, and either makes `sdc convert` exit 4 if nothing worse happened:
+  - A file written this run is still written. It prints `ok ... [VALIDATION FAILED]` and counts under "failed validation". <!-- D:LF1 -->
+  - An up to date file from an earlier run is not written. It prints `skip ... up to date; checked in place: failed validation` and counts under "checked in place (M failed)"; the next `if-changed` run encodes it again. <!-- D:LF10 -->
+  - Without `--validate`, the `done` line says `validation off`, or `N failed validation (complex types only)` when a complex material `_m` or complex grass output failed. It names "checked in place" only when N is above 0, as it does for kept counts. <!-- D:LF5,LF10 -->
 - The CLI raises none of the `CHK-` artist checks; the engine measures `CHK-LOW-DETAIL` only when the GUI asks.
 
 | `done` counter | Counts |
@@ -248,7 +247,7 @@ done: ..., N cancelled, N kept at a higher target
 | on purpose | The part of skipped you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, `PACK-CONFLICT` and `GEN-REPLACED`. |
 | failed | Files that failed to load, resolve, encode or write. |
 | failed validation | Files written this run whose validation reported an error. |
-| checked in place | Of up to date: outputs this run checked in place, and wrote no new file for; M of them failed. Shown only when above 0. |
+| checked in place | Of up to date: unchecked outputs that this run checked in place instead of encoding; M of them failed. Shown only when above 0. |
 | cancelled | Files not started because you pressed Ctrl-C. |
 | kept from an older encode version | Of up to date: the outputs kept as "older encode version" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
 | kept at a higher target | Of up to date: the outputs kept as "lower target" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
@@ -263,6 +262,7 @@ done: ..., N cancelled, N kept at a higher target
 | `skip` | kept | kept | kept | kept | kept |
 | `overwrite` | re-encoded | re-encoded | re-encoded | re-encoded | re-encoded |
 
+- `--validate` also reaches current outputs: [which ones](Validation-and-Output.md#what-is-checked).
 - An existing output with no manifest record is kept under `if-changed`, reported as `OUT-UNKNOWN-EXISTING`, and the run exits 1. `--on-existing overwrite` replaces it.
 - What "older encode version" and "lower target" mean, and why those outputs are kept: [Validation and output](Validation-and-Output.md#re-runs-and-if-changed). `overwrite` encodes a lower-target output at the lower target.
 - `--ev` with `--on-existing skip` or `overwrite` exits 2: `--ev applies only with --on-existing if-changed`. <!-- D:JA7 -->
@@ -626,7 +626,7 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 | `file_started` | none. |
 | `progress` | `stage`, `done`, `total`. |
 | `warning` | `code`, `severity`, `message`, `data`. |
-| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha`, `coverage`, `bc6h_peak_ratio`, `skipped`: true when the output was not checked). |
+| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha`, `coverage`, `bc6h_peak_ratio`, `skipped`: present, as `true`, only when the output was not checked). |
 | `file_skipped` | `skip`, `code`, `reason`. |
 | `file_failed` | `stage`, `error`. |
 | `batch_done` | `converted`, `up_to_date`, `skipped`, `skipped_intentional`, `failed`, `validation_failed`, `checked`, `checked_failed`, `cancelled` (list of inputs). |
