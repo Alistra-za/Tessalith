@@ -762,7 +762,7 @@ fn a_link_that_is_off_says_why() {
 }
 
 /// The app's half: a shape request takes Meshes forward once, and a request for a database Meshes does not read
-/// is dropped without switching.
+/// opens nothing there but says why in Meshes' status line (ruling 3d-T16-1: never a silent no-op).
 #[test]
 fn a_shape_request_brings_meshes_forward() {
     let (_d, _db, h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]);
@@ -782,7 +782,7 @@ fn a_shape_request_brings_meshes_forward() {
     app.route_3d(&ctx);
     assert!(sdc_gui::ui::header::meshes_view_active(&ctx));
     assert!(!app.model.centre_over_meshes && app.model.show_mesh.is_none());
-    // Another store: taken, not acted on.
+    // Another store: taken, nothing selected, and the reason shown where the click went.
     sdc_gui::ui::header::set_meshes_view(&ctx, false);
     app.model.centre_over_meshes = true;
     app.model.show_mesh = Some(MeshPick {
@@ -792,8 +792,13 @@ fn a_shape_request_brings_meshes_forward() {
         shape: None,
     });
     app.route_3d(&ctx);
-    assert!(!sdc_gui::ui::header::meshes_view_active(&ctx));
-    assert!(app.model.centre_over_meshes && app.model.show_mesh.is_none());
+    assert!(sdc_gui::ui::header::meshes_view_active(&ctx));
+    assert!(!app.model.centre_over_meshes && app.model.show_mesh.is_none());
+    assert_eq!(app.meshes.selected_nif, None);
+    assert_eq!(
+        app.meshes.status,
+        "That mesh link came from another scan database than Meshes shows, so it opened nothing."
+    );
 }
 
 #[test]

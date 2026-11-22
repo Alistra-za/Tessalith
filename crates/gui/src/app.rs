@@ -31,6 +31,10 @@ fn worker_poll(visible: bool, background: bool) -> Option<std::time::Duration> {
     }
 }
 
+/// Meshes' status line after a Used-by shape link from another scan database than Meshes reads.
+const OTHER_STORE_LINK: &str =
+    "That mesh link came from another scan database than Meshes shows, so it opened nothing.";
+
 fn same<T>(a: &Option<Arc<T>>, b: &Option<Arc<T>>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -185,17 +189,22 @@ impl SdcApp {
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
-        // Task 17 selects the shape on the matching store; this routes the request and brings Meshes forward. A copy
-        // id is local to its store, so a request for another database than Meshes reads is dropped (the panel keeps
-        // its links off in that case, so it is only a race).
-        model.meshes_store = m.store_path.clone();
-        model.meshes_rows_loading = m.rows_loading();
+        // A Used-by shape link brings Meshes forward and opens there (now or once its rows are read). A copy id is
+        // local to its store, so a link from another database than Meshes reads only says so in Meshes' status line
+        // (the panel keeps its links off in that case, so it is only a race). `MeshesModel::store_path` and
+        // `AppModel::scan_db` are one value (`SdcApp::new`), so plain equality cannot differ by spelling.
         if let Some(p) = model.show_mesh.take() {
+            model.centre_over_meshes = false;
+            crate::ui::header::set_meshes_view(ctx, true);
             if m.store_path.as_ref() == Some(&p.store) {
-                model.centre_over_meshes = false;
-                crate::ui::header::set_meshes_view(ctx, true);
+                m.show_shape(p.copy_id, p.block, p.shape);
+            } else {
+                m.status = OTHER_STORE_LINK.into();
             }
         }
+        // Copied after the link above, so the panel's next frame sees Meshes as the link left it.
+        model.meshes_store = m.store_path.clone();
+        model.meshes_rows_loading = m.rows_loading();
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
             model.centre_over_meshes = false;

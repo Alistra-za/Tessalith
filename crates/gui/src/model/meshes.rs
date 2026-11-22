@@ -158,6 +158,34 @@ pub fn display_path(p: &str) -> &str {
     }
 }
 
+/// The search `needle` (as `MeshesModel::needle` makes it) is in the row's shown path or its mod name, ASCII
+/// case-insensitive; an empty search keeps every row.
+fn searched(row: &NifRow, origin: &str, needle: &[u8]) -> bool {
+    let has = |hay: &str| {
+        needle.is_empty()
+            || hay
+                .as_bytes()
+                .windows(needle.len())
+                .any(|w| w.eq_ignore_ascii_case(needle))
+    };
+    has(display_path(&row.path)) || has(origin)
+}
+
+/// Note GH3: the This project pill keeps the row. A project mod keeps its own copies and the winning copy of every
+/// path it has a copy of; without one the pill keeps the listed NIF paths; no pill keeps every row.
+fn in_project(
+    row: &NifRow,
+    origin: &str,
+    project: Option<&HashSet<String>>,
+    project_mod: Option<&str>,
+) -> bool {
+    match (project, project_mod) {
+        (None, _) => true,
+        (Some(p), Some(m)) => origin == m || (row.wins && p.contains(&row.path)),
+        (Some(p), None) => p.contains(&row.path),
+    }
+}
+
 /// A list row as the store reads it: the copy and the name of the mod that holds it.
 pub type NifEntry = (NifRow, String);
 /// What the worker reads for the list (Note GC): every winner, and every losing copy.
@@ -482,6 +510,18 @@ fn scan_root(store: &Store) -> Option<String> {
     }
 }
 
+/// Review E (Task 17): a shape link to open (`MeshesModel::show_shape`), bound to the store it was asked on: a copy
+/// id is local to its store.
+struct ShapeRequest {
+    store: Option<PathBuf>,
+    copy_id: i64,
+    block: u32,
+    shape: Option<String>,
+}
+
+/// A shape link's copy, block or name is not in the current rows and shapes (ruling 3d-R4).
+const SHAPE_GONE: &str = "That shape is no longer in the scan";
+
 pub struct MeshesModel {
     pub picker: super::picker::Picker,
     pub store_path: Option<PathBuf>,
@@ -502,8 +542,12 @@ pub struct MeshesModel {
     pub losers: Arc<Vec<NifEntry>>,
     /// The read of `winners` and `losers` in flight.
     rows_rx: Option<Receiver<RowsRead>>,
+    /// `winners` and `losers` came from the latest reload's read, which succeeded (false while it is out).
+    rows_current: bool,
     /// A NIF to select again once the rows a reload asked for land (it was selected in "Any mod").
     reselect: Option<i64>,
+    /// Review E (Task 17): the latest shape link (`show_shape`) still waiting for current rows.
+    shape_request: Option<ShapeRequest>,
     /// The texture chip: a texture path and the NIF paths whose shapes use it (`Store::users_of_texture`). The users
     /// are `None` while the store is unsettled (Note GC15): the chip waits for a completed scan and cuts nothing.
     pub tex_filter: Option<(String, Option<Arc<HashSet<String>>>)>,
@@ -681,7 +725,9 @@ impl MeshesModel {
             winners: Arc::default(),
             losers: Arc::default(),
             rows_rx: None,
+            rows_current: false,
             reselect: None,
+            shape_request: None,
             tex_filter: None,
             store_unsettled: false,
             unsettled_before: false,
@@ -1119,15 +1165,17 @@ impl MeshesModel {
             }
         }
         // No new read (the scan did not complete): the NIF a reload held is looked for in the lists on screen, if the
-        // store is settled again (a PGPatcher pause); else it stays held.
+        // store is settled again (a PGPatcher pause); else it stays held. So is a shape link, on rows still current.
         if !self.rows_loading() {
             self.apply_reselect();
+            self.take_shape_request();
         }
     }
 
     /// Reads the mod list again and the list's rows (on a worker), and keeps the picked mod when it is still there,
     /// holds NIFs and is not PGPatcher-derived. The selected NIF is selected again when it is still listed.
     pub fn reload(&mut self) {
+        self.rows_current = false; // the store changed under the rows on hand
         let Some(store) = &self.store else {
             return;
         };
@@ -1208,7 +1256,8 @@ impl MeshesModel {
         self.rows_rx = Some(rx);
     }
 
-    /// Takes a finished row read. True while one is still running, so the caller repaints.
+    /// Takes a finished row read. True while one is still running, so the caller repaints. A shape link waiting for
+    /// rows is opened after a read that succeeded, and dropped after one that failed (its error stays).
     pub fn poll_rows(&mut self) -> bool {
         let Some(rx) = &self.rows_rx else {
             return false;
@@ -1217,6 +1266,7 @@ impl MeshesModel {
             Ok(Ok((winners, losers))) => {
                 self.winners = Arc::new(winners);
                 self.losers = Arc::new(losers);
+                self.rows_current = true;
                 // A failed leave keeps the live edit and its preview. Its scan details still follow the new rows.
                 if let Some(copy) = self
                     .selected_nif
@@ -1229,14 +1279,19 @@ impl MeshesModel {
                     }
                 }
             }
-            Ok(Err(e)) => self.error = Some(e),
+            Ok(Err(e)) => {
+                self.error = Some(e);
+                self.shape_request = None;
+            }
             Err(std::sync::mpsc::TryRecvError::Empty) => return true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.error = Some(db_err("reading the mesh list stopped"));
+                self.shape_request = None;
             }
         }
         self.rows_rx = None;
         self.apply_reselect();
+        self.take_shape_request();
         false
     }
 
@@ -1263,6 +1318,7 @@ impl MeshesModel {
     pub fn hold_rows_read(&mut self) -> Sender<RowsRead> {
         let (tx, rx) = channel();
         self.rows_rx = Some(rx);
+        self.rows_current = false;
         tx
     }
 
@@ -1696,28 +1752,15 @@ impl MeshesModel {
         }
         let needle = self.needle();
         let n = needle.as_bytes();
-        let has = |hay: &str| {
-            n.is_empty()
-                || hay
-                    .as_bytes()
-                    .windows(n.len())
-                    .any(|w| w.eq_ignore_ascii_case(n))
-        };
         let tex = self
             .tex_filter
             .as_ref()
             .and_then(|(_, users)| users.as_ref());
-        // Note GH3: a project mod keeps its own copies and the winning copy of every path it has a copy of.
-        let in_project = |row: &NifRow, origin: &str| match (project, project_mod) {
-            (None, _) => true,
-            (Some(p), Some(m)) => origin == m || (row.wins && p.contains(&row.path)),
-            (Some(p), None) => p.contains(&row.path),
-        };
         let keep = |row: &NifRow, origin: &str| {
             self.filter.matches(row)
                 && tex.is_none_or(|u| u.contains(&row.path))
-                && in_project(row, origin)
-                && (has(display_path(&row.path)) || has(origin))
+                && in_project(row, origin, project, project_mod)
+                && searched(row, origin, n)
         };
         match self.selected_mod {
             Some(id) => {
@@ -1735,13 +1778,19 @@ impl MeshesModel {
     }
 
     pub fn select_nif(&mut self, copy_id: i64) {
+        self.select_row(copy_id, false);
+    }
+
+    /// `select_nif`, showing the source side of a pair when `source` (the game side otherwise). False when nothing
+    /// changed: a scan runs or did not finish, or an open edit may not end.
+    fn select_row(&mut self, copy_id: i64, source: bool) -> bool {
         // Note GQ4: a scan running or left unfinished leaves the details unread (they would read disabled origins).
         if !self.store_settled() {
-            return;
+            return false;
         }
         // Ruling E6-C: an open edit whose ops are not durable and cannot be saved keeps the NIF selected
         if !self.clear_nif() {
-            return;
+            return false;
         }
         self.selected_nif = Some(copy_id);
         self.selected_info = self.find_row(copy_id).cloned();
@@ -1749,13 +1798,151 @@ impl MeshesModel {
             Ok(p) => self.pair = p,
             Err(e) => self.error = Some(e),
         }
+        self.view_source = source;
         self.load_shapes();
+        true
+    }
+
+    /// Review E (Task 17): a Used-by link asks for copy `copy_id`'s shape at `block`, named `shape` in the scan. The
+    /// request is bound to the store Meshes reads now and replaces any earlier one. It opens once no scan runs or is
+    /// unfinished and the rows on hand came from a read that succeeded: at once, else after the next such read lands
+    /// (a failed read drops it). A copy, block or name the rows and shapes no longer hold is said in `status`, with
+    /// nothing changed. An open edit of another NIF ends only as ruling E6-C allows (a refusal keeps everything);
+    /// one of this NIF (either side of a pair) stays open when the shape has a counterpart in it.
+    pub fn show_shape(&mut self, copy_id: i64, block: u32, shape: Option<String>) {
+        self.shape_request = Some(ShapeRequest {
+            store: self.store_path.clone(),
+            copy_id,
+            block,
+            shape,
+        });
+        self.take_shape_request();
+    }
+
+    /// Opens the waiting shape request when the rows are current (`show_shape`); a request asked on another store
+    /// than Meshes reads now is dropped.
+    fn take_shape_request(&mut self) {
+        // A read in flight makes the rows not current (`reload`), so the panel's one-frame-old state cannot open a
+        // link on rows a reload replaces.
+        if !self.store_settled() || !self.rows_current {
+            return;
+        }
+        let Some(r) = self.shape_request.take() else {
+            return;
+        };
+        if r.store == self.store_path {
+            self.open_shape(r);
+        }
+    }
+
+    /// `show_shape` on current rows. Everything it needs is read before anything changes.
+    fn open_shape(&mut self, r: ShapeRequest) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let winners = self.winners.iter().map(|e| (e, true));
+        let target = winners
+            .chain(self.losers.iter().map(|e| (e, false)))
+            .find(|((row, _), _)| row.copy_id == r.copy_id)
+            .map(|((row, origin), wins)| (row.clone(), origin.clone(), wins));
+        let Some((row, origin, wins)) = target else {
+            self.status = SHAPE_GONE.into();
+            return;
+        };
+        let read = match read_shapes(store, r.copy_id) {
+            Ok(read) => read,
+            Err(e) => {
+                self.error = Some(db_err(e));
+                return;
+            }
+        };
+        let name = read
+            .0
+            .iter()
+            .find(|s| s.block == r.block)
+            .map(|s| s.name.as_deref().map(str::to_owned));
+        let Some(name) = name.filter(|n| *n == r.shape) else {
+            self.status = SHAPE_GONE.into();
+            return;
+        };
+        let pair = match self.pair_of(r.copy_id, &row) {
+            Ok(pair) => pair,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let source = pair.is_some_and(|p| p.source == r.copy_id);
+        let kept = self
+            .edit
+            .as_ref()
+            .filter(|e| e.data_path == row.path)
+            .and_then(|e| edit_counterpart(&e.model, r.block, name.as_deref()));
+        match kept {
+            // This NIF's edit stays, with its preview: only the row, the side and the cards follow the link.
+            Some(edit_block) => {
+                self.reveal_row(&row, &origin, wins);
+                self.selected_nif = Some(r.copy_id);
+                self.selected_info = Some(row);
+                self.pair = pair;
+                if pair.is_some() {
+                    self.set_view_source(source);
+                }
+                self.install_shapes(r.copy_id, read, false);
+                self.select_edit(nif_edit::Selection::Shape(edit_block));
+            }
+            None => {
+                // Ruling E6-C: a refused leave keeps the row, the side, the filters, the edit and its error
+                if !self.select_row(r.copy_id, source) {
+                    return;
+                }
+                self.reveal_row(&row, &origin, wins);
+            }
+        }
+        let shown = self.shown_copy() == Some(r.copy_id)
+            && (self.shapes.iter())
+                .any(|s| s.block == r.block && s.name.as_deref() == name.as_deref());
+        if shown {
+            self.card_sel = Some((r.block, name));
+            self.shapes_col = true;
+        }
+    }
+
+    /// Makes the list show `row` (held by `origin`; `wins`: it wins its path): Any mod, with All for a winner and
+    /// Overridden for a losing copy; a search or texture chip that hides it is cleared and a This project pill that
+    /// hides it turned off.
+    fn reveal_row(&mut self, row: &NifRow, origin: &str, wins: bool) {
+        self.any_mod();
+        self.filter = if wins {
+            NifFilter::All
+        } else {
+            NifFilter::Overridden
+        };
+        if !searched(row, origin, self.needle().as_bytes()) {
+            self.search.clear();
+        }
+        let tex = self.tex_filter.as_ref().and_then(|(_, u)| u.as_ref());
+        if tex.is_some_and(|u| !u.contains(&row.path)) {
+            self.tex_filter = None;
+        }
+        let project = self.project_filter();
+        if project.is_some_and(|(m, p)| !in_project(row, origin, Some(&p), m.as_deref())) {
+            self.project_on = false;
+        }
     }
 
     /// The other side of a NIF with a derived copy: for a source patched in game, the derived game winner; for a
     /// derived copy, its source copy.
     fn find_pair(&self, copy_id: i64) -> Result<Option<CopyPair>, String> {
-        let (Some(store), Some(row)) = (&self.store, self.selected_row()) else {
+        match self.selected_row() {
+            Some(row) => self.pair_of(copy_id, row),
+            None => Ok(None),
+        }
+    }
+
+    /// `find_pair` for copy `copy_id`, whose list row is `row`.
+    fn pair_of(&self, copy_id: i64, row: &NifRow) -> Result<Option<CopyPair>, String> {
+        let Some(store) = &self.store else {
             return Ok(None);
         };
         let c = store.conn();
@@ -1864,46 +2051,47 @@ impl MeshesModel {
         let (Some(store), Some(copy)) = (&self.store, self.shown_copy()) else {
             return;
         };
-        let mut resolved = HashMap::new();
-        let r = store.shapes_of(copy).and_then(|shapes| {
-            for t in shapes.iter().flat_map(|s| s.textures.iter().flatten()) {
-                if !resolved.contains_key(t) {
-                    resolved.insert(t.clone(), store.resolve_texture(t)?);
-                }
-            }
-            Ok(shapes)
-        });
-        match r {
-            Ok(s) => {
-                let uses = store.copy_location(copy).and_then(|l| match l {
-                    Some((path, ..)) => store.plugin_uses_of_mesh(&path),
-                    None => Ok(vec![]),
-                });
-                self.plugin_uses = uses.unwrap_or_else(|e| {
-                    self.error = Some(db_err(e));
-                    vec![]
-                });
-                let spec = mesh_spec(store, copy, &s);
-                let location = store.copy_location(copy).ok().flatten();
-                self.shapes = s;
-                self.resolved = resolved;
-                if let Some((path, kind, root, _)) = location {
-                    self.read_card_ctrls(copy, FileSource::from_store(kind, &root, &path));
-                }
-                match spec {
-                    Ok(spec) => self.v3.set_mesh(spec),
-                    Err(e) => {
-                        self.v3.set_mesh(None);
-                        self.error = Some(db_err(e));
-                    }
-                }
-            }
+        match read_shapes(store, copy) {
+            Ok(read) => self.install_shapes(copy, read, true),
             Err(e) => {
                 self.shapes.clear();
                 self.resolved.clear();
                 self.plugin_uses.clear();
                 self.error = Some(db_err(e));
             }
+        }
+    }
+
+    /// Puts copy `copy`'s read shapes on the cards, with its plugin uses and its Controllers lines. `mesh`: the 3D
+    /// view shows the copy too; without it the view keeps what it shows (an edit's preview).
+    fn install_shapes(&mut self, copy: i64, (s, resolved): ShapesRead, mesh: bool) {
+        // Note GO: the cards are numbered as this copy is, and the spec below has no texture set picks.
+        self.txst_picks.clear();
+        let Some(store) = &self.store else {
+            return;
+        };
+        let uses = store.copy_location(copy).and_then(|l| match l {
+            Some((path, ..)) => store.plugin_uses_of_mesh(&path),
+            None => Ok(vec![]),
+        });
+        self.plugin_uses = uses.unwrap_or_else(|e| {
+            self.error = Some(db_err(e));
+            vec![]
+        });
+        let spec = mesh.then(|| mesh_spec(store, copy, &s));
+        let location = store.copy_location(copy).ok().flatten();
+        self.shapes = s;
+        self.resolved = resolved;
+        if let Some((path, kind, root, _)) = location {
+            self.read_card_ctrls(copy, FileSource::from_store(kind, &root, &path));
+        }
+        match spec {
+            Some(Ok(spec)) => self.v3.set_mesh(spec),
+            Some(Err(e)) => {
+                self.v3.set_mesh(None);
+                self.error = Some(db_err(e));
+            }
+            None => {}
         }
     }
 
@@ -1944,6 +2132,40 @@ impl MeshesModel {
         };
         self.tex_users = Some((path.to_string(), users));
     }
+}
+
+/// A copy's shapes and the game's resolution of every texture path they name.
+type ShapesRead = (Vec<ShapeView>, HashMap<String, TexResolution>);
+
+/// Reads copy `copy`'s shapes and resolves their texture paths; nothing is kept.
+fn read_shapes(store: &Store, copy: i64) -> Result<ShapesRead, ScanError> {
+    let shapes = store.shapes_of(copy)?;
+    let mut resolved = HashMap::new();
+    for t in shapes.iter().flat_map(|s| s.textures.iter().flatten()) {
+        if !resolved.contains_key(t) {
+            resolved.insert(t.clone(), store.resolve_texture(t)?);
+        }
+    }
+    Ok((shapes, resolved))
+}
+
+/// The edit's shape for the scan's shape at `block` named `name`: the same block and name, else the only shape with
+/// that name (the shown copy may be PGPatcher's, numbered differently; `nif_edit::first_selection`'s match). None
+/// when neither holds: unlike `first_selection` there is no fallback to the only shape or Root.
+fn edit_counterpart(m: &nif::model::NifModel, block: u32, name: Option<&str>) -> Option<u32> {
+    let same = m
+        .shapes
+        .iter()
+        .find(|s| s.block == block && s.name.as_deref() == name);
+    let mut named = m
+        .shapes
+        .iter()
+        .filter(|s| name.is_some() && s.name.as_deref() == name);
+    let by_name = match (named.next(), named.next()) {
+        (Some(s), None) => Some(s),
+        _ => None,
+    };
+    same.or(by_name).map(|s| s.block)
 }
 
 /// What the 3D panel draws for `copy`: where its bytes are and where the game's copy of each texture is.
