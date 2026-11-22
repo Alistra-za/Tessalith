@@ -9,6 +9,21 @@ use crate::dilate::dilate_under_zero_alpha;
 use crate::image::{Rgba32F, SourceInfo};
 use crate::profile::{self, Stage as Timing};
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SKIP_DILATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn dilate_skipped_for_test() -> bool {
+    SKIP_DILATE.get()
+}
+
+#[cfg(not(test))]
+const fn dilate_skipped_for_test() -> bool {
+    false
+}
+
 /// What the float values in a [`Work`] image mean; later stages key their filtering and quantising on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
@@ -196,7 +211,7 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
             _ => {}
         }
     }
-    if alpha_present && p.alpha_weighted_mips() {
+    if alpha_present && p.alpha_weighted_mips() && !dilate_skipped_for_test() {
         let _span = profile::span(Timing::Dilate);
         dilate_under_zero_alpha(&mut img); // (4)
     }

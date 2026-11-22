@@ -143,6 +143,10 @@ pub(crate) fn prepare(
     stop()?;
     let one: Vec<(u32, u32)> = chain.iter().map(|c| (c.size, c.size)).collect();
     let mut prep = Prepared {
+        #[cfg(test)]
+        alpha_present: false,
+        #[cfg(test)]
+        weighted: false,
         first_level: 0,
         dims: vec![],
         chain: vec![],

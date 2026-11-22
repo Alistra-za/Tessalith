@@ -28,6 +28,8 @@ pub use texcore::image;
 pub use texcore::load;
 pub mod manifest;
 pub(crate) mod migrate;
+#[cfg(test)]
+mod mip_quality;
 pub mod mips;
 pub mod ops;
 pub mod overrides;
@@ -36,6 +38,8 @@ pub(crate) mod pipeline;
 pub mod policy;
 pub mod presets;
 pub mod profile;
+#[cfg(test)]
+mod profile_fixture;
 pub mod quantize;
 pub mod reports;
 pub mod resize;

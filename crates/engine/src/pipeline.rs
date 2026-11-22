@@ -180,6 +180,10 @@ pub(crate) enum Keep {
 /// The stages up to quantise. `chain` and `inputs` start at mip `first_level`; `dims` covers every mip. `chain` is
 /// empty for `Keep::Encode`, `inputs` for `Keep::SourceOnly`.
 pub(crate) struct Prepared {
+    #[cfg(test)]
+    pub alpha_present: bool,
+    #[cfg(test)]
+    pub weighted: bool,
     pub first_level: usize,
     pub dims: Vec<(u32, u32)>,
     pub chain: Vec<Rgba32F>,
@@ -429,10 +433,16 @@ fn prepare_then<T>(
         _ => chain.split_off(first_level),
     };
     let domain = work.domain;
+    #[cfg(test)]
+    let weighted = crate::mips::weighted_rgb(&work, p);
     drop(work);
     stop()?;
     Ok((
         Prepared {
+            #[cfg(test)]
+            alpha_present,
+            #[cfg(test)]
+            weighted,
             first_level,
             dims,
             chain,
