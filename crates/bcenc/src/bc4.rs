@@ -586,6 +586,7 @@ pub const MAX_PAD: i32 = 16;
 /// [`window_pairs`], then the guard last: when the result flips more texels across `cut` than the upstream block, the
 /// guarded radius-10 search is returned instead. A port of the bench's `search_max`
 /// (`bench:crates/bench/src/bc4ref.rs`, branch `bench`; Note LH), whose guard was fixed at 128; this one takes the cut.
+/// `guard` is the cutoff itself: reading a 0 as 128 is `bc4_encode_alpha_max`'s job.
 pub fn search_max(v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
     let (base, b4) = searched(v, crate::MAX_SEARCH_RADIUS as i32);
     let mut b = b4;
@@ -753,12 +754,15 @@ mod tests {
     #[test]
     fn max_is_the_least_error_in_its_window() {
         let mut improved = 0usize;
-        for v in gen::bc4_classes(0xB4B4_0011, 12) {
+        // The pinned blocks too: `MAX_PAD_WITNESS` is the block where only pad 16 reaches the window's least error.
+        let fixed = bench_table().map(|(v, _)| v);
+        for v in gen::bc4_classes(0xB4B4_0011, 12).into_iter().chain(fixed) {
             let s = rescore(&v, search(&v, 10, None));
             let max = search_max(&v, None);
             let m = rescore(&v, max);
             let (mn, mx) = minmax(&v);
-            let (lo, hi) = (clampi(mn as i32 - MAX_PAD), clampi(mx as i32 + MAX_PAD));
+            // A literal 16, as `search_max_reference` has it: the test must not follow `MAX_PAD`.
+            let (lo, hi) = (clampi(mn as i32 - 16), clampi(mx as i32 + 16));
             let mut w = u32::MAX;
             for e0 in lo..=hi {
                 for e1 in lo..=hi {
@@ -782,16 +786,18 @@ mod tests {
         let mut fallbacks = 0usize;
         let extra = [gen::MAX_GUARD_FALLBACK, gen::MAX_GUARD_FALLBACK_BASE];
         for v in gen::bc4_classes(0xB4B4_0012, 12).iter().chain(&extra) {
+            let max_improves = search_max(v, None) != search(v, 10, None);
             for cut in gen::CUTS {
                 let max = search_max(v, Some(cut));
+                let guarded = search(v, 10, Some(cut));
                 let g = rescore(v, max);
-                let p = rescore(v, search(v, 10, Some(cut)));
+                let p = rescore(v, guarded);
                 assert!(g.err <= p.err, "{v:?} cut {cut}");
                 assert!(
                     flips(v, &g, cut) <= flips(v, &v0(v, 10), cut),
                     "{v:?} cut {cut}"
                 );
-                if max == search(v, 10, Some(cut)) && search_max(v, None) != search(v, 10, None) {
+                if max == guarded && max_improves {
                     fallbacks += 1;
                 }
             }

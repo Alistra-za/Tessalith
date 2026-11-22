@@ -31,7 +31,7 @@ mod gen;
 
 type Block = [[u8; 4]; 16];
 
-/// The search radius of Slowest (`BC45_RADIUS_MAX`).
+/// The search radius of Slowest, 10: the radius `search_max` starts from (`MAX_SEARCH_RADIUS`).
 const RADIUS: u32 = bcenc::MAX_SEARCH_RADIUS;
 
 /// One pass of `f` over all blocks; returns the pass time in microseconds.
