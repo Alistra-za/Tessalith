@@ -1194,7 +1194,8 @@ pub(crate) fn currency(
 
 /// [`currency`]'s profile step: `Some(false)` when the record's profile is the job's or differs only in a quality
 /// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
-/// otherwise, an unreadable or self-inconsistent record included.
+/// otherwise, an unreadable or self-inconsistent record included. The exception is a `max` record not known to be
+/// newer than 3.0.0 (Note LH): it reads as `slowest`, so against a job at `max` it is stale.
 fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let now = profile_sha256(p).ok()?;
     // Equal hashes mean equal radii, so an old or undated `max` record against a job at `max` must not return here.
@@ -1270,7 +1271,8 @@ fn recorded_radius(e: &ManifestEntry, r: SearchRadius) -> SearchRadius {
     }
 }
 
-/// A record at `max` that was written by engine 3.0.0 or older, or by one that cannot be dated.
+/// Whether the record was written by engine 3.0.0 or older, or by one that cannot be dated. It checks the age only;
+/// the callers check that the radius is `max`.
 fn old_max(e: &ManifestEntry) -> bool {
     record_age(&e.engine_version, MAX_WAS_SLOWEST_THROUGH) != RecordAge::New
 }
@@ -5763,7 +5765,8 @@ mod tests {
         )
         .unwrap();
         let read = Manifest::at(root).read().unwrap();
-        let loaded = read.get("rock.dds").expect("the record is read back");
+        let key = crate::manifest::output_key(root, &bc4.output);
+        let loaded = read.get(&key).expect("the record is read back");
         assert_eq!(loaded.engine_version, "");
         let mut slowest = bc4.clone();
         at(Format::Bc4, SearchRadius::Slowest)(&mut slowest.profile);
