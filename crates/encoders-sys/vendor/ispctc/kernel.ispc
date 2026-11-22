@@ -21,9 +21,10 @@
 // marked "sdc patch 0003". Without the define the file compiles as before.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by
-// an audit. Changes are marked "sdc patch 0004".
+// an audit. Changes are marked "sdc patch 0004". They change BC6H bytes.
 // #6 bc6h_bounds' rgb_span holds three floats.
 // #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
+// #5 get_span returns the float span (it truncated through an int).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2244,7 +2245,7 @@ inline uniform float get_span(uniform int mode)
         6,                  // (13) 3 / 16
     };
 
-    uniform int span = span_table[mode];
+    uniform float span = span_table[mode]; // sdc patch 0004: was int, which truncated 921.6, 204.8, 1843.2, 3686.3, 14745.4, 7782.3 and 1945.6
     assert(span > 0);
     return span;
 }

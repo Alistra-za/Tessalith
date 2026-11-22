@@ -81,7 +81,7 @@ fn hdr_image() -> Vec<[u16; 4]> {
     px
 }
 
-/// AVX2 path, recorded on Windows, ISPC 1.31.0, 2026-10-31.
+/// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -89,23 +89,24 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "fc9954432343d094bca7a2e7bddad47486fc3c00a14c5335a1bfe4810b14fcb1",
+        "6e863a5eb712ddd98f113ae993cd35bd6811f6faf6e23bcfd32ba3e73ca8b420",
     ),
     (
         Bc6hLevel::Basic,
-        "5b5dd790d10d4ebe36482cd6a5e4f956fe7ec9429cc9e58b8fb4405a61b030f8",
+        "77f47d088a051ee81193bbde671958d3ce11452ddc7f1d6a9c21fe8e38361a8e",
     ),
     (
         Bc6hLevel::Slow,
-        "49804dcc003a5cb1a8eab90dcbbd1151e0f7ebfd68c070181fe17cb7226b1e6f",
+        "5cff76d6f54850151c3859ebbe25476bd014c83c85c97dffa6f48e39bb8c8732",
     ),
     (
         Bc6hLevel::Veryslow,
-        "cc6fbdc096496cd67c9b728eb3809f6899c6e73ea634498925afbf3d2b85ecb6",
+        "27cd50278c489eddbe355e00d270a00f24930bae01acddb7d96808dcd3f045f1",
     ),
 ];
 
-/// The SSE2 path. The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes.
+/// The SSE2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
+/// (Note LM). The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes before patch 0004.
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -113,24 +114,24 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "c8461152e349acb1cb294667a7e501a9536a1ba22687546dd1912432eac63319",
+        "b557c183267ca7205902aa27ad831bd3961d9691b5b44755094d81ef2fc3c455",
     ),
     (
         Bc6hLevel::Basic,
-        "f0f5ba2c1fd6abb65db043cfd1e1b7b9373805b5383d1b595bc7e9c785c5e1fe",
+        "40490aad6ef3be2d6b4012023c76ade0fa8e4bdc4a3ca94e99f3ee0be00b731f",
     ),
     (
         Bc6hLevel::Slow,
-        "c428819ef65ec8801744c9b4324ad1c4d46808540dfd0c37a298559a35b9e340",
+        "0931a03ce5cb1b95461b162cfa56643a668351303d67bd89530b1697efe47ad8",
     ),
     (
         Bc6hLevel::Veryslow,
-        "ef6c0258b03cbd489f8ae998b3f9890f4e6b8866e0d2fc1a9ec6fd403e2fa997",
+        "815cd489e79d4bea56815d93a7c4be6483251d11c945aa2d7d4940df0f370978",
     ),
 ];
 
-/// AVX-512 path, recorded on Windows with the ISPC 1.32.0 objects, on an AMD Zen 5 CPU, 2026-11-13. A test build
-/// encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+/// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects built
+/// with ISPC 1.32.0 (Note LM). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -138,19 +139,19 @@ const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "78ba22294b12f7c5007b8c4278b7e2b151585df449b340473b27d9574afa600f",
+        "d75be99d5b345c3653a23464859b534020e9450b7324b5550016ce4c0ee9d8d3",
     ),
     (
         Bc6hLevel::Basic,
-        "7692eb5302bce30784beab86b66a816c9f61fdff29711a585fc09dbd18a9a3d7",
+        "3aec6443b998926eaf19c6609716b69089a19649524636cdb2ae44c140988765",
     ),
     (
         Bc6hLevel::Slow,
-        "d5dfe402130641019849baa55c36446db813a448651762b3d2412efcc2db45b0",
+        "082cf8a89f677a03cf1c926dd9983fab11773a85c0e11d972918489ba3de6ef0",
     ),
     (
         Bc6hLevel::Veryslow,
-        "9070edcbe36791762996eacf2c9cbc8ff62f672ba66f17f13be70c1cda4e5fec",
+        "a81ae4aaa7f9603d105dd5dbb78d0f39936f29e8f65a2b961329a2d592b90fca",
     ),
 ];
 
@@ -188,19 +189,19 @@ fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
     }
 }
 
-/// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
-/// The ISPC target paths differ (AVX-512, AVX2 and SSE2), so each target has its own hashes.
+/// The five shipped levels encode byte-identically to the recorded objects (the patch 0004 objects, Note LM), on each
+/// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). The paths differ, so each has its own hashes.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
     check_pins(|t| recorded(t).to_vec());
 }
 
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
-/// Recorded before the BC6H-only trim was tried (Note JB), 2026-11-14.
+/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
 const RECORDED_PEAK: [&str; 3] = [
-    "e0da9c0a767f735d46fad610ec0458ad0fa65b28470b6dfee742f48d2e9f9c77",
-    "e43d1d2d25d7e30f9c98517b8675d8631486a8e5b35096efe96fc6163d53d5aa",
-    "e1f6d9cff4b0d5c30f132f708b54b466dfc70f5d4dbc3a28ea88ed93a387372f",
+    "0d45a9e2ddf853c1b8a332590fc7100a95d24837d88e3526d9a17b976337af64",
+    "7ef6b1145bc2887e96e1c841d4932961c757ae67cebbed49a63a53971a5cd8c8",
+    "a76716efee2ffafc3780cc95f8611527cc0c8f4e62022c9896aca54cb9b0870b",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -340,6 +341,50 @@ fn neutral_blocks_encode_to_a_valid_mode_and_decode_close() {
                 }
             }
         }
+    }
+}
+
+/// `get_span` truncated mode 2's 204.8 to 204, so a block whose widest channel spans 99 half codes (204.39 UF16 units)
+/// was kept out of mode 2 at Fast (survey #5).
+#[test]
+fn mode_2_takes_a_span_inside_its_fractional_limit() {
+    // R is the widest channel: exactly 99 half codes, 0x3C00..=0x3C63. The left two columns (one region of BC6H
+    // partition 0) vary R with G fixed; the right two columns vary G with R fixed, so no single line fits the block.
+    const BASE: u16 = 0x3C00;
+    let one = f16::ONE.to_bits();
+    let mut px = [[BASE, BASE, BASE, one]; 16];
+    for row in 0..4u16 {
+        for col in 0..2u16 {
+            // 0, 14, 28, 42, 56, 70, 84, 99
+            let steps = [0u16, 14, 28, 42, 56, 70, 84, 99];
+            let r = BASE + steps[(row * 2 + col) as usize];
+            px[(row * 4 + col) as usize][0] = r;
+        }
+        for col in 2..4u16 {
+            let steps = [0u16, 8, 16, 24, 32, 40, 48, 56];
+            let g = BASE + steps[(row * 2 + (col - 2)) as usize];
+            px[(row * 4 + col) as usize][1] = g;
+        }
+    }
+    let modes: Vec<(IspcTarget, u32)> = paths()
+        .map(|target| {
+            let b = encode_block(&px, Bc6hLevel::Fast, target);
+            let mode = if field(&b, 0, 2) < 2 {
+                field(&b, 0, 2)
+            } else {
+                field(&b, 0, 5)
+            };
+            eprintln!("{target:?} mode {mode}");
+            (target, mode)
+        })
+        .collect();
+    for (target, mode) in modes {
+        assert_ne!(mode, 0, "{target:?}: mode 0 kept the block out of mode 2");
+        let one_region = matches!(mode, 3 | 7 | 11 | 15);
+        assert!(
+            one_region || matches!(mode, 2 | 6 | 10),
+            "{target:?}: a two-region mode other than the mode-2 family: {mode}"
+        );
     }
 }
 
