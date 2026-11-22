@@ -105,7 +105,7 @@ rmaosultrahigh = "rmaos"
 | `hidden` | no | `true` keeps the preset out of the preset lists. |
 | `description` | no | A one-line description, shown with the preset in lists. |
 | `[defaults]` | no | Partial profile for every type. |
-| `[subtypes.<id>]` | no | Partial profile for one type (`subtype` in `sdc.toml`; `[subtypes.<id>]` in a preset file). |
+| `[subtypes.<id>]` | no | Partial profile for one type, keyed by its type id. |
 | `[[rules]]` | no | Same format as in `sdc.toml`: [rules](Project-Config.md#rules). |
 | `[suffix_aliases]` | no | Extra file-name suffixes, as `alias = "canonical suffix"`. |
 

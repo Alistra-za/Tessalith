@@ -92,7 +92,9 @@ The box asks **What kind of texture is this?** and offers up to three likely typ
 
 A button shows only a type the mode offers for this texture. Clicking one picks that type in the dropdown and writes nothing: **Confirm** writes it. **Confirm** then opens the next undecided texture after this one in the order the Textures column shows. A texture the filters hide is skipped, it never wraps round to the top, and with none left the selection stays. <!-- D:LM10 --> Selecting several textures asks once for all of them: [Bulk editing](GUI-Bulk-and-Rename.md#editing-them-together).
 
-When your choice gives a lone file a set of its own, **Messages** gets one Info line after the plan settles, "{file} is now {type}. New set {id} (1 texture).", and the status line reads "New set {id}: see Messages." Several new sets read "2 new sets: {a} and {b}.", up to "{k} new sets: {a}, {b}, {c} and {m} more." **Show** on the row selects the first set's card, clears a Sets filter that hides it and unfolds its group. It is off with "That set is no longer listed" in another project or once the set is gone. A partial plan says nothing. <!-- D:LM6 -->
+### When a choice makes a new set
+
+When a type you choose (**Confirm** on one texture, **Apply** on several) makes a set of its own for a lone file, **Messages** gets one Info line after the plan settles, and the status line reads "New set {id}: see Messages." or "{k} new sets: see Messages." One set reads "{file} is now {type}. New set {id} (1 texture)." or "… ({n} textures)."; several read "2 new sets: {a} and {b}.", "3 new sets: {a}, {b} and {c}." or "{k} new sets: {a}, {b}, {c} and {m} more." **Show** on the row selects the first set's card, clears a Sets filter that hides it and unfolds its group. It is off with "That set is no longer listed" in another project or once the set is gone. A partial plan says nothing, and Undo, redo, an open and a failed plan drop a line that is waiting. <!-- D:LM6 -->
 
 ### Alpha from the meshes
 

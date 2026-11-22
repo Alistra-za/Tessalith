@@ -91,7 +91,7 @@ The GUI shows each field's provenance, so you can see which layer set it.
 
 ## [defaults] and [subtypes]
 
-Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Type ids are on [Texture types](Texture-Types.md#types-what-each-file-becomes). `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
+Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Type ids are on [Texture types](Texture-Types.md#types-what-each-file-becomes); the type itself is the `subtype` key of one file, not a field here. `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
 
 ## [[rules]]
 
@@ -111,7 +111,7 @@ overrides = { ... }           # optional partial profile
 | `subtypes` | The file's type is one of these. A rule with this key never decides a type; it only adds settings once the type is known. |
 
 - All given match keys must match. A rule with no match keys matches everything.
-- `subtype` names the type (`subtype` in `sdc.toml`) for matching files. It decides the file's type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's type, a rule naming a different `subtype` doesn't apply to it.
+- `subtype` names the type for matching files. It decides the file's type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's type, a rule naming a different `subtype` doesn't apply to it.
 - `overrides` is a partial profile applied to matching files.
 
 ```toml
