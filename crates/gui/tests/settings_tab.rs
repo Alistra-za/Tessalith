@@ -39,7 +39,8 @@ fn open_from_header(h: &mut H) {
 fn mode_name(target: &str) -> String {
     let label = match target {
         "cs" => "Community Shaders (cs)",
-        _ => "Base game (vanilla)",
+        "vanilla" => "Base game (vanilla)",
+        other => panic!("no mode label for {other:?}"),
     };
     format!("Mode (this project): {label}")
 }

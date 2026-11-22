@@ -23,8 +23,8 @@ use crate::model::{Answer, AppModel};
 use eframe::egui;
 use engine::codes::{Code, Warning};
 use engine::config::{
-    AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
-    Profile, Subtype, Target, ALPHA_THRESHOLD,
+    AlphaPolicy, ColorTag, CubeLayout, CubeStyle, Effort, FaceFlip, Format, GreenConvention,
+    MipFilter, Profile, Subtype, Target, ALPHA_THRESHOLD,
 };
 use engine::helper::HelperRole;
 use engine::policy::{offered, Provenance, ResolvedJob};
@@ -374,17 +374,22 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .into_iter()
             .map(|(e, label)| (json!(e), label))
             .collect(),
+        // The variants are listed by name, so a missing or misspelt level fails to compile; the id is the stored one.
         "encoder.effort" => [
-            "ultrafast",
-            "veryfast",
-            "fast",
-            "basic",
-            "veryslow",
-            "slowest",
-            "max",
+            Effort::Ultrafast,
+            Effort::Veryfast,
+            Effort::Fast,
+            Effort::Basic,
+            Effort::Veryslow,
+            Effort::Slowest,
+            Effort::Max,
         ]
         .into_iter()
-        .map(|e| opt(json!(e), effort_label(e)))
+        .map(|e| {
+            let id = json!(e);
+            let label = effort_label(id.as_str().unwrap_or_default());
+            (id, label.to_string())
+        })
         .collect(),
         // Note JI4: the Effort row's choices on BC4 and BC5, BC1, and BC3 (both fields, `BC3_CHOICES`).
         "encoder.bc45_search_radius" => search_options(true),

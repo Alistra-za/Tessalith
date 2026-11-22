@@ -151,7 +151,10 @@ pub fn effort_label(id: &str) -> &'static str {
         "veryslow" => "Very slow",
         "slowest" => "Slowest",
         "max" => "Max",
-        _ => "Unknown effort",
+        other => {
+            debug_assert!(false, "no label for the effort id {other:?}");
+            "Unknown effort"
+        }
     }
 }
 

@@ -122,11 +122,12 @@ fn the_tag_and_normal_entries_read_plainly() {
     m.select_item("landscape/rock01_normal.png");
     let mut h = harness(m, 1280.0);
     instant_tips(&h.ctx);
+    let closed = control(&h, Role::ComboBox, "Normal handling", centre(&h));
     open_combo(&mut h, "Normal handling");
-    // The set may already have chosen the bake, so the label can also be the combo's shown text; the popup's entry
-    // is built after the panel, so it is the last match.
+    // The set may already have chosen the bake, so the label can also be the combo's shown text: the popup's entry
+    // is the match that is not the closed combo.
     h.query_all_by_label(RENORM_BAKE_LABEL)
-        .last()
+        .find(|n| n.rect() != closed)
         .expect("the popup's entry")
         .hover();
     h.run();
@@ -635,17 +636,53 @@ fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
             .is_some(),
         "the gloss sentence"
     );
-    assert!(
-        h.query_by_label_contains("preserves average length")
-            .is_some(),
-        "the Keep as authored sentence"
-    );
-    assert!(
-        h.query_by_label_contains("The bake uses unit directions")
-            .is_some(),
-        "the unit direction sentence"
-    );
+    // Keep as authored is set above, so the hover names preserved average length and unit bake directions.
     assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_some());
+}
+
+/// The bake and variance explanations belong to the active bake only: not to a CM normal that has not chosen it, not
+/// to a normal kept as authored under the plain renormalise, and not to another field of a set-decided normal.
+#[test]
+fn the_bake_hover_shows_only_for_the_active_bake() {
+    use sdc_gui::model::labels::{RENORM_BAKE_HOVER, VARIANCE_BAKE_HOVER};
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let hovered = |h: &mut Harness<'static, AppModel>, name: &str| {
+        let c = centre(h);
+        let at = control(h, Role::ComboBox, name, c);
+        h.hover_at(at.center());
+        h.run();
+    };
+    // A complex material normal that has not chosen the bake: the opt-in hover, never the variance line.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    instant_tips(&h.ctx);
+    h.run();
+    hovered(&mut h, "Normal handling");
+    assert!(h.query_by_label_contains(RENORM_BAKE_HOVER).is_some());
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_none());
+    // Keep as authored under the plain renormalise: no bake, so neither explanation.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize"));
+    m.set_field(NORMAL, "mips.normal_base", serde_json::json!("keep"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    h.run();
+    hovered(&mut h, "Normal handling");
+    assert!(h.query_by_label_contains("average length").is_none());
+    assert!(h.query_by_label_contains("unit directions").is_none());
+    // Another field of the same normal never carries either explanation.
+    hovered(&mut h, "Normal base level");
+    assert!(h.query_by_label_contains("average length").is_none());
+    assert!(h.query_by_label_contains("unit directions").is_none());
 }
 
 /// Note HI14: the proposal is display only.
