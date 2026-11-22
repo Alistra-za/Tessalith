@@ -55,11 +55,17 @@ impl AppModel {
         // before the write and kept only once it took (a read-only, rejected or equal write queues nothing).
         let held = new
             .filter(|_| self.project.as_ref().is_some_and(|p| !p.read_only()))
-            .map(|st| (st, self.own_subtype(key), self.cards_now()));
+            .map(|st| {
+                let was = self.own_subtype(key);
+                // A write of the value already there is a no-op: no need to list the cards for it.
+                let cards = (!self.new_set_group_open() && was != Some(json!(st)))
+                    .then(|| self.cards_now());
+                (st, was, cards)
+            });
         self.edit_subtype_step(label, key, new);
         if let Some((st, was, cards)) = held {
             if was != Some(json!(st)) && self.own_subtype(key) == Some(json!(st)) {
-                self.queue_new_set_note(key, st, cards);
+                self.queue_new_set_note(key, cards);
             }
         }
     }
