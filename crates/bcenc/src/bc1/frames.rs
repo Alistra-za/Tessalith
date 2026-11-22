@@ -1,15 +1,13 @@
 //! The frame entries of the BC1 encode: one dispatch per call, on the path the caller names. `Base` runs the encode as
 //! plain code; `Avx2` runs it inside a `#[target_feature(enable = "avx2")]` function, where every hot function
-//! (`#[inline(always)]`) is compiled again with AVX2 and calls the AVX2 kernels (Note HY21). `Avx512` does the same
-//! inside a function with the AVX-512 set (`enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq"`), calling the same
-//! AVX2 kernels. The bytes are the same on every path. Each `_on` entry of `lib.rs` has asserted that its path is
-//! available before it calls these.
+//! (`#[inline(always)]`) is compiled again with AVX2 and calls the AVX2 kernels (Note HY21). The bytes are the
+//! same on every path. Each `_on` entry of `lib.rs` has asserted that its path is available before it calls these.
 
 use super::alpha::encode_alpha;
 use super::encode::encode;
 use super::LEVELS;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-use crate::path::{Avx2, Avx512};
+use crate::path::Avx2;
 use crate::path::{Base, Path};
 
 /// [`encode`] at a level given at run time, one of [`LEVELS`], on `path`. Panics on any other level.
@@ -50,19 +48,9 @@ pub(crate) fn encode_on<const LEVEL: u32>(
             // SAFETY: `t` exists, so `Avx2::require` found AVX2.
             unsafe { encode_avx2::<LEVEL>(t, px, allow_3color, weights) }
         }
-        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        Path::Avx512 => {
-            let t = Avx512::require();
-            // SAFETY: `t` exists, so `Avx512::require` found the AVX-512 set.
-            unsafe { encode_avx512::<LEVEL>(t, px, allow_3color, weights) }
-        }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
         Path::Avx2 => {
             unreachable!("path avx2 is not built here; the _on entry asserted availability")
-        }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-        Path::Avx512 => {
-            unreachable!("path avx512 is not built here; the _on entry asserted availability")
         }
     }
 }
@@ -86,19 +74,9 @@ pub(crate) fn encode_alpha_on<const LEVEL: u32>(
             // SAFETY: `t` exists, so `Avx2::require` found AVX2.
             unsafe { encode_alpha_avx2::<LEVEL>(t, px, transparent, weights) }
         }
-        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        Path::Avx512 => {
-            let t = Avx512::require();
-            // SAFETY: `t` exists, so `Avx512::require` found the AVX-512 set.
-            unsafe { encode_alpha_avx512::<LEVEL>(t, px, transparent, weights) }
-        }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
         Path::Avx2 => {
             unreachable!("path avx2 is not built here; the _on entry asserted availability")
-        }
-        #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-        Path::Avx512 => {
-            unreachable!("path avx512 is not built here; the _on entry asserted availability")
         }
     }
 }
@@ -128,33 +106,5 @@ fn encode_alpha_avx2<const LEVEL: u32>(
 ) -> [u8; 8] {
     #[cfg(test)]
     crate::path::frame_ran(Path::Avx2);
-    encode_alpha::<LEVEL>(t, px, transparent, weights)
-}
-
-/// The AVX-512 frame of [`encode`]: the whole encode compiled with the AVX-512 set, calling the AVX2 kernels.
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-#[target_feature(enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq")]
-fn encode_avx512<const LEVEL: u32>(
-    t: Avx512,
-    px: &[[u8; 4]; 16],
-    allow_3color: bool,
-    weights: [i32; 3],
-) -> [u8; 8] {
-    #[cfg(test)]
-    crate::path::frame_ran(Path::Avx512);
-    encode::<LEVEL>(t, px, allow_3color, weights)
-}
-
-/// The AVX-512 frame of [`encode_alpha`].
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-#[target_feature(enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq")]
-fn encode_alpha_avx512<const LEVEL: u32>(
-    t: Avx512,
-    px: &[[u8; 4]; 16],
-    transparent: u16,
-    weights: [i32; 3],
-) -> [u8; 8] {
-    #[cfg(test)]
-    crate::path::frame_ran(Path::Avx512);
     encode_alpha::<LEVEL>(t, px, transparent, weights)
 }

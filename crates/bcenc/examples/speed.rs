@@ -4,7 +4,7 @@
 //! to compare between runs, because both encoders run in alternating passes under the same load):
 //!
 //! ```text
-//! cargo run --offline --release -p bcenc --example speed -- [--path=<base|avx2|avx512|best>] <runs> [<png>...]
+//! cargo run --offline --release -p bcenc --example speed -- [--path=<base|avx2|best>] <runs> [<png>...]
 //! ```
 //!
 //! `--path` picks the code path `bcenc` runs on, through its hidden `_on` entries (default `best`, the one the public
@@ -174,7 +174,7 @@ fn main() -> ExitCode {
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n >= 1)
     else {
-        eprintln!("usage: speed [--path=<base|avx2|avx512|best>] <runs (1 or more)> [<png>...]");
+        eprintln!("usage: speed [--path=<base|avx2|best>] <runs (1 or more)> [<png>...]");
         return ExitCode::from(2);
     };
     eprintln!("path {}", path.name());

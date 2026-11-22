@@ -198,7 +198,7 @@ mod tests {
     use super::*;
     use crate::path::Base;
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    use crate::path::{avx2_tested, avx512_tested, Avx2, Avx512};
+    use crate::path::{avx2_tested, Avx2};
 
     /// Rows that together hold every 4-colour ordering index.
     fn rows4() -> Vec<[u16; MAX_TOTAL_ORDERINGS4]> {
@@ -263,7 +263,7 @@ mod tests {
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
         #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        let (avx2, avx512) = (avx2_tested(), avx512_tested());
+        let avx2 = avx2_tested();
         let tables = order_tables();
         let rows = rows3();
         for px in blocks() {
@@ -286,14 +286,6 @@ mod tests {
                             "AVX2 stamp, {px:?} along {axis:?}"
                         );
                     }
-                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-                    if avx512 {
-                        assert_eq!(
-                            keys3::<18>(Avx512::require(), total, &sums, row, tables, SINGLE),
-                            keys,
-                            "AVX2 stamp on the AVX-512 path, {px:?} along {axis:?}"
-                        );
-                    }
                     for (q, &s) in row.iter().enumerate() {
                         if TOTAL_ORDER_3_16.contains(&(s as usize)) {
                             assert_eq!(keys[q], SINGLE, "ordering {s}");
@@ -310,7 +302,7 @@ mod tests {
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
         #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        let (avx2, avx512) = (avx2_tested(), avx512_tested());
+        let avx2 = avx2_tested();
         let axes = axes();
         let tables = order_tables();
         let rows = rows4();
@@ -332,14 +324,6 @@ mod tests {
                             keys4::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
                             keys,
                             "AVX2 stamp, {px:?} along {axis:?}"
-                        );
-                    }
-                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-                    if avx512 {
-                        assert_eq!(
-                            keys4::<18>(Avx512::require(), total, &sums, row, tables, SINGLE),
-                            keys,
-                            "AVX2 stamp on the AVX-512 path, {px:?} along {axis:?}"
                         );
                     }
                     for (q, &s) in row.iter().enumerate() {

@@ -1,5 +1,5 @@
-//! Tests of the selector searches: every test runs on the public path, on `portable` and, for each wide path the unit
-//! tests run (AVX2, AVX-512), on the 256-bit kernels of `avx2.rs` as that path calls them.
+//! Tests of the selector searches: every test runs on the public path, on `portable` and, when the unit tests run the
+//! AVX2 path, on the 256-bit kernels of `avx2.rs`.
 
 use super::super::palette::{dual_palette, DualPalette};
 use super::super::{PERCEPTUAL, PLAIN};
@@ -7,7 +7,7 @@ use super::*;
 use crate::gen;
 use crate::path::Base;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-use crate::path::{avx2_tested, avx512_tested, Avx2, Avx512, Isa};
+use crate::path::{avx2_tested, Avx2};
 
 fn blocks() -> Vec<[[u8; 4]; 16]> {
     gen::colour_classes(0x5E15_0001, 40)
@@ -84,29 +84,11 @@ impl Kernel for Public {
         find_sels3(Base, t, e, sels, cutoff)
     }
 }
-/// A wide path's token, as its `require` builds it.
+/// The public searches on the AVX2 path (the 256-bit kernels); the texels are `Public`'s.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-trait Token: Isa {
-    fn require() -> Self;
-}
+struct OnAvx2;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-impl Token for Avx2 {
-    fn require() -> Self {
-        Avx2::require()
-    }
-}
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-impl Token for Avx512 {
-    fn require() -> Self {
-        Avx512::require()
-    }
-}
-
-/// The public searches on the wide path of token `I` (the 256-bit kernels); the texels are `Public`'s.
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-struct OnWide<I>(std::marker::PhantomData<I>);
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-impl<I: Token> Kernel for OnWide<I> {
+impl Kernel for OnAvx2 {
     type T = Texels;
     fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Texels {
         Public::new(px, w, dec)
@@ -115,13 +97,13 @@ impl<I: Token> Kernel for OnWide<I> {
         Public::masked(px, w, dec, mask)
     }
     fn f3m(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-        find_sels3_masked(I::require(), t, e, sels)
+        find_sels3_masked(Avx2::require(), t, e, sels)
     }
     fn f4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        find_sels4(I::require(), t, e, sels, cutoff)
+        find_sels4(Avx2::require(), t, e, sels, cutoff)
     }
     fn f3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        find_sels3(I::require(), t, e, sels, cutoff)
+        find_sels3(Avx2::require(), t, e, sels, cutoff)
     }
 }
 
@@ -176,13 +158,8 @@ fn the_kernels_equal_the_scalar_searches() {
     equal_the_scalar_searches::<Public>();
     equal_the_scalar_searches::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            equal_the_scalar_searches::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            equal_the_scalar_searches::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        equal_the_scalar_searches::<OnAvx2>();
     }
 }
 
@@ -238,13 +215,8 @@ fn the_kernels_take_the_decoder_weights() {
     take_the_decoder_weights::<Public>();
     take_the_decoder_weights::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            take_the_decoder_weights::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            take_the_decoder_weights::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        take_the_decoder_weights::<OnAvx2>();
     }
 }
 
@@ -293,13 +265,8 @@ fn a_cutoff_decides_as_the_scalar_search_does() {
     decide_by_the_cutoff::<Public>();
     decide_by_the_cutoff::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            decide_by_the_cutoff::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            decide_by_the_cutoff::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        decide_by_the_cutoff::<OnAvx2>();
     }
 }
 
@@ -452,13 +419,8 @@ fn ties_and_exact_texels() {
     ties_and_exact::<Public>();
     ties_and_exact::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            ties_and_exact::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            ties_and_exact::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        ties_and_exact::<OnAvx2>();
     }
 }
 
@@ -514,13 +476,8 @@ fn each_texel_keeps_its_own_selector() {
     own_selectors::<Public>();
     own_selectors::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            own_selectors::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            own_selectors::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        own_selectors::<OnAvx2>();
     }
 }
 
@@ -595,13 +552,8 @@ fn the_largest_errors_do_not_overflow() {
     largest_errors::<Public>();
     largest_errors::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            largest_errors::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            largest_errors::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        largest_errors::<OnAvx2>();
     }
 }
 
@@ -672,13 +624,8 @@ fn the_masked_kernel_equals_the_scalar_search() {
     masked_equals_the_scalar_search::<Public>();
     masked_equals_the_scalar_search::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            masked_equals_the_scalar_search::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            masked_equals_the_scalar_search::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        masked_equals_the_scalar_search::<OnAvx2>();
     }
 }
 
@@ -731,13 +678,8 @@ fn the_masked_largest_errors_do_not_overflow() {
     masked_largest_errors::<Public>();
     masked_largest_errors::<Portable>();
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    {
-        if avx2_tested() {
-            masked_largest_errors::<OnWide<Avx2>>();
-        }
-        if avx512_tested() {
-            masked_largest_errors::<OnWide<Avx512>>();
-        }
+    if avx2_tested() {
+        masked_largest_errors::<OnAvx2>();
     }
 }
 

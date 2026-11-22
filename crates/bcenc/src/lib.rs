@@ -4,12 +4,10 @@
 //! tables are built once in a `OnceLock`). `unsafe` has two uses, each call with a `// SAFETY:` comment: calling a
 //! `#[target_feature(enable = "sse2")]` function of a module compiled only where the target has SSE2
 //! (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and `mod sse2` in `bc4.rs`), where Rust asks for the block even though
-//! the feature is always on; and calling a function with the AVX2 set (`enable = "avx2"`: the AVX2 frames of
-//! `bc1/frames.rs` and `bc4.rs`, and the AVX2 kernels) while holding a `path::Avx2`, or one with the AVX-512 set
-//! (`enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq"`: the AVX-512 frames and BC4's four-pair kernel) while holding
-//! a `path::Avx512`. Only `Avx2::require` and `Avx512::require` create the tokens, after std's detection found the set
-//! (an `Avx512` also gives an `Avx2`, as its set holds AVX2) (Note HY21). A target without SSE2 runs portable code
-//! instead, which the unit tests run on every target.
+//! the feature is always on; and calling a `#[target_feature(enable = "avx2")]` function (the AVX2 frames of
+//! `bc1/frames.rs` and `bc4.rs`, and the AVX2 kernels) while holding a `path::Avx2`, a token only `Avx2::require`
+//! creates, after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the
+//! unit tests run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
 //! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16). Each call runs on
 //! the widest code path the CPU has, picked per call; `Path` and the `_on` entries are hidden, for tests and the speed
