@@ -27,6 +27,7 @@ fn convert(dir: &Path, target: Target, sets: &[&str]) -> Out {
 
 fn request(dir: &Path, target: Target, sets: &[&str]) -> BatchRequest {
     let mut req = BatchRequest::new(vec![dir.join("in")], dir.join("out"), target);
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();

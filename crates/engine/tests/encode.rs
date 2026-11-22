@@ -763,6 +763,7 @@ fn convert_one(
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     img.save(&p).unwrap();
     let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    req.validate = true;
     req.recursive = true;
     req.accept = engine::policy::AcceptSuggestions::High;
     req.on_existing = OnExisting::Overwrite;

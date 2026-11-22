@@ -40,6 +40,7 @@ fn kinds(ev: &[EngineEvent], name: &str) -> usize {
 
 fn request(dir: &Path) -> BatchRequest {
     let mut r = BatchRequest::new(vec![dir.join("textures")], dir.join("out"), Target::Cs);
+    r.validate = true;
     r.recursive = true;
     r.accept = AcceptSuggestions::High;
     r.overrides = vec![

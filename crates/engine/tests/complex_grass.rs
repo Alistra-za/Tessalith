@@ -55,6 +55,7 @@ fn put(d: &TempDir, name: &str, img: &Rgba32F) {
 
 fn req(d: &TempDir, target: Target, sets: &[&str]) -> BatchRequest {
     let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), target);
+    r.validate = true;
     r.recursive = true;
     r.accept = AcceptSuggestions::High;
     r.on_existing = OnExisting::Overwrite;

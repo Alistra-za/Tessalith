@@ -190,6 +190,31 @@ fn skipping_validation_writes_the_same_bytes() {
     }
 }
 
+/// The engine default: a request straight from `BatchRequest::new`, with `validate` left alone, does not validate.
+#[test]
+fn a_request_from_new_does_not_validate() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    req.recursive = true;
+    req.accept = AcceptSuggestions::High;
+    req.overrides = SETS
+        .iter()
+        .map(|s| engine::overrides::parse_set(s).unwrap())
+        .collect();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "optional-validate");
+    let e = Engine::new().unwrap();
+    let plan = e.plan(req, &rep, &CancelToken::default()).unwrap();
+    let root = plan.request.output_root.clone();
+    let s = e.run(plan, &rep, &CancelToken::default()).unwrap();
+    assert!(s.converted > 0, "{s:?}");
+    let recs = records(&root);
+    assert!(!recs.is_empty());
+    for (key, r) in &recs {
+        assert_eq!(r["validation"]["skipped"], true, "{key}: {r}");
+    }
+}
+
 /// D4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.
 #[test]
 fn a_record_not_validated_is_current_on_the_next_run() {

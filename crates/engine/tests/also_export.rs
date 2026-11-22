@@ -198,6 +198,66 @@ fn plain_sets_are_copied_and_their_bytes_match_the_pbr_folder() {
     }
 }
 
+/// Note LF: all three phases follow the request's `validate`, except that the CM phase's complex `_m` is always
+/// validated; a copied Vanilla output carries its PBR twin's `validation`, `skipped` included.
+#[test]
+fn the_also_phases_follow_the_requests_validate() {
+    for validate in [true, false] {
+        let (_d, m, loc) = project(|m| {
+            steel(m);
+            cup(m);
+        });
+        let mut r = request(&m, &loc);
+        r.validate = validate;
+        let (s, ev) = also(r, &spec(&loc, BOTH));
+        s.unwrap();
+        let (pbr, van, cm) = (
+            loc.join("Mod PBR"),
+            loc.join("Mod Vanilla"),
+            loc.join("Mod CM"),
+        );
+        let done: Vec<(String, bool)> = ev
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::FileDone { output, validation } => {
+                    Some((output.replace('\\', "/"), validation.skipped))
+                }
+                _ => None,
+            })
+            .collect();
+        for folder in ["Mod PBR", "Mod Vanilla", "Mod CM"] {
+            assert!(
+                done.iter().any(|(o, _)| o.contains(&format!("{folder}/"))),
+                "validate={validate}: no FileDone under {folder}: {done:?}"
+            );
+        }
+        if validate {
+            assert!(
+                done.iter().all(|(_, skipped)| !skipped),
+                "validate=true: {done:?}"
+            );
+        } else {
+            assert_eq!(
+                record(&pbr, "textures/pbr/arm/steel.dds").raw["validation"]["skipped"],
+                true
+            );
+            assert!(
+                record(&cm, "textures/arm/steel_m.dds").raw["validation"]
+                    .get("skipped")
+                    .is_none(),
+                "complex_material is always validated"
+            );
+        }
+        let copy = record(&van, "textures/clutter/cup_n.dds");
+        assert!(copy.raw.get("copied_from").is_some(), "validate={validate}");
+        assert_eq!(
+            copy.raw["validation"],
+            record(&pbr, "textures/clutter/cup_n.dds").raw["validation"],
+            "validate={validate}"
+        );
+    }
+}
+
 /// Note FM43: the vanilla presets encode a diffuse perceptually and cs-quality does not, so the Vanilla phase encodes
 /// the diffuse itself instead of copying the PBR output. The normal map has the same profile in both and is copied.
 #[test]

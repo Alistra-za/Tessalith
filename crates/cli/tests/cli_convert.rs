@@ -1058,7 +1058,8 @@ fn a_layered_validation_mips_changes_what_validation_reports() {
     };
     // The defaults (`alpha.exact_opaque` off, alpha removed) hold the decoded-alpha guarantee on this noise (fix
     // batch 41), so every run exits 0 and only the warning moves.
-    let base = DIFFUSE;
+    let mut base = DIFFUSE.to_vec();
+    base.push("--validate");
     let o = fx.convert(&base);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert!(
@@ -1114,7 +1115,7 @@ impl Fx {
 fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     let fx = Fx::new();
     fx.rgb("checker.png");
-    let o = fx.convert_failing_validation(&[]);
+    let o = fx.convert_failing_validation(&["--validate"]);
     assert_eq!(code(&o), 4, "{}", text(&o.stderr));
     let done = batch_done(&o);
     assert_eq!(
@@ -1129,15 +1130,48 @@ fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     // The output is still written (the report says so; the file is not deleted).
     assert!(fx.dds("textures/a/checker.dds").exists());
     // A failed validation is not up to date: the next run encodes it again and reports it again.
-    let o = fx.convert_failing_validation(&[]);
+    let o = fx.convert_failing_validation(&["--validate"]);
     assert_eq!(code(&o), 4, "{}", text(&o.stderr));
     assert_eq!(batch_done(&o)["converted"], 1);
 
     // Partial (exit 1) outranks validation failed (exit 4).
     fx.rgb("bad.png");
-    let o = fx.convert_failing_validation(&["--set", "file:**/bad.png.alpha.threshold=0"]);
+    let o = fx.convert_failing_validation(&[
+        "--validate",
+        "--set",
+        "file:**/bad.png.alpha.threshold=0",
+    ]);
     assert_eq!(code(&o), 1, "{}", text(&o.stderr));
     assert_eq!(batch_done(&o)["validation_failed"], 1);
+}
+
+/// Validation runs only with `--validate` (Note LF): without it the same failing fixture exits 0 and the record says
+/// `validation.skipped`.
+#[test]
+fn convert_validates_only_with_the_flag() {
+    let fx = Fx::new();
+    fx.rgb("checker.png");
+    let o = fx.convert_failing_validation(&[]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let done = batch_done(&o);
+    assert_eq!(done["validation_failed"], 0);
+    assert_eq!(done["converted"], 1);
+    let err = text(&o.stderr);
+    assert!(!err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(!err.contains("VAL-HEADER"), "{err}");
+    assert!(err.contains("failed, validation off,"), "{err}");
+    let lines = manifest_lines(&fx.p("out"));
+    let rec: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+    assert_eq!(rec["validation"]["skipped"], true, "{rec}");
+    assert_eq!(rec["validation"]["passed"], true, "{rec}");
+
+    let o = fx.convert_failing_validation(&["--validate", "--on-existing", "overwrite"]);
+    assert_eq!(code(&o), 4, "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    assert!(err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(!err.contains("validation off"), "{err}");
+    assert!(err.contains("1 failed validation,"), "{err}");
+    assert!(!err.contains("complex types only"), "{err}");
 }
 
 /// DECISIONS Note M5: `--set packing.fill.<role>` writes a packed channel that has no source; it is provenance

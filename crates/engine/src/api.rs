@@ -220,7 +220,7 @@ impl BatchRequest {
             jobs: 0,
             mem_budget: 0,
             dry_run: false,
-            validate: true,
+            validate: false, // Note LF: off, as the owner ruled ("Off, like sdc").
             plan_progress: None,
             low_detail: LowDetailMode::Off,
             derive: None,

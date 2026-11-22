@@ -26,16 +26,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 /// Human output on stderr, plus JSON Lines on stdout with `--json`. `run_also` takes this and makes its own reporters.
-fn tee_sink(json: bool) -> Arc<dyn EventSink> {
-    let mut sinks: Vec<Arc<dyn EventSink>> = vec![Arc::new(human::HumanSink::new())];
+fn tee_sink(json: bool, validated: bool) -> Arc<dyn EventSink> {
+    let mut sinks: Vec<Arc<dyn EventSink>> =
+        vec![Arc::new(human::HumanSink::new().validating(validated))];
     if json {
         sinks.push(Arc::new(JsonLinesSink::new(std::io::stdout())));
     }
     Arc::new(human::TeeSink(sinks))
 }
 
-fn reporter(json: bool) -> Reporter {
-    Reporter::new(tee_sink(json), new_batch_id())
+fn reporter(json: bool, validated: bool) -> Reporter {
+    Reporter::new(tee_sink(json, validated), new_batch_id())
 }
 
 fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
@@ -65,6 +66,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         (true, false) => EvScope::matching(a.property).map_err(EngineError::Usage)?,
     };
     req.dry_run = a.dry_run;
+    req.validate = a.validate;
     // Before planning, so a Ctrl-C during a long scan is not lost. A failed install is not fatal, but it is
     // reported: without the handler Ctrl-C ends the process at once, as for any console program.
     let cancel = CancelToken::default();
@@ -91,7 +93,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             &AnalysisCache::default(),
             req,
             &spec,
-            tee_sink(a.batch.json),
+            tee_sink(a.batch.json, a.validate),
             &cancel,
         )?;
         // Plain lines on stderr (stdout carries the JSON lines): the files this export did not write, and the sets left out.
@@ -103,7 +105,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         }
         return Ok(sum.exit_code());
     }
-    let rep = reporter(a.batch.json);
+    let rep = reporter(a.batch.json, a.validate);
     let plan = engine.plan(req, &rep, &cancel)?;
     Ok(engine.run(plan, &rep, &cancel)?.exit_code())
 }

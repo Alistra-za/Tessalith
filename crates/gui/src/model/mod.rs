@@ -3295,6 +3295,7 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        req.validate = true; // Task 4 replaces this with the Validate exported DDS setting.
         Some(req)
     }
 

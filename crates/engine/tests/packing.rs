@@ -23,6 +23,7 @@ struct Out {
 
 fn convert_with(dir: &Path, target: Target, sets: &[&str], on_existing: OnExisting) -> Out {
     let mut req = BatchRequest::new(vec![dir.join("in")], dir.join("out"), target);
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();
@@ -683,6 +684,7 @@ fn a_vanilla_gloss_height_set_packs_the_complex_m_only_with_the_complex_material
         d.path().join("out"),
         Target::Vanilla,
     );
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.set_shaders.insert(

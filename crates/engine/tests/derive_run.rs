@@ -85,6 +85,7 @@ fn plan(dir: &Path, dj: DeriveJob, name: &str) -> Plan {
         dir.join("out"),
         Target::Vanilla,
     );
+    req.validate = true;
     req.on_existing = OnExisting::IfChanged;
     req.accept = AcceptSuggestions::High;
     let mut plan = Engine::new()
