@@ -1109,10 +1109,11 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 ///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
 /// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
-///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile (`raw["profile"]`, which must hash to
-///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
-///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
-///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).
+///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile
+///   (`raw["profile"]`, which must hash to its `profile_sha256`) with the job's three quality targets
+///   (`encoder.effort`, `encoder.bc45_search_radius`, `encoder.bc1_search`) must hash as the job's profile, or `Stale`
+///   (format, weighting or any other field changed); then a target that rose for the job's format is `Stale` and one
+///   that fell keeps it (`lower_target`). In that comparison such an old `max` record counts as `slowest`.
 ///
 /// Neither flag: `Current`. The engine version is read only for that `max` rule; the record's `isa` is not compared.
 pub(crate) fn currency(
@@ -1197,7 +1198,8 @@ pub(crate) fn currency(
 /// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
 /// otherwise, an unreadable or self-inconsistent record included. Equal hashes return `Some(false)` at once, except
 /// for a job at `max` on a format that reads the radius (BC3, BC4, BC5) against a record not known to be newer than
-/// 3.0.0 (Note LI4): that record reads as `slowest`, so it is stale.
+/// 3.0.0 (Note LI4): that record reads as `slowest`, so it is stale. When the hashes differ, the rank comparison reads
+/// such a record's radius as `slowest` too (`recorded_radius`).
 fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let now = profile_sha256(p).ok()?;
     // Equal hashes mean equal radii, so an old or undated `max` record against a job at `max` must not return here.
@@ -1232,8 +1234,9 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     Some(moves.contains(&std::cmp::Ordering::Less))
 }
 
-/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
-/// shortcut: a 3.0.1 build from before Note LI also wrote `max` for radius 10; such dev records read as the new `max`.
+/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`. This is a
+/// known limit (shortcut): a 3.0.1 build from before Note LI also wrote `max` for radius 10, and such dev records read
+/// as the new `max`.
 const MAX_WAS_SLOWEST_THROUGH: [u32; 3] = [3, 0, 0];
 
 /// Where a record's `engine_version` places it against a last version.

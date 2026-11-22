@@ -162,7 +162,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                             src,
                             mask,
                             e.perceptual,
-                            bc1_search(e.bc1_search),
+                            bc1s,
                         ))
                     }
                     // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
@@ -170,7 +170,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         src,
                         true,
                         e.perceptual,
-                        bc1_search(e.bc1_search),
+                        bc1s,
                     )),
                     Format::Bc3 if max => blk.copy_from_slice(&bcenc::bc3_encode_block_max_with(
                         src,

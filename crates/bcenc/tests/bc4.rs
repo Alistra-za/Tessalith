@@ -121,43 +121,12 @@ fn bc4_channel_out_of_range_panics() {
     bc4_encode_block(&[[0; 4]; 16], 4, 5);
 }
 
-/// The six pinned blocks of `gen` with the bench code's bytes (BC45-R10): this plan's Task 1 table, taken on 2026-11-21
-/// from `bench:crates/bench/src/bc4ref.rs` (branch `bench`, 87c5539f) compiled unchanged. Per block: slowest no guard,
-/// slowest cut 128, max no guard, max cut 128. Independent of `bc4::search_max`.
-#[rustfmt::skip]
-fn bench_blocks() -> [([u8; 16], [[u8; 8]; 4]); 6] {
-    [
-        (gen::MAX_PAD_WITNESS, {
-            let s = [0x66, 0x94, 0xcb, 0xd4, 0x6d, 0x9d, 0xb4, 0x4d];
-            let m = [0xa4, 0x67, 0x9e, 0x4f, 0xdb, 0xf4, 0x6f, 0xfb];
-            [s, s, m, m]
-        }),
-        (gen::MAX_TIE_RAMP, {
-            let s = [0x72, 0x64, 0xc9, 0xed, 0x96, 0xdc, 0x24, 0x00];
-            [s, s, s, s]
-        }),
-        (gen::MAX_IMPROVING_TIE, {
-            let s = [0x9a, 0x2d, 0x06, 0xdd, 0xee, 0xad, 0xd9, 0x42];
-            let m = [0xa8, 0x3d, 0x57, 0x6f, 0x33, 0xf6, 0x6b, 0x6b];
-            [s, s, m, m]
-        }),
-        (gen::MAX_IMPROVING_TIE_E0, {
-            let s = [0xd3, 0x02, 0xd4, 0xe8, 0xcc, 0x00, 0xec, 0xbf];
-            let m = [0xe1, 0x18, 0x1d, 0xfb, 0xcc, 0x02, 0xee, 0xc4];
-            [s, s, m, m]
-        }),
-        (gen::MAX_GUARD_FALLBACK, {
-            let s = [0xea, 0x04, 0x86, 0x2e, 0x20, 0xc5, 0x50, 0x7e];
-            let m = [0xed, 0x1e, 0x87, 0x22, 0x20, 0x06, 0xd1, 0x66];
-            [s, s, m, s]
-        }),
-        (gen::MAX_GUARD_FALLBACK_BASE, {
-            let n = [0xed, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x13];
-            let g = [0xf2, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x17];
-            let m = [0xed, 0x09, 0x46, 0x8e, 0x43, 0x95, 0x9c, 0x13];
-            [n, g, m, g]
-        }),
-    ]
+/// The six pinned blocks of gen with the bench code's bytes (gen::MAX_BENCH_BYTES): slowest no guard, slowest cut
+/// 128, max no guard, max cut 128. Independent of `bc4::search_max`.
+fn bench_blocks() -> impl Iterator<Item = ([u8; 16], [[u8; 8]; 4])> {
+    gen::MAX_BENCH_BYTES
+        .into_iter()
+        .map(|(v, [_, slow, slow128, max, max128])| (v, [slow, slow128, max, max128]))
 }
 
 #[test]
