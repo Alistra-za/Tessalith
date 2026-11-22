@@ -967,8 +967,14 @@ pub struct AppModel {
     reencode_follow: Option<String>,
     /// A Save report write is on a worker (AG130); the app keeps frames coming until it lands.
     pub report_saving: bool,
-    /// "Show in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
+    /// "Show all in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
     pub show_in_meshes: Option<String>,
+    /// A shape link in "Used by N meshes" was clicked; `SdcApp::route_3d` takes it and brings Meshes forward.
+    pub show_mesh: Option<used_by::MeshPick>,
+    /// The scan database the Meshes view reads and whether it is reading its rows, copied by `SdcApp::route_3d` each
+    /// frame; the Used-by links stay off while either disagrees with the answer they would act on.
+    pub meshes_store: Option<std::path::PathBuf>,
+    pub meshes_rows_loading: bool,
     /// A NIF worklist row's fix: (NIF path, tab, field); app.rs switches to the Meshes view (NIF team, Note GD1).
     pub nif_tab_request: Option<(String, meshes::NifTab, Option<nif::fields::Field>)>,
     /// Note FC1 (AM14): `Choose preset…` was clicked on this pass (`ctx.cumulative_pass_nr`); the header opens its
@@ -1371,6 +1377,9 @@ impl AppModel {
             reencode_follow: None,
             report_saving: false,
             show_in_meshes: None,
+            show_mesh: None,
+            meshes_store: None,
+            meshes_rows_loading: false,
             nif_tab_request: None,
             choose_preset: None,
             auto_note: None,

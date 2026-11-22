@@ -1,4 +1,4 @@
-//! Item 9 (Task 12, DECISIONS AG96-AG97): the settings panel's "Used by meshes" list. One read of the scan database
+//! Item 9 (Task 12, DECISIONS AG96-AG97): the settings panel's "Used by N meshes" list. One read of the scan database
 //! per selected texture, on a worker thread and tagged with a generation, so a stale answer is dropped.
 use super::AppModel;
 use crate::worker::{spawn_guarded, WorkerMsg};
@@ -9,18 +9,50 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The list shows this many meshes, then "and N more".
+/// The list shows this many NIF copies (grouped into rows), then "and N more meshes, not listed".
 pub const USED_BY_CAP: usize = 200;
 
-/// One NIF copy (a mesh in a mod) whose shapes use the texture, in any slot. Copies of one NIF in one mod name (two
-/// origins with the same name, other roots) are one display group; each keeps its own facts in [`MeshUser::copies`].
-/// The row facts below are the first (winning-order) copy's.
+/// The header's words: "Used by 1 mesh", "Used by 3 meshes" (`n` counts NIF copies before the cap).
+pub fn header_line(n: usize) -> String {
+    match n {
+        1 => "Used by 1 mesh".to_string(),
+        n => format!("Used by {n} meshes"),
+    }
+}
+
+/// The amber tag on a copy whose shapes decided the texture's alpha meaning (AG96).
+pub const DECIDED_ALPHA: &str = "decided the alpha";
+/// Its hover.
+pub const DECIDED_ALPHA_HOVER: &str =
+    "This mesh's alpha settings decided what this texture's alpha means.";
+
+/// The line under a NIF path: where the copy comes from and how it ranks.
+pub fn user_line(mod_name: &str, priority: i32, bsa: bool) -> String {
+    if bsa {
+        format!("{mod_name} · BSA load rank {priority}")
+    } else {
+        format!("{mod_name} · MO2 priority {priority}")
+    }
+}
+
+/// The line after the rows when `n` copies are past the cap.
+pub fn more_line(n: usize) -> String {
+    match n {
+        1 => "and 1 more mesh, not listed".to_string(),
+        n => format!("and {n} more meshes, not listed"),
+    }
+}
+
+/// A display group: the copies of one NIF in one mod name (the same mod name with other roots makes several copies).
+/// Each copy keeps its own facts in [`MeshUser::copies`]. `priority` and `bsa` are the first copy's only, so a group
+/// with more than one copy must be drawn from its copies, never from them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MeshUser {
     pub nif: String,
     pub mod_name: String,
+    /// The first copy's (see the type's note).
     pub priority: i32,
-    /// From a BSA: loses to every loose copy whatever its number (archive rank).
+    /// The first copy's: from a BSA, which loses to every loose copy whatever its number (archive rank).
     pub bsa: bool,
     /// Any copy's shapes carry the alpha evidence that decided the texture's alpha meaning (AG96).
     pub decided_alpha: bool,
@@ -38,6 +70,8 @@ pub struct MeshCopy {
     /// The mod whose copy of this NIF wins instead (it need not use this texture); `None` for the winner, or when
     /// the scan names no winner.
     pub overridden_by: Option<String>,
+    /// The root of that winning origin: two origins of one name in other roots differ only by it.
+    pub overridden_root: Option<String>,
     /// The (block number, name) of each shape using the texture, once each, in block order.
     pub shapes: Vec<(u32, Option<String>)>,
 }
@@ -55,7 +89,20 @@ pub struct UsedBy {
     /// Copies past the cap.
     pub more: usize,
     pub error: Option<String>,
+    /// The scan database it was read from: a copy id is local to its store.
+    pub store: std::path::PathBuf,
 }
+
+/// A click on one shape of one copy: the scan database the copy id belongs to, the copy, the block and the shape's
+/// name (when it has one). The app brings Meshes forward for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MeshPick {
+    pub store: std::path::PathBuf,
+    pub copy_id: i64,
+    pub block: u32,
+    pub shape: Option<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct UsedByState {
     /// The last answer that landed (kept on screen while a newer read runs).
@@ -83,6 +130,7 @@ pub fn read_users(db: &Path, item: &str, tex: &str, alpha: bool) -> UsedBy {
     let mut out = UsedBy {
         item: item.into(),
         tex: tex.into(),
+        store: db.to_path_buf(),
         ..UsedBy::default()
     };
     match query(db, tex) {
@@ -104,6 +152,7 @@ struct ShapeRow {
     shape_name: Option<String>,
     /// The origin of the path's winning copy, when that is another copy.
     overridden_by: Option<String>,
+    overridden_root: Option<String>,
     alpha: Option<MeshAlpha>,
 }
 
@@ -115,7 +164,7 @@ fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
         .conn()
         .prepare(
             "SELECT np.p, o.name, o.kind, o.priority, tu.slot, s.shader_kind, ifnull(s.slsf2, 0), c.is_derived,
-                    s.alpha_flags, s.alpha_threshold, c.id, s.block, s.name, w.copy_id, wo.name
+                    s.alpha_flags, s.alpha_threshold, c.id, s.block, s.name, w.copy_id, wo.name, wo.root
              FROM path tp
              JOIN tex_use tu ON tu.tex_path_id = tp.id
              JOIN shape s ON s.texset_id = tu.texset_id
@@ -150,6 +199,11 @@ fn query(db: &Path, tex: &str) -> Result<Vec<ShapeRow>, String> {
                     None
                 } else {
                     r.get(14)?
+                },
+                overridden_root: if winner == Some(copy_id) {
+                    None
+                } else {
+                    r.get(15)?
                 },
                 alpha: source.then(|| MeshAlpha {
                     blend: flags & 1 != 0,
@@ -195,6 +249,7 @@ fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize, usize) {
                     bsa: r.kind == KIND_BSA,
                     decided_alpha: false,
                     overridden_by: r.overridden_by.clone(),
+                    overridden_root: r.overridden_root.clone(),
                     shapes: vec![],
                 },
             )
@@ -248,9 +303,10 @@ fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize, usize) {
     }
     (rows, total, more)
 }
+
 impl AppModel {
-    /// The "Used by meshes" list of texture `key`: `None` hides it (no scan database, or the texture has no job);
-    /// `Some(None)` while the first read runs. The first ask for a texture, or after a finished scan, starts the read.
+    /// The "Used by N meshes" list of texture `key`: `None` hides it (no scan database, or the texture has no job);
+    /// `Some(None)` while the first read runs, or when the answer held is from another database. The first ask for a texture, or after a finished scan, starts the read.
     pub fn used_by_for(&mut self, key: &str) -> Option<Option<Arc<UsedBy>>> {
         let db = self.scan_db.clone().filter(|d| self.stat_is_file(d))?;
         let j = self.item(key)?.job.as_ref()?;
@@ -261,7 +317,11 @@ impl AppModel {
             .get("alpha.policy")
             .is_some_and(|p| p.to_string() == "mesh:alpha");
         let st = &self.used_by;
-        let have = st.current.clone().filter(|c| c.item == key);
+        // An answer read from another database is not this one's: its copy ids are local to its store.
+        let have = st
+            .current
+            .clone()
+            .filter(|c| c.item == key && c.store == db);
         // Wave 2 #6: no read of a store a running or cancelled scan left empty; a list already read stays.
         if self.scan_store_unsettled {
             return have.map(Some);
@@ -330,6 +390,7 @@ impl AppModel {
         st.stale = false;
         st.current = Some(Arc::new(UsedBy {
             item,
+            store: self.scan_db.clone().unwrap_or_default(),
             error: Some(format!("Reading the scan database failed: {message}")),
             ..UsedBy::default()
         }));

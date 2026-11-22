@@ -185,6 +185,17 @@ impl SdcApp {
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
+        // Task 17 selects the shape on the matching store; this routes the request and brings Meshes forward. A copy
+        // id is local to its store, so a request for another database than Meshes reads is dropped (the panel keeps
+        // its links off in that case, so it is only a race).
+        model.meshes_store = m.store_path.clone();
+        model.meshes_rows_loading = m.rows_loading();
+        if let Some(p) = model.show_mesh.take() {
+            if m.store_path.as_ref() == Some(&p.store) {
+                model.centre_over_meshes = false;
+                crate::ui::header::set_meshes_view(ctx, true);
+            }
+        }
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
             model.centre_over_meshes = false;
