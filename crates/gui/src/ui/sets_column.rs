@@ -8,7 +8,7 @@ use super::slot_commands::SlotCmdState;
 use super::status::{shared_stroke, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
-use crate::model::bulk::MenuAction;
+use crate::model::bulk::{MenuAction, MenuEntry};
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files, ItemKind, TextureItem};
 use crate::model::labels::subtype_name;
@@ -3761,6 +3761,26 @@ fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> 
     v
 }
 
+/// One model menu entry as a card-menu button: off with its own reason on hover when `own_reason` (the entry's reason is
+/// the one to read), otherwise through `tip` (the read-only reason on a disabled `ui`); a click pushes its action.
+fn entry_button(
+    ui: &mut egui::Ui,
+    entry: &MenuEntry,
+    own_reason: bool,
+    tip: impl Fn(egui::Response) -> egui::Response,
+    acts: &mut Vec<Act>,
+) {
+    let r = ui.add_enabled(entry.disabled.is_none(), egui::Button::new(&entry.label));
+    let r = match &entry.disabled {
+        Some(why) if own_reason => r.on_disabled_hover_text(why),
+        _ => tip(r),
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(entry.action.clone()));
+        ui.close();
+    }
+}
+
 fn menu(
     ui: &mut egui::Ui,
     v: &SetView,
@@ -3806,19 +3826,7 @@ fn menu(
         ui.close();
     }
     // It only reads (the clipboard is not the document), so it sits above the disable and shows its own reason.
-    let copy_clip = model.copy_clip_entry();
-    let r = ui.add_enabled(
-        copy_clip.disabled.is_none(),
-        egui::Button::new(&copy_clip.label),
-    );
-    let r = match &copy_clip.disabled {
-        Some(why) => r.on_disabled_hover_text(why),
-        None => r,
-    };
-    if r.clicked() {
-        acts.push(Act::Bulk(copy_clip.action));
-        ui.close();
-    }
+    entry_button(ui, &model.copy_clip_entry(), true, |r| r, acts);
     if !editing.on {
         ui.disable();
     }
@@ -3852,26 +3860,8 @@ fn menu(
         ui.close();
     }
     // The same entry as the sets menu: with one set selected it reads "to 0 selected…" and says why it is off.
-    let copy = model.copy_json_entry();
-    let r = ui.add_enabled(copy.disabled.is_none(), egui::Button::new(&copy.label));
-    let r = match &copy.disabled {
-        Some(why) if editing.on => r.on_disabled_hover_text(why),
-        _ => tip(r),
-    };
-    if r.clicked() {
-        acts.push(Act::Bulk(copy.action));
-        ui.close();
-    }
-    let paste = model.paste_clip_entry();
-    let r = ui.add_enabled(paste.disabled.is_none(), egui::Button::new(&paste.label));
-    let r = match &paste.disabled {
-        Some(why) if editing.on => r.on_disabled_hover_text(why),
-        _ => tip(r),
-    };
-    if r.clicked() {
-        acts.push(Act::Bulk(paste.action));
-        ui.close();
-    }
+    entry_button(ui, &model.copy_json_entry(), editing.on, tip, acts);
+    entry_button(ui, &model.paste_clip_entry(), editing.on, tip, acts);
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());

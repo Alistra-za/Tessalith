@@ -519,18 +519,25 @@ impl AppModel {
     /// W7, W8, W3: the menus' "Copy JSON settings", which puts the active set's rows on the clipboard. It only reads, so
     /// it has no read-only check (a read-only document holds no entries, so it is off with W3 there).
     pub fn copy_clip_entry(&self) -> MenuEntry {
+        self.copy_clip_parts().0
+    }
+
+    /// The Copy entry, the active set's card name and its rows, built once: a click reads the rows it checks.
+    fn copy_clip_parts(&self) -> (MenuEntry, String, Vec<JsonRow>) {
         let (name, source) = self.copy_source();
-        let no_rows = source
-            .as_deref()
-            .is_none_or(|id| self.json_rows(id).is_empty());
+        let rows = source.map(|id| self.json_rows(&id)).unwrap_or_default();
         let disabled = (self.selected_set_ids().len() >= 2)
             .then(|| "select one set to copy from".to_string())
-            .or_else(|| no_rows.then(|| format!("{name} has no JSON settings of its own")));
-        MenuEntry {
+            .or_else(|| {
+                rows.is_empty()
+                    .then(|| format!("{name} has no JSON settings of its own"))
+            });
+        let entry = MenuEntry {
             action: MenuAction::CopyJsonToClip,
             label: "Copy JSON settings".to_string(),
             disabled,
-        }
+        };
+        (entry, name, rows)
     }
 
     /// W10, or W11 with W12: the menus' "Paste JSON settings from {set} to {n} selected…". The read-only reason comes
@@ -553,17 +560,16 @@ impl AppModel {
         }
     }
 
-    /// Put the active set's rows on the clipboard (W9); nothing while the entry is off.
+    /// Put the active set's rows on the clipboard (W9); nothing while the entry is off. The line is a status note, so
+    /// the plan an edit started cannot overwrite it when it settles (SM-T3-1 does the same for W16).
     pub fn copy_json_to_clip(&mut self) {
-        if self.copy_clip_entry().disabled.is_some() {
+        let (entry, name, rows) = self.copy_clip_parts();
+        if entry.disabled.is_some() {
             return;
         }
-        let (name, source) = self.copy_source();
-        let Some(source) = source else {
-            return;
-        };
-        let rows = self.json_rows(&source);
-        self.status_line = format!("Copied {} JSON settings from {name}", rows.len());
+        let line = format!("Copied {} JSON settings from {name}", rows.len());
+        self.status_line.clone_from(&line);
+        self.status_note = Some(line);
         self.json_clip = Some(JsonClip { source: name, rows });
     }
 

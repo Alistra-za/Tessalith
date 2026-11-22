@@ -282,6 +282,57 @@ fn the_clipboard_survives_opening_another_project() {
     );
 }
 
+/// Copy only reads, so on the card menu it is drawn above the disable: while sets are not editable it still shows its
+/// own reason (W3) on hover, not the read-only one.
+#[test]
+fn copy_on_the_card_menu_shows_its_own_reason_while_editing_is_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    let rock = view(&m, ROCK).short;
+    select(&mut m, &[ROCK]);
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "this is = = not toml\n").unwrap();
+    m.sets_doc = Some(SetsDoc::open(&bad));
+    assert!(
+        m.sets_doc.as_ref().unwrap().read_only(),
+        "premise: editing is off"
+    );
+    let mut h = harness(m);
+    h.run();
+    open_card_menu(&mut h, ROCK);
+    h.get_by_label("Copy JSON settings").hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label_contains(&format!("{rock} has no JSON settings of its own"))
+            .is_some(),
+        "Copy's own reason shows on its hover"
+    );
+}
+/// W9 is a status note, so the replan an edit started cannot overwrite it when it settles.
+#[test]
+fn the_copied_line_survives_a_plan_that_settles_after_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    select(&mut m, &[ROCK]);
+    let rock = view(&m, ROCK).short;
+    m.run_menu(MenuAction::CopyJsonToClip);
+    // The plan an edit starts rewrites the status line from its counts; the note stays in front of them.
+    m.set_json_value(LEAF, "path_contains", Some(json!("leaf")));
+    idle(&mut m);
+    assert!(
+        m.status_line
+            .starts_with(&format!("Copied 1 JSON settings from {rock}")),
+        "{:?}",
+        m.status_line
+    );
+}
+
 #[test]
 fn copy_and_paste_entries_say_why_they_are_off() {
     let d = tempfile::tempdir().unwrap();
@@ -305,8 +356,15 @@ fn copy_and_paste_entries_say_why_they_are_off() {
         m.copy_clip_entry().disabled.as_deref(),
         Some("select one set to copy from")
     );
-    assert_eq!(m.set_menu()[2].action, MenuAction::CopyJsonToClip);
-    assert_eq!(m.set_menu()[3].action, MenuAction::PasteJson);
+    let actions: Vec<_> = m.set_menu().into_iter().map(|e| e.action).collect();
+    let at = actions
+        .iter()
+        .position(|a| *a == MenuAction::CopyJsonFromActive)
+        .expect("the menu has Copy to selected");
+    assert_eq!(
+        actions[at + 1..at + 3],
+        [MenuAction::CopyJsonToClip, MenuAction::PasteJson]
+    );
     // Odd alone.
     select(&mut m, &[ODD]);
     assert_eq!(
