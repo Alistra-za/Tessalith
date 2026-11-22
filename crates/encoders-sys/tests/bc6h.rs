@@ -386,6 +386,63 @@ fn mode_2_takes_a_span_inside_its_fractional_limit() {
     }
 }
 
+/// `block_quant` stored each texel's float error in an `int`; above 2^31 (a black texel beside one brighter than about
+/// 1344.0) x86 gives `INT_MIN`, which beat every honest candidate (survey #1).
+#[test]
+fn black_beside_bright_keeps_both() {
+    const BRIGHT: f32 = 8192.0;
+    let black = neutral(0.0);
+    let bright = neutral(BRIGHT);
+    // (i) half black, half bright (guarded in peak mode); (ii) one black texel among fifteen bright (unguarded).
+    let blocks: [(&str, [[u16; 4]; 16]); 2] = [
+        (
+            "half black",
+            std::array::from_fn(|t| if t < 8 { black } else { bright }),
+        ),
+        (
+            "one black",
+            std::array::from_fn(|t| if t == 5 { black } else { bright }),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (name, px) in &blocks {
+        for target in paths() {
+            for level in [
+                Bc6hLevel::Veryfast,
+                Bc6hLevel::Fast,
+                Bc6hLevel::Basic,
+                Bc6hLevel::Slow,
+                Bc6hLevel::Veryslow,
+                Bc6hLevel::VeryslowPeak,
+            ] {
+                let dec = decode_halves(&encode_block(px, level, target));
+                for (t, texel) in dec.iter().enumerate() {
+                    let is_black = px[t][0] == black[0];
+                    for (c, &h) in texel.iter().enumerate() {
+                        let d = f16::from_bits(h).to_f32();
+                        let ok = if is_black {
+                            d < 0.01 * BRIGHT
+                        } else {
+                            (d - BRIGHT).abs() <= 0.1 * BRIGHT
+                        };
+                        if !ok {
+                            failures.push(format!(
+                                "{name} {target:?} {level:?} texel {t} ch {c}: decoded {d}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} texel channels off:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 /// A seeded LCG (the one `hdr_image` uses).
 struct Lcg(u32);
 

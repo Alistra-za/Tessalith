@@ -25,6 +25,7 @@
 // #6 bc6h_bounds' rgb_span holds three floats.
 // #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
 // #5 get_span returns the float span (it truncated through an int).
+// #1 block_quant keeps each texel's error as a float (an int overflowed on high-contrast blocks).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -1303,7 +1304,7 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
 			err1 += sq(dec_v1 - block[k+p*16]);
 		}
 		
-		int best_err = err1;
+		float best_err = err1; // sdc patch 0004: was int; a UF16 texel error can exceed 2^31
 		int best_q = q1;
 		if (err0<err1)
 		{
