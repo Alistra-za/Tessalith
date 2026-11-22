@@ -2,9 +2,9 @@
 //! so the written DDS is the same either way; the record keeps a `validation` object that says `skipped`.
 use engine::api::*;
 use engine::config::{Format, Target};
-use engine::events::{Reporter, VecSink};
+use engine::events::{EngineEvent, EventKind, Reporter, SkipKind, VecSink};
 use engine::manifest::Manifest;
-use engine::policy::AcceptSuggestions;
+use engine::policy::{AcceptSuggestions, SourceStamp};
 use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// One BC1, one BC4, one BC6H and BC7 outputs (one of them a cutout), none of an always-validated type.
-const SETS: [&str; 7] = [
+const SETS: [&str; 10] = [
+    "file:**/stone.png.subtype=diffuse",
+    "file:**/stone.png.format=bc7",
+    "file:**/noise.png.subtype=diffuse",
     "file:**/wall.png.subtype=diffuse",
     "file:**/wall.png.format=bc1",
     "file:**/mask.png.subtype=gray",
@@ -36,6 +39,19 @@ fn rgb64() -> DynamicImage {
 }
 
 fn fixture(d: &Path) {
+    put(d, "stone.png", rgb64());
+    let mut state = 12345u32;
+    let mut next = || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        (state >> 24) as u8
+    };
+    put(
+        d,
+        "noise.png",
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 64, |_, _| {
+            Rgb([next(), next(), next()])
+        })),
+    );
     put(d, "wall.png", rgb64());
     put(d, "mask.png", rgb64());
     put(
@@ -73,6 +89,12 @@ fn convert(
     validate: bool,
     on_existing: OnExisting,
 ) -> (BatchSummary, PathBuf) {
+    let req = request(d, out, validate, on_existing);
+    let root = req.output_root.clone();
+    (run(req).0, root)
+}
+
+fn request(d: &Path, out: &str, validate: bool, on_existing: OnExisting) -> BatchRequest {
     let mut req = BatchRequest::new(vec![d.join("in")], d.join(out), Target::Cs);
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
@@ -82,12 +104,16 @@ fn convert(
         .iter()
         .map(|s| engine::overrides::parse_set(s).unwrap())
         .collect();
-    let rep = Reporter::new(Arc::new(VecSink::default()), "optional-validate");
+    req
+}
+
+fn run(req: BatchRequest) -> (BatchSummary, Vec<EngineEvent>) {
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "optional-validate");
     let e = Engine::new().unwrap();
     let plan = e.plan(req, &rep, &CancelToken::default()).unwrap();
-    let root = plan.request.output_root.clone();
     let s = e.run(plan, &rep, &CancelToken::default()).unwrap();
-    (s, root)
+    (s, sink.take())
 }
 
 /// Every `.dds` below `root`, keyed by its path relative to `root`.
@@ -213,6 +239,200 @@ fn a_request_from_new_does_not_validate() {
     for (key, r) in &recs {
         assert_eq!(r["validation"]["skipped"], true, "{key}: {r}");
     }
+}
+
+fn skips(events: &[EngineEvent]) -> BTreeMap<&str, &str> {
+    events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                reason,
+                ..
+            } => Some((e.job.as_deref().unwrap(), reason.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn warnings<'a>(events: &'a [EngineEvent], key: &str) -> Vec<&'a engine::codes::Warning> {
+    events
+        .iter()
+        .filter(|e| e.job.as_deref() == Some(key))
+        .filter_map(|e| match &e.kind {
+            EventKind::Warning(w) => Some(w),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_validating_run_checks_a_skipped_output_in_place() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let req = |out, validate| request(d.path(), out, validate, OnExisting::IfChanged);
+    let out = d.path().join("out");
+    let first = run(req("out", false)).0;
+    let before = records(&out);
+    let bytes = dds_files(&out);
+    let stamps: BTreeMap<_, _> = before
+        .keys()
+        .map(|key| (key, SourceStamp::of(&out.join(key)).unwrap()))
+        .collect();
+    put(d.path(), "stone.png", rgb64().brighten(30));
+    let (checked, events) = run(req("out", true));
+    assert_eq!(checked.converted, 1, "{checked:?}");
+    assert_eq!(checked.up_to_date, first.converted - 1);
+    assert_eq!(checked.checked, first.converted - 1);
+    assert_eq!(checked.checked_failed, 0);
+    let reasons = skips(&events);
+    let after = records(&out);
+    assert_eq!(
+        before.keys().collect::<Vec<_>>(),
+        after.keys().collect::<Vec<_>>()
+    );
+    for (key, rec) in &after {
+        assert!(rec["validation"].get("skipped").is_none(), "{key}");
+        if key == "textures/a/stone.dds" {
+            continue;
+        }
+        assert!(
+            std::fs::read(out.join(key)).unwrap() == bytes[Path::new(key)],
+            "{key}"
+        );
+        assert_eq!(SourceStamp::of(&out.join(key)), Some(stamps[key]), "{key}");
+        for field in ["output_stamp", "profile_sha256", "encode_version"] {
+            assert_eq!(rec[field], before[key][field], "{key}: {field}");
+        }
+        assert!(reasons[key.as_str()].ends_with(CHECKED_IN_PLACE), "{key}");
+    }
+    let (reference, reference_events) = run(req("ref", true));
+    assert_eq!(reference.converted, first.converted);
+    assert!(
+        warnings(&events, "textures/a/noise.dds")
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ValMipError),
+        "noise.dds missing VAL-MIP-ERROR"
+    );
+    for (key, rec) in records(&d.path().join("ref")) {
+        assert_eq!(
+            warnings(&events, &key),
+            warnings(&reference_events, &key),
+            "{key}"
+        );
+        assert_eq!(after[&key]["validation"], rec["validation"], "{key}");
+    }
+    let third = run(req("out", true)).0;
+    assert_eq!((third.checked, third.converted), (0, 0));
+}
+
+#[test]
+fn a_current_copy_record_is_not_checked_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    put(dir.path(), "stone.png", rgb64());
+    let (first, out) = convert(dir.path(), "out", false, OnExisting::IfChanged);
+    assert_eq!(first.converted, 1);
+    let key = "textures/a/stone.dds";
+    let manifest = Manifest::at(&out);
+    let mut record: engine::manifest::ManifestRecord =
+        serde_json::from_value(records(&out).remove(key).unwrap()).unwrap();
+    // Keep the current profile, sources and output stamp, and mark the record as a copy.
+    record.copied_from = record.output_stamp;
+    assert!(record.copied_from.is_some());
+    manifest.append(&record).unwrap();
+    let (s, ev) = run(request(dir.path(), "out", true, OnExisting::IfChanged));
+    assert_eq!(s.up_to_date, 1);
+    assert_eq!(s.checked, 0);
+    assert_eq!(skips(&ev)[key], "up to date");
+    let after = &records(&out)[key];
+    assert_eq!(after["validation"]["skipped"], true);
+    assert_eq!(
+        after["copied_from"],
+        serde_json::to_value(record.copied_from).unwrap()
+    );
+}
+
+#[test]
+fn a_lower_target_keep_is_not_checked_in_place() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let mut req = request(d.path(), "out", false, OnExisting::IfChanged);
+    req.overrides
+        .push(engine::overrides::parse_set("encoder.effort=slowest").unwrap());
+    assert_eq!(run(req).0.exit_code(), 0);
+    let (s, events) = run(request(d.path(), "out", true, OnExisting::IfChanged));
+    let reasons = skips(&events);
+    let recs = records(&d.path().join("out"));
+    assert!(s.kept_lower_target >= 1);
+    assert!(reasons["textures/a/stone.dds"].starts_with("kept:"));
+    for (key, reason) in reasons.iter().filter(|(_, r)| r.starts_with("kept:")) {
+        assert_eq!(recs[*key]["validation"]["skipped"], true);
+        assert!(!reason.ends_with(CHECKED_IN_PLACE));
+    }
+    assert_eq!(s.checked, recs.len() as u32 - s.kept_lower_target);
+}
+
+#[test]
+fn an_older_encode_output_is_not_checked_in_place() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let (first, out) = convert(d.path(), "out", false, OnExisting::IfChanged);
+    let manifest = Manifest::at(&out);
+    let lines = std::fs::read_to_string(manifest.path()).unwrap();
+    let (line, rest) = lines.split_once('\n').unwrap();
+    let mut old: Value = serde_json::from_str(line).unwrap();
+    old["encode_version"] = "0.9.0".into();
+    std::fs::write(manifest.path(), format!("{old}\n{rest}")).unwrap();
+    let (s, _) = convert(d.path(), "out", true, OnExisting::IfChanged);
+    assert_eq!(s.kept_older_encode, 1);
+    assert_eq!(s.checked, first.converted - 1);
+    assert_eq!(
+        records(&out)[old["output"].as_str().unwrap()]["validation"]["skipped"],
+        true
+    );
+}
+
+#[test]
+fn a_packed_output_whose_pass_one_pick_changed_is_not_checked_in_place() {
+    use engine::config::GraySource;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_roughness.png", rgb64());
+    let cfg = d.path().join("sdc.toml");
+    let global = "[defaults.channels]\ngrayscale_source = \"luma\"\n";
+    let rule = "[[rules]]\nmatch = { alpha = \"constant255\" }\noverrides = { channels = { grayscale_source = \"luma\" } }\n";
+    let key = "textures/a/iron_rmaos.dds";
+    let packed = |out, config, validate, gray| {
+        std::fs::write(&cfg, config).unwrap();
+        let mut req = request(d.path(), out, validate, OnExisting::IfChanged);
+        req.project_config = Some(cfg.clone());
+        let sink = Arc::new(VecSink::default());
+        let rep = Reporter::new(sink.clone(), "pack-identity");
+        let e = Engine::new().unwrap();
+        let plan = e.plan(req, &rep, &CancelToken::default()).unwrap();
+        let job = plan.jobs.iter().find(|j| j.output.ends_with(key)).unwrap();
+        assert_eq!(job.pack.as_ref().unwrap().gray, gray);
+        let profile = engine::manifest::profile_sha256(&job.profile).unwrap();
+        let s = e.run(plan, &rep, &CancelToken::default()).unwrap();
+        let rec = &records(&d.path().join(out))[key];
+        assert_eq!(rec["profile_sha256"], profile);
+        (s, sink.take(), rec.clone())
+    };
+    let (first, _, before) = packed("out", global, false, GraySource::Luma);
+    assert_eq!(first.converted, 1);
+    let path = d.path().join("out").join(key);
+    let bytes = std::fs::read(&path).unwrap();
+    let (s, ev, after) = packed("out", rule, true, GraySource::R);
+    assert_eq!(after["profile_sha256"], before["profile_sha256"]);
+    assert_eq!(s.up_to_date, 1);
+    assert_eq!(s.checked, 0);
+    assert!(!skips(&ev)[key].ends_with(CHECKED_IN_PLACE));
+    assert_eq!(after["validation"]["skipped"], true);
+    assert!(std::fs::read(&path).unwrap() == bytes);
+    packed("control", rule, false, GraySource::R);
+    let (s, ev, rec) = packed("control", rule, true, GraySource::R);
+    assert_eq!(s.checked, 1);
+    assert!(skips(&ev)[key].ends_with(CHECKED_IN_PLACE));
+    assert!(rec["validation"].get("skipped").is_none());
 }
 
 /// D4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.

@@ -66,6 +66,8 @@ pub struct AlsoSummary {
 fn add(a: &mut BatchSummary, b: &BatchSummary) {
     a.converted += b.converted;
     a.up_to_date += b.up_to_date;
+    a.checked += b.checked;
+    a.checked_failed += b.checked_failed;
     a.kept_older_encode += b.kept_older_encode;
     a.kept_lower_target += b.kept_lower_target;
     a.skipped += b.skipped;

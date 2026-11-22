@@ -141,10 +141,13 @@ impl EventSink for HumanSink {
                 skipped_intentional,
                 failed,
                 validation_failed,
+                checked,
+                checked_failed,
                 cancelled,
             } => Some(format!(
-                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {}, {} cancelled{}",
+                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {}{}, {} cancelled{}",
                 validation_clause(self.validated, *validation_failed),
+                if *checked > 0 { format!(", {checked} checked in place ({checked_failed} failed)") } else { String::new() },
                 cancelled.len(),
                 kept_clause(std::mem::take(&mut *kept()))
             )),

@@ -2376,6 +2376,18 @@
           },
           "type": "array"
         },
+        "checked": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "checked_failed": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "converted": {
           "format": "uint32",
           "minimum": 0,

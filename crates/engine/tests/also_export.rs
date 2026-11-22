@@ -16,6 +16,53 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
+#[test]
+fn a_copy_is_not_checked_in_place() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+    });
+    let mut req = request(&m, &loc);
+    req.validate = false;
+    req.on_existing = OnExisting::IfChanged;
+    let sp = spec(&loc, BOTH);
+    assert_eq!(also(req.clone(), &sp).0.unwrap().exit_code(), 0);
+    let key = "textures/clutter/cup_n.dds";
+    let van = loc.join("Mod Vanilla");
+    let path = van.join(key);
+    let before = record(&van, key);
+    assert!(!before.raw["copied_from"].is_null());
+    let bytes = std::fs::read(&path).unwrap();
+    let stamp = engine::policy::SourceStamp::of(&path).unwrap();
+    req.validate = true;
+    let (s, ev) = also(req, &sp);
+    let s = s.unwrap();
+    assert_eq!(s.exit_code(), 0);
+    assert!(s.combined().checked > 0);
+    let after = record(&van, key);
+    assert_eq!(after.raw["copied_from"], before.raw["copied_from"]);
+    assert_eq!(after.raw["validation"]["skipped"], true);
+    assert!(std::fs::read(&path).unwrap() == bytes);
+    assert_eq!(engine::policy::SourceStamp::of(&path), Some(stamp));
+    assert!(record(&loc.join("Mod PBR"), key).raw["validation"]
+        .get("skipped")
+        .is_none());
+    let copy_key = format!("Mod Vanilla/{key}");
+    let reasons: Vec<_> = ev
+        .iter()
+        .filter(|e| e.job.as_deref() == Some(&copy_key))
+        .filter_map(|e| match &e.kind {
+            EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                reason,
+                ..
+            } => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasons, ["up to date"]);
+}
+
 fn set(v: &[&str]) -> BTreeSet<String> {
     v.iter().map(|s| s.to_string()).collect()
 }

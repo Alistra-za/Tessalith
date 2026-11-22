@@ -245,6 +245,8 @@ fn packed_source_skips_make_no_row_and_cancelled_inputs_mark_their_rows() {
             skipped_intentional: 0,
             failed: 0,
             validation_failed: 0,
+            checked: 0,
+            checked_failed: 0,
             cancelled: vec!["C:/in/a/b.png".into()],
         },
     );

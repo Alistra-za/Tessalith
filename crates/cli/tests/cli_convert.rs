@@ -1174,6 +1174,87 @@ fn convert_validates_only_with_the_flag() {
     assert!(!err.contains("complex types only"), "{err}");
 }
 
+#[test]
+fn convert_validate_checks_in_place_and_exits_4_on_a_failure() {
+    let fx = Fx::new();
+    fx.rgb("checker.png");
+    assert_eq!(code(&fx.convert_failing_validation(&[])), 0);
+    let path = fx.dds("textures/a/checker.dds");
+    let bytes = std::fs::read(&path).unwrap();
+    let o = fx.convert_failing_validation(&["--validate"]);
+    let err = text(&o.stderr);
+    assert_eq!(code(&o), 4, "{err}");
+    let done = batch_done(&o);
+    for (field, n) in [
+        ("converted", 0),
+        ("up_to_date", 1),
+        ("checked", 1),
+        ("checked_failed", 1),
+    ] {
+        assert_eq!(done[field], n, "{done}");
+    }
+    for fragment in [
+        "VAL-HEADER",
+        ": up to date; checked in place: failed validation",
+        "1 checked in place (1 failed)",
+    ] {
+        assert!(err.contains(fragment), "{err}");
+    }
+    assert!(!err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(std::fs::read(path).unwrap() == bytes);
+    let lines = manifest_lines(&fx.p("out"));
+    let rec: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+    assert_eq!(rec["output"], "textures/a/checker.dds");
+    assert_eq!(rec["validation"]["passed"], false);
+    assert!(rec["validation"].get("skipped").is_none());
+
+    let o = fx.convert_failing_validation(&["--validate"]);
+    assert_eq!(code(&o), 4);
+    assert_eq!(batch_done(&o)["converted"], 1);
+    assert_eq!(batch_done(&o)["checked"], 0);
+    assert!(text(&o.stderr).contains("[VALIDATION FAILED]"));
+}
+
+#[test]
+fn a_failed_pbr_check_reencodes_the_vanilla_copy() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.project_config(ALSO_ALL);
+    let run = |args: &[&str]| {
+        fx.convert_cmd("out", args)
+            .env("SDC_TEST_FAIL_VALIDATION", "cup_n")
+            .output()
+            .unwrap()
+    };
+    let key = "textures/clutter/cup_n.dds";
+    let van = fx.dds("in Vanilla");
+    let latest = |folder: &Path| {
+        engine::manifest::Manifest::at(folder)
+            .read()
+            .unwrap()
+            .remove(key)
+            .unwrap()
+            .raw
+    };
+    assert_eq!(code(&run(&HI)), 0);
+    let copy = latest(&van);
+    assert!(!copy["copied_from"].is_null());
+    let o = run(&[HI[0], HI[1], "--validate"]);
+    let err = text(&o.stderr);
+    assert_eq!(code(&o), 4, "{err}");
+    assert_eq!(latest(&fx.dds("in PBR"))["validation"]["passed"], false);
+    let after = latest(&van);
+    assert!(after.get("copied_from").is_none());
+    assert_eq!(after["validation"]["passed"], false);
+    let ev = events(&o);
+    assert!(ev.iter().any(|e| e["job_key"] == key
+        && e["kind"] == "file_skipped"
+        && e["reason"] == "up to date; checked in place: failed validation"));
+    assert!(ev
+        .iter()
+        .any(|e| e["job_key"] == format!("in Vanilla/{key}") && e["kind"] == "file_done"));
+}
+
 /// DECISIONS Note M5: `--set packing.fill.<role>` writes a packed channel that has no source; it is provenance
 /// `fill:<v>` and not a defaulted channel.
 #[test]

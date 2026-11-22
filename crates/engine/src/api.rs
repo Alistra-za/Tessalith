@@ -21,7 +21,7 @@ use crate::manifest::{
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
-use crate::pipeline::{process_file, FileError, FileTracker};
+use crate::pipeline::{check_in_place, process_file, FileError, FileTracker};
 use crate::policy::*;
 use crate::presets::*;
 use crate::session::{fill_cache_key, pack_cache_key, AnalysisCache, PackEntry};
@@ -553,12 +553,19 @@ impl Plan {
     }
 }
 
+pub const CHECKED_IN_PLACE: &str = "checked in place";
+pub const CHECKED_IN_PLACE_FAILED: &str = "checked in place: failed validation";
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct BatchSummary {
     /// Written outputs, including those whose validation failed.
     pub converted: u32,
     /// Outputs kept under `if-changed`: current ones and the kept ones counted below.
     pub up_to_date: u32,
+    /// Of `up_to_date`, outputs checked in place during this run.
+    pub checked: u32,
+    /// Of `checked`, outputs whose validation reported an error.
+    pub checked_failed: u32,
     /// Of `up_to_date`, outputs written by an older encode version and kept (Note JA; `--ev` re-encodes them).
     pub kept_older_encode: u32,
     /// Of `up_to_date`, outputs encoded at a higher quality target than asked and kept (Note JA).
@@ -578,14 +585,14 @@ pub struct BatchSummary {
 
 impl BatchSummary {
     /// Spec §8 precedence for a batch that ran: 1 partial (unintentionally skipped, failed or cancelled
-    /// files) > 4 validation failed > 0. Up-to-date files, raw packing inputs and intentional skips
+    /// files) > 4 validation failed on a written or checked output > 0. Up-to-date files, raw packing inputs and intentional skips
     /// (DECISIONS Note I) do not make a batch partial. (2 and 3 come from
     /// `EngineError`.)
     pub fn exit_code(&self) -> i32 {
         let unintended = self.skipped.saturating_sub(self.skipped_intentional);
         if unintended + self.failed > 0 || !self.cancelled.is_empty() {
             1
-        } else if self.validation_failed > 0 {
+        } else if self.validation_failed + self.checked_failed > 0 {
             4
         } else {
             0
@@ -3666,6 +3673,10 @@ impl Engine {
         // Note JA: the outputs kept for an older encode version, per format and per sub-type, for the run's one line.
         let mut older_by_format: BTreeMap<Format, u32> = BTreeMap::new();
         let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
+        enum Work<'a> {
+            Encode(&'a ResolvedJob, PresetRef, bool),
+            Check(&'a ResolvedJob, &'a ManifestEntry),
+        }
         let mut todo = vec![];
         for (job, job_key, recorded) in classify_ready_jobs(&plan, &existing, &pool, cancel) {
             if cancel.is_cancelled() {
@@ -3694,7 +3705,19 @@ impl Engine {
                     continue;
                 }
                 PreviewVerdict::WillWrite => None,
-                PreviewVerdict::Current => Some("up to date".into()),
+                PreviewVerdict::Current => {
+                    if req.validate && req.on_existing == OnExisting::IfChanged {
+                        if let Some(entry) = existing.get(&job_key).filter(|entry| {
+                            entry.raw["validation"]["skipped"] == true
+                                && entry.raw["copied_from"].is_null()
+                                && pack_identity_matches(entry, job)
+                        }) {
+                            todo.push(Work::Check(job, entry));
+                            continue;
+                        }
+                    }
+                    Some("up to date".into())
+                }
                 PreviewVerdict::Kept {
                     older_encode,
                     lower_target,
@@ -3745,7 +3768,7 @@ impl Engine {
                 Some(p) => {
                     let replace_existing =
                         recorded.is_some() || (exists && req.on_existing == OnExisting::Overwrite);
-                    todo.push((job, p, replace_existing));
+                    todo.push(Work::Encode(job, p, replace_existing));
                 }
                 None => {
                     summary.failed += 1;
@@ -3769,7 +3792,10 @@ impl Engine {
         // ever blocks on the budget. A pool thread blocked in `acquire` while its nested band-parallel encode stole
         // another file's task could otherwise hold budget forever (deadlock).
         pool.in_place_scope(|scope| {
-            for &(job, ref preset, replace_existing) in &todo {
+            for work in &todo {
+                let job = match *work {
+                    Work::Check(job, _) | Work::Encode(job, ..) => job,
+                };
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
                     continue;
@@ -3789,16 +3815,21 @@ impl Engine {
                         lock(state).cancelled.push(job.input.clone());
                         return;
                     }
-                    run_one(
-                        job,
-                        req,
-                        preset,
-                        cancel,
-                        rep,
-                        manifest,
-                        state,
-                        replace_existing,
-                    );
+                    match *work {
+                        Work::Check(_, entry) => {
+                            check_one(job, entry, cancel, rep, manifest, state)
+                        }
+                        Work::Encode(_, ref preset, replace_existing) => run_one(
+                            job,
+                            req,
+                            preset,
+                            cancel,
+                            rep,
+                            manifest,
+                            state,
+                            replace_existing,
+                        ),
+                    }
                 });
             }
         });
@@ -3881,6 +3912,25 @@ fn kept_warnings(
     out
 }
 
+/// Pass two can select the same profile after pass one's source-channel choice changed.
+pub(crate) fn pack_identity_matches(entry: &ManifestEntry, job: &ResolvedJob) -> bool {
+    if job.pack.is_none() {
+        return true;
+    }
+    let Some(recorded) = entry.raw["provenance"].as_object() else {
+        return false;
+    };
+    let mut expected = job
+        .provenance
+        .iter()
+        .filter(|(k, _)| k.starts_with("pack."));
+    let count = recorded.keys().filter(|k| k.starts_with("pack.")).count();
+    expected.clone().count() == count
+        && expected.all(|(key, label)| {
+            recorded.get(key).and_then(Value::as_str) == Some(label.to_string().as_str())
+        })
+}
+
 fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
     let emit = |kind| rep.emit_job(Some(key), Some(&job.set_key), Some(&job.input), kind);
     emit(EventKind::Warning(Warning::new(
@@ -3895,6 +3945,61 @@ fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
         code: Some(Code::OutUnknownExisting),
         reason: "existing output without a manifest record".into(),
     });
+}
+
+/// Check one admitted current output. Only the manifest is updated on success.
+fn check_one(
+    job: &ResolvedJob,
+    entry: &ManifestEntry,
+    cancel: &CancelToken,
+    rep: &Reporter,
+    manifest: &Manifest,
+    state: &Mutex<BatchSummary>,
+) {
+    let emit = |kind| {
+        rep.emit_job(
+            Some(&entry.output),
+            Some(&job.set_key),
+            Some(&job.input),
+            kind,
+        )
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        check_in_place(job, entry, cancel, manifest)
+    }));
+    let (stage, error) = match result {
+        Ok(Ok(report)) => {
+            for w in report.warnings {
+                emit(EventKind::Warning(w));
+            }
+            let suffix = if report.summary.passed {
+                CHECKED_IN_PLACE
+            } else {
+                CHECKED_IN_PLACE_FAILED
+            };
+            emit(EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                code: None,
+                reason: format!("up to date; {suffix}"),
+            });
+            let mut s = lock(state);
+            s.up_to_date += 1;
+            s.checked += 1;
+            s.checked_failed += u32::from(!report.summary.passed);
+            return;
+        }
+        Ok(Err(FileError::Cancelled)) => {
+            lock(state).cancelled.push(job.input.clone());
+            return;
+        }
+        Ok(Err(FileError::Failed(stage, error))) => (stage, error),
+        Err(panic) => (
+            Stage::Validate,
+            format!("internal error: {}", panic_message(&*panic)),
+        ),
+    };
+    lock(state).failed += 1;
+    emit(EventKind::FileFailed { stage, error });
 }
 
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
@@ -4328,6 +4433,8 @@ fn done_event(s: &BatchSummary) -> EventKind {
     EventKind::BatchDone {
         converted: s.converted,
         up_to_date: s.up_to_date,
+        checked: s.checked,
+        checked_failed: s.checked_failed,
         skipped: s.skipped,
         skipped_intentional: s.skipped_intentional,
         failed: s.failed,
