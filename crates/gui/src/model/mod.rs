@@ -119,7 +119,8 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
-/// Why a plan runs: an open says "Analysing", a re-plan after the user's edit says so, any other re-plan re-checks.
+/// Why a plan runs. An open starts with "Planning…" and then counts "Analysing n / m files…"; a re-plan after the
+/// user's edit says "Re-checking after your change"; every other re-plan, Undo and Redo included, says "Re-checking".
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PlanCause {
     #[default]
@@ -128,14 +129,30 @@ pub enum PlanCause {
     Other,
 }
 
+impl PlanCause {
+    /// The status line before the first progress event.
+    fn waiting_line(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Planning…",
+            PlanCause::Edit => "Re-checking after your change…",
+            PlanCause::Other => "Re-checking…",
+        }
+    }
+
+    /// The words ahead of "n / m files…".
+    fn lead(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Analysing",
+            PlanCause::Edit => "Re-checking after your change:",
+            PlanCause::Other => "Re-checking",
+        }
+    }
+}
+
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
 /// A7; not `counted`, which has no thousands separator). A re-plan reads "Re-checking …" (`PlanCause`).
 pub fn plan_bar_text(cause: PlanCause, done: usize, total: usize) -> String {
-    let lead = match cause {
-        PlanCause::Open => "Analysing",
-        PlanCause::Edit => "Re-checking after your change:",
-        PlanCause::Other => "Re-checking",
-    };
+    let lead = cause.lead();
     format!(
         "{lead} {} / {} {}…",
         thousands(done),
@@ -1148,7 +1165,7 @@ pub struct AppModel {
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
-    /// Why the plan in flight runs; words its status line and progress text.
+    /// The cause of the latest plan started (it stays after the plan lands); words its status line and progress text.
     pub plan_cause: PlanCause,
     /// While a folder's first plan is in flight: the folder open before it (`None`: none), Recent as it was, and that
     /// folder's undo history and selection (Note FC12). Cancel goes back to all of them.
@@ -1961,12 +1978,7 @@ impl AppModel {
         } else {
             cause
         };
-        self.status_line = match self.plan_cause {
-            PlanCause::Open => "Planning…",
-            PlanCause::Edit => "Re-checking after your change…",
-            PlanCause::Other => "Re-checking…",
-        }
-        .into();
+        self.status_line = self.plan_cause.waiting_line().into();
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),

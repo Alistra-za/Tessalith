@@ -121,12 +121,30 @@ fn an_open_still_says_analysing() {
 }
 
 #[test]
-fn a_re_plan_during_an_open_still_says_planning() {
+fn a_plain_re_plan_during_an_open_still_says_planning() {
     let d = tempfile::tempdir().unwrap();
     let root = mod_folder(d.path());
     let mut m = AppModel::new(GuiSettings::default(), None, session());
     m.open_folder(root);
     m.replan();
+    assert_eq!(m.plan_cause, PlanCause::Open);
+    assert_eq!(m.status_line, "Planning…");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+#[test]
+fn an_edit_during_an_open_still_says_planning() {
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    let mut m = AppModel::new(GuiSettings::default(), None, session());
+    m.open_folder(root);
+    let key = m
+        .items
+        .iter()
+        .find(|i| i.key.ends_with("rock01_normal.png"))
+        .map(|i| i.key.clone())
+        .unwrap_or_else(|| "textures/landscape/rock01_normal.png".into());
+    m.set_field(&key, "subtype", serde_json::json!("height"));
     assert_eq!(m.plan_cause, PlanCause::Open);
     assert_eq!(m.status_line, "Planning…");
     assert!(m.wait_idle(Duration::from_secs(60)));

@@ -125,6 +125,27 @@ fn auto_accepted_types_are_recorded_as_the_baseline() {
     assert!(!m.can_redo());
 }
 
+/// JY: the post-open next step is written by the plan that really settles, after the recorder's follow-up re-plan
+/// (which says "Re-checking…") has landed.
+#[test]
+fn the_recorders_follow_up_keeps_the_post_open_next_step() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    rgb(&root, "a/rock_n.png", [128, 128, 255]);
+    std::fs::write(root.join("sdc.toml"), "# my notes\n").unwrap();
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    m.open_folder(root);
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(m.plan_cause, PlanCause::Other, "the recorder re-planned");
+    let step = m.next_step_text().expect("a folder is open");
+    assert_eq!(m.status_note.as_deref(), Some(step.as_str()));
+    assert!(m.status_line.starts_with(&step), "{}", m.status_line);
+}
+
 #[test]
 fn undo_after_the_same_normal_type_is_recorded_again_still_prompts() {
     let d = tempfile::tempdir().unwrap();
