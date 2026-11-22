@@ -565,7 +565,7 @@ fn process_state_needles_match_the_files_kept_apart() {
 }
 
 /// Pushes every `.rs` file under `root`, recursively. A `root` that does not exist is skipped unless `required`; every
-/// other read error propagates.
+/// other read error (listing a directory, reading an entry, reading an entry's file type) propagates.
 fn rs_files(
     root: &std::path::Path,
     required: bool,
@@ -577,8 +577,9 @@ fn rs_files(
         Ok(_) => {}
     }
     for e in std::fs::read_dir(root)? {
-        let p = e?.path();
-        if p.is_dir() {
+        let e = e?;
+        let p = e.path();
+        if e.file_type()?.is_dir() {
             rs_files(&p, true, out)?;
         } else if p.extension().is_some_and(|x| x == "rs") {
             out.push(p);
@@ -673,10 +674,33 @@ fn code_lines(text: &str) -> Vec<CodeLine> {
 }
 
 fn is_fn_line(line: &str) -> bool {
-    let t = line.trim_start();
-    ["fn ", "pub fn ", "async fn ", "pub(crate) fn "]
+    let mut t = line.trim_start();
+    if let Some(r) = t.strip_prefix("pub") {
+        t = match r.strip_prefix('(') {
+            Some(inner) => inner.split_once(')').map_or(r, |(_, after)| after),
+            None => r,
+        }
+        .trim_start();
+    }
+    while let Some(r) = ["const ", "async ", "unsafe "]
         .iter()
-        .any(|p| t.starts_with(p))
+        .find_map(|q| t.strip_prefix(q))
+    {
+        t = r.trim_start();
+    }
+    t.starts_with("fn ")
+}
+
+/// True when `code` calls `helper` as itself: not as the tail of a longer identifier, and not under a `!`, where the
+/// helper's printed reason belongs to the other branch.
+fn calls_helper(code: &str, helper: &str) -> bool {
+    code.match_indices(helper).any(|(at, _)| {
+        let before = &code[..at];
+        let ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+        let path = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == ':';
+        !before.bytes().next_back().is_some_and(ident)
+            && !before.trim_end_matches(path).trim_end().ends_with('!')
+    })
 }
 
 /// True when `code` holds `return;`, `return }` or `return Ok(());`.
@@ -698,8 +722,9 @@ const SKIP_HELPERS: [&str; 2] = ["render_state()", "skip_byte_pins()"];
 
 /// The early returns in the `#[test]` functions of `text` that give no reason (Note LH3), as `label:line`, and the
 /// `helpers` entries seen at a return line.
-// shortcut: line by line, so a raw string spanning lines can miscount braces and a `return` inside a closure counts
-// as the test's own; upgrade when a test does either.
+// shortcut: line by line, so a string (raw or ordinary) spanning lines and a `/* */` block comment can miscount braces,
+// a `return` inside a closure counts as the test's own, and a match arm `=> return,` is not seen as a return at all;
+// upgrade when a test does any of these.
 // shortcut: the checks are positional, so a print whose block closes on its own line before the return
 // (`if a() { println!("a"); }` above `if b() { return; }`) and a helper behind `||` on the condition line
 // (`if other() || skip_byte_pins() {`) both pass; upgrade to tracking the block at the print token and matching the
@@ -760,8 +785,9 @@ fn unexplained_returns(
             if !skip && has_return(&l.code) {
                 let mut excused = ignored;
                 for h in helpers {
-                    let above = j > i && ends(&ln[j - 1], &['{']) && ln[j - 1].code.contains(h);
-                    if l.code.contains(h) || above {
+                    let above =
+                        j > i && ends(&ln[j - 1], &['{']) && calls_helper(&ln[j - 1].code, h);
+                    if calls_helper(&l.code, h) || above {
                         seen.insert((*h).to_owned());
                         excused = true;
                     }
@@ -924,4 +950,33 @@ fn the_return_rule_tells_a_skip_from_a_checked_exit() {
     .is_empty());
     // 12: a wrapped attribute between #[test] and fn still marks a test.
     assert_eq!(hits("#[test]\n#[cfg_attr(\n    not(windows),\n    allow(unused)\n)]\nfn t() {\n    return;\n}").0, ["x.rs:7"]);
+    // 13: a print three lines above explains it, four lines above does not.
+    assert!(hits(
+        "#[test]\nfn t() {\n    eprintln!(\"a\");\n    let a = 1;\n    let b = 2;\n    return;\n}"
+    )
+    .0
+    .is_empty());
+    assert_eq!(hits("#[test]\nfn t() {\n    eprintln!(\"a\");\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    return;\n}").0, ["x.rs:7"]);
+    // 14: `return }` counts.
+    assert_eq!(
+        hits("#[test]\nfn t() {\n    let Some(a) = f() else { return };\n}").0,
+        ["x.rs:3"]
+    );
+    // 15: a helper is matched as itself, and not under a `!`.
+    assert_eq!(
+        hits("#[test]\nfn t() {\n    let Some(rs) = my_render_state() else { return };\n}").0,
+        ["x.rs:3"]
+    );
+    assert_eq!(hits("#[test]\nfn t() {\n    if !encoders_sys::skip_byte_pins() {\n        return;\n    }\n}").0, ["x.rs:4"]);
+    // 16: a nested fn in any form keeps its returns out of the test's.
+    assert!(hits("#[test]\nfn t() {\n    pub(super) fn w() {\n        return;\n    }\n    const fn k() {\n        return;\n    }\n    unsafe fn u() {\n        return;\n    }\n}").0.is_empty());
+}
+
+/// The shared walker skips an absent root only when it is not required (AF-R2).
+#[test]
+fn the_walker_skips_only_an_absent_optional_root() {
+    let absent = std::env::temp_dir().join("sdc-it-no-such-root");
+    let mut out = Vec::new();
+    assert!(rs_files(&absent, true, &mut out).is_err());
+    assert!(rs_files(&absent, false, &mut out).is_ok() && out.is_empty());
 }
