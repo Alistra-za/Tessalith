@@ -1326,6 +1326,7 @@ fn decision_box(
     decisions: &[Decision],
     warnings: &[Warning],
     alpha: Option<AlphaPolicy>,
+    likely: &[(Subtype, String)],
     actions: &mut Vec<Action>,
 ) {
     // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
@@ -1344,7 +1345,7 @@ fn decision_box(
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
-                        subtype_decision(ui, cx, left, *suggested, actions)
+                        subtype_decision(ui, cx, left, *suggested, likely, actions)
                     }
                     // Note HI7, HI13: the dropdown on the resolved type and Confirm, in the Alpha row's columns (the
                     // strip keeps FM35's line); the engine's reason is the label's hover.
@@ -1400,7 +1401,7 @@ fn decision_box(
                             ui.label(m);
                         }
                         if *code == Code::CfgUnavailable {
-                            subtype_decision(ui, cx, left, None, actions);
+                            subtype_decision(ui, cx, left, None, &[], actions);
                         }
                     }
                 }
@@ -1449,13 +1450,55 @@ fn decision_row(
     .inner
 }
 
+/// The likely types of one texture, built again only when the items, the document or the target change (the pairing
+/// walks the `[files]` keys, so it is not run every frame).
+fn cached_likely(ui: &egui::Ui, model: &AppModel, key: &str) -> Vec<(Subtype, String)> {
+    let id = ui.scope_id().with(("likely-types", key));
+    let stamp = (
+        model.items_rev(),
+        model.project.as_ref().map_or(0, |p| p.rev()),
+        model.target,
+    );
+    if let Some((s, v)) =
+        ui.data(|d| d.get_temp::<((u64, u64, Target), Vec<(Subtype, String)>)>(id))
+    {
+        if s == stamp {
+            return v;
+        }
+    }
+    let v = crate::model::likely::likely_types(model, &[key.to_string()]);
+    ui.data_mut(|d| d.insert_temp(id, (stamp, v.clone())));
+    v
+}
+
+/// Task 11: the likely types of an undecided card as buttons (the label, the reason on hover, "Use {label}" as the
+/// name). Returns the one clicked: it picks the type in the combo and writes nothing.
+pub(super) fn likely_buttons(ui: &mut egui::Ui, likely: &[(Subtype, String)]) -> Option<Subtype> {
+    let mut picked = None;
+    if likely.is_empty() {
+        return None;
+    }
+    ui.horizontal_wrapped(|ui| {
+        for (st, why) in likely {
+            let label = subtype_label(*st);
+            let r = ui.button(&label).on_hover_text(why);
+            super::helper_panel::named(&r, egui::Role::Button, &format!("Use {label}"), None);
+            if r.clicked() {
+                picked = Some(*st);
+            }
+        }
+    });
+    picked
+}
+
 /// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button. Aligned,
-/// they stand in the control column under the sentence (Note HI13).
+/// they stand in the control column under the sentence (Note HI13). `likely` are the buttons above the combo.
 fn subtype_decision(
     ui: &mut egui::Ui,
     cx: &Ctx,
     left: Option<f32>,
     suggested: Option<Subtype>,
+    likely: &[(Subtype, String)],
     actions: &mut Vec<Action>,
 ) {
     ui.label("What kind of texture is this?");
@@ -1463,6 +1506,9 @@ fn subtype_decision(
     let mut chosen: Subtype = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
+    if let Some(st) = likely_buttons(ui, likely) {
+        chosen = st;
+    }
     let mut controls = |ui: &mut egui::Ui| {
         let r = egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
@@ -1825,7 +1871,15 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 });
             }
             if !decisions.is_empty() {
-                decision_box(ui, &cx, &decisions, &warnings, alpha, &mut actions);
+                let likely = if decisions
+                    .iter()
+                    .any(|d| matches!(d, Decision::Subtype { .. }))
+                {
+                    cached_likely(ui, model, key)
+                } else {
+                    vec![]
+                };
+                decision_box(ui, &cx, &decisions, &warnings, alpha, &likely, &mut actions);
             }
             if kind == ItemKind::Packed && !compact {
                 channels(ui, job);

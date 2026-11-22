@@ -26,6 +26,7 @@ pub mod items;
 mod json_finish;
 pub mod known_paths;
 pub mod labels;
+pub mod likely;
 pub mod marker;
 pub mod meshes;
 pub mod messages;

@@ -2,8 +2,8 @@
 //! model call, made after drawing.
 use super::columns::AMBER;
 use super::settings_panel::{
-    combo, editor, field_label, offered_groups, own_name_after_link, subtype_label, Options,
-    RowEdit, GROUPS,
+    combo, editor, field_label, likely_buttons, offered_groups, own_name_after_link, subtype_label,
+    Options, RowEdit, GROUPS,
 };
 use crate::look::Combo036 as _;
 use crate::model::bulk::{BulkField, BulkOp};
@@ -42,6 +42,7 @@ fn undecided_card(
     model: &AppModel,
     keys: &[String],
     typed: usize,
+    likely: &[(Subtype, String)],
 ) -> Option<Act> {
     if keys.is_empty() {
         return None;
@@ -67,6 +68,9 @@ fn undecided_card(
         .map(|(h, ms)| (h, ms.into_iter().filter(|st| offered_to_all(*st)).collect()))
         .filter(|(_, ms): &(&str, Vec<Subtype>)| !ms.is_empty())
         .collect();
+    if let Some(st) = likely_buttons(ui, likely) {
+        chosen = Some(st);
+    }
     let name = format!("Type for {n} texture{}", if n == 1 { "" } else { "s" });
     let shown = chosen.map_or_else(|| "Choose a type".to_string(), subtype_label);
     ui.horizontal(|ui| {
@@ -191,7 +195,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         ui.weak(r);
     }
     reencode_row(ui, model, &view.reencode, &mut acts);
-    if let Some(a) = undecided_card(ui, model, &view.undecided.0, view.undecided.1) {
+    if let Some(a) = undecided_card(ui, model, &view.undecided.0, view.undecided.1, &view.likely) {
         acts.push(a);
     }
     // Options come from the active texture's job, else the first target's (design §3.2).

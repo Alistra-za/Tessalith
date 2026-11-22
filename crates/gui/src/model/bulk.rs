@@ -74,6 +74,8 @@ pub struct BulkView {
     pub reencode: (Vec<String>, Vec<String>),
     /// `type_card_split`: the selected textures the type card asks about, and the count of typed ones beside them.
     pub undecided: (Vec<String>, usize),
+    /// `likely::likely_types` over the textures the type card asks about (Task 11).
+    pub likely: Vec<(Subtype, String)>,
 }
 
 impl AppModel {
@@ -1298,6 +1300,7 @@ impl AppModel {
         let encodings = bulk_encodings(self, &keys);
         let reencode = self.reencode_split(&keys);
         let undecided = self.type_card_split();
+        let likely = super::likely::likely_types(self, &undecided.0);
         let view = std::sync::Arc::new(BulkView {
             keys,
             rows,
@@ -1305,6 +1308,7 @@ impl AppModel {
             encodings,
             reencode,
             undecided,
+            likely,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;

@@ -177,6 +177,10 @@ fn no_scan_database_hides_the_list_and_a_database_reads_it_off_the_ui_thread() {
     let u = wait_used_by(h.state_mut(), key);
     assert_eq!(order(&u), vec![("meshes/tree.nif", "Trees", 7)]);
     h.run();
+    // The card's likely-type buttons (Task 11) take a row, so the header sits under the clip: scroll to it as a user
+    // would before the click.
+    h.get_by_label_contains("Used by meshes (1)").scroll_to_me();
+    h.run();
     h.get_by_label_contains("Used by meshes (1)").click();
     h.run();
     h.get_by_label_contains("meshes/tree.nif");

@@ -5,7 +5,7 @@
 //! DECISIONS AP10) → analysis facts → the project config's
 //! `[files]` entries (DECISIONS N2) → `--set` (unscoped, then sub-type-scoped, then file-scoped, each in
 //! command-line order).
-use crate::analyse::Analysis;
+use crate::analyse::{Analysis, NORMAL_LEN_TOL};
 use crate::codes::{Code, Severity, Warning};
 use crate::config::*;
 use crate::dds::{resolve_header, ResolvedHeader};
@@ -1368,9 +1368,6 @@ fn stores_alpha(p: &Profile) -> bool {
         ))
 }
 
-/// `normal_len_err` above this is "far from unit length" (CHAN-NORMAL-LENGTH).
-const NORMAL_LEN_TOL: f64 = 0.1;
-
 /// Spec §4.3 rule 5: content that contradicts the decided sub-type. Reported, never blocking.
 fn contradictions(p: &Profile, f: &FileFacts) -> Vec<String> {
     let a = f.analysis;
@@ -1391,10 +1388,7 @@ fn contradictions(p: &Profile, f: &FileFacts) -> Vec<String> {
         );
     }
     // A tangent-space normal decodes to unit length with Z >= 0, so blue sits high.
-    if p.category == Category::Color
-        && a.normal_len_err < NORMAL_LEN_TOL
-        && a.channels[2].mean >= 0.75
-    {
+    if p.category == Category::Color && a.looks_like_tangent_normal() {
         v.push(format!(
             "{} source looks like a tangent-space normal map (unit length, blue mostly high)",
             st.id()
