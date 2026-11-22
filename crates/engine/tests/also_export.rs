@@ -16,6 +16,53 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
+#[test]
+fn a_copy_is_not_checked_in_place() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+    });
+    let mut req = request(&m, &loc);
+    req.validate = false;
+    req.on_existing = OnExisting::IfChanged;
+    let sp = spec(&loc, BOTH);
+    assert_eq!(also(req.clone(), &sp).0.unwrap().exit_code(), 0);
+    let key = "textures/clutter/cup_n.dds";
+    let van = loc.join("Mod Vanilla");
+    let path = van.join(key);
+    let before = record(&van, key);
+    assert!(!before.raw["copied_from"].is_null());
+    let bytes = std::fs::read(&path).unwrap();
+    let stamp = engine::policy::SourceStamp::of(&path).unwrap();
+    req.validate = true;
+    let (s, ev) = also(req, &sp);
+    let s = s.unwrap();
+    assert_eq!(s.exit_code(), 0);
+    assert!(s.combined().checked > 0);
+    let after = record(&van, key);
+    assert_eq!(after.raw["copied_from"], before.raw["copied_from"]);
+    assert_eq!(after.raw["validation"]["skipped"], true);
+    assert!(std::fs::read(&path).unwrap() == bytes);
+    assert_eq!(engine::policy::SourceStamp::of(&path), Some(stamp));
+    assert!(record(&loc.join("Mod PBR"), key).raw["validation"]
+        .get("skipped")
+        .is_none());
+    let copy_key = format!("Mod Vanilla/{key}");
+    let reasons: Vec<_> = ev
+        .iter()
+        .filter(|e| e.job.as_deref() == Some(&copy_key))
+        .filter_map(|e| match &e.kind {
+            EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                reason,
+                ..
+            } => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasons, ["up to date"]);
+}
+
 fn set(v: &[&str]) -> BTreeSet<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
@@ -195,6 +242,74 @@ fn plain_sets_are_copied_and_their_bytes_match_the_pbr_folder() {
             engine::policy::SourceStamp::of(&van.join(f))
         );
         assert_eq!(copy.source_sha256, twin.source_sha256);
+    }
+}
+
+/// Note LG: all three phases follow the request's `validate`, except that the CM phase's complex `_m` is always
+/// validated; a copied Vanilla output carries its PBR twin's `validation`, `skipped` included.
+#[test]
+fn the_also_phases_follow_the_requests_validate() {
+    for validate in [true, false] {
+        let (_d, m, loc) = project(|m| {
+            steel(m);
+            cup(m);
+        });
+        let mut r = request(&m, &loc);
+        r.overrides.clear(); // the Vanilla phase encodes the perceptual diffuse (Note FM43)
+        r.validate = validate;
+        let (s, ev) = also(r, &spec(&loc, BOTH));
+        s.unwrap();
+        let (pbr, van, cm) = (
+            loc.join("Mod PBR"),
+            loc.join("Mod Vanilla"),
+            loc.join("Mod CM"),
+        );
+        let done: Vec<(String, bool)> = ev
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::FileDone { output, validation } => {
+                    Some((output.replace('\\', "/"), validation.skipped))
+                }
+                _ => None,
+            })
+            .collect();
+        for folder in ["Mod PBR", "Mod Vanilla", "Mod CM"] {
+            assert!(
+                done.iter().any(|(o, _)| o.contains(&format!("{folder}/"))),
+                "validate={validate}: no FileDone under {folder}: {done:?}"
+            );
+        }
+        if validate {
+            assert!(
+                done.iter().all(|(_, skipped)| !skipped),
+                "validate=true: {done:?}"
+            );
+        } else {
+            assert_eq!(
+                record(&pbr, "textures/pbr/arm/steel.dds").raw["validation"]["skipped"],
+                true
+            );
+            assert!(
+                record(&cm, "textures/arm/steel_m.dds").raw["validation"]
+                    .get("skipped")
+                    .is_none(),
+                "complex_material is always validated"
+            );
+            // The Vanilla phase's own encode follows the switch too (Note FM43: the perceptual diffuse is encoded).
+            let enc = record(&van, "textures/clutter/cup.dds");
+            assert!(enc.raw["copied_from"].is_null(), "encoded, not copied");
+            assert_eq!(enc.raw["validation"]["skipped"], true);
+        }
+        let copy = record(&van, "textures/clutter/cup_n.dds");
+        assert!(
+            !copy.raw["copied_from"].is_null(),
+            "validate={validate}: a copy"
+        );
+        assert_eq!(
+            copy.raw["validation"],
+            record(&pbr, "textures/clutter/cup_n.dds").raw["validation"],
+            "validate={validate}"
+        );
     }
 }
 

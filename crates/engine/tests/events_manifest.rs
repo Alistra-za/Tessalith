@@ -177,6 +177,8 @@ fn paths_use_forward_slashes_and_every_kind_round_trips() {
             skipped_intentional: 1,
             failed: 4,
             validation_failed: 5,
+            checked: 2,
+            checked_failed: 1,
             cancelled: vec!["z".into()],
         },
     ];

@@ -6,12 +6,14 @@ use engine::config::*;
 use engine::dds::{read_dds, DdsPixelFormat};
 use engine::decode::{decode_level, Decoded};
 use engine::derive::recipe::LegacyParams;
-use engine::derive::{DeriveJob, DeriveKind, DeriveSource};
+use engine::derive::{DeriveJob, DeriveKind, DeriveMode, DeriveRequest, DeriveSource};
 use engine::events::*;
 use engine::manifest::{Manifest, SourceRef};
 use engine::pack::ChannelSource;
 use engine::policy::*;
+use engine::shader::Shader;
 use image::{ImageBuffer, Rgba};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -83,6 +85,7 @@ fn plan(dir: &Path, dj: DeriveJob, name: &str) -> Plan {
         dir.join("out"),
         Target::Vanilla,
     );
+    req.validate = true;
     req.on_existing = OnExisting::IfChanged;
     req.accept = AcceptSuggestions::High;
     let mut plan = Engine::new()
@@ -235,43 +238,36 @@ fn a_legacy_n_keeps_rgb_and_writes_spec_alpha_as_bc7_data() {
     }
 }
 
+/// A grass stack job writing `out/grass.dds` from a 64² albedo, a flat normal and a full-metal `_rmaos`.
+fn grass_stack(dir: &Path, keep: bool) -> Plan {
+    let albedo = png(dir, "in/grass_albedo.png", 64, 64, [200, 200, 200, 255]);
+    let normal = png(dir, "maps/grass_n.png", 64, 64, [128, 128, 255, 255]);
+    // Full metal, rough 0.5, AO 1.
+    let rmaos = png(dir, "maps/grass_rmaos.png", 64, 64, [128, 255, 255, 255]);
+    let params = LegacyParams {
+        keep_metal_brightness: keep,
+        keep_metal_strength: 1.0,
+        ..LegacyParams::default()
+    };
+    let dj = derive(
+        DeriveKind::GrassStack,
+        false,
+        Some(&albedo),
+        Some(&normal),
+        &rmaos,
+        params,
+    );
+    let mut p = plan(dir, dj, "grass.dds");
+    // As planning resolves complex grass (X12); the base `remove` would drop the bottom half's spec alpha too.
+    p.jobs[0].profile.alpha.policy = AlphaPolicy::Cutout;
+    p
+}
+
 #[test]
 fn a_grass_stack_is_twice_as_tall_and_passes_the_grass_corner_test() {
     let stack = |keep: bool| {
         let d = tempfile::tempdir().unwrap();
-        let albedo = png(
-            d.path(),
-            "in/grass_albedo.png",
-            64,
-            64,
-            [200, 200, 200, 255],
-        );
-        let normal = png(d.path(), "maps/grass_n.png", 64, 64, [128, 128, 255, 255]);
-        // Full metal, rough 0.5, AO 1.
-        let rmaos = png(
-            d.path(),
-            "maps/grass_rmaos.png",
-            64,
-            64,
-            [128, 255, 255, 255],
-        );
-        let params = LegacyParams {
-            keep_metal_brightness: keep,
-            keep_metal_strength: 1.0,
-            ..LegacyParams::default()
-        };
-        let dj = derive(
-            DeriveKind::GrassStack,
-            false,
-            Some(&albedo),
-            Some(&normal),
-            &rmaos,
-            params,
-        );
-        let mut p = plan(d.path(), dj, "grass.dds");
-        // As planning resolves complex grass (X12); the base `remove` would drop the bottom half's spec alpha too.
-        p.jobs[0].profile.alpha.policy = AlphaPolicy::Cutout;
-        let (s, ev) = run(p);
+        let (s, ev) = run(grass_stack(d.path(), keep));
         assert_eq!(s.converted, 1, "{ev:#?}");
         assert!(
             !format!("{ev:?}").contains("VAL-GRASS-DETECT"),
@@ -296,6 +292,92 @@ fn a_grass_stack_is_twice_as_tall_and_passes_the_grass_corner_test() {
     for q in &px[..64 * 64] {
         near(q[0], 180, 2, "top, keep-metal flavour");
     }
+}
+
+/// The validation summary of the `file_done` whose output ends in `name`.
+fn file_done<'a>(ev: &'a [EngineEvent], name: &str) -> &'a engine::validate::ValidationSummary {
+    ev.iter()
+        .find_map(|e| match &e.kind {
+            EventKind::FileDone { output, validation } if output.ends_with(name) => {
+                Some(validation)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no file_done for {name}: {ev:#?}"))
+}
+
+/// Note LG9: a grass stack resolves `complex_grass`, so it is validated with the switch off, though its
+/// name has no `_m`.
+#[test]
+fn a_derived_grass_stack_is_validated_with_the_switch_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut p = grass_stack(d.path(), false);
+    p.request.validate = false;
+    let (s, ev) = run(p);
+    assert_eq!(s.converted, 1, "{ev:#?}");
+    let v = file_done(&ev, "grass.dds");
+    assert!(!v.skipped, "{v:?}");
+    assert!(v.min_mip_psnr_db.is_some(), "{v:?}");
+}
+
+/// `derive_plan.rs`'s `env_m_needs_an_envmap_vote_and_metal` setup: a full-metal PBR steel set with an envmap vote,
+/// planned under `cs`, then under `vanilla` with the derive request built from that plan.
+fn env_m_plan(dir: &Path) -> Plan {
+    for (name, px) in [
+        ("steel", [200, 200, 200, 255]),
+        ("steel_n", [128, 128, 255, 255]),
+        ("steel_rmaos", [128, 255, 255, 255]),
+    ] {
+        png(dir, &format!("in/textures/pbr/arm/{name}.png"), 16, 16, px);
+    }
+    let request = |out: &str, target: Target| {
+        let mut r = BatchRequest::new(vec![dir.join("in")], dir.join(out), target);
+        r.recursive = true;
+        r.accept = AcceptSuggestions::High;
+        r.mesh_shaders = BTreeMap::from([("textures/arm/steel".to_string(), vec![Shader::Envmap])]);
+        r
+    };
+    let e = Engine::new().unwrap();
+    let rep = Reporter::new(Arc::new(NullSink), "t");
+    let cs = e
+        .plan(request("pbr", Target::Cs), &rep, &CancelToken::default())
+        .unwrap();
+    let mut r = request("vanilla", Target::Vanilla);
+    r.derive = Some(DeriveRequest {
+        mode: DeriveMode::Vanilla,
+        params: LegacyParams::default(),
+        sets: engine::also::derive_sets(&cs, &BTreeSet::new()).0,
+        drop: vec![],
+        scanned: true,
+    });
+    e.plan(r, &rep, &CancelToken::default()).unwrap()
+}
+
+/// Note LG9: a derived env `_m` resolves `envmask`, not `complex_material`, so it follows the switch.
+#[test]
+fn a_derived_env_m_follows_the_switch() {
+    let d = tempfile::tempdir().unwrap();
+    let mut p = env_m_plan(d.path());
+    let m = p
+        .jobs
+        .iter()
+        .find(|j| {
+            j.derive
+                .as_ref()
+                .is_some_and(|dj| dj.kind == DeriveKind::EnvM)
+        })
+        .expect("the derived env _m");
+    assert_eq!(m.profile.subtype, Subtype::Envmask);
+    assert!(
+        m.output.to_string_lossy().ends_with("_m.dds"),
+        "{:?}",
+        m.output
+    );
+    let name = m.output.file_name().unwrap().to_string_lossy().into_owned();
+    p.request.validate = false;
+    let (s, ev) = run(p);
+    assert_eq!(s.failed, 0, "{ev:#?}");
+    assert!(file_done(&ev, &name).skipped, "{ev:#?}");
 }
 
 /// Review I1: an EXR `_rmaos` (float) with a PNG albedo still writes the diffuse in the albedo's coding: 135, not

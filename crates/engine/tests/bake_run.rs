@@ -287,6 +287,7 @@ fn keep_upgrade_obeys_encode_version_scope() {
     let rep = Reporter::new(Arc::new(VecSink::default()), "keep-upgrade");
     let resolve = |out: &str, base: Option<&str>, ev| {
         let mut req = BatchRequest::new(vec![input.clone()], d.path().join(out), Target::Cs);
+        req.validate = true;
         req.on_existing = OnExisting::IfChanged;
         req.ev = ev;
         req.overrides = [
@@ -366,6 +367,7 @@ fn acknowledged_bc5_keep_fails_before_if_changed() {
     let rough = rmaos(d.path(), 32);
     let resolve = |root: &str, base: &str, bake_off: bool| {
         let mut req = BatchRequest::new(vec![d.path().join("in")], d.path().join(root), Target::Cs);
+        req.validate = true;
         req.on_existing = OnExisting::IfChanged;
         req.accept = AcceptSuggestions::High;
         req.allow.insert(Code::FmtBc5Normal);

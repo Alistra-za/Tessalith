@@ -6,6 +6,26 @@ fn defaults_follow_the_spec() {
     assert!(!s.live_encode, "preview encoding is off by default");
 }
 
+/// Note LG: a pin. Validate exported DDS is off on a fresh install and in a gui.toml without the key, and is saved.
+#[test]
+fn validate_exports_defaults_off_and_round_trips() {
+    assert!(!GuiSettings::default().validate_exports);
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    std::fs::write(&p, "live_encode = true\n").unwrap();
+    let (s, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert!(s.live_encode && !s.validate_exports);
+    let s = GuiSettings {
+        validate_exports: true,
+        ..s
+    };
+    s.save(&p).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(text.contains("validate_exports = true"), "{text}");
+    assert!(GuiSettings::load(&p).0.validate_exports);
+}
+
 #[test]
 fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     let d = tempfile::tempdir().unwrap();

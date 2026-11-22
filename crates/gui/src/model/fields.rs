@@ -136,9 +136,10 @@ pub const SEARCH_FIELDS: [(&str, &str); 2] = [
 pub const BC3_SEARCH: &str = "encoder.bc3_search";
 
 /// Spec goal 4, BC3 row: (choice, encoder.bc1_search, encoder.bc45_search_radius).
-pub const BC3_CHOICES: [(&str, &str, &str); 3] = [
+pub const BC3_CHOICES: [(&str, &str, &str); 4] = [
     ("fast", "fast", "fast"),
     ("default", "default", "default"),
+    ("slowest", "default", "slowest"),
     ("max", "default", "max"),
 ];
 
@@ -167,7 +168,7 @@ pub fn effort_field(p: &Profile) -> Option<&'static str> {
     }
 }
 
-/// A search field's value as its serde name (`"fast"`, `"default"`, `"max"`).
+/// A search field's value as its serde name (`"fast"`, `"default"`, `"slowest"`, `"max"`).
 fn search_name<T: serde::Serialize>(v: T) -> String {
     serde_json::to_value(v)
         .ok()
@@ -539,9 +540,9 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
-        "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Max a radius of 10, Fast a radius of 4.",
+        "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Fast a radius of 4, Default 5, Slowest 10. Max runs the Slowest search, then tries every endpoint pair near the block's values; it takes longer for a small gain.",
         "encoder.bc1_search" => "How long the encoder searches. On BC1 it sets the colour search: Fast takes a fraction of the time and is a little less exact; use it for previews.",
-        BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Max searches the alpha widest.",
+        BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Slowest searches the alpha at radius 10, and Max also tries every alpha endpoint pair near the block's values.",
         "header" => "The form of the DDS header. Auto writes a legacy header for BC1, BC3 and RGBA8 without the _SRGB tag, and the DX10 header for everything else.",
         "resize" => "Halves both sides once, twice or three times, while the longer side stays at or above the size floor.",
         "resize_relative_to" => "What Resize is measured from: this texture's own size, or the size of the set's map in a texture-set slot.",

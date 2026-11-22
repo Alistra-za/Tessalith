@@ -43,6 +43,7 @@ fn relative(name: &str, slot: &str) -> Vec<String> {
 
 fn request(dir: &Path, sets: &[String]) -> BatchRequest {
     let mut r = BatchRequest::new(vec![dir.join("in")], dir.join("out"), Target::Cs);
+    r.validate = true;
     r.recursive = true;
     r.accept = AcceptSuggestions::High;
     r.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();

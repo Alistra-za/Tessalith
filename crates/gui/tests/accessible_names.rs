@@ -165,6 +165,7 @@ const SCREENS: &[&str] = &[
     "presets",
     "rename dialog",
     "copy json dialog",
+    "settings tab",
     "meshes view",
     "meshes mod filter open",
     "meshes skin browse popup",
@@ -269,6 +270,13 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "Mipmaps",
         &["CheckBox", "DisclosureTriangle"],
         GROUP_ROW,
+    ),
+    ("settings tab", "◀", &["Button", "Button"], COLLAPSE),
+    (
+        "settings tab",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
     ),
     ("set editor", "◀", &["Button", "Button"], COLLAPSE),
     ("set editor", "D", &["Button", "Button", "Button"], CHIP),
@@ -486,6 +494,18 @@ fn every_input_has_a_name_in_the_textures_view() {
         "{:?}",
         unnamed_progress(&h)
     );
+}
+
+/// Note LG: the Settings tab, with the header drawn too, so a name the tab shares with a header control is found.
+#[test]
+fn every_input_has_a_name_in_the_settings_tab() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.open_settings_tab();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Validate exported DDS");
+    audit_names(&h, "settings tab");
 }
 
 #[test]

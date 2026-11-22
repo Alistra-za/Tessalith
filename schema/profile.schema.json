@@ -655,7 +655,8 @@
       "enum": [
         "default",
         "max",
-        "fast"
+        "fast",
+        "slowest"
       ],
       "type": "string"
     },

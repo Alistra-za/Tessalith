@@ -55,6 +55,7 @@ fn put(d: &TempDir, name: &str, img: &Rgba32F) {
 
 fn req(d: &TempDir, target: Target, sets: &[&str]) -> BatchRequest {
     let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), target);
+    r.validate = true;
     r.recursive = true;
     r.accept = AcceptSuggestions::High;
     r.on_existing = OnExisting::Overwrite;
@@ -256,12 +257,14 @@ fn a_tall_diffuse_raises_no_grass_code() {
 }
 
 fn run(d: &TempDir, target: Target, sets: &[&str]) -> (Vec<EngineEvent>, BatchSummary) {
+    run_req(req(d, target, sets))
+}
+
+fn run_req(r: BatchRequest) -> (Vec<EngineEvent>, BatchSummary) {
     let sink = Arc::new(VecSink::default());
     let rep = Reporter::new(sink.clone(), "t");
     let e = Engine::new().unwrap();
-    let p = e
-        .plan(req(d, target, sets), &rep, &CancelToken::default())
-        .unwrap();
+    let p = e.plan(r, &rep, &CancelToken::default()).unwrap();
     let s = e.run(p, &rep, &CancelToken::default()).unwrap();
     (sink.take(), s)
 }
@@ -357,6 +360,50 @@ fn a_corner_no_encode_can_fix_is_val_grass_detect() {
         assert_eq!(named, want, "grey {grey}: {:?}", r.warnings);
         assert_eq!(r.summary.passed, !want);
     }
+}
+
+/// Mip 0 keeps the normal half as written: BC7 stores XYZ, so `always_unit_base` is off and a grey texel stays grey.
+const KEEP_BASE: &str = "file:**/g.png.mips.normal_base=keep";
+
+/// `grass(32)` with a zero-length normal at the normal half's bottom-left texel (0, 63).
+fn grass_with_a_grey_corner() -> Rgba32F {
+    let mut img = grass(32);
+    *img.at_mut(0, 63) = [0.5, 0.5, 0.5, 12.0 / 255.0];
+    img
+}
+
+fn has_grass_detect(events: &[EngineEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::ValGrassDetect))
+}
+
+/// §3.6 through a run: a grey corner kept by `normal_base=keep` is written as it is and fails validation.
+#[test]
+fn an_undetectable_written_corner_is_val_grass_detect() {
+    let d = tempfile::tempdir().unwrap();
+    put(&d, "g.png", &grass_with_a_grey_corner());
+    let (events, s) = run(&d, Target::Cs, &[TAG, CUTOUT, KEEP_BASE]);
+    assert!(has_grass_detect(&events), "{events:?}");
+    assert_eq!(s.validation_failed, 1);
+}
+
+/// Note LG9: complex grass is validated whatever `BatchRequest::validate` says.
+#[test]
+fn an_undetectable_corner_fails_validation_with_the_switch_off() {
+    let d = tempfile::tempdir().unwrap();
+    put(&d, "g.png", &grass_with_a_grey_corner());
+    let mut r = req(&d, Target::Cs, &[TAG, CUTOUT, KEEP_BASE]);
+    r.validate = false;
+    let root = r.output_root.clone();
+    let (events, s) = run_req(r);
+    assert!(has_grass_detect(&events), "{events:?}");
+    assert_eq!(s.validation_failed, 1);
+    assert_eq!(s.exit_code(), 4);
+    let records = engine::manifest::Manifest::at(&root).read().unwrap();
+    assert_eq!(records.len(), 1, "{:?}", records.keys());
+    let rec = &records.values().next().unwrap().raw;
+    assert!(rec["validation"].get("skipped").is_none(), "{rec}");
 }
 
 /// Review Focus 2: a source without an alpha channel resolves `remove`, encodes opaque in both halves and passes.

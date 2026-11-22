@@ -47,7 +47,7 @@ Read `57 files → 68 textures (11 packed or generated) · 7 sets` as files foun
 
 **Settings…** opens in the current view, even with no folder open. In **Meshes**, docked Settings, Presets and the JSON editor cover the mesh list. **Back to meshes**, **Close** or **Pop out** reveals it again. <!-- D:JY15 --> See [which edit Undo reverses over Meshes](GUI-NIF-Edit.md#pending-edits-undo-and-source-changes). The top section belongs to the open folder. The lower one applies to every project. <!-- D:JI1 -->
 
-![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
+![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Export, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
 
 ### This project
 
@@ -70,6 +70,7 @@ These apply to every project and save to `gui.toml` at once.
 |---|---|
 | Preview | **Live encode**: the expanded preview encodes again after every edit; off, use **Encode now**. The preview toolbar has the same switch. |
 | Checks | **Low detail**, **Green direction**, **Parallax**: [Artist checks](Texture-Types.md#artist-checks). |
+| Export | **Validate exported DDS**: each export decodes every DDS again and checks it. Off by default. What gets checked, and when: [Validation and output](Validation-and-Output.md#what-is-checked). <!-- D:LG6 --> |
 | Cache | **Analysis cache limit**: [Where Tessalith keeps its files](Installation.md#where-tessalith-keeps-its-files). |
 | Columns | **Textures**, **Sets**: ticked shows the column. |
 

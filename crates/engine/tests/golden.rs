@@ -27,6 +27,7 @@ struct Out {
 
 fn request(dir: &Path, target: Target, sets: &[&str], allow: &[Code]) -> BatchRequest {
     let mut req = BatchRequest::new(vec![dir.join("in")], dir.join("out"), target);
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();
@@ -2548,6 +2549,7 @@ fn reencode_into_its_own_folder_fails_and_leaves_the_source_alone() {
     // An explicit file input: a folder walk skips everything under the output root, so only an explicit file can
     // map onto itself (`discover::make` gives `output == path`).
     let mut req = BatchRequest::new(vec![src.clone()], root.join("textures"), Target::Vanilla);
+    req.validate = true;
     req.overrides = ["reencode=true", "subtype=diffuse"]
         .iter()
         .map(|s| parse_set(s).unwrap())
@@ -2637,6 +2639,7 @@ fn reencode_through_a_junction_into_its_own_folder_fails() {
         String::from_utf8_lossy(&mk.stderr)
     );
     let mut req = BatchRequest::new(vec![link.join("rock.dds")], real.clone(), Target::Vanilla);
+    req.validate = true;
     req.overrides = ["reencode=true", "subtype=diffuse"]
         .iter()
         .map(|s| parse_set(s).unwrap())

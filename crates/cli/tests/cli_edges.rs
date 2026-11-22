@@ -150,7 +150,11 @@ fn partial_outranks_validation_failed_and_fatal_outranks_partial() {
     img(&d.path().join("in/checker.png"));
     let out = d.path().join("out");
     let run = |panic_on: Option<&str>| {
-        let mut c = convert(&d.path().join("in"), &out, &["--on-existing", "overwrite"]);
+        let mut c = convert(
+            &d.path().join("in"),
+            &out,
+            &["--on-existing", "overwrite", "--validate"],
+        );
         c.env("SDC_TEST_FAIL_VALIDATION", "checker");
         if let Some(p) = panic_on {
             c.env("SDC_TEST_PANIC_ON", p);

@@ -54,11 +54,12 @@ I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps 
 |---|---|
 | BC7, BC6H | The seven levels from **Ultrafast** to **Max**, as `encoder.effort`. |
 | BC1 | **Fast** or **Default**, as `encoder.bc1_search`. |
-| BC3 | Three choices that set both keys: **Fast** sets both to `fast`, **Default** both to `default`, **Max** the radius to `max` and the BC1 search to `default`. |
-| BC4, BC5 | The same three choices as BC3, written to `encoder.bc45_search_radius` alone. |
+| BC3 | Four choices that set both keys: **Fast** sets both to `fast`, **Default** both to `default`, **Slowest** the radius to `slowest` and **Max** the radius to `max`, each with the BC1 search at `default`. |
+| BC4, BC5 | The same four choices as BC3, written to `encoder.bc45_search_radius` alone. |
 | Any other | Nothing: the row is greyed with "this format has no search setting". |
 
 - **Fast** on BC1 and BC3 is for a quick look: it encodes in a fraction of the time and comes out a little less exact. The `fast-preview` preset sets it for you. What each value does: [Project config](Project-Config.md#encoder).
+- **Max** takes longer than **Slowest** for a small gain ([how much longer](Project-Config.md#encoder)); use it for a release build of a mod, not while you work. <!-- D:LI -->
 - A BC3 pair that no choice names, set by a preset or by hand in `[files]`, reads **Custom: search fast, radius max** (its own values). Pick a choice to set both.
 
 ### Resize and size floor

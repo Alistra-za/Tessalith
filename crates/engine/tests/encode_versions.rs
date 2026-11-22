@@ -467,6 +467,7 @@ fn run_target(
 ) {
     let hooks = tempfile::tempdir().unwrap();
     let mut req = BatchRequest::new(vec![d.join("in")], out_dir(d, prefix), target);
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.on_existing = OnExisting::Overwrite;

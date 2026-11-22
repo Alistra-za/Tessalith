@@ -118,6 +118,16 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
+/// Note JI4: an undo step's label for a field write: every field the Effort row writes reads "Effort", as the bulk
+/// panel's step does (`bulk.rs`), not the raw config key.
+fn field_step_label(verb: &str, field: &str) -> String {
+    if fields::EFFORT_FIELDS.contains(&field) {
+        format!("{verb} Effort")
+    } else {
+        format!("{verb} {field}")
+    }
+}
+
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
 /// A7; not `counted`, which has no thousands separator).
 pub fn plan_bar_text(done: usize, total: usize) -> String {
@@ -1537,6 +1547,12 @@ impl AppModel {
         self.replan();
         // E3: a new folder has no settled answer; the label reads Review until its plan settles.
         (self.settled_writes_now, self.settled_export_files) = (false, 0);
+    }
+
+    /// Note LG: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
+    pub fn set_validate_exports(&mut self, on: bool) {
+        self.settings.validate_exports = on;
+        self.save_settings();
     }
 
     pub fn save_settings(&mut self) {
@@ -3305,6 +3321,7 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        req.validate = self.settings.validate_exports;
         Some(req)
     }
 
@@ -3353,6 +3370,7 @@ impl AppModel {
                 .map(|i| (i.job_key.clone(), None))
                 .collect(),
             pace: Some(export::Pace::new(Instant::now())),
+            validated: req.validate,
             outside_run,
             ..Default::default()
         };
@@ -4989,7 +5007,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Change {f}"), move |p| {
+        self.edit(&field_step_label("Change", field), move |p| {
             p.set_file_value(&k, &f, &value)
         });
     }
@@ -5008,7 +5026,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Reset {f}"), move |p| {
+        self.edit(&field_step_label("Reset", field), move |p| {
             p.clear_file_value(&k, &f);
             // The Format row writes the tag with the format (`set_format`), so its reset clears both.
             if f == "format" {
