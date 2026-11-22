@@ -149,8 +149,8 @@ fn a_refused_dds_is_read_once_until_it_changes() {
     );
 }
 
-/// Synthetic pre-packed eye fixture with low specular in alpha.
-fn opened_with_eye(dir: &Path) -> sdc_gui::model::AppModel {
+/// `textures/pbr/eye` under `dir`, with the diffuse `eye.png`.
+fn eye_folder(dir: &Path) -> std::path::PathBuf {
     let eye = dir.join("textures/pbr/eye");
     std::fs::create_dir_all(&eye).unwrap();
     image::ImageBuffer::from_fn(64, 64, |x, y| {
@@ -158,21 +158,32 @@ fn opened_with_eye(dir: &Path) -> sdc_gui::model::AppModel {
     })
     .save(eye.join("eye.png"))
     .unwrap();
-    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgba([140u8, 0, 255, 10]))
-        .save(eye.join("eye_rmaos.png"))
-        .unwrap();
+    eye
+}
+
+/// Opens `dir/textures` as the app and polls (30 s) until an item with a job and a thumbnail has `key`.
+fn opened_with_thumb(dir: &Path, key: impl Fn(&str) -> bool) -> sdc_gui::model::AppModel {
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     let end = Instant::now() + Duration::from_secs(30);
     while !m
         .items
         .iter()
-        .any(|i| i.key.ends_with("eye_rmaos.png") && i.thumb.is_some())
+        .any(|i| key(&i.key) && i.thumb.is_some() && i.job.is_some())
         && Instant::now() < end
     {
         m.poll();
         std::thread::sleep(Duration::from_millis(10));
     }
     m
+}
+
+/// Synthetic pre-packed eye fixture with low specular in alpha.
+fn opened_with_eye(dir: &Path) -> sdc_gui::model::AppModel {
+    let eye = eye_folder(dir);
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgba([140u8, 0, 255, 10]))
+        .save(eye.join("eye_rmaos.png"))
+        .unwrap();
+    opened_with_thumb(dir, |k| k.ends_with("eye_rmaos.png"))
 }
 
 /// A grayscale PNG of one value, the source of one packed channel.
@@ -184,13 +195,7 @@ fn gray_png(path: std::path::PathBuf, v: u8) {
 
 /// The eye's four channel sources (roughness 140, metallic 0, ao 255, specular 10), packed by the app.
 fn opened_with_generated_eye(dir: &Path) -> sdc_gui::model::AppModel {
-    let eye = dir.join("textures/pbr/eye");
-    std::fs::create_dir_all(&eye).unwrap();
-    image::ImageBuffer::from_fn(64, 64, |x, y| {
-        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
-    })
-    .save(eye.join("eye.png"))
-    .unwrap();
+    let eye = eye_folder(dir);
     for (name, v) in [
         ("roughness", 140),
         ("metallic", 0),
@@ -199,18 +204,7 @@ fn opened_with_generated_eye(dir: &Path) -> sdc_gui::model::AppModel {
     ] {
         gray_png(eye.join(format!("eye_{name}.png")), v);
     }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
-    let end = Instant::now() + Duration::from_secs(30);
-    while !m
-        .items
-        .iter()
-        .any(|i| i.key == "pbr/eye/eye_rmaos" && i.thumb.is_some())
-        && Instant::now() < end
-    {
-        m.poll();
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    m
+    opened_with_thumb(dir, |k| k == "pbr/eye/eye_rmaos")
 }
 
 /// What `ThumbCache::get` uploads for `item`, as the first whole-image upload of the frame after it.
@@ -263,8 +257,10 @@ fn a_packed_tile_is_not_drawn_black() {
     );
     // What the tile draws: columns.rs asks ThumbCache::get, which uploads this texture.
     let lum = mean_rgb(&uploaded(item));
-    eprintln!("source-file tile: thumbnail mean alpha {mean_a}, upload mean rgb {lum}");
-    assert!(lum > 40, "drawn dark: {lum}");
+    assert!(
+        lum > 40,
+        "drawn dark: upload mean rgb {lum}, thumbnail mean alpha {mean_a}"
+    );
 }
 
 #[test]
@@ -278,34 +274,54 @@ fn the_packed_tile_draws_its_own_thumbnail() {
         .find(|i| i.kind == sdc_gui::model::items::ItemKind::Packed && i.key == key)
         .expect("generated eye output, extensionless input-relative key");
     assert_eq!(item.name, "eye_rmaos");
-    assert!(item.job.as_ref().unwrap().pack.is_some());
+    // The CS RMAOS recipe: R roughness, G metallic, B ao, A specular, each read from its own source file.
+    let pack = item
+        .job
+        .as_ref()
+        .unwrap()
+        .pack
+        .as_ref()
+        .expect("a pack job");
+    for (c, (src, want)) in pack
+        .channels
+        .iter()
+        .zip([
+            "eye_roughness.png",
+            "eye_metallic.png",
+            "eye_ao.png",
+            "eye_specular.png",
+        ])
+        .enumerate()
+    {
+        let engine::pack::ChannelSource::Source { path, .. } = src else {
+            panic!("channel {c} is not read from a source: {src:?}");
+        };
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some(want),
+            "channel {c} source"
+        );
+    }
     let thumb = item.thumb.as_ref().expect("assembled thumbnail");
     let n = thumb.rgba.len() as u32 / 4;
-    let mean = |c: usize| {
-        thumb
-            .rgba
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|p| p[c] as u32)
-            .sum::<u32>()
-            / n
-    };
-    eprintln!(
-        "generated eye: kind {:?} key {} thumbnail rgba means {} {} {} {}",
-        item.kind,
-        item.key,
-        mean(0),
-        mean(1),
-        mean(2),
-        mean(3)
-    );
-    assert!(thumb
-        .rgba
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .all(|p| p[3] < 32 && p[2] > 200));
+    let means: Vec<u32> = (0..4)
+        .map(|c| {
+            thumb
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[c] as u32)
+                .sum::<u32>()
+                / n
+        })
+        .collect();
+    for (got, want) in means.iter().zip([140u32, 0, 255, 10]) {
+        assert!(
+            got.abs_diff(want) <= 2,
+            "thumbnail rgba means {means:?}, wanted about [140, 0, 255, 10]"
+        );
+    }
     use eframe::egui;
     use egui_kittest::kittest::Queryable;
     let name = format!("thumb:{key}");
@@ -345,6 +361,12 @@ fn the_packed_tile_draws_its_own_thumbnail() {
         .find(|n| !in_sets_column(&h, n.rect()))
         .expect("the tile")
         .rect();
+    let column =
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures").expect("the Textures column");
+    assert!(
+        column.contains_rect(tile),
+        "the tile {tile:?} is in the Textures column {column:?}"
+    );
     let id = support::shapes(&h)
         .iter()
         .filter(|s| {
@@ -367,14 +389,10 @@ fn the_packed_tile_draws_its_own_thumbnail() {
         .get(&id)
         .expect("whole upload for the painted tile ID");
     assert!(!img.pixels.is_empty(), "empty upload for {id:?}");
-    eprintln!(
-        "generated eye: painted id {id:?}, upload mean rgb {}, first pixel {:?}",
-        mean_rgb(img),
-        img.pixels[0]
-    );
     assert!(
         img.pixels.iter().all(|p| p.a() == 255 && p.b() > 200),
-        "drawn tile lost its data channels: {:?}",
+        "drawn tile lost its data channels: upload mean rgb {}, first pixel {:?}",
+        mean_rgb(img),
         img.pixels[0]
     );
 }
@@ -405,7 +423,6 @@ fn a_blend_tile_keeps_its_low_alpha_and_the_flag_follows_the_policy() {
     }
     item.job.as_mut().unwrap().profile.alpha.policy = AlphaPolicy::Blend;
     let lum = mean_rgb(&uploaded(&item));
-    eprintln!("blend control: upload mean rgb {lum}");
     assert!(lum < 20, "a Blend tile is still premultiplied: {lum}");
     item.job = None;
     assert!(!item.alpha_is_data(), "no job: the original transparency");

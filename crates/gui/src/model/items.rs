@@ -106,7 +106,7 @@ impl TextureItem {
     }
 
     /// The thumbnail's alpha is data (a packed map's specular) or absent from the output, never opacity: the tile
-    /// draws it opaque. A colour map (Blend, Cutout, CutoutBlend) and an item with no job keep their transparency.
+    /// draws it opaque. A colour map (Blend, Cutout, CutoutBlend) and a non-packed item with no job keep their transparency.
     pub fn alpha_is_data(&self) -> bool {
         self.kind == ItemKind::Packed
             || self.job.as_ref().is_some_and(|j| {
