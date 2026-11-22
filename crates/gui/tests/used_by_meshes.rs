@@ -57,7 +57,7 @@ fn read(users: &[User], alpha: bool) -> UsedBy {
 fn order(u: &UsedBy) -> Vec<(&str, &str, i32)> {
     u.rows
         .iter()
-        .map(|r| (r.nif.as_str(), r.mod_name.as_str(), r.priority))
+        .map(|r| (r.nif.as_str(), r.mod_name.as_str(), r.copies[0].priority))
         .collect()
 }
 
@@ -82,7 +82,7 @@ fn rows_are_sorted_by_mo2_priority_winner_first_and_loose_beats_bsa() {
             ("meshes/c.nif", "Skyrim - Meshes0.bsa", 50),
         ]
     );
-    assert!(u.rows[3].bsa && !u.rows[0].bsa);
+    assert!(u.rows[3].copies[0].bsa && !u.rows[0].copies[0].bsa);
     assert_eq!(u.more, 0);
 }
 

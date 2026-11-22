@@ -751,9 +751,10 @@ pub(super) fn reach_combo(
                 } else {
                     None
                 };
+                // An entry that reaches nothing stays off after the plan too, so waiting is no reason for it.
                 let r = match (on, hover) {
-                    (false, _) if busy => r.on_disabled_hover_text("Wait for the plan to finish"),
-                    (false, _) => r.on_disabled_hover_text(NO_REACH_HOVER),
+                    (false, _) if *k == 0 => r.on_disabled_hover_text(NO_REACH_HOVER),
+                    (false, _) => r.on_disabled_hover_text("Wait for the plan to finish"),
                     (true, Some(h)) => r.on_hover_text(h),
                     (true, None) => r,
                 };

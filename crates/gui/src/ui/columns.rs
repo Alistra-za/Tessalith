@@ -235,7 +235,7 @@ fn pack_source_names(model: &AppModel, item: &TextureItem) -> Vec<String> {
 fn sorted_file_names(mut keys: Vec<String>) -> Vec<String> {
     keys.sort();
     keys.dedup();
-    let name = |k: &str| k.rsplit('/').next().unwrap_or(k).to_string();
+    let name = |k: &str| crate::model::items::key_file_name(k).to_string();
     keys.sort_by_key(|k| (name(k).to_lowercase(), k.clone()));
     keys.iter().map(|k| name(k)).collect()
 }

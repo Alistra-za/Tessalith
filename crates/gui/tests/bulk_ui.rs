@@ -1408,6 +1408,82 @@ fn the_reach_entries_are_off_while_an_edit_is_in_flight() {
     );
 }
 
+/// E14: an `sdc.toml` the app cannot read is read-only for it, and the reach entries are off: the panel greys every
+/// row under its amber reason, so the combo does not open and a click writes nothing (the setup of
+/// `a_stale_bulk_type_choice_writes_nothing`).
+#[test]
+fn the_reach_entries_are_off_while_sdc_toml_is_read_only() {
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.save().unwrap();
+    std::fs::write(m.root.clone().unwrap().join("sdc.toml"), "[[[ not toml").unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(WAIT));
+    let why = m
+        .toml_read_only_reason()
+        .expect("premise: the file is read-only for the app");
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    let before = docs(&m);
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label(&why).next().is_some(),
+        "the reason is shown"
+    );
+    weighting_combo(&h).scroll_to_me();
+    h.run();
+    assert!(
+        weighting_combo(&h).accesskit_node().is_disabled(),
+        "premise: the row is drawn, and off"
+    );
+    weighting_combo(&h).click();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label_contains(" of 2)").count(),
+        0,
+        "no entry can be picked"
+    );
+    assert_eq!(docs(h.state()), before);
+}
+
+/// E14: while an edit is in flight, an entry no selected texture can take keeps its own reason (waiting would not turn
+/// it on), and an entry that reaches some texture says to wait.
+#[test]
+fn a_zero_reach_entry_keeps_its_reason_while_an_edit_is_in_flight() {
+    use eframe::egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, keys) = reach_fixture(d.path(), 3);
+    m.hold_plan_results = true;
+    m.set_field(&keys[0], "mips.levels", serde_json::json!(3));
+    assert!(m.edit_busy(), "premise: the edit's plan is in flight");
+    let mut h = narrow_harness(m);
+    instant_tips(&h.ctx);
+    h.run_steps(6);
+    h.get_by_role_and_label(Role::ComboBox, "Filter")
+        .scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::ComboBox, "Filter").click();
+    h.run_steps(4);
+    for (entry, why) in [
+        (
+            "Tent (0 of 3)",
+            "None of the selected textures can take this",
+        ),
+        ("Box (3 of 3)", "Wait for the plan to finish"),
+    ] {
+        assert!(
+            h.get_by_label(entry).accesskit_node().is_disabled(),
+            "{entry} is off"
+        );
+        h.get_by_label(entry).hover();
+        h.run_steps(4);
+        assert!(h.query_by_label(why).is_some(), "{entry}: {why}");
+    }
+}
+
 /// E14 (M5): a texture filling a locked slot is not reached, and the count says so as the planner does.
 #[test]
 fn a_slot_locked_member_is_left_out_of_the_reach() {

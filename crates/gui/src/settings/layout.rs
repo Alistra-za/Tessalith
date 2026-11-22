@@ -179,9 +179,12 @@ pub struct LayoutSettings {
     pub sort: String,
     #[serde(deserialize_with = "lenient_tile")]
     pub tile: f32,
-    /// The Sets column pills of an old file, by [`SETS_FILTER_NAMES`] name: read and ignored, never saved (review E19). Its
-    /// shader filter below (a `Shader` id; none: Any) is kept; its search is not saved (R17).
-    #[serde(deserialize_with = "lenient_strings")]
+    /// The Sets column pills of an old file, by [`SETS_FILTER_NAMES`] name: read and ignored, never saved (review
+    /// E19). Its shader filter below (a `Shader` id; none: Any) is kept; its search is not saved (R17).
+    #[serde(
+        deserialize_with = "lenient_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub sets_filters: Vec<String>,
     #[serde(deserialize_with = "lenient")]
     pub sets_shader: Option<String>,

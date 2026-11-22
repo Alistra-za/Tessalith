@@ -200,6 +200,11 @@ pub(crate) fn key_of(root: &Path, path: &Path) -> String {
     project_rel(root, &f).unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
 }
 
+/// The file name of a `[files]` key or a game path, without its folders (either separator).
+pub(crate) fn key_file_name(key: &str) -> &str {
+    key.rsplit(['/', '\\']).next().unwrap_or(key)
+}
+
 /// A packed job's key: its first source's folder plus the stem of its own output name (`files_stem`, Note HS2),
 /// without extension (as the engine scopes `[files]`; an output path does not change it).
 fn packed_key(root: &Path, job: &ResolvedJob, kind: RecipeKind) -> String {

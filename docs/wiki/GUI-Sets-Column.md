@@ -14,7 +14,7 @@ A chip with a file hovers as its name, the slot's type (as in [Texture types](Te
 
 - **Linked:** "{slot} linked to {path}", then "{type}, from set {set}" or "{type}: {file}, set by path".
 - **Cleared:** "{slot} (cleared): {file}", then "{type}: cleared, so the JSON leaves this slot empty".
-- **Replaced by a link:** "{slot} (empty)", then "{type}: the link to {path} supplies game slot {n}, so {file} is not written here".
+- **Replaced by a link:** "{slot} (empty)", then "{type}: the link to {path} supplies the {slot} slot, so {file} is not written here".
 
 A member that fills no chip but has a job adds its type's description under its role. <!-- D:JX1,LM5 -->
 

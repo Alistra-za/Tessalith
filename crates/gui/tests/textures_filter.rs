@@ -591,9 +591,10 @@ fn status_pills_are_not_restored_but_sort_and_tile_are() {
             .collect::<Vec<_>>(),
         ["hide-helpers"]
     );
-    assert!(layout
-        .get("sets_filters")
-        .is_none_or(|v| v.as_array().unwrap().is_empty()));
+    assert!(
+        layout.get("sets_filters").is_none(),
+        "the Sets pills are never written: {disk}"
+    );
     let (saved, err) = GuiSettings::load(&p);
     assert_eq!(err, None);
     assert_eq!(saved.layout.filters, ["hide-helpers"]);

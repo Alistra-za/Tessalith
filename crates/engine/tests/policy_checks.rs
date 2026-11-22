@@ -2225,32 +2225,57 @@ fn hdr_filter_reasons_cite_no_spec() {
     }
 }
 
-/// No user-visible engine message names a DECISIONS note: the RGBA16F and BC6H outside-cs errors and the two
-/// suffix-alias refusals.
+/// No user-visible engine message names a DECISIONS note or a spec cite: the RGBA16F and BC6H outside-cs errors and the
+/// two suffix-alias refusals.
 #[test]
 fn messages_cite_no_decision() {
-    let j = run(
-        Target::Vanilla,
-        "textures/a/x.png",
-        None,
-        &[],
-        opaque(),
-        &["subtype=glow", "format=rgba16f", "color.tag=n/a"],
-        &[Code::CfgUnavailable],
-    );
-    let mut texts = vec![warning(&j, Code::CfgUnavailable).message.clone()];
+    // Each case's own phrase first, so a case that never reaches its message fails rather than passing on another text;
+    // the phrases span where the old cites sat ("[D#3]", "(DECISIONS S4)", "since Note AL").
+    let mut texts = vec![];
+    for (format, kept) in [
+        (
+            "rgba16f",
+            "RGBA16F is usable only under Community Shaders; choose another format",
+        ),
+        (
+            "bc6h_uf16",
+            "BC6H is usable only under Community Shaders; choose another format",
+        ),
+    ] {
+        let j = run(
+            Target::Vanilla,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            &["subtype=glow", &format!("format={format}"), "color.tag=n/a"],
+            &[Code::CfgUnavailable],
+        );
+        let m = warning(&j, Code::CfgUnavailable).message.clone();
+        assert!(m.contains(kept), "{format}: {m}");
+        texts.push(m);
+    }
     let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
-    for alias in ["orm", "detail"] {
+    for (alias, kept) in [
+        (
+            "orm",
+            "orm is a built-in packing input (AO, roughness, metallic)",
+        ),
+        ("detail", "is a detail map name"),
+    ] {
         let e = PresetRegistry::builtin()
             .unwrap()
             .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
             .unwrap_err()
             .to_string();
+        assert!(e.contains(kept), "{alias}: {e}");
         texts.push(e);
     }
-    assert_eq!(texts.len(), 3);
     for t in &texts {
-        assert!(!t.contains("DECISIONS") && !t.contains("Note "), "{t}");
+        assert!(
+            !t.contains("DECISIONS") && !t.contains("Note ") && !t.contains("[D#"),
+            "{t}"
+        );
     }
 }
 

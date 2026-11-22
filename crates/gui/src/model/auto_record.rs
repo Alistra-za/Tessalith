@@ -6,6 +6,8 @@
 //! R5 (amends R1): a user action that re-types (a set-shader pick, PBR follow, a preset alias change) treats an
 //! untouched recorded sub-type, one equal to what auto-accept picks from the plan, as not set, as before FC1. Scan
 //! evidence still never rewrites one.
+// The hover lists file names, not folders or game paths (the folder is in the Textures tree).
+use super::items::key_file_name as file_name;
 use super::items::{ItemKind, ItemStatus};
 use super::sets::{SlotFill, SlotKind};
 use super::{fields, AppModel, PlanCause};
@@ -47,11 +49,6 @@ fn show(v: &serde_json::Value) -> String {
 fn show_type(v: &serde_json::Value) -> String {
     serde_json::from_value::<Subtype>(v.clone())
         .map_or_else(|_| show(v), super::labels::subtype_name)
-}
-
-/// The file's name, not its folder or game path (the hover lists files; the folder is in the Textures tree).
-fn file_name(key: &str) -> &str {
-    key.rsplit(['/', '\\']).next().unwrap_or(key)
 }
 
 /// Ends the row's hover, after a blank line, only when a first automatic sub-type was set, not a guarded retype such

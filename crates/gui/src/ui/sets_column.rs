@@ -11,7 +11,7 @@ use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files, ItemKind, TextureItem};
-use crate::model::labels::{set_slot_label, subtype_name, type_info, LEGEND};
+use crate::model::labels::{set_slot_label, subtype_name, type_info, AUTO_SHADER_FIRST, LEGEND};
 use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
@@ -3587,11 +3587,11 @@ fn chip_row<'a>(
             }
             SlotShown::Replaced { item, by } => {
                 let file = model.item(item).map_or(item, |i| i.name.as_str());
-                // `slot_shown` yields Replaced only for a kind on a game slot
-                let slot = k.game_slot().unwrap_or_default();
+                // The slot by its name, as the linked and cleared hovers name it: a bare number could be a TXST's
+                // 0-based TX0n or PGPatcher's 1-based `slotN`.
+                let slot = v.slot_text(k);
                 let r = letter_box(ui, &letter(), None, None).on_hover_text(format!(
-                    "{} (empty)\n{}: the link to {} supplies game slot {slot}, so {file} is not written here",
-                    v.slot_text(k),
+                    "{slot} (empty)\n{}: the link to {} supplies the {slot} slot, so {file} is not written here",
                     set_slot_label(v, k),
                     by.path
                 ));
@@ -3866,8 +3866,7 @@ fn shader_combo(
     .inner
 }
 
-/// The hover of a shader the engine picked from the set's files.
-const AUTO_SHADER_FIRST: &str = "Tessalith picked this shader from the set's files.";
+/// The hover of a shader the engine picked from the set's files, after `labels::AUTO_SHADER_FIRST`.
 const AUTO_SHADER_FIX: &str = "Pick one yourself to fix it.";
 
 /// The free card area left of the shader combo, which still opens the set (Note HP12).
@@ -5332,7 +5331,7 @@ mod tests {
         h.run();
         h.run();
         h.get_by_label(
-            "Normal _n (empty)\nPBR normal: the link to p\\x.dds supplies game slot 2, so a/n.png is not written here",
+            "Normal _n (empty)\nPBR normal: the link to p\\x.dds supplies the Normal _n slot, so a/n.png is not written here",
         );
     }
 

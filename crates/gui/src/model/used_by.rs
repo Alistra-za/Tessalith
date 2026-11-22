@@ -44,16 +44,11 @@ pub fn more_line(n: usize) -> String {
 }
 
 /// A display group: the copies of one NIF in one mod name (the same mod name with other roots makes several copies).
-/// Each copy keeps its own facts in [`MeshUser::copies`]. `priority` and `bsa` are the first copy's only, so a group
-/// with more than one copy must be drawn from its copies, never from them.
+/// Each copy keeps its own facts, its priority among them, in [`MeshUser::copies`]; the group has none of its own.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MeshUser {
     pub nif: String,
     pub mod_name: String,
-    /// The first copy's (see the type's note).
-    pub priority: i32,
-    /// The first copy's: from a BSA, which loses to every loose copy whatever its number (archive rank).
-    pub bsa: bool,
     /// Any copy's shapes carry the alpha evidence that decided the texture's alpha meaning (AG96).
     pub decided_alpha: bool,
     /// Every listed copy of this NIF in this mod name, in list order.
@@ -296,8 +291,6 @@ fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize, usize) {
             None => rows.push(MeshUser {
                 nif,
                 mod_name,
-                priority: c.priority,
-                bsa: c.bsa,
                 decided_alpha: c.decided_alpha,
                 copies: vec![c],
             }),

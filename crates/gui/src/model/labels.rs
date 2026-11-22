@@ -119,6 +119,16 @@ pub fn set_slot_label(v: &SetView, kind: SlotKind) -> &'static str {
     slot_type_label(kind, pbr, skin, v.rfaos)
 }
 
+/// What "(auto)" on a set's shader means, once for the shader combo's hover and the legend's "(auto)" line.
+macro_rules! auto_shader_first {
+    () => {
+        "Tessalith picked this shader from the set's files."
+    };
+}
+
+/// The first sentence of an auto-picked shader combo's hover.
+pub const AUTO_SHADER_FIRST: &str = auto_shader_first!();
+
 /// The "?" legend beside the Sets heading, one line per entry, each "{name}: {meaning}".
 pub const LEGEND: [&str; 18] = [
     "D: Diffuse, PBR albedo or Skin albedo",
@@ -137,7 +147,7 @@ pub const LEGEND: [&str; 18] = [
     "DETAIL_N: Skin detail",
     "PBR → JSON: a PBR set that writes a PGPatcher JSON entry.",
     "unused: a helper that fills no slot of this set.",
-    "(auto): Tessalith picked this shader from the set's files.",
+    concat!("(auto): ", auto_shader_first!()),
     "Empty slots: the letters shown while you drag have no file yet.",
 ];
 

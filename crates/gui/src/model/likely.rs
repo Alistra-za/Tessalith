@@ -1,6 +1,7 @@
 //! Up to three likely types for textures that wait for one, each with the reason it is likely.
 //! Three sources, in this order: the engine's own suggestions, the types written for files with the same name ending,
 //! and what the pixels look like. Nothing here depends on selection, hash-map or file-system order.
+use super::items::key_file_name as file_name;
 use super::AppModel;
 use engine::config::Subtype;
 use std::collections::BTreeMap;
@@ -10,7 +11,7 @@ const MAX_LIKELY: usize = 3;
 
 /// The file-name ending the pairing compares: the stem after its last `_`, lower case, without trailing digits.
 fn name_tail(key: &str) -> Option<String> {
-    let name = key.rsplit(['/', '\\']).next()?;
+    let name = file_name(key);
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
     let (_, tail) = stem.rsplit_once('_')?;
     let tail = tail
@@ -18,10 +19,6 @@ fn name_tail(key: &str) -> Option<String> {
         .trim_end_matches(|c: char| c.is_ascii_digit())
         .to_string();
     (!tail.is_empty()).then_some(tail)
-}
-
-fn file_name(key: &str) -> &str {
-    key.rsplit(['/', '\\']).next().unwrap_or(key)
 }
 
 /// Types ranked by how many keys back them (descending), then by id; each with the reason of its first key.
@@ -72,11 +69,8 @@ pub fn likely_types(m: &AppModel, keys: &[String]) -> Vec<(Subtype, String)> {
         let mut file_keys = p.file_keys();
         file_keys.sort();
         for k in file_keys {
-            // `[files]` keys fold Unicode (Note BF).
-            if eligible
-                .iter()
-                .any(|e| e.to_lowercase() == k.to_lowercase())
-            {
+            // `[files]` keys fold Unicode (Note BF), as the engine compares them.
+            if eligible.iter().any(|e| engine::sets::same_id(e, &k)) {
                 continue;
             }
             let Some(tail) = name_tail(&k) else { continue };

@@ -2085,6 +2085,8 @@ impl MeshesModel {
     }
 
     fn load_shapes(&mut self) {
+        // Note GO: the picks belong to the shapes shown before; a failed read or no shown copy must not keep them.
+        self.txst_picks.clear();
         let (Some(store), Some(copy)) = (&self.store, self.shown_copy()) else {
             return;
         };
