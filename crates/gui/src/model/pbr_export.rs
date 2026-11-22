@@ -1190,6 +1190,37 @@ mod tests {
     use super::*;
     use crate::pgp::prefix::check_file_name;
 
+    /// Note LF, HF9: a dependency whose check in place failed is untouched and on disk, so it is accepted as a
+    /// `Done { passed: false }` one is; a queued one is not.
+    #[test]
+    fn a_dependency_that_failed_its_check_in_place_is_accepted() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("a.dds");
+        std::fs::write(&file, b"x").unwrap();
+        let p = PendingJson {
+            root: d.path().to_path_buf(),
+            path: d.path().join("j.json"),
+            entries: vec![],
+            copies: vec![],
+            leaves_sets_out: false,
+            held: vec![],
+        };
+        let row = |state| Row {
+            job_key: "g/a.dds".into(),
+            path: "g/a.png".into(),
+            state,
+            warnings: vec![],
+        };
+        let rows = [row(RowState::CheckFailed)];
+        assert_eq!(dep_ok(&p, &rows, "g/a.dds", &file, None), Ok(()));
+        assert_eq!(dep_ok(&p, &rows, "g/a.dds", &file, Some(&file)), Ok(()));
+        let rows = [row(RowState::Queued)];
+        assert_eq!(
+            dep_ok(&p, &rows, "g/a.dds", &file, None),
+            Err("queued".to_string())
+        );
+    }
+
     /// Final fix 5: a filled slot of a no-albedo JSON set that no path names (a kept DDS, no job) is locked, so
     /// PGPatcher keeps the mesh's own; a named one and an explicit lock are left alone.
     #[test]

@@ -630,7 +630,9 @@ pub fn export_folder_problem(root: &Path, export: &Path) -> Option<String> {
 
 /// The `sdc convert` command that reproduces the export from the saved `sdc.toml` (M3a spec §2.5). The GUI plans
 /// with High suggestions accepted (Note U3), so the command does too (audit 08c-2). Set edits in
-/// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither.
+/// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither. `--validate` follows the Validate
+/// exported DDS setting as it is now (Note LF); like the rest of the command it is rebuilt from the current saved
+/// state, not read from the export the Files tab shows.
 pub fn cli_command(root: &Path, export: &Path, validate: bool) -> String {
     let q = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "/"));
     format!(
@@ -879,6 +881,41 @@ mod tests {
         // A keep is never checked (OV-R4).
         let m = up_to_date_with("kept: x".into());
         assert_eq!(m.rows[0].state, RowState::Kept);
+    }
+
+    /// Note LF: in an Also phase a failed check in place counts once, under `failed` (from the summary), and not under
+    /// `current` (the up-to-date event's terminal is `Failed`).
+    #[test]
+    fn an_also_phase_counts_a_failed_check_once() {
+        use engine::api::CHECKED_IN_PLACE_FAILED;
+        let mut m = ExportModel::default();
+        // The first batch is the primary one; the phase below is another batch under the `v` folder.
+        m.on_event(event(
+            0,
+            "a/p.dds",
+            EventKind::FileDiscovered {
+                output: "a/p.dds".into(),
+            },
+        ));
+        let mut skip = event(
+            1,
+            "v/a/x.dds",
+            EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                code: None,
+                reason: format!("up to date; {CHECKED_IN_PLACE_FAILED}"),
+            },
+        );
+        skip.batch = "phase".into();
+        m.on_event(skip);
+        let summary = BatchSummary {
+            up_to_date: 1,
+            checked: 1,
+            checked_failed: 1,
+            ..Default::default()
+        };
+        let o = m.secondary_outcomes(&summary, Path::new("x/v"));
+        assert_eq!((o.failed, o.current), (1, 0));
     }
 
     /// Note LF: with the switch off, a complex-type failure is still reported as one, and `not validated` says nothing

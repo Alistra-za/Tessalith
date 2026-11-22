@@ -1,6 +1,6 @@
 //! Note JI1: the Settings tab of the centre column (or its own window when popped out, Note FB7). "This project" (Mode,
-//! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml: Preview, Checks, Export, Cache and Columns). Drawing
-//! only: every edit is collected and applied once the tab is drawn.
+//! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml: Preview,
+//! Checks, Export, Cache and Columns). Drawing only: every edit is collected and applied once the tab is drawn.
 use super::header::{self, target_help, target_name};
 use crate::look::Combo036 as _;
 use crate::model::{AppModel, CentreTab, EXPORT_WITHOUT_REVIEW_WAIT};
