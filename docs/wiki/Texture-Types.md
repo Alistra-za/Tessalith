@@ -104,7 +104,7 @@ Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Preset
 <a id="sub-types-what-each-file-becomes"></a>
 ## Types: what each file becomes
 
-One row per type: the first column is the id `sdc.toml` and the command line use, **In the window** is the name Tessalith's window shows. Hover a type in the picker for its one-line description and the file ending that gives it. **vanilla** says whether the type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and the GUI's acknowledge button converts it as the fallback named there (on the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes)). With no fallback, change the type or the target.
+One row per type: the first column is the id `sdc.toml` and the command line use, **In the window** is the name Tessalith's window shows ([the picker](GUI-Texture-Panel.md#changing-a-setting) adds a description to each). **vanilla** says whether the type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and the GUI's acknowledge button converts it as the fallback named there (on the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes)). With no fallback, change the type or the target.
 
 | Type | In the window | Category | Default format | Tag (`cs`) | Default alpha | vanilla | Notes |
 |---|---|---|---|---|---|---|---|
@@ -124,7 +124,7 @@ One row per type: the first column is the id `sdc.toml` and the command line use
 | `landscape_normal` | Landscape normal | Normal | BC7 | UNORM | data | yes | |
 | `pbr_normal` | PBR normal | Normal | BC7 | UNORM | remove | `normal` | `cs` only. The default drops specular alpha silently. Pick **Data** on the Alpha row to keep it. For shared normals, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS8 --> |
 | `detail_normal` | Detail normal | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
-| `msn` | Model-space normal | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
+| `msn` | Model-space normal | Normal | BC7 | UNORM | remove | yes | Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
 | `coat_normal` | PBR coat normal | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
 | `skin_wet` | Skin wet | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only some formats here: see `FMT-CS-SKIN-LOADER`. <!-- D:HB3,HB4 --> |
 | `skin_detail` | Skin detail | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
@@ -137,7 +137,7 @@ One row per type: the first column is the id `sdc.toml` and the command line use
 | `complex_material` | Complex material | MixedPacked | BC7 | UNORM | data, exact opaque | yes | Complex `_m`. |
 | `rmaos` | PBR RMAOS | MixedPacked | BC7 | UNORM | data | no | `cs` only. |
 | `skin_rfaos` | Skin RFAOS | MixedPacked | BC7 | UNORM | data | no | |
-| `flow` | Hair flow | MixedPacked | BC5 | UNORM | remove | no | Hair flow. At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
+| `flow` | Hair flow | MixedPacked | BC5 | UNORM | remove | no | At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
 | `generic_two_channel` | Two-channel data | MixedPacked | BC5 | UNORM | remove | yes | |
 | `generic_data` | Other data | MixedPacked | BC7 | UNORM | data | yes | Any data map Tessalith has no type for. |
 | `complex_grass` | Complex grass | MixedPacked | BC7 only | UNORM only | cutout (when alpha varies) | yes | Own size. Both targets accept it; only CS and ENB read it. See [Complex grass](PBR-Landscape.md#complex-grass). |

@@ -51,7 +51,7 @@ Every built-in preset has one rule: any file under an `interface` or `sky` folde
 ![The Presets tab.](../img/gui/Presets-and-Targets/presets-tab.png)
 
 - **Built-in presets are read-only.** **Duplicate** makes an editable copy.
-- **One row per type** (`subtype` in `sdc.toml`), in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
+- **One row per type**, in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
 - **A format a type can't use is fixed when the preset opens.** A user preset that gives `skin_sk` BC7 opens with BC4 set and a note in the editor saying so; **Save preset** writes the fix. Grey maps are BC4 or R8 in the GUI: [texture panel](GUI-Texture-Panel.md).
 - **A preset that wouldn't load is never written.** The creator loads it through the same loader as the presets folder before saving, edits your file in place (comments kept), and re-reads the folder, so the preset appears in the **Preset** menu without a restart.
 - **A preset that `sdc.toml` names but is gone** blocks the export: Problems shows "Preset <id> is not installed" with **Choose preset…**. On the command line that is an error: [CLI reference](CLI-Reference.md#target-and-preset-from-the-command-line).
@@ -105,7 +105,7 @@ rmaosultrahigh = "rmaos"
 | `hidden` | no | `true` keeps the preset out of the preset lists. |
 | `description` | no | A one-line description, shown with the preset in lists. |
 | `[defaults]` | no | Partial profile for every type. |
-| `[subtypes.<id>]` | no | Partial profile for one type. |
+| `[subtypes.<id>]` | no | Partial profile for one type (`subtype` in `sdc.toml`; `[subtypes.<id>]` in a preset file). |
 | `[[rules]]` | no | Same format as in `sdc.toml`: [rules](Project-Config.md#rules). |
 | `[suffix_aliases]` | no | Extra file-name suffixes, as `alias = "canonical suffix"`. |
 

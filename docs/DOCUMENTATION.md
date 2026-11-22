@@ -61,7 +61,7 @@ The docs grew too large, mostly from over-explaining and over-stating limits. Wr
 - **The command line has one page:** CLI-Reference holds every `sdc` command, flag, example, exit code and CLI message, with no size cap (owner, 2026-11-08). Other pages carry no CLI material, at most a one-line link to it.
 - **The GUI guide is split by area of the window, not one page per screen.** A page is named after the area as the UI labels it, and a small area folds into its neighbour. The GUI pages are:
   - GUI-Guide: the annotated window, the bottom panel, shortcuts and dialogs;
-  - GUI-Main-Window, GUI-Texture-Panel, GUI-Sets-Column, GUI-Set-Groups, GUI-Set-Editor, GUI-Bulk-and-Rename;
+  - GUI-Main-Window, GUI-Texture-Panel, GUI-Sets-Column, GUI-Set-Editor, GUI-Bulk-and-Rename;
   - GUI-Problems and GUI-Review-and-Export;
   - GUI-PGPatcher-JSON;
   - GUI-NIF-Edit and GUI-NIF-Animation.

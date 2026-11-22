@@ -55,7 +55,7 @@ These rows are saved in the open folder's files. With no folder open, the sectio
 
 | Row | Writes |
 |---|---|
-| **Mode** | `target` in `sdc.toml`: **Community Shaders (cs)** or **Base game (vanilla)**. It beats the Target a preset names. The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
+| **Mode** | `target` in `sdc.toml`: **Community Shaders (cs)** or **Base game (vanilla)**. It beats a preset's Target ([which target wins](Presets-and-Targets.md#which-target)). The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
 | **Preset** | `preset` in `sdc.toml`, the same value as the header's **Preset**. |
 | **Export folder** (**Choose…**, **Open**) | The export folder in `sdc-project.toml`, the same value as [Export to ▾](#export-to). |
 | **Export without review** | Sets `[project] export_without_review` in `sdc-project.toml`. [When Tessalith still opens Review](GUI-Review-and-Export.md#the-export-button). |

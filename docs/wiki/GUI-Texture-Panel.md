@@ -92,6 +92,8 @@ The box asks **What kind of texture is this?** and offers up to three likely typ
 
 A button shows only a type the mode offers for this texture. Clicking one picks that type in the dropdown and writes nothing: **Confirm** writes it. **Confirm** then opens the next undecided texture after this one in the order the Textures column shows. A texture the filters hide is skipped, it never wraps round to the top, and with none left the selection stays. <!-- D:LM10 --> Selecting several textures asks once for all of them: [Bulk editing](GUI-Bulk-and-Rename.md#editing-them-together).
 
+When your choice gives a lone file a set of its own, **Messages** gets one Info line after the plan settles, "{file} is now {type}. New set {id} (1 texture).", and the status line reads "New set {id}: see Messages." Several new sets read "2 new sets: {a} and {b}.", up to "{k} new sets: {a}, {b}, {c} and {m} more." **Show** on the row selects the first set's card, clears a Sets filter that hides it and unfolds its group. It is off with "That set is no longer listed" in another project or once the set is gone. A partial plan says nothing. <!-- D:LM6 -->
+
 ### Alpha from the meshes
 
 After a [mod scan](Mod-Scanning.md), a colour map whose alpha varies takes its alpha meaning from the meshes that use it, and isn't asked:
@@ -116,7 +118,7 @@ After a [scan](Mod-Scanning.md), the list under the texture's heading reads **Us
 
 The list shows 200 copies, then "and {m} more meshes, not listed". The compact strip beside the preview has no list. <!-- D:LM13 -->
 
-When a link is greyed, its hover says why. A scan is running or didn't finish, the list is still being read, or Meshes shows another scan database than the list came from. If you click while Meshes is still reading its own list, the link opens once the read is done. <!-- D:LM13,LM14 -->
+When a link is greyed, its hover says why. A scan is running or didn't finish, the list is still being read, or Meshes shows another scan database than the list came from. <!-- D:LM13,LM14 -->
 
 When a link opens nothing, the Meshes status line says why:
 
@@ -127,7 +129,7 @@ When a link opens nothing, the Meshes status line says why:
 | Meshes has no scan database open, so that mesh link opened nothing. | No scan is open in Meshes. |
 | The scan database could not be read, so that mesh link opened nothing. | The mesh list failed to load; it stays that way until the next scan. |
 
-If you have an unsaved NIF edit open, the link follows the same rules as picking another NIF ([Editing a NIF](GUI-NIF-Edit.md)): the draft is saved first, and an edit that can't be saved stays open and the link opens nothing. <!-- D:LM14 -->
+Your [NIF edits](GUI-NIF-Edit.md) are saved as a draft as you make them, so a link to another mesh closes the edit and opens the shape. An edit that can't be saved stays open and the link opens nothing; a link to a shape of the NIF you are editing keeps the edit. <!-- D:LM14 -->
 
 ## DDS files in the folder
 

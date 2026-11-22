@@ -103,7 +103,7 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
 | `--config <file>` | `sdc.toml` in the first input folder | The project config file. |
 | `--set <override>` | none | Override a profile field. Repeatable. See [--set syntax](#--set-syntax). |
-| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence suggestion of a type (`subtype` in `sdc.toml`). With `none`, a file whose type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
+| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence type suggestion. With `none`, a file whose type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
 | `--allow <CODE>` | none | Acknowledge a blocking code for the whole batch. Repeatable. An unknown code is a usage error. See [Acknowledging blocking codes](#acknowledging-blocking-codes). |
 | `--json` | off | Write JSON Lines events to stdout. Human output stays on stderr. |
 
@@ -130,7 +130,7 @@ The GUI accepts High suggestions and writes each into `sdc.toml` as a `[files]` 
 | Form | Applies to | Can't set |
 |---|---|---|
 | `field=value` | Every file. | `helper.*` |
-| `subtype:<id>.field=value` | Every file of that type. | `subtype`, `reencode`, `helper.*` |
+| `subtype:<id>.field=value` | Every file of that type (`subtype` in `sdc.toml`). | `subtype`, `reencode`, `helper.*` |
 | `file:<glob>.field=value` | Files matching the glob ([glob rules](Project-Config.md#rules)). | |
 | `set:<set id>.shader=<shader>` | A texture set's shader ([shader ids](Set-Shaders.md)). The set id is what `inspect` prints after `set`; an id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. | Anything but `shader` |
 

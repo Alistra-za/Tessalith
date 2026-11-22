@@ -44,7 +44,7 @@ Download the zip from [Releases](https://github.com/Alistra-za/Tessalith/release
 **Command line**
 - Batch convert, inspect and validate. See the [CLI reference](docs/wiki/CLI-Reference.md).
 
-**What sets it apart.** It starts from what the file is: suffix and folder give a sub-type, and the sub-type sets format, tag, alpha and mips. Unclear files are skipped until you decide them. It blocks combinations Skyrim mishandles, such as `_SRGB` outside TruePBR colour under `cs`, or BC4/BC5 on a normal map. A manifest lets re-runs redo only what changed.
+**What sets it apart.** It starts from what the file is: suffix and folder give a type, and the type sets format, tag, alpha and mips. Unclear files are skipped until you decide them. It blocks combinations Skyrim mishandles, such as `_SRGB` outside TruePBR colour under `cs`, or BC4/BC5 on a normal map. A manifest lets re-runs redo only what changed.
 
 ## Uses the best encoder available
 

@@ -111,7 +111,7 @@ overrides = { ... }           # optional partial profile
 | `subtypes` | The file's type is one of these. A rule with this key never decides a type; it only adds settings once the type is known. |
 
 - All given match keys must match. A rule with no match keys matches everything.
-- `subtype` names the type for matching files. It decides the file's type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's type, a rule naming a different `subtype` doesn't apply to it.
+- `subtype` names the type (`subtype` in `sdc.toml`) for matching files. It decides the file's type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's type, a rule naming a different `subtype` doesn't apply to it.
 - `overrides` is a partial profile applied to matching files.
 
 ```toml
@@ -220,7 +220,7 @@ Also export needs the `cs` target. A value out of range is an error only when an
 
 ## Fields
 
-Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a `[files]` entry, except `subtype`, `target`, `category` and `resize_reference`: the type (`subtype` in `sdc.toml`) is decided per file, and the planner alone writes the other three. Defaults are the base preset's; a type or preset may change them, as noted.
+Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a `[files]` entry, except `subtype`, `target`, `category` and `resize_reference`: the type is decided per file, and the planner alone writes the other three. Defaults are the base preset's; a type or preset may change them, as noted.
 
 ### Type and colour
 

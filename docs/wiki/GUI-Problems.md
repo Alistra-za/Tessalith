@@ -110,7 +110,8 @@ Check the mode in the row before you remove anything. Some files are planned onl
 
 ## Deciding from the list
 
-- An undecided texture with a suggestion shows **Set type: X ✓** (a click decides it) and a **▾** for the type picker, which has a search box and the suggestion on top. With no suggestion it shows **Set type…**. **Accept all suggestions (n)** decides every texture that has one, as one undo step.- Tab to a row and press Enter or Space to accept its suggestion and move on to the next row.
+- An undecided texture with a suggestion shows **Set type: X ✓** (a click decides it) and a **▾** for the type picker, which has a search box and the suggestion on top. With no suggestion it shows **Set type…**. **Accept all suggestions (n)** decides every texture that has one, as one undo step.
+- Tab to a row and press Enter or Space to accept its suggestion and move on to the next row.
 
 An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 
@@ -120,9 +121,10 @@ After planning, Tessalith records High-confidence types and mesh-derived alpha p
 
 To check which normals can follow a shader, Tessalith reads the recorded types, file entries and slot locks once for the whole pass. <!-- D:JS5 -->
 
+**The Notes row** reads "{n} types set automatically: {a}, {b}, {c}, and {m} more"; hover for every file. A batch that set a type adds why: a known ending such as `_n`, the folder, or the meshes and grass that use it. <!-- D:LM7 -->
+
 - Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
 - Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->
-- **The Notes row** reads "{n} types set automatically: {a}, {b}, {c}, and {m} more"; hover for every file. A batch that set a type adds why: a known ending such as `_n`, the folder, or the meshes and grass that use it. <!-- D:LM7 -->
 - Your own type or alpha changes, including Undo, [need a save](GUI-Main-Window.md#header).
 - Saving presets can give a recorded normal a different type for that pass. A normal can follow its set into PBR with suggestion acceptance off. Its Info row omits confidence. If ownership can't be recorded in `sdc-project.toml`, the suggested type stays. <!-- D:JS5 -->
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
