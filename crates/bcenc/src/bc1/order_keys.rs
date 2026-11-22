@@ -420,6 +420,7 @@ mod tests {
         #[test]
         fn the_avx2_stamp_rounds_the_probes_as_the_scalar_code() {
             if !avx2_tested() {
+                eprintln!("skipped: avx2 is not among the tested paths");
                 return;
             }
             let t = Avx2::require();

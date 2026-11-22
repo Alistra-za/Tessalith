@@ -1395,6 +1395,7 @@ mod tests {
     #[test]
     fn two_pairs_in_a_vector_equal_two_scalar_calls() {
         if !avx2_tested() {
+            eprintln!("skipped: avx2 is not among the tested paths");
             return;
         }
         let t = Avx2::require();
@@ -1450,6 +1451,7 @@ mod tests {
     #[test]
     fn a_lone_last_pair_is_flushed() {
         if !avx2_tested() {
+            eprintln!("skipped: avx2 is not among the tested paths");
             return;
         }
         let t = Avx2::require();
