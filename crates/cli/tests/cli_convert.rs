@@ -66,6 +66,8 @@ impl Fx {
     fn sdc(&self) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_sdc"));
         c.env("APPDATA", self.p("appdata"));
+        // An inherited profile switch would add a report and a stderr line to every test.
+        c.env_remove("SDC_PROFILE");
         c
     }
 
@@ -2094,4 +2096,110 @@ fn property_words_are_trimmed_and_case_blind() {
         let o = fx.convert(&with(&DIFFUSE, &["--ev", "--property", bad]));
         assert_eq!(code(&o), 2, "{bad:?}: {}", text(&o.stderr));
     }
+}
+
+const PROFILE_ARGS: [&str; 5] = [
+    "--accept-suggestions",
+    "high",
+    "--set",
+    "file:**/*.png.subtype=diffuse",
+    "--jobs=2",
+];
+
+fn profile_fixture() -> Fx {
+    let fx = Fx::new();
+    fx.rgb_sized("a.png", 64, 40);
+    fx.rgb_sized("b.png", 32, 90);
+    fx
+}
+
+#[test]
+fn sdc_profile_writes_one_report_beside_the_same_outputs() {
+    let fx = profile_fixture();
+    let plain = fx.convert_to("out_a", &PROFILE_ARGS);
+    assert_eq!(code(&plain), 0, "{}", text(&plain.stderr));
+    let mut c = fx.convert_cmd("out_b", &PROFILE_ARGS);
+    c.env("SDC_PROFILE", fx.p("prof"));
+    let o = c.output().unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let (a, b) = (read_all(&fx.p("out_a")), read_all(&fx.p("out_b")));
+    assert!(!a.is_empty() && a == b);
+    let reports: Vec<PathBuf> = std::fs::read_dir(fx.p("prof"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    let name = reports[0]
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert!(
+        name.starts_with("profile-") && name.ends_with(".json"),
+        "{name}"
+    );
+    let r: Value = serde_json::from_slice(&std::fs::read(&reports[0]).unwrap()).unwrap();
+    assert_eq!(r["schema"], 1);
+    assert!(!r["spans"].as_array().unwrap().is_empty());
+    assert_eq!(r["jobs"].as_array().unwrap().len(), a.len());
+    assert!(
+        text(&o.stderr).lines().any(|l| l.starts_with("profile: ")),
+        "{}",
+        text(&o.stderr)
+    );
+    assert!(!text(&plain.stderr).contains("profile: "));
+    #[cfg(windows)]
+    assert!(r["process"]["peak_working_set"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn sdc_profile_naming_a_file_is_a_usage_error() {
+    let fx = profile_fixture();
+    let file = fx.write("not-a-folder", "x");
+    let below = file.join("sub");
+    for (i, target) in [file, below].into_iter().enumerate() {
+        let out = format!("out{i}");
+        let mut c = fx.convert_cmd(&out, &PROFILE_ARGS);
+        c.env("SDC_PROFILE", &target);
+        let o = c.output().unwrap();
+        assert_eq!(code(&o), 2, "{target:?}: {}", text(&o.stderr));
+        assert!(
+            text(&o.stderr).contains("SDC_PROFILE must name a folder"),
+            "{}",
+            text(&o.stderr)
+        );
+        assert!(!fx.p(&out).exists() || read_all(&fx.p(&out)).is_empty());
+        assert!(!fx.p(&out).join("_sdc").exists());
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_report_that_cannot_be_written_keeps_the_exit_code_and_outputs() {
+    let fx = profile_fixture();
+    let plain = fx.convert_to("out_a", &PROFILE_ARGS);
+    assert_eq!(code(&plain), 0, "{}", text(&plain.stderr));
+    let prof = fx.p("prof");
+    std::fs::create_dir_all(&prof).unwrap();
+    let acl = |args: &[&str]| {
+        assert!(Command::new("icacls")
+            .arg(&prof)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    };
+    acl(&["/deny", "*S-1-1-0:(WD)"]);
+    let check = std::panic::catch_unwind(|| {
+        let mut c = fx.convert_cmd("out_b", &PROFILE_ARGS);
+        c.env("SDC_PROFILE", &prof);
+        c.output().unwrap()
+    });
+    acl(&["/remove:d", "*S-1-1-0"]);
+    let o = check.unwrap_or_else(|p| std::panic::resume_unwind(p));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("warning: profile report not written"));
+    assert!(read_all(&fx.p("out_a")) == read_all(&fx.p("out_b")));
+    assert_eq!(std::fs::read_dir(&prof).unwrap().count(), 0);
 }

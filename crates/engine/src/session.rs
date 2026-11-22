@@ -365,6 +365,8 @@ pub struct Session {
     cache: AnalysisCache,
     /// The last uncancelled full plan's skeleton (fast re-plan), replaced wholesale by the next one.
     skeleton: Mutex<Option<Arc<Skeleton>>>,
+    /// `SDC_PROFILE`'s folder (`set_profile_out`).
+    profile_out: Option<PathBuf>,
 }
 
 impl Session {
@@ -378,6 +380,7 @@ impl Session {
                 ..Default::default()
             },
             skeleton: Mutex::new(None),
+            profile_out: None,
         })
     }
     /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to `max_bytes` (Note HV2: the caller's
@@ -502,6 +505,36 @@ impl Session {
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
         self.engine.run(plan, rep, cancel)
+    }
+
+    /// Where `export` writes one stage-timing report per call (`SDC_PROFILE`); `None`: no recorder is created.
+    pub fn set_profile_out(&mut self, dir: Option<PathBuf>) {
+        self.profile_out = dir;
+    }
+
+    /// `plan` then `run`. With a profile folder set, a recorder goes on the request and its report is written after
+    /// the run; a write error goes to stderr and the run's result is returned unchanged.
+    pub fn export(
+        &self,
+        mut req: BatchRequest,
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<BatchSummary, EngineError> {
+        let profiled = self.profile_out.as_deref().map(|dir| {
+            let rec = crate::profile::Recorder::new();
+            req.profile = Some(rec.clone());
+            (dir, rec)
+        });
+        let result = self
+            .plan(req, rep, cancel)
+            .and_then(|p| self.run(p, rep, cancel));
+        if let Some((dir, rec)) = profiled {
+            match rec.write_report(dir, &rep.batch, std::env::args().collect()) {
+                Ok(path) => eprintln!("profile: {}", path.display()),
+                Err(e) => eprintln!("warning: profile report not written: {e}"),
+            }
+        }
+        result
     }
     pub fn thumbnail(&self, job: &ResolvedJob) -> Option<Arc<Thumbnail>> {
         self.cache.thumbnail(job)

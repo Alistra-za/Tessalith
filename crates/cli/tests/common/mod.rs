@@ -8,5 +8,7 @@ pub fn sdc() -> Command {
         "APPDATA",
         std::env::temp_dir().join("sdc-test-appdata-none"),
     );
+    // An inherited profile switch would add a report and a stderr line to every test.
+    c.env_remove("SDC_PROFILE");
     c
 }

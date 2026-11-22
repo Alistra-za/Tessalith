@@ -12,7 +12,12 @@ fn build_model() -> AppModel {
         .map(settings::GuiSettings::load)
         .unwrap_or_default();
     let mut model = match Session::new() {
-        Ok(session) => {
+        Ok(mut session) => {
+            session.set_profile_out(
+                std::env::var_os("SDC_PROFILE")
+                    .filter(|v| !v.is_empty())
+                    .map(std::path::PathBuf::from),
+            );
             // Analyses are reused across runs (Note DZ); no `LOCALAPPDATA`, no store.
             let session = sdc_gui::with_analysis_cache(
                 session,

@@ -38,7 +38,34 @@ fn reporter(json: bool) -> Reporter {
     Reporter::new(tee_sink(json), new_batch_id())
 }
 
+/// `SDC_PROFILE`'s folder: `None` when unset or empty; a missing folder is created. A path that is not a folder, or
+/// cannot be created, is an error (a usage error: nothing has been written).
+fn profile_dir(v: Option<std::ffi::OsString>) -> Result<Option<std::path::PathBuf>, String> {
+    let Some(v) = v.filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let path = std::path::PathBuf::from(v);
+    let fail = |why: String| format!("SDC_PROFILE must name a folder: {}: {why}", path.display());
+    if path.exists() {
+        if !path.is_dir() {
+            return Err(fail("not a folder".into()));
+        }
+    } else {
+        std::fs::create_dir_all(&path).map_err(|e| fail(e.to_string()))?;
+    }
+    Ok(Some(path))
+}
+
+/// Write the report after a batch; a failure is a warning and never changes the exit code.
+fn write_profile(rec: &engine::profile::Recorder, dir: &std::path::Path, batch: &str) {
+    match rec.write_report(dir, batch, std::env::args().collect()) {
+        Ok(p) => err!("profile: {}", p.display()),
+        Err(e) => err!("warning: profile report not written: {e}"),
+    }
+}
+
 fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
+    let profile_out = profile_dir(std::env::var_os("SDC_PROFILE")).map_err(EngineError::Usage)?;
     let out = a
         .output
         .clone()
@@ -65,6 +92,10 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         (true, false) => EvScope::matching(a.property).map_err(EngineError::Usage)?,
     };
     req.dry_run = a.dry_run;
+    let profile = profile_out
+        .as_deref()
+        .map(|dir| (dir, engine::profile::Recorder::new()));
+    req.profile = profile.as_ref().map(|(_, r)| r.clone());
     // Before planning, so a Ctrl-C during a long scan is not lost. A failed install is not fatal, but it is
     // reported: without the handler Ctrl-C ends the process at once, as for any console program.
     let cancel = CancelToken::default();
@@ -93,7 +124,11 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             &spec,
             tee_sink(a.batch.json),
             &cancel,
-        )?;
+        );
+        if let Some((dir, rec)) = &profile {
+            write_profile(rec, dir, &new_batch_id());
+        }
+        let sum = sum?;
         // Plain lines on stderr (stdout carries the JSON lines): the files this export did not write, and the sets left out.
         for n in &sum.notes {
             err!("{n}");
@@ -104,8 +139,13 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         return Ok(sum.exit_code());
     }
     let rep = reporter(a.batch.json);
-    let plan = engine.plan(req, &rep, &cancel)?;
-    Ok(engine.run(plan, &rep, &cancel)?.exit_code())
+    let result = engine
+        .plan(req, &rep, &cancel)
+        .and_then(|plan| engine.run(plan, &rep, &cancel));
+    if let Some((dir, rec)) = &profile {
+        write_profile(rec, dir, &rep.batch);
+    }
+    Ok(result?.exit_code())
 }
 
 fn run(cli: Cli) -> Result<i32, EngineError> {
