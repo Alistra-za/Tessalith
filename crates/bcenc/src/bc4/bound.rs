@@ -9,9 +9,9 @@
 //! mode's 0 and 255, so a texel outside that cover costs at least what the tables count for it.
 //!
 //! The tables are exact over a window `[min - pad, max + pad]` clamped to 0..=255 and a pair with an end outside it has
-//! bound 0 (it is never pruned). The fill is one sum of 16 squared saturating differences per entry: SSE2 where the
-//! target has it, a scalar loop elsewhere; in the unit tests every fill also runs the scalar definition and asserts the
-//! same tables.
+//! bound 0 (the bound never prunes it; only a best of error 0 does). The fill is one sum of 16 squared saturating
+//! differences per entry: SSE2 where the target has it, a scalar loop elsewhere; in the unit tests every fill also runs
+//! the scalar definition and asserts the same tables.
 
 use super::minmax;
 
