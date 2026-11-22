@@ -140,6 +140,9 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
         f => {
             let bs = f.block_bytes().expect("block format");
             let max = e.bc45_search_radius == SearchRadius::Max;
+            let bc1s = bc1_search(e.bc1_search);
+            // A closure: `alpha_cut` asserts a cut of 1 or more, which only BC3 needs.
+            let cut = || bc3_cut(alpha_cut(&p.alpha));
             for (blk, src) in o.chunks_mut(bs).zip(b.chunks(BLOCK_TEXELS)) {
                 let src: &[[u8; 4]; 16] = src.try_into().unwrap();
                 match f {
@@ -171,16 +174,16 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                     )),
                     Format::Bc3 if max => blk.copy_from_slice(&bcenc::bc3_encode_block_max_with(
                         src,
-                        bc3_cut(alpha_cut(&p.alpha)),
+                        cut(),
                         e.perceptual,
-                        bc1_search(e.bc1_search),
+                        bc1s,
                     )),
                     Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block_with(
                         src,
                         radius(e.bc45_search_radius),
-                        bc3_cut(alpha_cut(&p.alpha)),
+                        cut(),
                         e.perceptual,
-                        bc1_search(e.bc1_search),
+                        bc1s,
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
                     Format::Bc4 if max => blk.copy_from_slice(&bcenc::bc4_encode_block_max(src, 0)),

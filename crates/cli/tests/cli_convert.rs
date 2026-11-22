@@ -1031,13 +1031,18 @@ fn invalid_configs_are_exit_2_and_valid_ones_are_really_read() {
     );
 }
 
-/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
-fn noise(fx: &Fx, name: &str) {
-    let mut state = 12345u32;
-    let mut next = move || {
+/// The bytes of a linear congruential generator seeded with `seed`.
+fn lcg(seed: u32) -> impl FnMut() -> u8 {
+    let mut state = seed;
+    move || {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
         (state >> 24) as u8
-    };
+    }
+}
+
+/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
+fn noise(fx: &Fx, name: &str) {
+    let mut next = lcg(12345);
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([next(), next(), next()]))
         .save(fx.p(&format!("in/textures/a/{name}")))
         .unwrap();
@@ -1048,13 +1053,8 @@ fn noise(fx: &Fx, name: &str) {
 #[test]
 fn bc45_search_radius_spellings_reach_the_encoder() {
     let fx = Fx::new();
-    let mut state = 777u32;
-    let grey: Vec<u8> = (0..32 * 32)
-        .map(|_| {
-            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
-            (state >> 24) as u8
-        })
-        .collect();
+    let mut next = lcg(777);
+    let grey: Vec<u8> = (0..32 * 32).map(|_| next()).collect();
     ImageBuffer::from_fn(32, 32, |x, y| image::Luma([grey[(y * 32 + x) as usize]]))
         .save(fx.p("in/textures/a/g.png"))
         .unwrap();

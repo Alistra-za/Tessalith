@@ -514,10 +514,6 @@ fn max_routes_to_the_pair_search_and_slowest_keeps_radius_10() {
         let perceptual = p.encoder.perceptual;
         let max = encode(&input, 32, 32, &with_radius(p.clone(), "max"));
         let slowest = encode(&input, 32, 32, &with_radius(p, "slowest"));
-        assert_ne!(
-            max, slowest,
-            "{fmt:?}: the fixture must tell Max from Slowest"
-        );
         let bs = fmt.block_bytes().unwrap();
         assert_eq!(max.len(), blocks.len() / 16 * bs);
         for (i, src) in blocks.chunks(16).enumerate() {
@@ -553,6 +549,10 @@ fn max_routes_to_the_pair_search_and_slowest_keeps_radius_10() {
                 "{fmt:?} slowest block {i}"
             );
         }
+        assert_ne!(
+            max, slowest,
+            "{fmt:?}: the fixture must tell Max from Slowest"
+        );
     }
 }
 
@@ -588,8 +588,14 @@ fn max_bc3_guards_at_the_textures_cut() {
             [0xed, 0x1e, 0x87, 0x22, 0x20, 0x06, 0xd1, 0x66],
             "block {i} literal at cut 201"
         );
-        assert_ne!(half, bcenc::bc4_encode_alpha_max(&alpha, 128), "block {i}");
-        // The fallback at 128, for the reader of a failure: ea 04 86 2e 20 c5 50 7e.
+        // The fallback at cut 128, which a Max arm that hard-coded 128 would write.
+        let at_128 = bcenc::bc4_encode_alpha_max(&alpha, 128);
+        assert_eq!(
+            at_128,
+            [0xea, 0x04, 0x86, 0x2e, 0x20, 0xc5, 0x50, 0x7e],
+            "block {i} literal at cut 128"
+        );
+        assert_ne!(half, at_128, "block {i}");
     }
 }
 
