@@ -166,3 +166,18 @@ impl EventSink for TeeSink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validation_clause;
+
+    #[test]
+    fn the_done_line_validation_clause_has_three_cases() {
+        assert_eq!(validation_clause(true, 2), "2 failed validation");
+        assert_eq!(validation_clause(false, 0), "validation off");
+        assert_eq!(
+            validation_clause(false, 1),
+            "1 failed validation (complex types only)"
+        );
+    }
+}

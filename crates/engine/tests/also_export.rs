@@ -208,6 +208,7 @@ fn the_also_phases_follow_the_requests_validate() {
             cup(m);
         });
         let mut r = request(&m, &loc);
+        r.overrides.clear(); // the Vanilla phase encodes the perceptual diffuse (Note FM43)
         r.validate = validate;
         let (s, ev) = also(r, &spec(&loc, BOTH));
         s.unwrap();
@@ -247,9 +248,16 @@ fn the_also_phases_follow_the_requests_validate() {
                     .is_none(),
                 "complex_material is always validated"
             );
+            // The Vanilla phase's own encode follows the switch too (Note FM43: the perceptual diffuse is encoded).
+            let enc = record(&van, "textures/clutter/cup.dds");
+            assert!(enc.raw["copied_from"].is_null(), "encoded, not copied");
+            assert_eq!(enc.raw["validation"]["skipped"], true);
         }
         let copy = record(&van, "textures/clutter/cup_n.dds");
-        assert!(copy.raw.get("copied_from").is_some(), "validate={validate}");
+        assert!(
+            !copy.raw["copied_from"].is_null(),
+            "validate={validate}: a copy"
+        );
         assert_eq!(
             copy.raw["validation"],
             record(&pbr, "textures/clutter/cup_n.dds").raw["validation"],
