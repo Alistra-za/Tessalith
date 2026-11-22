@@ -1061,7 +1061,12 @@ fn bc45_search_radius_spellings_reach_the_encoder() {
     let texels: Vec<[u8; 4]> = grey.iter().map(|&g| [g, g, g, 255]).collect();
     let src = encoders_sys::gather_blocks(&texels, 32, 32);
     let mut payloads: BTreeMap<&str, Vec<u8>> = BTreeMap::new();
-    for (spelling, r) in [("fast", 4), ("default", 5), ("slowest", 10), ("max", 0)] {
+    for (spelling, r) in [
+        ("fast", Some(4)),
+        ("default", Some(5)),
+        ("slowest", Some(10)),
+        ("max", None),
+    ] {
         let out = format!("out_{spelling}");
         let setting = format!("encoder.bc45_search_radius={spelling}");
         let o = fx.convert_to(
@@ -1095,7 +1100,8 @@ fn bc45_search_radius_spellings_reach_the_encoder() {
         let (w, h, range) = f.surfaces()[0].clone();
         assert_eq!((w, h), (32, 32));
         let payload = f.data[range].to_vec();
-        if r != 0 {
+        // `max` has no rgbcx counterpart to compare with.
+        if let Some(r) = r {
             let want: Vec<u8> = src
                 .chunks(16)
                 .flat_map(|b| encoders_sys::bc4_encode_block(b.try_into().unwrap(), 0, r))
