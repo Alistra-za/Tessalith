@@ -110,7 +110,7 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
         let verdict = match layout {
             None => JobStatus::Unresolved {
                 reasons: vec![format!(
-                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's sub-type.{}",
+                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's type.{}",
                     if w == 2 * h {
                         " 3.0 no longer reads panoramas: convert it to six faces, a cross or a strip first."
                     } else {

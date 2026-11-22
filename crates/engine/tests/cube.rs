@@ -756,7 +756,12 @@ fn a_square_image_names_the_accepted_sources() {
         r.contains("1024x1024 is not six faces, a cross or a strip"),
         "{r}"
     );
-    assert!(r.contains("sub-type") && !r.contains("equirect"), "{r}");
+    assert!(
+        r.contains("Change this file's type.")
+            && !r.contains("sub-type")
+            && !r.contains("equirect"),
+        "{r}"
+    );
 }
 
 #[test]

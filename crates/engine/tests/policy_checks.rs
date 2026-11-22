@@ -2196,6 +2196,17 @@ fn kaiser_on_srgb_diffuse_without_alpha_is_allowed() {
 }
 
 #[test]
+fn filter_reasons_cite_no_spec() {
+    let j = m6_job(&["subtype=normal", "file:**/x.png.mips.filter=tent"]);
+    let msgs = cfg_invalid(&j);
+    let reason = msgs
+        .iter()
+        .find(|m| m.starts_with("mips.filter = tent: ") && m.contains("sRGB colour only"))
+        .expect("file-scoped Tent on a normal emits the detailed CFG-INVALID");
+    assert!(!reason.contains('§'), "{reason}");
+}
+
+#[test]
 fn non_box_filters_are_cfg_invalid_outside_srgb_colour() {
     for st in [
         "normal",

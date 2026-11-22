@@ -1498,12 +1498,12 @@ fn encoding_warnings(
     if srgb && target != Target::Cs {
         add(
             TagSrgbVanilla,
-            "_SRGB is not usable under vanilla shaders [D#4]".into(),
+            "_SRGB is not usable under vanilla shaders".into(),
         );
     } else if srgb && !st.is_pbr_color() {
         add(
             TagSrgbNonpbr,
-            "_SRGB on a non-PBR sub-type renders darker [SC §6]".into(),
+            "_SRGB on a non-PBR type renders darker".into(),
         );
     }
     // Blocking since the owner's 2026-10-13 ruling: PBR colour is sRGB only.
@@ -1517,7 +1517,7 @@ fn encoding_warnings(
     if category == Category::Normal && st != Subtype::SkinDetail && !stores_xyz(format) {
         add(
             FmtBc5Normal,
-            "BC4/BC5/R8/RG8 on a normal: Skyrim reads Z directly, so Z decodes -1 and alpha is lost [SC §2]".into(),
+            "BC4/BC5/R8/RG8 on a normal: Skyrim reads Z directly, so Z decodes -1 and alpha is lost".into(),
         );
     }
     if st == Subtype::LandscapeDiffuse && format == Format::Bc1 {
@@ -1757,7 +1757,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
                 "accept the fallback {} with --allow CFG-UNAVAILABLE",
                 fb.id()
             ),
-            None => "no fallback; change the sub-type or the target".to_string(),
+            None => "no fallback; change the type or the target".to_string(),
         };
         return vec![Warning::new(
             CfgUnavailable,
@@ -1961,7 +1961,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
     {
         add(
             FmtPerceptualData,
-            "perceptual BC1/BC3/BC7 is allowed only for colour without data alpha [B2 §1]".into(),
+            "perceptual BC1/BC3/BC7 is allowed only for colour without data alpha".into(),
         );
     }
     // DECISIONS Note CP: the weights reach bc7e only, and only without perceptual (bc7e's own weights win there).
@@ -2211,7 +2211,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             ..Warning::new(
                 CfgUnavailable,
                 if p.format == Format::Bc6hUf16 {
-                    "BC6H is usable only under Community Shaders [D#3]; choose another format"
+                    "BC6H is usable only under Community Shaders; choose another format"
                 } else {
                     "RGBA16F is usable only under Community Shaders (DECISIONS S4); choose another format"
                 },
@@ -2271,12 +2271,12 @@ fn packing_input_job(
     let profile = ctx.registry.base_profile(ctx.target, Subtype::GenericData);
     let msg = if hand {
         format!(
-            "helper.role = \"{}\": a channel-packing input (spec §6.4), not converted on its own; set helper.role = \"none\" to convert it alone",
+            "helper.role = \"{}\": a channel-packing input, not converted on its own; set helper.role = \"none\" to convert it alone",
             role.id()
         )
     } else {
         format!(
-            "_{term} is a raw {} map: a channel-packing input (spec §6.4), not converted on its own; set a sub-type for it to convert it alone",
+            "_{term} is a raw {} map: a channel-packing input, not converted on its own; set a type for it to convert it alone",
             role.id()
         )
     };
@@ -2453,13 +2453,13 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         }
         reasons.push(match d.suggestions.first() {
             Some(s) => format!(
-                "sub-type '{}' is a {:?}-confidence suggestion ({})",
+                "type '{}' is a {:?}-confidence suggestion ({})",
                 s.subtype.id(),
                 s.confidence,
                 s.reason
             ),
             None if unknown_suffix => UNKNOWN_SUFFIX.into(),
-            None => "no sub-type could be suggested; set one".into(),
+            None => "no type could be suggested; set one".into(),
         });
     }
     // Spec §4.2: an unavailable sub-type with a fallback is resolved as the fallback when the user accepts it

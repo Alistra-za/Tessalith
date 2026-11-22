@@ -4181,7 +4181,7 @@ fn check_file_subtype(o: &SetOverride) -> Result<(), EngineError> {
                 .map(|_| ())
                 .map_err(|_| {
                     EngineError::Config(format!(
-                        "[files.\"{key}\"] subtype: unknown sub-type {}",
+                        "[files.\"{key}\"] subtype: unknown type {}",
                         o.value
                     ))
                 })
@@ -4248,7 +4248,7 @@ fn check_up_front(
     let usage = EngineError::Usage;
     for o in req.overrides.iter().filter(|o| o.field == "subtype") {
         serde_json::from_value::<Subtype>(o.value.clone())
-            .map_err(|_| usage(format!("--set subtype: unknown sub-type {}", o.value)))?;
+            .map_err(|_| usage(format!("--set subtype: unknown type {}", o.value)))?;
     }
     // DECISIONS N2: the project config's `[files]` entries are held to the same checks, as config errors.
     let mut file_overrides = vec![];

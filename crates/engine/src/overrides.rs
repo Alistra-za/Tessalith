@@ -438,20 +438,20 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
             .split_once('.')
             .ok_or_else(|| format!("--set '{s}': expected subtype:<id>.<field>"))?;
         let st: Subtype = serde_json::from_value(Value::String(id.to_string()))
-            .map_err(|_| format!("--set '{s}': unknown sub-type '{id}'"))?;
+            .map_err(|_| format!("--set '{s}': unknown type '{id}'"))?;
         if field == "subtype" {
             return Err(format!(
-                "--set '{s}': a sub-type scope cannot set the sub-type"
+                "--set '{s}': a `subtype:` scope cannot set the type"
             ));
         }
         if field == REENCODE_FIELD {
             return Err(format!(
-                "--set '{s}': reencode is decided per file, before the sub-type: use reencode=true or file:<glob>.reencode=true"
+                "--set '{s}': reencode is decided per file, before the type: use reencode=true or file:<glob>.reencode=true"
             ));
         }
         if crate::helper::FIELDS.contains(&field) {
             return Err(format!(
-                "--set '{s}': {field} is decided per file, before the sub-type: use file:<glob>.{field}=<…>"
+                "--set '{s}': {field} is decided per file, before the type: use file:<glob>.{field}=<…>"
             ));
         }
         if !known(field) {
@@ -503,7 +503,7 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     };
     // A sub-type decides the whole profile, so a misspelt one must not be ignored.
     if field == "subtype" && value.as_str().and_then(Subtype::from_id).is_none() {
-        return Err(format!("--set '{s}': unknown sub-type '{raw}'"));
+        return Err(format!("--set '{s}': unknown type '{raw}'"));
     }
     if field == REENCODE_FIELD && !value.is_boolean() {
         return Err(format!("--set '{s}': reencode takes true or false"));
