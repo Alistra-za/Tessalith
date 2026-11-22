@@ -360,7 +360,8 @@ mod xpmf_card;
 mod xpmf_export;
 #[path = "../xpmf_json.rs"]
 mod xpmf_json;
-// Beside this file, not under `tests/`: the return scan that `every_early_return_in_a_test_says_why` runs.
+// Beside this file in `tests/it/`, so it needs no `#[path]`: the return scan that
+// `every_early_return_in_a_test_says_why` runs.
 mod return_scan;
 
 /// `autotests = false` (Cargo.toml): a file that is neither a module here nor a `[[test]]` target is never compiled,
@@ -568,6 +569,8 @@ fn process_state_needles_match_the_files_kept_apart() {
     );
 }
 
+// shortcut: it follows directory links, so a link cycle would recurse without end; upgrade when a link appears under
+// a scanned root.
 /// Pushes every `.rs` file under `root`, recursively, following links to directories. A `root` that does not exist is
 /// skipped unless `required`; every other read error (listing a directory, reading an entry, reading an entry's
 /// metadata) propagates.

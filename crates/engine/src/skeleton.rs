@@ -268,8 +268,8 @@ impl Skeleton {
                 n.file_scopes.rebuild_keys();
             }
             // shortcut: the [files] documents, the request and file_scopes (all but the shared `forms`) are copied
-            // whole on every patch, since patch writes them; upgrade when a re-plan of a project with a large [files] table shows them in the
-            // allocation profile.
+            // whole on every patch, since patch writes them; upgrade when a re-plan of a project with a large [files]
+            // table shows them in the allocation profile.
             // Keep the documents in step with the layer, as a fresh `prepare` would read them.
             for doc in [
                 n.project_config.as_mut(),

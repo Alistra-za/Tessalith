@@ -1,5 +1,5 @@
-//! The return scan (Note LH3): every early `return` in a test says why. It reads the sources of the test crates with
-//! the walker in `main.rs`.
+//! The return scan (Note LH3): every early `return` in a test says why. It reads `src` and `tests` of the six
+//! main-team crates with the walker in `main.rs`.
 
 use super::rs_files;
 
@@ -144,7 +144,8 @@ const SKIP_HELPERS: [&str; 2] = ["render_state()", "skip_byte_pins()"];
 // (`if a() { println!("a"); }` above `if b() { return; }`) and a helper behind `||` on the condition line
 // (`if other() || skip_byte_pins() {`) both pass, as do a helper on a `{ } else {` line above the return (the
 // return sits in the branch where the helper did not fire) and `helper() == false`; upgrade to tracking the block at
-// the print token and matching the exact guard shapes (`if helper() {`, `let ... = helper() else { return };`) when a test writes either shape.
+// the print token and matching the exact guard shapes (`if helper() {`, `let ... = helper() else { return };`) when a
+// test writes any of these shapes.
 fn unexplained_returns(
     label: &str,
     text: &str,
