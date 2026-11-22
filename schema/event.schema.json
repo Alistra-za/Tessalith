@@ -2378,12 +2378,14 @@
         },
         "checked": {
           "default": 0,
+          "description": "Of `up_to_date`, outputs checked in place during this run.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "checked_failed": {
           "default": 0,
+          "description": "Of `checked`, outputs whose validation reported an error.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"

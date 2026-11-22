@@ -1255,6 +1255,32 @@ fn a_failed_pbr_check_reencodes_the_vanilla_copy() {
         .any(|e| e["job_key"] == format!("in Vanilla/{key}") && e["kind"] == "file_done"));
 }
 
+#[test]
+fn a_check_in_a_later_also_phase_keys_its_events_with_the_phase_prefix() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.project_config(ALSO_ALL);
+    assert_eq!(code(&fx.convert_cmd("out", &HI).output().unwrap()), 0);
+    let o = fx
+        .convert_cmd("out", &[HI[0], HI[1], "--validate"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let checked: Vec<String> = events(&o)
+        .iter()
+        .filter(|e| {
+            e["kind"] == "file_skipped"
+                && e["reason"]
+                    .as_str()
+                    .is_some_and(|r| r.ends_with("checked in place"))
+        })
+        .map(|e| e["job_key"].as_str().unwrap().to_string())
+        .collect();
+    // The key the phase's other events carry (a file_done of the same output in the first run uses it too).
+    let key = "in Vanilla/textures/arm/steel.dds";
+    assert!(checked.iter().any(|k| k == key), "{checked:?}");
+}
+
 /// DECISIONS Note M5: `--set packing.fill.<role>` writes a packed channel that has no source; it is provenance
 /// `fill:<v>` and not a defaulted channel.
 #[test]

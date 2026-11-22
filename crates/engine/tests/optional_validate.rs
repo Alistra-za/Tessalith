@@ -383,7 +383,9 @@ fn an_older_encode_output_is_not_checked_in_place() {
     let mut old: Value = serde_json::from_str(line).unwrap();
     old["encode_version"] = "0.9.0".into();
     std::fs::write(manifest.path(), format!("{old}\n{rest}")).unwrap();
-    let (s, _) = convert(d.path(), "out", true, OnExisting::IfChanged);
+    let mut req = request(d.path(), "out", true, OnExisting::IfChanged);
+    req.ev = EvScope::Off;
+    let (s, _) = run(req);
     assert_eq!(s.kept_older_encode, 1);
     assert_eq!(s.checked, first.converted - 1);
     assert_eq!(

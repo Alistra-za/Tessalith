@@ -554,8 +554,7 @@ pub fn process_file(
 
     enter(Stage::Compress);
     let levels = encode_levels(&prep, p, cancel, rep, &key, set, path)?;
-    // Mips per face: the header's count.
-    let total = (prep.inputs.len() / prep.faces) as u32;
+    let total = levels_per_face(&prep);
 
     enter(Stage::Write);
     let srgb = p.srgb_tag();
@@ -650,6 +649,11 @@ pub fn process_file(
     }))
 }
 
+/// Mips per face: the header's count, and the level count validation expects, on the encode and the check path alike.
+fn levels_per_face(prep: &Prepared) -> u32 {
+    (prep.inputs.len() / prep.faces) as u32
+}
+
 fn validate_prepared(bytes: &[u8], profile: &Profile, prep: &Prepared) -> ValidationReport {
     validate(&ValidationInput {
         bytes,
@@ -657,7 +661,7 @@ fn validate_prepared(bytes: &[u8], profile: &Profile, prep: &Prepared) -> Valida
         encoder_input: Some(&prep.inputs),
         base_coverage: prep.base_coverage,
         source_peak: prep.source_peak,
-        expected_levels: Some((prep.inputs.len() / prep.faces) as u32),
+        expected_levels: Some(levels_per_face(prep)),
     })
 }
 
@@ -782,14 +786,7 @@ mod tests {
         let bytes = std::fs::read(&job.output).unwrap();
         let modified = std::fs::metadata(&job.output).unwrap().modified().unwrap();
         let prep = prepare(&job, &cancel, &FileTracker::default(), Keep::Encode).unwrap();
-        let report = validate(&ValidationInput {
-            bytes: &bytes,
-            profile: &job.profile,
-            encoder_input: Some(&prep.inputs),
-            base_coverage: prep.base_coverage,
-            source_peak: prep.source_peak,
-            expected_levels: Some((prep.inputs.len() / prep.faces) as u32),
-        });
+        let report = validate_prepared(&bytes, &job.profile, &prep);
         let lines = line_count(&manifest);
         std::fs::write(&job.output, b"changed").unwrap();
         let changed = commit_check(&job, &entry, &report, &cancel, &manifest);

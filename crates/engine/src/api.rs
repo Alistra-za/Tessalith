@@ -553,7 +553,9 @@ impl Plan {
     }
 }
 
+/// The suffix after `up to date; ` in the `file_skipped` reason of a current output checked in place that passed.
 pub const CHECKED_IN_PLACE: &str = "checked in place";
+/// The same suffix when the check's validation reported an error.
 pub const CHECKED_IN_PLACE_FAILED: &str = "checked in place: failed validation";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -585,8 +587,8 @@ pub struct BatchSummary {
 
 impl BatchSummary {
     /// Spec §8 precedence for a batch that ran: 1 partial (unintentionally skipped, failed or cancelled
-    /// files) > 4 validation failed on a written or checked output > 0. Up-to-date files, raw packing inputs and intentional skips
-    /// (DECISIONS Note I) do not make a batch partial. (2 and 3 come from
+    /// files) > 4 validation failed on a written or checked output > 0. Up-to-date files, raw packing inputs and
+    /// intentional skips (DECISIONS Note I) do not make a batch partial. (2 and 3 come from
     /// `EngineError`.)
     pub fn exit_code(&self) -> i32 {
         let unintended = self.skipped.saturating_sub(self.skipped_intentional);
@@ -3675,7 +3677,7 @@ impl Engine {
         let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
         enum Work<'a> {
             Encode(&'a ResolvedJob, PresetRef, bool),
-            Check(&'a ResolvedJob, &'a ManifestEntry),
+            Check(&'a ResolvedJob, String, &'a ManifestEntry),
         }
         let mut todo = vec![];
         for (job, job_key, recorded) in classify_ready_jobs(&plan, &existing, &pool, cancel) {
@@ -3712,7 +3714,7 @@ impl Engine {
                                 && entry.raw["copied_from"].is_null()
                                 && pack_identity_matches(entry, job)
                         }) {
-                            todo.push(Work::Check(job, entry));
+                            todo.push(Work::Check(job, job_key.clone(), entry));
                             continue;
                         }
                     }
@@ -3794,7 +3796,7 @@ impl Engine {
         pool.in_place_scope(|scope| {
             for work in &todo {
                 let job = match *work {
-                    Work::Check(job, _) | Work::Encode(job, ..) => job,
+                    Work::Check(job, ..) | Work::Encode(job, ..) => job,
                 };
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
@@ -3816,8 +3818,8 @@ impl Engine {
                         return;
                     }
                     match *work {
-                        Work::Check(_, entry) => {
-                            check_one(job, entry, cancel, rep, manifest, state)
+                        Work::Check(_, ref job_key, entry) => {
+                            check_one(job, job_key, entry, cancel, rep, manifest, state)
                         }
                         Work::Encode(_, ref preset, replace_existing) => run_one(
                             job,
@@ -3912,7 +3914,10 @@ fn kept_warnings(
     out
 }
 
-/// Pass two can select the same profile after pass one's source-channel choice changed.
+/// Whether a packed job's recorded `pack.*` provenance entries equal the ones it resolves now: the same keys, and
+/// each label serialised to JSON equals the recorded value. Pass two can select the same profile after pass one's
+/// source-channel choice changed, so the profile hash alone does not identify the pack. A job without `pack` has
+/// nothing to compare and returns true.
 pub(crate) fn pack_identity_matches(entry: &ManifestEntry, job: &ResolvedJob) -> bool {
     if job.pack.is_none() {
         return true;
@@ -3927,7 +3932,9 @@ pub(crate) fn pack_identity_matches(entry: &ManifestEntry, job: &ResolvedJob) ->
     let count = recorded.keys().filter(|k| k.starts_with("pack.")).count();
     expected.clone().count() == count
         && expected.all(|(key, label)| {
-            recorded.get(key).and_then(Value::as_str) == Some(label.to_string().as_str())
+            serde_json::to_value(label)
+                .ok()
+                .is_some_and(|value| recorded.get(key) == Some(&value))
         })
 }
 
@@ -3947,23 +3954,17 @@ fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
     });
 }
 
-/// Check one admitted current output. Only the manifest is updated on success.
+/// Check one admitted current output. Only the manifest is updated on success. Events carry the run loop's `job_key`.
 fn check_one(
     job: &ResolvedJob,
+    job_key: &str,
     entry: &ManifestEntry,
     cancel: &CancelToken,
     rep: &Reporter,
     manifest: &Manifest,
     state: &Mutex<BatchSummary>,
 ) {
-    let emit = |kind| {
-        rep.emit_job(
-            Some(&entry.output),
-            Some(&job.set_key),
-            Some(&job.input),
-            kind,
-        )
-    };
+    let emit = |kind| rep.emit_job(Some(job_key), Some(&job.set_key), Some(&job.input), kind);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         check_in_place(job, entry, cancel, manifest)
     }));
