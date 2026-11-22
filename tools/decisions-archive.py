@@ -197,9 +197,10 @@ def apply(root, rows):
             continue
         heading = live[next(i for i in range(a, -1, -1) if live[i].startswith("## "))]
         block = [archived_line(r), *live[a:b]]
-        # A partial row's live text was edited after its old wording was archived: archiving it again would file
-        # the current wording as "before the edit" (T8-a). A whole move still archives whatever is live now.
-        if r["class"] == "partial" and any(archived_already(d, r) for d in done):
+        # A partial row whose own entry (same superseders and date) is already archived was applied before; its live
+        # text has been edited since, and archiving it again would file the current wording as "before the edit"
+        # (T8-a). An ID archived earlier under another superseder gets a further entry. A whole move archives what is live now.
+        if r["class"] == "partial" and any(partial_done(d, r) for d in done):
             continue
         if not contains(arc, live[a:b]):
             add_block(arc, heading, block)
@@ -217,6 +218,27 @@ def archived_already(arc, r):
         return find_span(arc, r) is not None
     except LookupError2:  # more than one match: archived (at least once)
         return True
+
+
+def partial_done(arc, r):
+    """True when `arc` holds an entry for the partial row's ID whose ARCHIVED line names the row's superseders and date."""
+    if is_section(r):
+        return archived_already(arc, r)
+    note, _, prefix = r["id"].partition("¶")
+    rng = section_range(arc, note if prefix else r["note"])
+    if rng is None:
+        return False
+    sups = [s.strip() for s in r.get("superseder", "").split(",") if s.strip()]
+    date = r.get("date") or "2026-10-31"
+    head = re.compile(rf"^\s*- (?:\*\*{re.escape(r['id'])}(?![0-9A-Za-z-])|{re.escape(r['id'])}\.)")
+    for i in range(rng[0] + 1, rng[1] - 1):
+        a = arc[i]
+        if not a.startswith("ARCHIVED") or date not in a or not all(re.search(rf"Note {re.escape(s)}(?![0-9A-Za-z])", a) for s in sups):
+            continue
+        nxt = arc[i + 1]
+        if nxt.strip().startswith(prefix) if prefix else head.match(nxt):
+            return True
+    return False
 
 
 def deleted_lines(old, new):
@@ -418,7 +440,26 @@ def self_test():
         apply(root, ROWS)
         ok("re-applying a partial row after its live text was edited leaves the archive alone (T8-a)",
            (root / ARC).read_bytes() == before[1] and (root / DEC).read_bytes() == edited)
+        # An ID already archived once and partly superseded again: the replaced wording is a further entry (same
+        # format, same note heading), and a rerun of that table after another edit archives nothing more.
+        again = [{"id": "DU2", "note": "DU", "class": "partial", "superseder": "DW1", "date": "2026-11-01"}]
+        apply(root, again)
+        arc2 = (root / ARC).read_bytes().decode().replace("\r\n", "\n")
+        first = "ARCHIVED (wording before the edit; superseded in part by Note DV4, 2026-10-28)\n- DU2. **Two.** text\n"
+        second = ("ARCHIVED (wording before the edit; superseded in part by Note DW1, 2026-11-01)\n"
+                  "- DU2. **Two.** edited to the current rule\n")
+        ok("a repeated ID: the replaced wording is a further entry under the same heading (T8-b)",
+           arc2.count("- DU2. **Two.**") == 2 and arc2.index(first) < arc2.index(second)
+           and arc2.index("## Note DU ") < arc2.index(first) and arc2.count("## Note DU ") == 1
+           and (root / DEC).read_bytes() == edited)
+        kept = ((root / DEC).read_bytes(), (root / ARC).read_bytes())
+        (root / DEC).write_bytes(edited.replace(b"edited to the current rule", b"edited a third time"))
+        apply(root, again)
+        ok("a rerun after a further edit archives no new text and changes nothing (T8-c)",
+           (root / ARC).read_bytes() == kept[1]
+           and (root / DEC).read_bytes() == edited.replace(b"edited to the current rule", b"edited a third time"))
         (root / DEC).write_bytes(before[0])
+        (root / ARC).write_bytes(before[1])
         (root / FROZEN).write_bytes(b"# DECISIONS 1.x (frozen)\n\n## Note Q - q\n\n- **Q1 Live.** x\n\n"
                                     b"# Archived\n\n## Note Q - q\n\nARCHIVED (superseded by Note R, 2026-10-11)\n"
                                     b"- **Q2 Old.** y\n")
