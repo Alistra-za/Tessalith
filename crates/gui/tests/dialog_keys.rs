@@ -3,6 +3,7 @@ mod support;
 use eframe::egui::{self, Key};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use sdc_gui::model::set_json_copy::{JsonGroup, JsonRow};
 use sdc_gui::model::{AppModel, Dialog, DocKind};
 use serde_json::json;
 use support::*;
@@ -315,6 +316,12 @@ fn esc_closes_the_dialogs_that_use_the_shared_modal() {
             to: vec![],
             fields: vec![],
         },
+        Dialog::CopySetJson {
+            source: "a".into(),
+            paste: false,
+            to: vec![],
+            rows: vec![],
+        },
     ] {
         let mut m = opened(d.path());
         m.dialog = Some(dialog.clone());
@@ -338,6 +345,51 @@ fn enter_never_decides_a_decision_dialog() {
         Some(dialog.clone()),
         "Enter did something in {dialog:?}"
     );
+}
+
+/// The JSON copy dialog is a decision dialog too: Enter does nothing (R18), so it neither applies the ticked row nor
+/// closes.
+#[test]
+fn enter_leaves_the_copy_json_dialog_and_the_document_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let row = JsonRow {
+        group: JsonGroup::Pgp,
+        key: "emissive".into(),
+        label: "Emissive".into(),
+        value: json!(true),
+    };
+    let dialog = Dialog::CopySetJson {
+        source: "rock01".into(),
+        paste: false,
+        to: vec!["landscape/leaf".into()],
+        rows: vec![(row.clone(), true)],
+    };
+    let mut m = pbr_opened(d.path());
+    // Leaf is a PGPatcher JSON set, so an Apply would write the row: an Enter that applied would change the document.
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let leaf = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        m.json_skip(&leaf, false, &row),
+        None,
+        "premise: leaf takes the row"
+    );
+    let before = m.sets_doc.as_ref().unwrap().text();
+    m.dialog = Some(dialog.clone());
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert_eq!(h.state().dialog, Some(dialog));
+    assert_eq!(h.state().sets_doc.as_ref().unwrap().text(), before);
 }
 
 #[test]

@@ -44,6 +44,7 @@ pub mod rename;
 pub mod review;
 pub mod sections;
 pub mod set_groups;
+pub mod set_json_copy;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
@@ -364,6 +365,13 @@ pub enum Dialog {
         from: String,
         to: Vec<String>,
         fields: Vec<(String, bool)>,
+    },
+    /// Copy (or paste) the ticked JSON settings of set `source` (its card name) to the sets `to` (document ids).
+    CopySetJson {
+        source: String,
+        paste: bool,
+        to: Vec<String>,
+        rows: Vec<(set_json_copy::JsonRow, bool)>,
     },
     /// F3a D4: remove the `[files]` settings of these textures, once confirmed.
     ConfirmResetAll(Vec<String>),

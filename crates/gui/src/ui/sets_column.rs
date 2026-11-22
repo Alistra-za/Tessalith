@@ -3837,6 +3837,17 @@ fn menu(
         acts.push(Act::EditMatch(v.id.clone()));
         ui.close();
     }
+    // The same entry as the sets menu: with one set selected it reads "to 0 selected…" and says why it is off.
+    let copy = model.copy_json_entry();
+    let r = ui.add_enabled(copy.disabled.is_none(), egui::Button::new(&copy.label));
+    let r = match &copy.disabled {
+        Some(why) if editing.on => r.on_disabled_hover_text(why),
+        _ => tip(r),
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(copy.action));
+        ui.close();
+    }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());

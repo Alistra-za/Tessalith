@@ -1086,6 +1086,8 @@ pub fn kind_chips(m: &AppModel, set_keys: &[String]) -> Vec<KindChip> {
 pub enum MenuAction {
     EditSettings,
     CopyFromActive,
+    /// The sets menus' Copy JSON settings from the active set to the other selected sets (the dialog opens).
+    CopyJsonFromActive,
     ResetAll,
     SelectMembersOfKind(Option<SlotKind>),
     /// F3a Task 8: a Slot commands window command on slot `n` of set `set` (an id), through the same model call.
@@ -1446,6 +1448,7 @@ impl AppModel {
                 label: format!("Edit settings for {n} selected"),
                 disabled: None,
             },
+            self.copy_json_entry(),
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
@@ -1843,6 +1846,7 @@ impl AppModel {
                 self.bulk.kind = None;
             }
             MenuAction::CopyFromActive => self.open_copy_settings(),
+            MenuAction::CopyJsonFromActive => self.open_copy_set_json(),
             MenuAction::ResetAll => self.ask_reset_all(),
             MenuAction::SelectMembersOfKind(k) => self.select_members_of_kind(k),
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),

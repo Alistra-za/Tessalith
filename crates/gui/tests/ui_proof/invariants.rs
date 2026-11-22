@@ -772,6 +772,7 @@ pub const AUTHORED: &[&str] = &[
     "Choose export folder…",
     "Choose where the Also folders go…",
     "Choose…",
+    "Copy JSON settings from stone/stonewall to 0 selected…",
     "Copy settings from stonewall.png to 0 selected…",
     "Edit match…",
     "Fill from names…",

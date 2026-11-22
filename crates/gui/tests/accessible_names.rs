@@ -164,6 +164,7 @@ const SCREENS: &[&str] = &[
     "json editor",
     "presets",
     "rename dialog",
+    "copy json dialog",
     "meshes view",
     "meshes mod filter open",
     "meshes skin browse popup",
@@ -382,6 +383,20 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["CheckBox", "DisclosureTriangle"],
         GROUP_ROW,
     ),
+    // The copy dialog's own rows are named apart; these three are the Sets column behind it, as for the rename dialog.
+    ("copy json dialog", "◀", &["Button", "Button"], COLLAPSE),
+    (
+        "copy json dialog",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "copy json dialog",
+        "Alpha",
+        &["ComboBox", "DisclosureTriangle"],
+        GROUP_ROW,
+    ),
     (
         "meshes skin browse popup",
         "textures/white.dds",
@@ -556,6 +571,52 @@ fn every_input_has_a_name_in_presets_and_rename() {
     }
     h.get_by_role_and_label(Role::ComboBox, "Letter case");
     audit_names(&h, "rename dialog");
+
+    // The Sets menu's JSON copy dialog, with rows in two groups.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_shader("landscape/leaf", Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_json_value(
+        "landscape/rock01",
+        "emissive",
+        Some(serde_json::json!(true)),
+    );
+    m.add_cs_block("landscape/rock01", Kind::Txst);
+    m.set_cs_value(
+        "landscape/rock01",
+        Kind::Txst,
+        "fuzzWeight",
+        Some(serde_json::json!(0.5)),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let key = |m: &AppModel, id: &str| {
+        sdc_gui::model::sets::views(m)
+            .iter()
+            .find(|v| v.id == id)
+            .unwrap()
+            .key
+            .clone()
+    };
+    let (leaf, rock) = (key(&m, "landscape/leaf"), key(&m, "landscape/rock01"));
+    m.click_set(&leaf, false, false);
+    m.click_set(&rock, true, false);
+    m.run_menu(sdc_gui::model::bulk::MenuAction::CopyJsonFromActive);
+    let Some(sdc_gui::model::Dialog::CopySetJson { rows, .. }) = m.dialog.clone() else {
+        panic!("the copy dialog is open: {:?}", m.dialog);
+    };
+    let groups: std::collections::BTreeSet<_> = rows.iter().map(|r| r.0.group).collect();
+    assert!(groups.len() >= 2, "rows in two groups: {rows:?}");
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "PGPatcher JSON: Emissive: true");
+    h.get_by_role_and_label(Role::CheckBox, "CS PBR texture set: Fuzz weight: 0.5");
+    audit_names(&h, "copy json dialog");
 }
 
 /// The Files tab's bar while an export runs (`drawer.rs`): a `ProgressIndicator`, which kittest's check does not

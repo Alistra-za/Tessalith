@@ -271,6 +271,8 @@ mod set_editor_width;
 mod set_groups;
 #[path = "../set_groups_ui.rs"]
 mod set_groups_ui;
+#[path = "../set_json_copy.rs"]
+mod set_json_copy;
 #[path = "../set_order.rs"]
 mod set_order;
 #[path = "../set_panel.rs"]
