@@ -20,8 +20,8 @@
 // the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
 // marked "sdc patch 0003". Without the define the file compiles as before.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by an
-// audit. Changes are marked "sdc patch 0004".
+// Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by
+// an audit. Changes are marked "sdc patch 0004".
 // #6 bc6h_bounds' rgb_span holds three floats.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
