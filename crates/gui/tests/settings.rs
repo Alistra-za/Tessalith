@@ -6,7 +6,7 @@ fn defaults_follow_the_spec() {
     assert!(!s.live_encode, "preview encoding is off by default");
 }
 
-/// Note LF: a pin. Validate exported DDS is off on a fresh install and in a gui.toml without the key, and is saved.
+/// Note LG: a pin. Validate exported DDS is off on a fresh install and in a gui.toml without the key, and is saved.
 #[test]
 fn validate_exports_defaults_off_and_round_trips() {
     assert!(!GuiSettings::default().validate_exports);

@@ -245,7 +245,7 @@ fn plain_sets_are_copied_and_their_bytes_match_the_pbr_folder() {
     }
 }
 
-/// Note LF: all three phases follow the request's `validate`, except that the CM phase's complex `_m` is always
+/// Note LG: all three phases follow the request's `validate`, except that the CM phase's complex `_m` is always
 /// validated; a copied Vanilla output carries its PBR twin's `validation`, `skipped` included.
 #[test]
 fn the_also_phases_follow_the_requests_validate() {

@@ -1190,7 +1190,7 @@ mod tests {
     use super::*;
     use crate::pgp::prefix::check_file_name;
 
-    /// Note LF, HF9: a dependency whose check in place failed is untouched and on disk, so it is accepted as a
+    /// Note LG, HF9: a dependency whose check in place failed is untouched and on disk, so it is accepted as a
     /// `Done { passed: false }` one is; a queued one is not.
     #[test]
     fn a_dependency_that_failed_its_check_in_place_is_accepted() {

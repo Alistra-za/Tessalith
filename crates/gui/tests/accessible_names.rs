@@ -481,7 +481,7 @@ fn every_input_has_a_name_in_the_textures_view() {
     );
 }
 
-/// Note LF: the Settings tab, with the header drawn too, so a name the tab shares with a header control is found.
+/// Note LG: the Settings tab, with the header drawn too, so a name the tab shares with a header control is found.
 #[test]
 fn every_input_has_a_name_in_the_settings_tab() {
     let d = tempfile::tempdir().unwrap();

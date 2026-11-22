@@ -70,7 +70,7 @@ These apply to every project and save to `gui.toml` at once.
 |---|---|
 | Preview | **Live encode**: the expanded preview encodes again after every edit; off, use **Encode now**. The preview toolbar has the same switch. |
 | Checks | **Low detail**, **Green direction**, **Parallax**: [Artist checks](Texture-Types.md#artist-checks). |
-| Export | **Validate exported DDS**: each export decodes every DDS again and checks it. Off by default. What gets checked, and when: [Validation and output](Validation-and-Output.md#what-is-checked). <!-- D:LF6 --> |
+| Export | **Validate exported DDS**: each export decodes every DDS again and checks it. Off by default. What gets checked, and when: [Validation and output](Validation-and-Output.md#what-is-checked). <!-- D:LG6 --> |
 | Cache | **Analysis cache limit**: [Where Tessalith keeps its files](Installation.md#where-tessalith-keeps-its-files). |
 | Columns | **Textures**, **Sets**: ticked shows the column. |
 

@@ -388,7 +388,7 @@ fn an_undetectable_written_corner_is_val_grass_detect() {
     assert_eq!(s.validation_failed, 1);
 }
 
-/// Note LF9: complex grass is validated whatever `BatchRequest::validate` says.
+/// Note LG9: complex grass is validated whatever `BatchRequest::validate` says.
 #[test]
 fn an_undetectable_corner_fails_validation_with_the_switch_off() {
     let d = tempfile::tempdir().unwrap();

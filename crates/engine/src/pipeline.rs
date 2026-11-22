@@ -485,7 +485,7 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
 /// record, except after a second Ctrl-C: that aborts the process (exit 3) and can leave `.sdc-*.tmp` files, or an
 /// output without a record (`OUT-UNKNOWN-EXISTING` on the next run). A failed validation (`passed = false`) is not a failure here: the output is written and recorded.
 /// With `req.validate` off the output is not decoded again and its record says `validation.skipped`, unless its
-/// sub-type is always validated (`validate::always_validated`, Note LF9).
+/// sub-type is always validated (`validate::always_validated`, Note LG9).
 ///
 /// Check 3 (`req.low_detail`): a flagged texture is written in full and carries the warning in its report under
 /// `Warn`.

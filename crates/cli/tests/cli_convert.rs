@@ -1145,7 +1145,7 @@ fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     assert_eq!(batch_done(&o)["validation_failed"], 1);
 }
 
-/// Validation runs only with `--validate` (Note LF): without it the same failing fixture exits 0 and the record says
+/// Validation runs only with `--validate` (Note LG): without it the same failing fixture exits 0 and the record says
 /// `validation.skipped`.
 #[test]
 fn convert_validates_only_with_the_flag() {

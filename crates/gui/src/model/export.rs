@@ -17,7 +17,7 @@ pub enum RowState {
         passed: bool,
     },
     UpToDate,
-    /// Checked in place and failed (Note LF10): the file was kept and not written.
+    /// Checked in place and failed (Note LG10): the file was kept and not written.
     CheckFailed,
     Kept,
     Skipped(SkipKind, String),
@@ -422,7 +422,7 @@ impl ExportModel {
                     k => RowState::Skipped(*k, reason.clone()),
                 };
                 // A skip is not work: it counts in done/total but not in the files/s rate or the ETA. A check in
-                // place (Note LF10) is: it reads and decodes the DDS.
+                // place (Note LG10) is: it reads and decodes the DDS.
                 if let Some(r) = self.row(&ev) {
                     if terminal.is_some() || r.state.accepts_skip() {
                         r.state = state;
@@ -635,7 +635,7 @@ pub fn export_folder_problem(root: &Path, export: &Path) -> Option<String> {
 /// The `sdc convert` command that reproduces the export from the saved `sdc.toml` (M3a spec §2.5). The GUI plans
 /// with High suggestions accepted (Note U3), so the command does too (audit 08c-2). Set edits in
 /// `sdc-project.toml` and mesh evidence are not carried: the CLI reads neither. `--validate` follows the Validate
-/// exported DDS setting as it is now (Note LF); like the rest of the command it is rebuilt from the current saved
+/// exported DDS setting as it is now (Note LG); like the rest of the command it is rebuilt from the current saved
 /// state, not read from the export the Files tab shows.
 pub fn cli_command(root: &Path, export: &Path, validate: bool) -> String {
     let q = |p: &Path| format!("\"{}\"", p.to_string_lossy().replace('\\', "/"));
@@ -861,7 +861,7 @@ mod tests {
         m
     }
 
-    /// Note LF10: an output checked in place that failed is a failed row, in the Failed only filter, the
+    /// Note LG10: an output checked in place that failed is a failed row, in the Failed only filter, the
     /// Files counts and the report. One that passed, and a keep, are not.
     #[test]
     fn a_failed_check_in_place_is_a_failed_row() {
@@ -882,12 +882,12 @@ mod tests {
         let o = m.primary_outcomes(false);
         assert_eq!((o.failed, o.current), (0, 1));
 
-        // A keep is never checked (Note LF11).
+        // A keep is never checked (Note LG11).
         let m = up_to_date_with("kept: x".into());
         assert_eq!(m.rows[0].state, RowState::Kept);
     }
 
-    /// Note LF: in an Also phase a failed check in place counts once, under `failed` (from the summary), and not under
+    /// Note LG: in an Also phase a failed check in place counts once, under `failed` (from the summary), and not under
     /// `current` (the up-to-date event's terminal is `Failed`).
     #[test]
     fn an_also_phase_counts_a_failed_check_once() {
@@ -922,7 +922,7 @@ mod tests {
         assert_eq!((o.failed, o.current), (1, 0));
     }
 
-    /// Note LF: with the switch off, a complex-type failure is still reported as one, and `not validated` says nothing
+    /// Note LG: with the switch off, a complex-type failure is still reported as one, and `not validated` says nothing
     /// was checked; with it on, the in-place checks are counted.
     #[test]
     fn the_report_shows_mandatory_failures_when_not_validating() {

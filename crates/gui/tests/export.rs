@@ -139,7 +139,7 @@ fn copy_cli_command_uses_no_removed_flag() {
     }
 }
 
-/// Note LF: the copied command validates when the switch is on.
+/// Note LG: the copied command validates when the switch is on.
 #[test]
 fn the_cli_command_names_validate_when_it_is_on() {
     let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), true);
@@ -533,7 +533,7 @@ fn skipped(rec: &serde_json::Value) -> bool {
     rec["validation"]["skipped"].as_bool().unwrap_or(false)
 }
 
-/// Note LF: an export validates only when Validate exported DDS is on.
+/// Note LG: an export validates only when Validate exported DDS is on.
 #[test]
 fn an_export_validates_only_when_the_setting_is_on() {
     for on in [false, true] {
@@ -556,7 +556,7 @@ fn an_export_validates_only_when_the_setting_is_on() {
     }
 }
 
-/// Note LF10: turning the setting on checks the last export's outputs where they are.
+/// Note LG10: turning the setting on checks the last export's outputs where they are.
 #[test]
 fn turning_validation_on_checks_the_last_export_in_place() {
     let d = tempfile::tempdir().unwrap();

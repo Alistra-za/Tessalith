@@ -1,4 +1,4 @@
-//! Note LF: `BatchRequest::validate` off skips the post-encode check (spec §5.8). Validation only reads the bytes,
+//! Note LG: `BatchRequest::validate` off skips the post-encode check (spec §5.8). Validation only reads the bytes,
 //! so the written DDS is the same either way; the record keeps a `validation` object that says `skipped`.
 use engine::api::*;
 use engine::config::{Format, Target};
@@ -326,7 +326,7 @@ fn a_validating_run_checks_a_skipped_output_in_place() {
     assert_eq!((third.checked, third.converted), (0, 0));
 }
 
-/// Note LF10: a dry run decides before the manifest is opened, so a validating one checks nothing in place and
+/// Note LG10: a dry run decides before the manifest is opened, so a validating one checks nothing in place and
 /// writes neither a record nor a DDS, even with unchecked records and a new source to convert.
 #[test]
 fn a_validating_dry_run_over_skipped_records_writes_nothing() {
@@ -468,7 +468,7 @@ fn a_packed_output_whose_pass_one_pick_changed_is_not_checked_in_place() {
     assert!(rec["validation"].get("skipped").is_none());
 }
 
-/// Note LF4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.
+/// Note LG4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.
 #[test]
 fn a_record_not_validated_is_current_on_the_next_run() {
     let d = tempfile::tempdir().unwrap();

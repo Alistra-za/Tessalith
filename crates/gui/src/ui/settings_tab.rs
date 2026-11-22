@@ -19,7 +19,7 @@ const PATH_CHARS: usize = 48;
 /// Open's accessible name: Export to ▾ has an "Open export folder" item, and both can be on screen (rule 8.4).
 const OPEN_NAME: &str = "Settings: Open export folder";
 
-/// Note LF: the Validate exported DDS box's hover.
+/// Note LG: the Validate exported DDS box's hover.
 const VALIDATE_HOVER: &str = "Decode each DDS again after it is encoded and check it against Skyrim's rules. Takes longer. With it on, the next export also checks the files an earlier export left unchecked, without encoding them again. Complex material _m and complex grass are always checked.";
 
 /// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window

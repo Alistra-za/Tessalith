@@ -573,7 +573,7 @@ fn skips_stay_out_of_the_rate_but_count_as_done() {
     assert!(p.eta(40, 100, at(t0, 4000)).is_none(), "no ETA from skips");
 }
 
-/// Note LF10: a check in place reads and decodes a DDS, so it is work for the rate and the ETA, though it ends as
+/// Note LG10: a check in place reads and decodes a DDS, so it is work for the rate and the ETA, though it ends as
 /// an up-to-date skip. A passed and a failed check both count; a plain skip beside them does not (the control above).
 #[test]
 fn checks_in_place_count_as_work_in_the_rate() {

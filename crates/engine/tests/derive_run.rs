@@ -306,7 +306,7 @@ fn file_done<'a>(ev: &'a [EngineEvent], name: &str) -> &'a engine::validate::Val
         .unwrap_or_else(|| panic!("no file_done for {name}: {ev:#?}"))
 }
 
-/// Note LF9: a grass stack resolves `complex_grass`, so it is validated with the switch off, though its
+/// Note LG9: a grass stack resolves `complex_grass`, so it is validated with the switch off, though its
 /// name has no `_m`.
 #[test]
 fn a_derived_grass_stack_is_validated_with_the_switch_off() {
@@ -353,7 +353,7 @@ fn env_m_plan(dir: &Path) -> Plan {
     e.plan(r, &rep, &CancelToken::default()).unwrap()
 }
 
-/// Note LF9: a derived env `_m` resolves `envmask`, not `complex_material`, so it follows the switch.
+/// Note LG9: a derived env `_m` resolves `envmask`, not `complex_material`, so it follows the switch.
 #[test]
 fn a_derived_env_m_follows_the_switch() {
     let d = tempfile::tempdir().unwrap();

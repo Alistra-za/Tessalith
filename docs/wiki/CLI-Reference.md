@@ -191,7 +191,7 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists: `if-changed` encodes it again only when something changed, `skip` keeps it, `overwrite` encodes it again ([below](#re-runs-and-if-changed)). |
 | `--ev` (alias `--encoder-version`) | off | With `if-changed`, also encode again the outputs written by an older encode version ([after an update](#re-encoding-after-an-update)). |
 | `--property <words>` | none | With `--ev`, only the outputs that have every word of the list. Repeatable: any list may match ([the words](#property-words)). |
-| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it and `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LF1,LF10 --> |
+| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it and `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LG1,LG10 --> |
 | `--dry-run` | off | Plan and report, write nothing. |
 
 The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
@@ -233,10 +233,10 @@ done: ..., N cancelled, N kept at a higher target
 - With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
-- A file is checked when the run has `--validate`, and always when it is a complex material `_m` or complex grass output. <!-- D:LF1,LF9 --> A failed check reads differently by kind, and either makes `sdc convert` exit 4 if nothing worse happened:
-  - A file written this run is still written. It prints `ok ... [VALIDATION FAILED]` and counts under "failed validation". <!-- D:LF1 -->
-  - An up to date file from an earlier run is not written. It prints `skip ... up to date; checked in place: failed validation` and counts under "checked in place (M failed)"; the next `if-changed` run encodes it again. <!-- D:LF10 -->
-  - Without `--validate`, the `done` line says `validation off`, or `N failed validation (complex types only)` when a complex material `_m` or complex grass output failed. It names "checked in place" only when N is above 0, as it does for kept counts. <!-- D:LF5,LF10 -->
+- A file is checked when the run has `--validate`, and always when it is a complex material `_m` or complex grass output. <!-- D:LG1,LG9 --> A failed check reads differently by kind, and either makes `sdc convert` exit 4 if nothing worse happened:
+  - A file written this run is still written. It prints `ok ... [VALIDATION FAILED]` and counts under "failed validation". <!-- D:LG1 -->
+  - An up to date file from an earlier run is not written. It prints `skip ... up to date; checked in place: failed validation` and counts under "checked in place (M failed)"; the next `if-changed` run encodes it again. <!-- D:LG10 -->
+  - Without `--validate`, the `done` line says `validation off`, or `N failed validation (complex types only)` when a complex material `_m` or complex grass output failed. It names "checked in place" only when N is above 0, as it does for kept counts. <!-- D:LG5,LG10 -->
 - The CLI raises none of the `CHK-` artist checks; the engine measures `CHK-LOW-DETAIL` only when the GUI asks.
 
 | `done` counter | Counts |

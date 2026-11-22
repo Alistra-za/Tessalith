@@ -34,7 +34,7 @@ Tessalith writes its own headers: legacy or DX10, picked from the format and the
 
 ## What is checked
 
-Complex material `_m` and complex grass outputs are always checked; other outputs are checked when you ask (`sdc convert --validate`, or **Validate exported DDS** in the GUI's Settings). Mip quality, coverage and the BC6H peak need the encoder input, so only a conversion runs them. A checking run also checks, in place and against the rebuilt encoder input, the outputs an earlier run left unchecked; their files are not written. Some outputs wait for a re-encode instead: an output kept for an older encode version (`--ev`) or for a lower quality target, a packed output whose channel pick would differ now, and every Vanilla copy made by an Also export. A copy is not checked until it is encoded again, so when its PBR twin fails the check, the copy is encoded in that run and the twin waits for the next one. A check still queued when you cancel counts as cancelled, not as up to date. <!-- D:LF9,LF10,LF11 --> The other checks also work on DDS files you already have, from the command line: [CLI reference](CLI-Reference.md#sdc-validate).
+Complex material `_m` and complex grass outputs are always checked; other outputs are checked when you ask (`sdc convert --validate`, or **Validate exported DDS** in the GUI's Settings). Mip quality, coverage and the BC6H peak need the encoder input, so only a conversion runs them. A checking run also checks, in place and against the rebuilt encoder input, the outputs an earlier run left unchecked; their files are not written. Some outputs wait for a re-encode instead: an output kept for an older encode version (`--ev`) or for a lower quality target, a packed output whose channel pick would differ now, and every Vanilla copy made by an Also export. A copy is not checked until it is encoded again, so when its PBR twin fails the check, the copy is encoded in that run and the twin waits for the next one. A check still queued when you cancel counts as cancelled, not as up to date. <!-- D:LG9,LG10,LG11 --> The other checks also work on DDS files you already have, from the command line: [CLI reference](CLI-Reference.md#sdc-validate).
 
 The thresholds are fixed; only `validation.mips` is a setting.
 
@@ -66,7 +66,7 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 - a source file's content (by SHA-256), including packing sources and the baked normal map;
 - the output file's size or modified time, so touching or replacing an output by hand counts;
 - a resolved setting, other than a quality target set lower;
-- the record failed validation. <!-- D:LF4 -->
+- the record failed validation. <!-- D:LG4 -->
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 --> A current output stays as it is, except that a checking run checks it in place if an earlier run left it unchecked ([what is checked](#what-is-checked)).
 

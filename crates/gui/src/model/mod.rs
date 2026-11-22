@@ -1528,7 +1528,7 @@ impl AppModel {
         (self.settled_writes_now, self.settled_export_files) = (false, 0);
     }
 
-    /// Note LF: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
+    /// Note LG: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
     pub fn set_validate_exports(&mut self, on: bool) {
         self.settings.validate_exports = on;
         self.save_settings();
