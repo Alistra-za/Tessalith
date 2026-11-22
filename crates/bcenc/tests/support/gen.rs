@@ -195,6 +195,46 @@ pub const LONG_WALK: ([[u8; 4]; 16], u16) = (
     0x6042,
 );
 
+// The six blocks below pin `bc4::search_max`. Their expected bytes (BC45-R10) come from the bench code itself
+// (`bench:crates/bench/src/bc4ref.rs`, branch `bench` 87c5539f, compiled unchanged), not from `bcenc`.
+
+/// The window's least error is 7 at the single pair (164, 103), and 164 = max + 16, so only pad 16 reaches it; at pad
+/// 15 the least error is 8, at (102, 148) and (111, 157), which radius 10 already found.
+pub const MAX_PAD_WITNESS: [u8; 16] = [
+    120, 148, 120, 111, 139, 120, 120, 120, 139, 120, 111, 113, 120, 120, 120, 113,
+];
+
+/// 100 to 115. Four pairs share the window's least error 8: (114, 100), (114, 101), (115, 100), (115, 101). Radius 10
+/// already holds (114, 100), so strict `<` keeps it.
+pub const MAX_TIE_RAMP: [u8; 16] = [
+    100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115,
+];
+
+/// Radius 10 ends at error 174 with (154, 45); two window pairs share the least error 172, (168, 61) and (171, 60).
+/// Forward order (e0 outer, ascending) meets (168, 61) first.
+pub const MAX_IMPROVING_TIE: [u8; 16] = [
+    78, 150, 105, 72, 95, 89, 124, 55, 91, 97, 74, 111, 96, 95, 156, 136,
+];
+
+/// Two window pairs share the least error 998 with the same e0, (225, 24) and (225, 25); ascending e1 meets (225, 24)
+/// first.
+pub const MAX_IMPROVING_TIE_E0: [u8; 16] = [
+    109, 174, 144, 115, 53, 5, 162, 71, 201, 219, 222, 63, 76, 31, 35, 88,
+];
+
+/// At cut 128 the window block flips 1 texel, the upstream block 0, so Max falls back. The guarded radius-10 block
+/// (which passed its own guard, 0 flips) differs from the upstream block, so a fallback that returned upstream
+/// directly is caught.
+pub const MAX_GUARD_FALLBACK: [u8; 16] = [
+    60, 238, 201, 32, 198, 232, 251, 14, 93, 229, 153, 238, 113, 130, 40, 173,
+];
+
+/// At cut 128 Max falls back and the guarded radius-10 search itself falls back to the upstream block, which differs
+/// from the unguarded radius-10 block, so a fallback that returned the unguarded radius-10 block is caught.
+pub const MAX_GUARD_FALLBACK_BASE: [u8; 16] = [
+    60, 243, 14, 47, 233, 42, 240, 198, 103, 199, 208, 76, 22, 37, 127, 252,
+];
+
 /// A block and transparency mask on which two distinct opaque colours tie on `encode_bc1_alpha`'s default axis
 /// (306, 601, 117) while that axis is in use, so the texel order picks the low endpoint (strict `<`, rgbcx.cpp
 /// 2122-2126). Texels 0 and 1 differ by (15, -9, 7), and 306 * 15 - 601 * 9 + 117 * 7 = 0: both dot to 102,400,

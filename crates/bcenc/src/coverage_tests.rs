@@ -6,7 +6,10 @@ use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
 use crate::gen;
 use crate::hits::{counts, Hit};
-use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
+use crate::{
+    bc4_encode_alpha, bc4_encode_alpha_max, bc4_encode_block, bc4_encode_block_max,
+    bc5_encode_block,
+};
 
 /// How often this thread took each branch since `before` (an earlier [`counts`]). The counters are per thread, so
 /// the tests running beside this one add nothing; taking the difference also leaves out a test that ran earlier on
@@ -38,6 +41,19 @@ fn every_ported_branch_is_taken() {
             bc4_encode_alpha(&v, rad, 0);
         }
     }
+    // The Max search, on a sample of the classes (its window is up to 256 x 256 pairs) and the two fallback
+    // blocks, plus a solid block for the perfect-block early return.
+    for v in gen::bc4_classes(0xC0DE_0001, 600)
+        .iter()
+        .step_by(40)
+        .chain([&gen::MAX_GUARD_FALLBACK, &gen::MAX_GUARD_FALLBACK_BASE])
+    {
+        bc4_encode_block_max(&v.map(|a| [a, 0, 0, a]), 0);
+        for cut in [128, 201] {
+            bc4_encode_alpha_max(v, cut);
+        }
+    }
+    bc4_encode_block_max(&[[9; 4]; 16], 0);
     // The BC1 palettes, and the single-colour and total-ordering tables: the encoder builds those once, on whichever
     // thread asks first, so the test builds them here, on its own.
     for three in [false, true] {

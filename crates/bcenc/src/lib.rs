@@ -7,6 +7,9 @@
 //! always on there. A target without SSE2 runs portable code instead, which the unit tests run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
 //! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16).
+//! The `_max` functions run a search the C++ does not have (Note LH); their reference is
+//! `bc4::tests::search_max_reference`, a literal port of the bench measurement, and `tests/bc4.rs` pins bytes taken
+//! from the bench code itself.
 
 use std::num::NonZeroU8;
 
@@ -74,6 +77,24 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
     out
 }
 
+/// The radius [`bc4::search_max`] starts from: the engine's `BC45_RADIUS_MAX`.
+pub const MAX_SEARCH_RADIUS: u32 = 10;
+
+/// [`bc4_encode_block`] with the Max search ([`bc4::search_max`], no guard). Panics if `channel >= 4`.
+pub fn bc4_encode_block_max(px: &[[u8; 4]; 16], channel: usize) -> [u8; 8] {
+    assert!(channel < 4, "channel {channel} is not 0..4");
+    let v: [u8; 16] = std::array::from_fn(|i| px[i][channel]);
+    bc4::search_max(&v, None)
+}
+
+/// [`bc5_encode_block`] with the Max search: channel 0 then channel 1, each as [`bc4_encode_block_max`].
+pub fn bc5_encode_block_max(px: &[[u8; 4]; 16]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    out[..8].copy_from_slice(&bc4_encode_block_max(px, 0));
+    out[8..].copy_from_slice(&bc4_encode_block_max(px, 1));
+    out
+}
+
 /// `rgbcx::encode_bc1(18, .., allow_3color, false)` in `cBC1Dual` mode for one 4x4 block of RGBA texels (alpha is
 /// ignored). `allow_3color` lets the encoder pick a three-colour block; `perceptual` weights the colour error by
 /// Rec.709 luma (rgbcx's `set_bc1_perceptual`). [`bc1_encode_block_with`] at [`Bc1Search::Default`].
@@ -121,6 +142,18 @@ pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8
         128
     };
     bc4::search(alpha, search_radius, Some(cut))
+}
+
+/// [`bc4_encode_alpha`] with the Max search ([`bc4::search_max`] with the guard at `cut`); a `cut` of 0 is 128.
+pub fn bc4_encode_alpha_max(alpha: &[u8; 16], cut: u8) -> [u8; 8] {
+    let cut = if cut != 0 {
+        hits::hit!(hits::Hit::CutGiven);
+        cut
+    } else {
+        hits::hit!(hits::Hit::CutDefault);
+        128
+    };
+    bc4::search_max(alpha, Some(cut))
 }
 
 /// `rgbcx::encode_bc1_alpha(18, ..)` in `cBC1Dual` mode: BC1 with one-bit alpha, bit i of `transparent` marking
@@ -171,6 +204,21 @@ pub fn bc3_encode_block_with(
     search: Bc1Search,
 ) -> [u8; 16] {
     bc3_raw_cut_with(px, search_radius, cut.get(), perceptual, search)
+}
+
+/// [`bc3_encode_block_with`] with the Max search on the alpha half: bytes 0..8 are [`bc4_encode_alpha_max`] of the
+/// alpha channel, bytes 8..16 `bc1_encode_block_with(px, false, perceptual, search)`.
+pub fn bc3_encode_block_max_with(
+    px: &[[u8; 4]; 16],
+    cut: NonZeroU8,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 16] {
+    let alpha: [u8; 16] = std::array::from_fn(|i| px[i][3]);
+    let mut out = [0u8; 16];
+    out[..8].copy_from_slice(&bc4_encode_alpha_max(&alpha, cut.get()));
+    out[8..].copy_from_slice(&bc1_encode_block_with(px, false, perceptual, search));
+    out
 }
 
 /// [`bc3_encode_block`] with the cut as rgbcx's flags carry it, where 0 is 128 ([`bc4_encode_alpha`]). For the tests,

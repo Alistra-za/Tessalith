@@ -545,7 +545,12 @@ pub fn upstream(v: &[u8; 16], radius: u32) -> [u8; 8] {
 /// would flip more texels across the alpha-test cutoff `cut`, 128 by default). Never worse than [`upstream`] in SSE.
 /// `cut` is the cutoff itself: reading a 0 as 128, as rgbcx's flags do, is `bc4_encode_alpha`'s job.
 pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
-    let rad = radius as i32;
+    let (base, b) = searched(v, radius as i32);
+    keep_guard(v, &base, b, guard).bytes()
+}
+
+/// The search without the guard: the upstream block (`base`) and the result of the added searches from it.
+fn searched(v: &[u8; 16], rad: i32) -> (Best, Best) {
     let modes = v0_modes(v, rad);
     let base = v0_pick(&modes);
     let mut b = base;
@@ -555,17 +560,68 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     refit_both(v, &mut b, &modes);
     trimmed6(v, &mut b);
     local(v, &mut b);
+    (base, b)
+}
+
+/// The alpha-test guard: `b` unless it flips more texels across `cut` than `base` does, then `base`.
+fn keep_guard(v: &[u8; 16], base: &Best, b: Best, guard: Option<u8>) -> Best {
     if let Some(cut) = guard {
-        if flips(v, &b, cut) > flips(v, &base, cut) {
+        if flips(v, &b, cut) > flips(v, base, cut) {
             hit!(Hit::GuardFallback);
-            b = base;
+            *base
         } else {
             hit!(Hit::GuardPassed);
+            b
         }
     } else {
         hit!(Hit::NoGuard);
+        b
     }
-    b.bytes()
+}
+
+/// The window of [`search_max`]: how far past the block's least and greatest value an endpoint may lie.
+pub const MAX_PAD: i32 = 16;
+
+/// `max`: [`search`] at [`crate::MAX_SEARCH_RADIUS`] without the guard, then the near-exhaustive pair search of
+/// [`window_pairs`], then the guard last: when the result flips more texels across `cut` than the upstream block, the
+/// guarded radius-10 search is returned instead. A port of the bench's `search_max`
+/// (`bench:crates/bench/src/bc4ref.rs`, branch `bench`; Note LH), whose guard was fixed at 128; this one takes the cut.
+pub fn search_max(v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
+    let (base, b4) = searched(v, crate::MAX_SEARCH_RADIUS as i32);
+    let mut b = b4;
+    window_pairs(v, &mut b);
+    match guard {
+        None => {
+            hit!(Hit::MaxNoGuard);
+            b.bytes()
+        }
+        Some(cut) if flips(v, &b, cut) > flips(v, &base, cut) => {
+            hit!(Hit::MaxGuardFallback);
+            keep_guard(v, &base, b4, Some(cut)).bytes()
+        }
+        Some(_) => {
+            hit!(Hit::MaxGuardPassed);
+            b.bytes()
+        }
+    }
+}
+
+/// Every endpoint pair within [`MAX_PAD`] of the block's least and greatest value, both modes, e0 outer and ascending,
+/// e1 inner and ascending, replacing `b` only on a strictly lower error (a tie keeps the earlier pair). A block `b`
+/// already codes exactly has nothing to gain and is left alone.
+fn window_pairs(v: &[u8; 16], b: &mut Best) {
+    if b.err == 0 {
+        hit!(Hit::MaxPerfect);
+        return;
+    }
+    hit!(Hit::MaxPairSearch);
+    let (mn, mx) = minmax(v);
+    let (lo, hi) = (clampi(mn as i32 - MAX_PAD), clampi(mx as i32 + MAX_PAD));
+    for e0 in lo..=hi {
+        for e1 in lo..=hi {
+            b.try_pair(v, e0, e1);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -591,6 +647,178 @@ mod tests {
             }
         }
         out
+    }
+
+    /// The bench's `search_max` (`bench:crates/bench/src/bc4ref.rs`, branch `bench` 87c5539f), literally: the base is
+    /// the 8/6-value upstream search, `b` is the unguarded radius-10 search rebuilt from its bytes (the bench's
+    /// `from_bytes`), then every pair of the window, then the guard against the base at `cut` (the bench's was fixed
+    /// at 128). The scalar `try_pair_reference` throughout.
+    fn search_max_reference(v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
+        let base = v0_reference(v, 10);
+        let s = search(v, 10, None);
+        let mut b = Best::new();
+        b.try_pair_reference(v, s[0], s[1]);
+        if b.err != 0 {
+            let (mn, mx) = minmax(v);
+            let (lo, hi) = (clampi(mn as i32 - 16), clampi(mx as i32 + 16));
+            for e0 in lo..=hi {
+                for e1 in lo..=hi {
+                    b.try_pair_reference(v, e0, e1);
+                }
+            }
+        }
+        if let Some(cut) = guard {
+            if flips(v, &b, cut) > flips(v, &base, cut) {
+                return search(v, 10, Some(cut));
+            }
+        }
+        b.bytes()
+    }
+
+    /// The six `gen` blocks with the bench code's bytes (this plan's Task 1 table, taken 2026-11-21 from
+    /// `bench:crates/bench/src/bc4ref.rs` at 87c5539f): upstream r10, slowest no guard, slowest cut 128, max no
+    /// guard, max cut 128.
+    #[rustfmt::skip]
+    fn bench_table() -> [([u8; 16], [[u8; 8]; 5]); 6] {
+        let same = |a: [u8; 8]| [a, a, a, a, a];
+        [
+            (gen::MAX_PAD_WITNESS, {
+                let s = [0x66, 0x94, 0xcb, 0xd4, 0x6d, 0x9d, 0xb4, 0x4d];
+                let m = [0xa4, 0x67, 0x9e, 0x4f, 0xdb, 0xf4, 0x6f, 0xfb];
+                [s, s, s, m, m]
+            }),
+            (gen::MAX_TIE_RAMP, same([0x72, 0x64, 0xc9, 0xed, 0x96, 0xdc, 0x24, 0x00])),
+            (gen::MAX_IMPROVING_TIE, {
+                let s = [0x9a, 0x2d, 0x06, 0xdd, 0xee, 0xad, 0xd9, 0x42];
+                let m = [0xa8, 0x3d, 0x57, 0x6f, 0x33, 0xf6, 0x6b, 0x6b];
+                [s, s, s, m, m]
+            }),
+            (gen::MAX_IMPROVING_TIE_E0, {
+                let u = [0xd4, 0x03, 0xd4, 0xe8, 0xcc, 0x00, 0xec, 0xbf];
+                let s = [0xd3, 0x02, 0xd4, 0xe8, 0xcc, 0x00, 0xec, 0xbf];
+                let m = [0xe1, 0x18, 0x1d, 0xfb, 0xcc, 0x02, 0xee, 0xc4];
+                [u, s, s, m, m]
+            }),
+            (gen::MAX_GUARD_FALLBACK, {
+                let u = [0xf1, 0x05, 0x86, 0x2e, 0x20, 0x05, 0x51, 0x7e];
+                let s = [0xea, 0x04, 0x86, 0x2e, 0x20, 0xc5, 0x50, 0x7e];
+                let m = [0xed, 0x1e, 0x87, 0x22, 0x20, 0x06, 0xd1, 0x66];
+                [u, s, s, m, s]
+            }),
+            (gen::MAX_GUARD_FALLBACK_BASE, {
+                let u = [0xf2, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x17];
+                let s = [0xed, 0x0e, 0x47, 0x8e, 0x43, 0x95, 0x9c, 0x13];
+                let m = [0xed, 0x09, 0x46, 0x8e, 0x43, 0x95, 0x9c, 0x13];
+                [u, s, u, m, u]
+            }),
+        ]
+    }
+
+    #[test]
+    fn the_reference_reproduces_the_bench_bytes() {
+        for (v, [up, slow, slow128, max, max128]) in bench_table() {
+            assert_eq!(upstream(&v, 10), up, "upstream {v:?}");
+            assert_eq!(search(&v, 10, None), slow, "slowest {v:?}");
+            assert_eq!(search(&v, 10, Some(128)), slow128, "slowest cut 128 {v:?}");
+            assert_eq!(search_max_reference(&v, None), max, "max {v:?}");
+            assert_eq!(
+                search_max_reference(&v, Some(128)),
+                max128,
+                "max cut 128 {v:?}"
+            );
+        }
+    }
+
+    /// The block an encoded pair stands for, scored by the scalar reference.
+    fn rescore(v: &[u8; 16], bytes: [u8; 8]) -> Best {
+        let mut b = Best::new();
+        b.try_pair_reference(v, bytes[0], bytes[1]);
+        b
+    }
+
+    #[test]
+    fn max_equals_the_bench_reference() {
+        let fixed = bench_table().map(|(v, _)| v);
+        for v in gen::bc4_classes(0xB4B4_0010, 12).iter().chain(&fixed) {
+            for guard in [None, Some(1), Some(128), Some(201), Some(255)] {
+                assert_eq!(
+                    search_max(v, guard),
+                    search_max_reference(v, guard),
+                    "{v:?} guard {guard:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn max_is_the_least_error_in_its_window() {
+        let mut improved = 0usize;
+        for v in gen::bc4_classes(0xB4B4_0011, 12) {
+            let s = rescore(&v, search(&v, 10, None));
+            let max = search_max(&v, None);
+            let m = rescore(&v, max);
+            let (mn, mx) = minmax(&v);
+            let (lo, hi) = (clampi(mn as i32 - MAX_PAD), clampi(mx as i32 + MAX_PAD));
+            let mut w = u32::MAX;
+            for e0 in lo..=hi {
+                for e1 in lo..=hi {
+                    if let Some((err, _)) = pair_scalar(&v, &pal(e0, e1), u32::MAX) {
+                        w = w.min(err);
+                    }
+                }
+            }
+            assert_eq!(m.err, s.err.min(w), "{v:?}");
+            if m.err == s.err {
+                assert_eq!(max, search(&v, 10, None), "{v:?}");
+            } else {
+                improved += 1;
+            }
+        }
+        assert!(improved > 0, "the window improved no block");
+    }
+
+    #[test]
+    fn the_max_guard_is_never_worse_than_slowest() {
+        let mut fallbacks = 0usize;
+        let extra = [gen::MAX_GUARD_FALLBACK, gen::MAX_GUARD_FALLBACK_BASE];
+        for v in gen::bc4_classes(0xB4B4_0012, 12).iter().chain(&extra) {
+            for cut in gen::CUTS {
+                let max = search_max(v, Some(cut));
+                let g = rescore(v, max);
+                let p = rescore(v, search(v, 10, Some(cut)));
+                assert!(g.err <= p.err, "{v:?} cut {cut}");
+                assert!(
+                    flips(v, &g, cut) <= flips(v, &v0(v, 10), cut),
+                    "{v:?} cut {cut}"
+                );
+                if max == search(v, 10, Some(cut)) && search_max(v, None) != search(v, 10, None) {
+                    fallbacks += 1;
+                }
+            }
+        }
+        assert!(fallbacks > 0, "no block fell back to the guarded search");
+    }
+
+    #[test]
+    fn a_perfect_block_skips_the_pair_search() {
+        let solid = |x: u8| [x; 16];
+        let checker: [u8; 16] = std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 });
+        let taken = |a: &[(Hit, u64)], b: &[(Hit, u64)], h: Hit| {
+            let n = |s: &[(Hit, u64)]| s.iter().find(|e| e.0 == h).unwrap().1;
+            n(b) - n(a)
+        };
+        for v in [solid(0), solid(7), solid(255), checker] {
+            let mut b = v0(&v, 10);
+            assert_eq!(b.err, 0, "{v:?}");
+            let before = crate::hits::counts();
+            window_pairs(&v, &mut b);
+            let after = crate::hits::counts();
+            assert_eq!(taken(&before, &after, Hit::PairEarlyOut), 0, "{v:?}");
+            assert_eq!(taken(&before, &after, Hit::PairImproved), 0, "{v:?}");
+            assert_eq!(taken(&before, &after, Hit::MaxPerfect), 1, "{v:?}");
+            assert_eq!(taken(&before, &after, Hit::MaxPairSearch), 0, "{v:?}");
+            assert_eq!(search_max(&v, None), search(&v, 10, None), "{v:?}");
+        }
     }
 
     #[test]

@@ -74,6 +74,12 @@ hits! {
     NoGuard,
     GuardPassed,
     GuardFallback,
+    // search_max
+    MaxPerfect,
+    MaxPairSearch,
+    MaxNoGuard,
+    MaxGuardPassed,
+    MaxGuardFallback,
     // bc1 encode
     Bc1Solid,
     LsPassSame,
