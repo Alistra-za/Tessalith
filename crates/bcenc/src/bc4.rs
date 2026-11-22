@@ -676,7 +676,7 @@ mod tests {
         b.bytes()
     }
 
-    /// The six `gen` blocks with the bench code's bytes: gen::MAX_BENCH_BYTES.
+    /// The six `gen` blocks with the bench code's bytes: `gen::MAX_BENCH_BYTES`.
     fn bench_table() -> [([u8; 16], [[u8; 8]; 5]); 6] {
         gen::MAX_BENCH_BYTES
     }

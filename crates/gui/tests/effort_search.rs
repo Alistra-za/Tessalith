@@ -285,6 +285,7 @@ fn a_bc7_or_bc1_effort_pick_undoes_as_change_effort() {
     assert_eq!(file(h.state(), ROCK, BC1), Some(json!("fast")));
     assert_eq!(h.state().undo_label(), Some("Change Effort"));
 }
+
 #[test]
 fn a_mixed_bc3_pair_shows_custom_and_a_pick_writes_both() {
     let d = tempfile::tempdir().unwrap();

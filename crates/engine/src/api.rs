@@ -1234,9 +1234,10 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     Some(moves.contains(&std::cmp::Ordering::Less))
 }
 
-/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`. This is a
-/// known limit (shortcut): a 3.0.1 build from before Note LI also wrote `max` for radius 10, and such dev records read
-/// as the new `max`.
+/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
+///
+/// shortcut: a 3.0.1 build from before Note LI also wrote `max` for radius 10, and such dev records read as the new
+/// `max`; upgrade (record a build marker in the manifest) when one of those builds is known to have reached users.
 const MAX_WAS_SLOWEST_THROUGH: [u32; 3] = [3, 0, 0];
 
 /// Where a record's `engine_version` places it against a last version.

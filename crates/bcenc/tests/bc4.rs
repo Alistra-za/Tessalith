@@ -121,7 +121,7 @@ fn bc4_channel_out_of_range_panics() {
     bc4_encode_block(&[[0; 4]; 16], 4, 5);
 }
 
-/// The six pinned blocks of gen with the bench code's bytes (gen::MAX_BENCH_BYTES): slowest no guard, slowest cut
+/// The six pinned blocks of `gen` with the bench code's bytes (`gen::MAX_BENCH_BYTES`): slowest no guard, slowest cut
 /// 128, max no guard, max cut 128. Independent of `bc4::search_max`.
 fn bench_blocks() -> impl Iterator<Item = ([u8; 16], [[u8; 8]; 4])> {
     gen::MAX_BENCH_BYTES
