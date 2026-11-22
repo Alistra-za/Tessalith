@@ -149,7 +149,8 @@ fn a_restricted_picker_skips_an_unavailable_likely_type() {
 /// Four textures in four folders. `p_wait.png` and `q_wait.png` wait for a type, with one engine suggestion each
 /// (Normal and Height, which no real file name gives a waiting texture, so they are set on the jobs); `r_wait.png`
 /// is written Gray, `s_wait.png` and then `a_wait.png` Envmask (so the first Envmask file in lexical order is the one
-/// written last, in the folder made last). Returns the model and the keys of p and q.
+/// written last, in the folder made last), and `b_wait.png` Gray: Gray and Envmask are written twice each, a tie only
+/// the id breaks. Returns the model and the keys of p and q.
 fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     use engine::config::Subtype;
     for (folder, name) in [
@@ -158,6 +159,7 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
         ("three", "r_wait.png"),
         ("four", "s_wait.png"),
         ("five", "a_wait.png"),
+        ("six", "b_wait.png"),
     ] {
         let f = dir.join("textures").join(folder);
         std::fs::create_dir_all(&f).unwrap();
@@ -168,16 +170,18 @@ fn bulk_fixture(dir: &Path) -> (AppModel, String, String) {
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     idle(&mut m);
     let key = |m: &AppModel, n: &str| key_of(m, n);
-    let (p, q, r, s, a) = (
+    let (p, q, r, s, a, b) = (
         key(&m, "p_wait.png"),
         key(&m, "q_wait.png"),
         key(&m, "r_wait.png"),
         key(&m, "s_wait.png"),
         key(&m, "a_wait.png"),
+        key(&m, "b_wait.png"),
     );
     m.set_field(&r, "subtype", serde_json::json!(Subtype::Gray));
     m.set_field(&s, "subtype", serde_json::json!(Subtype::Envmask));
     m.set_field(&a, "subtype", serde_json::json!(Subtype::Envmask));
+    m.set_field(&b, "subtype", serde_json::json!(Subtype::Gray));
     idle(&mut m);
     for (k, st, why) in [
         (&p, Subtype::Normal, "the engine reads p as a normal"),
@@ -235,9 +239,13 @@ fn tie_break_run(reversed: bool) {
         .filter(|k| k.ends_with("_wait.png"))
         .map(|k| (k.clone(), doc.file_value(&k, "subtype")))
         .collect();
-    assert_eq!(written.len(), 3, "only r, s and a are written: {written:?}");
+    assert_eq!(
+        written.len(),
+        4,
+        "only r, s, a and b are written: {written:?}"
+    );
     for (k, v) in &written {
-        let want = if k.ends_with("r_wait.png") {
+        let want = if k.ends_with("r_wait.png") || k.ends_with("b_wait.png") {
             serde_json::json!(Subtype::Gray)
         } else {
             serde_json::json!(Subtype::Envmask)
@@ -337,7 +345,8 @@ fn a_reason_comes_from_the_first_key_in_lexical_order() {
     let want = vec![
         (Subtype::Diffuse, "reason from p".to_string()),
         (Subtype::Envmask, "a_wait.png has this type.".to_string()),
-        (Subtype::Gray, "r_wait.png has this type.".to_string()),
+        // Gray ties Envmask at two files each; the first Gray key in order is `six/b_wait.png`.
+        (Subtype::Gray, "b_wait.png has this type.".to_string()),
     ];
     for keys in [vec![p.clone(), q.clone()], vec![q.clone(), p.clone()]] {
         assert_eq!(
