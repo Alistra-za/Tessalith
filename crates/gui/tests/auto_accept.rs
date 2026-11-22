@@ -104,7 +104,7 @@ fn auto_accepted_types_are_recorded_as_the_baseline() {
     assert_eq!(auto_steps(&m), 0, "{:?}", m.history.undo);
     assert!(!m.can_undo());
     let row = auto_row(&m).expect("the combined row");
-    assert_eq!(row.text, "1 type set automatically (High confidence)");
+    assert_eq!(row.text, "1 type set automatically: rock_n.png");
     assert_eq!((row.at.clone(), row.fix.clone()), (At::Project, None));
     assert!(
         row.detail.as_deref().unwrap_or("").contains("rock_n.png: "),
@@ -144,6 +144,8 @@ fn undo_after_the_same_normal_type_is_recorded_again_still_prompts() {
     assert!(!m.request_close());
 }
 
+const CONFIDENCE: &str = "Tessalith sets a type on its own only when the evidence is clear: a known file ending such as _n, the folder it is in, or the meshes and grass that use it. Anything less sure stays Undecided for you.";
+
 /// Note FI11 (A17, D15): the row's hover names files and types in words and explains High confidence.
 #[test]
 fn the_automatic_row_explains_high_confidence() {
@@ -153,9 +155,20 @@ fn the_automatic_row_explains_high_confidence() {
     rgb(&root, "landscape/grass/g.png", [60, 120, 40]);
     let m = support::opened_as_the_app(root, d.path().join("export"));
     let detail = auto_row(&m).expect("the row").detail.unwrap_or_default();
+    assert!(detail.ends_with(CONFIDENCE), "{detail}");
+    assert_eq!(detail.matches(CONFIDENCE).count(), 1, "{detail}");
     assert!(
-        detail.ends_with("High confidence: the file name and the pixels agree on the type."),
-        "{detail}"
+        detail.ends_with(&format!("\n\n{CONFIDENCE}")),
+        "a blank line, then the paragraph: {detail}"
+    );
+    let row = auto_row(&m).expect("the row");
+    assert!(
+        row.text.starts_with("2 types set automatically: ")
+            && row.text.contains("rock_n.png")
+            && row.text.contains("g.png")
+            && !row.text.contains("more"),
+        "{}",
+        row.text
     );
     // The file name and the type the picker shows, not the folder and the id.
     assert!(detail.contains("rock_n.png: Normal map"), "{detail}");
@@ -520,9 +533,29 @@ fn an_explicit_subtype_is_never_touched() {
 fn evidence_decisions_are_recorded_and_recorded_values_stay() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
+    let m = values_row_folder(d.path());
+    let row = auto_row(&m).expect("the row");
+    assert_eq!(row.text, "1 value set automatically: wall.png");
+    assert_eq!(row.detail.as_deref(), Some("wall.png: cutout"));
+    let p = cli_plan(&root, &text(&m));
+    assert_eq!(
+        cli_job(&p, "g.png").profile.subtype,
+        Subtype::LandscapeDiffuse
+    );
+    let cw = cli_job(&p, "wall.png");
+    assert_eq!(
+        (cw.profile.alpha.policy, cw.profile.alpha.threshold),
+        (AlphaPolicy::Cutout, 100)
+    );
+}
+
+/// A folder whose plan recorded a type (before the scan) and then a mesh-alpha value (the scan's evidence); the open
+/// model is returned with the evidence applied.
+fn values_row_folder(dir: &Path) -> AppModel {
+    let root = dir.join("textures");
     rgb(&root, "landscape/grass/g.png", [60, 120, 40]);
     varying(&root, "a/wall.png");
-    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    let mut m = support::opened_as_the_app(root.clone(), dir.join("export"));
     // Before the scan: the colour maps are recorded as what their names say; the wall's alpha is still asked.
     assert_eq!(
         subtype(&m, "landscape/grass/g.png"),
@@ -561,19 +594,69 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
     );
     assert_eq!(value(&m, "a/wall.png", "alpha.threshold"), Some(json!(100)));
     assert_eq!(m.history.undo.len(), steps, "the mesh verdict adds no step");
+    m
+}
+
+/// A batch of three typed files and one file with a type and an alpha verdict: four distinct names (the file with
+/// two writes counted once), three listed, "and 1 more"; the hover has every line and the paragraph once.
+#[test]
+fn a_mixed_recording_names_three_files_and_counts_the_rest() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = values_row_folder(d.path());
+    let root = d.path().join("textures");
+    for k in ["b/rock_n.png", "b/tile_n.png", "b/slab_n.png"] {
+        rgb(&root, k, [128, 128, 255]);
+    }
+    varying(&root, "b/door_d.png");
+    m.mesh_alpha.insert(
+        "textures/b/door_d".to_string(),
+        vec![MeshAlpha {
+            blend: false,
+            test: true,
+            threshold: 90,
+        }],
+    );
+    m.replan();
+    assert!(m.wait_idle(WAIT));
     let row = auto_row(&m).expect("the row");
-    assert_eq!(row.text, "1 value set automatically (High confidence)");
-    assert_eq!(row.detail.as_deref(), Some("wall.png: cutout"));
-    let p = cli_plan(&root, &text(&m));
-    assert_eq!(
-        cli_job(&p, "g.png").profile.subtype,
-        Subtype::LandscapeDiffuse
+    let list = row
+        .text
+        .strip_prefix("5 values set automatically: ")
+        .unwrap_or_else(|| panic!("{}", row.text));
+    let list = list.strip_suffix(", and 1 more").expect(&row.text);
+    let names: Vec<_> = list.split(", ").collect();
+    assert_eq!(names.len(), 3, "{}", row.text);
+    let detail = row.detail.expect("hover");
+    for f in ["rock_n.png", "tile_n.png", "slab_n.png", "door_d.png"] {
+        assert!(detail.contains(&format!("{f}: ")), "{detail}");
+    }
+    assert!(detail.contains("door_d.png: cutout"), "{detail}");
+    assert_eq!(detail.matches(CONFIDENCE).count(), 1, "{detail}");
+    assert!(detail.ends_with(&format!("\n\n{CONFIDENCE}")), "{detail}");
+}
+
+#[test]
+fn the_values_row_hover_never_speaks_of_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = values_row_folder(d.path());
+    m.open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Notes));
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    h.get_by_label("1 value set automatically: wall.png")
+        .hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label("wall.png: cutout").is_some(),
+        "the hover shows the per-file line"
     );
-    let cw = cli_job(&p, "wall.png");
-    assert_eq!(
-        (cw.profile.alpha.policy, cw.profile.alpha.threshold),
-        (AlphaPolicy::Cutout, 100)
-    );
+    assert!(h
+        .query_by_label_contains("sets a type on its own")
+        .is_none());
 }
 
 /// Note HR2: a mesh `remove` on a varying alpha survives Undo of a user edit; the CLI

@@ -24,10 +24,10 @@ use std::path::Path;
 pub(crate) struct AutoNote {
     /// Only a shader follow has a command the row can undo.
     pub step: Option<u64>,
-    /// The row's count is the number of decisions. A follow-only row names no suggestion confidence.
+    /// The row's count is the number of decisions, then the first three distinct file names and how many more.
     pub text: String,
-    /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; the
-    /// last line explains High confidence when a sub-type was set.
+    /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; a
+    /// blank line and the paragraph on when Tessalith decides end it when a first sub-type was set (not a retype).
     pub lines: Vec<String>,
 }
 
@@ -54,8 +54,8 @@ fn file_name(key: &str) -> &str {
     key.rsplit(['/', '\\']).next().unwrap_or(key)
 }
 
-/// Ends the row's hover when a sub-type was set (Note FI11, A17).
-const HIGH_CONFIDENCE: &str = "High confidence: the file name and the pixels agree on the type.";
+/// Ends the row's hover when a sub-type was set (Note FI11, A17), after a blank line.
+const HIGH_CONFIDENCE: &str = "Tessalith sets a type on its own only when the evidence is clear: a known file ending such as _n, the folder it is in, or the meshes and grass that use it. Anything less sure stays Undecided for you.";
 
 /// Fuzz-8: ends the switch row's hover.
 pub const FUZZ_SWITCH_HOVER: &str = "A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.";
@@ -525,7 +525,6 @@ impl AppModel {
             "value"
         };
         let s = if n == 1 { "" } else { "s" };
-        let follow_only = followed.len() == writes.len();
         let decisions = writes.len();
         let cubes = self.cube_face_keys();
         let joins_switch = join
@@ -707,12 +706,23 @@ impl AppModel {
                 sw.step = self.history.pushes;
             }
         } else {
-            let typed = !follow_only && writes.iter().any(|w| w.field == "subtype");
-            let confidence = if follow_only {
-                ""
-            } else {
-                " (High confidence)"
-            };
+            // A first automatic type, not a guarded retype (a normal follow): only that claims the evidence was clear.
+            let typed = writes[..decisions]
+                .iter()
+                .any(|w| w.field == "subtype" && w.only_if.is_none());
+            let mut files: Vec<&str> = Vec::new();
+            for (key, _) in &lines {
+                let name = file_name(key);
+                if !files.contains(&name) {
+                    files.push(name);
+                }
+            }
+            let more = files.len().saturating_sub(3);
+            let mut listed = files[..files.len() - more].join(", ");
+            if more > 0 {
+                listed.push_str(&format!(", and {more} more"));
+            }
+            let text = format!("{n} {noun}{s} set automatically: {listed}");
             self.auto_note = Some(AutoNote {
                 step: if followed.is_empty() {
                     self.auto_note
@@ -722,11 +732,11 @@ impl AppModel {
                 } else {
                     Some(self.history.pushes)
                 },
-                text: format!("{n} {noun}{s} set automatically{confidence}"),
+                text,
                 lines: lines
                     .into_iter()
                     .map(|(_, l)| l)
-                    .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
+                    .chain(typed.then(|| format!("\n{HIGH_CONFIDENCE}")))
                     .collect(),
             });
         }
