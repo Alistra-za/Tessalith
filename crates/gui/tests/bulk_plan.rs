@@ -225,7 +225,10 @@ fn the_per_option_reach_equals_what_the_write_writes() {
             );
         }
     }
-    let f = rows.iter().find(|r| r.field == "mips.filter").unwrap();
+    let f = rows
+        .iter()
+        .find(|r| r.field == sdc_gui::model::fields::FILTER_FIELD.0)
+        .unwrap();
     assert_eq!(f.note(), "Box: 4 of 4 · Tent, Mitchell, Kaiser: 1 of 4");
     // The reach differs between options, so the check above is not trivially equal.
     let w = rows.iter().find(|r| r.field == WEIGHTING).unwrap();

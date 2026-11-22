@@ -1086,13 +1086,13 @@ fn popup_of(row: &str, m: AppModel, keys: Vec<String>) -> Vec<(String, bool)> {
     use sdc_gui::model::labels::UNORM_LABEL;
     let selected = keys.len();
     let field = match row {
-        "Filter" => "mips.filter",
+        "Filter" => sdc_gui::model::fields::FILTER_FIELD.0,
         "BC7 weighting" => WEIGHTING,
         "Format" => "format",
         _ => "color.tag",
     };
     let options: Vec<(String, serde_json::Value)> = match field {
-        "mips.filter" => ["Box", "Tent", "Mitchell", "Kaiser"]
+        f if f == sdc_gui::model::fields::FILTER_FIELD.0 => ["Box", "Tent", "Mitchell", "Kaiser"]
             .map(|l| (l.to_string(), serde_json::json!(l.to_lowercase())))
             .to_vec(),
         WEIGHTING => WEIGHTING_OPTIONS
@@ -1215,6 +1215,7 @@ fn the_tag_popup_offers_both_tags_where_the_target_writes_srgb() {
         "{tag:?}"
     );
 }
+
 /// E14: at 1100 px the longest notes (the BC7 weighting and Format rows name every option) stay inside the window and
 /// keep their whole text in their name and on hover.
 #[test]
@@ -1228,7 +1229,11 @@ fn a_long_reach_note_stays_inside_the_panel_with_its_text_on_hover() {
         sdc_gui::model::fields::WEIGHTING,
         serde_json::json!("alpha2"),
     );
-    m.set_field(&keys[3], "mips.filter", serde_json::json!("tent"));
+    m.set_field(
+        &keys[3],
+        sdc_gui::model::fields::FILTER_FIELD.0,
+        serde_json::json!("tent"),
+    );
     m.set_format(
         &keys[3],
         engine::config::Format::Bc7,
@@ -1279,7 +1284,7 @@ fn a_long_reach_note_stays_inside_the_panel_with_its_text_on_hover() {
 fn a_third_group_of_reaches_reads_others_vary() {
     use sdc_gui::model::bulk::BulkField;
     let mut f = BulkField {
-        field: "mips.filter",
+        field: sdc_gui::model::fields::FILTER_FIELD.0,
         label: "Filter",
         value: Some(serde_json::json!("box")),
         applies: 4,
@@ -1294,6 +1299,17 @@ fn a_third_group_of_reaches_reads_others_vary() {
             .collect(),
     };
     assert_eq!(f.note(), "A: 4 of 4 · B, D: 3 of 4 · others vary");
+    // The widest group is never the one folded away: groups sort by reach, ties keep option order.
+    let mut g = f.clone();
+    g.option_reach = ["X", "Y", "Z"]
+        .iter()
+        .zip([1, 2, 4])
+        .map(|(l, k)| (l.to_string(), serde_json::json!(l), k))
+        .collect();
+    assert_eq!(g.note(), "Z: 4 of 4 · Y: 2 of 4 · others vary");
+    // No option reaches any texture: one plain count.
+    g.option_reach.iter_mut().for_each(|o| o.2 = 0);
+    assert_eq!(g.note(), "applies to 0 of 4");
     f.option_reach.truncate(2);
     f.value = None;
     assert_eq!(f.note(), "— mixed · A: 4 of 4 · B: 3 of 4");
@@ -1342,5 +1358,50 @@ fn a_pick_dispatches_when_the_active_texture_already_has_the_value() {
         shown.value,
         serde_json::json!("linear"),
         "the diffuse took Linear"
+    );
+}
+
+/// E14 (I1): while an edit is in flight the reach entries are off, as the old editor's busy gate had them.
+#[test]
+fn the_reach_entries_are_off_while_an_edit_is_in_flight() {
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    m.hold_plan_results = true;
+    m.set_field(ROCK, "mips.levels", serde_json::json!(3));
+    assert!(m.edit_busy(), "the edit's plan is in flight");
+    let mut h = harness(m);
+    h.run_steps(6);
+    weighting_combo(&h).scroll_to_me();
+    h.run_steps(4);
+    weighting_combo(&h).click();
+    h.run_steps(4);
+    let entries: Vec<_> = h.query_all_by_label_contains(" of 2)").collect();
+    assert!(entries.len() >= 5, "the popup is open: {}", entries.len());
+    assert!(
+        entries.iter().all(|n| n.accesskit_node().is_disabled()),
+        "every entry is off while busy"
+    );
+}
+
+/// E14 (M5): a texture filling a locked slot is not reached, and the count says so as the planner does.
+#[test]
+fn a_slot_locked_member_is_left_out_of_the_reach() {
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_slot_lock("landscape/rock01", 1, true).unwrap();
+    assert!(m.wait_idle(WAIT));
+    m.click_item(ROCK, false, false);
+    m.click_item(NORMAL, true, false);
+    let keys = vec![ROCK.to_string(), NORMAL.to_string()];
+    // popup_of compares every entry with `plan_bulk_edit`, which skips the locked slot's texture.
+    let filter = popup_of("Filter", m, keys);
+    assert!(
+        filter.contains(&("Box (1 of 2)".to_string(), false)),
+        "{filter:?}"
     );
 }

@@ -456,7 +456,7 @@ fn skip_of(
         // parsable sub-types and filters; an unparsable one is reported, not written.
         let bad = v.is_null()
             || (field == "subtype" && serde_json::from_value::<Subtype>(v.clone()).is_err())
-            || (field == "mips.filter" && serde_json::from_value::<MipFilter>(v.clone()).is_err())
+            || (field == FILTER_FIELD.0 && serde_json::from_value::<MipFilter>(v.clone()).is_err())
             || (field == WEIGHTING
                 && !super::fields::WEIGHTING_OPTIONS
                     .iter()
@@ -468,7 +468,7 @@ fn skip_of(
         }
         let barred = serde_json::from_value::<MipFilter>(v.clone())
             .ok()
-            .filter(|_| field == "mips.filter")
+            .filter(|_| field == FILTER_FIELD.0)
             .and_then(|f| filter_option_lock(&job.profile, f));
         if let Some(lock) = barred {
             return Some(lock.into());
@@ -603,6 +603,9 @@ impl BulkField {
         }
         if self.option_reach.is_empty() {
             parts.push(format!("applies to {} of {}", self.applies, self.total));
+        } else if self.option_reach.iter().all(|o| o.2 == 0) {
+            // No option reaches any texture: one plain count, not every option at zero.
+            parts.push(format!("applies to 0 of {}", self.total));
         } else {
             let mut groups: Vec<(usize, Vec<&str>)> = vec![];
             for (label, _, k) in &self.option_reach {
@@ -611,6 +614,8 @@ impl BulkField {
                     None => groups.push((*k, vec![label])),
                 }
             }
+            // The widest reaches first, so a big group is never folded into "others vary"; ties keep option order.
+            groups.sort_by_key(|g| std::cmp::Reverse(g.0));
             parts.extend(
                 groups
                     .iter()
@@ -708,10 +713,10 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
                 other.as_ref()
             };
             // E14: the textures a write of each option reaches, by the rule the plan applies.
-            for (_, v, n) in &mut row.option_reach {
+            for (_, v, reach) in &mut row.option_reach {
                 let write = BulkOp::Set(v.clone());
                 let lock = locked.get(k).map(String::as_str);
-                *n += usize::from(
+                *reach += usize::from(
                     skip_of(job, view, row.field, Some(&write), lock, m.target).is_none(),
                 );
             }
@@ -768,12 +773,17 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
     rows
 }
 
+/// E14: whether the field's locks depend on the value picked (so its row lists each option's reach).
+pub fn is_value_dependent(field: &str) -> bool {
+    [FILTER_FIELD.0, WEIGHTING, "format", "color.tag"].contains(&field)
+}
+
 /// E14: the options of a value-dependent row (label, exact write value), in the order the picker lists them. The
 /// Format row's are `bulk_encodings`' pairs; the tag row's, the tags the engine allows with each selected texture's
 /// own format, in first-seen order (a stray current pair is not one a write can make).
 fn option_candidates(m: &AppModel, keys: &[String], field: &str) -> Vec<(String, Value)> {
     match field {
-        "mips.filter" => FILTER_OPTIONS
+        f if f == FILTER_FIELD.0 => FILTER_OPTIONS
             .iter()
             .map(|(f, l)| (l.to_string(), serde_json::json!(f)))
             .collect(),

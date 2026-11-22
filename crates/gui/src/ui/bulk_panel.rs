@@ -6,7 +6,7 @@ use super::settings_panel::{
     subtype_label, RowEdit, GROUPS,
 };
 use crate::look::Combo036 as _;
-use crate::model::bulk::{BulkField, BulkOp};
+use crate::model::bulk::{is_value_dependent, BulkField, BulkOp};
 use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
 use crate::model::labels::type_hover;
 use crate::model::sets::SlotKind;
@@ -310,16 +310,21 @@ fn row(
             .add_enabled_ui(r.applies > 0, |ui| {
                 let mixed = r.value.is_none() && r.applies > 0;
                 // E14: a value-dependent row lists every option with how many textures a pick reaches.
-                if !r.option_reach.is_empty() {
-                    return reach_combo(
-                        ui,
-                        egui::Id::unique((id, r.field)),
-                        r.field,
-                        &view.value,
-                        &r.option_reach,
-                        r.total,
-                        mixed,
-                    );
+                // With no option to list the combo is drawn off, never the editor with one texture's locks.
+                if is_value_dependent(r.field) {
+                    return ui
+                        .add_enabled_ui(!r.option_reach.is_empty(), |ui| {
+                            reach_combo(
+                                ui,
+                                egui::Id::unique((id, r.field)),
+                                r.field,
+                                &view.value,
+                                &r.option_reach,
+                                r.total,
+                                (mixed, busy),
+                            )
+                        })
+                        .inner;
                 }
                 editor(ui, id, target, job, busy, &view, mixed)
             })

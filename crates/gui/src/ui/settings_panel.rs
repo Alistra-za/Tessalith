@@ -717,7 +717,7 @@ pub(super) fn reach_combo(
     current: &Value,
     reach: &[(String, Value, usize)],
     total: usize,
-    mixed: bool,
+    (mixed, busy): (bool, bool),
 ) -> (Option<Value>, egui::Response) {
     let shown = if mixed {
         egui::RichText::new("— mixed").weak()
@@ -734,7 +734,7 @@ pub(super) fn reach_combo(
         .selected_text(shown)
         .show_ui_036(ui, |ui| {
             for (label, v, k) in reach {
-                let on = *k > 0;
+                let on = *k > 0 && !busy;
                 let text = format!("{label} ({k} of {total})");
                 let r = ui.add_enabled(on, egui::Button::selectable(!mixed && v == current, text));
                 let hover = if field == WEIGHTING {
@@ -748,6 +748,7 @@ pub(super) fn reach_combo(
                     None
                 };
                 let r = match (on, hover) {
+                    (false, _) if busy => r.on_disabled_hover_text("Wait for the plan to finish"),
                     (false, _) => r.on_disabled_hover_text(NO_REACH_HOVER),
                     (true, Some(h)) => r.on_hover_text(h),
                     (true, None) => r,
