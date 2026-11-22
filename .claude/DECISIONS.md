@@ -9,7 +9,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS, LA
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, LD
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF
 
 ## Digest
 
@@ -2183,3 +2183,9 @@ LD is provisional. At merge the controller rechecks the next free main-team lett
 LE is provisional. At merge the controller rechecks the next free main-team letter and renames LE and its references if needed.
 
 - **LE1 Shared roughness (amends R7 and M4-final-1).** A set joins the bake group through its own or borrowed roughness slot. A JSON slot-6 link or clear leaves that membership intact. The normal check follows slot-2 links and clears. A shared slot-6 output bakes once on its producer when every set using it resolves to the same eligible normal image, including a borrowed normal. Different, missing or unverifiable normals leave the roughness unbaked and put SET-SHARED-ROUGHNESS-NORMAL on the producer's job and in Problems. Explicit bake exclusions and an explicit renormalize setting on the normal still win. Mip 0 stays authored (HD1).
+
+## Note LF — Allocation budgets (main team, 2026-11-21)
+
+A new engine test file counts the allocation calls of a warm full plan and of a one-edit re-plan, so a change that makes planning allocate far more fails a test. It changes no encoded byte.
+
+- **LF1 Plan allocation budgets.** `crates/engine/tests/alloc_budget.rs` counts allocation calls with a process-wide counting allocator, for a warm full plan and for one `replan_sets` edit of the fast fixture, and fails above `WARM_PLAN_CALLS` or `REPLAN_CALLS`. Every request runs with `jobs = 1` so the count is the same from run to run. Each const is the largest of 5 measured runs times 1.25, rounded up to two significant figures; to raise one, re-measure 5 runs with `--nocapture`, apply that rule, and give the reason in the commit.
