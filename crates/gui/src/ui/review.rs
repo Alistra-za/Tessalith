@@ -65,7 +65,7 @@ pub fn undecided_row(
         .iter()
         .filter_map(|d| match d {
             Decision::AlphaMeaning => {
-                alpha_asked(item).map(|shown| (alpha_confirm_text(shown).to_string(), None))
+                alpha_asked(item).map(|shown| (alpha_confirm_text(shown), None))
             }
             Decision::Acknowledge(code) => {
                 Some((code_line(*code).to_string(), Some(code.as_str())))

@@ -215,7 +215,7 @@ fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
         all,
         filter: f,
         name_kind: kind,
-        hidden_kinds: hidden_kinds.clone(),
+        hidden_kinds,
         rows,
         checks,
         hidden,

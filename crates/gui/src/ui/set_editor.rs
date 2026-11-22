@@ -1933,7 +1933,7 @@ fn source_picker(
                             why.is_none(),
                             egui::Button::selectable(now.is_none(), "Value"),
                         )
-                        .on_disabled_hover_text(why.clone().unwrap_or_default());
+                        .on_disabled_hover_text(why.unwrap_or_default());
                     if value.clicked() && now.is_some() {
                         if let Some(c) = channel {
                             acts.push(Act::ChannelHelper(packed.into(), c as u8, None));

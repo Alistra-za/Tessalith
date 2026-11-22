@@ -4285,7 +4285,7 @@ impl AppModel {
                 "{new_id} is still the automatic set of a file; pick another name"
             ));
         }
-        let (a, b) = (v.id.clone(), new_id);
+        let (a, b) = (v.id, new_id);
         // TA31: the Also export opt-out (`[export] skip`, set ids) follows, in the same step.
         self.edit_docs(&format!("Rename {a}"), None, true, move |p, s| {
             s.rename_set(&a, &b);
@@ -5260,7 +5260,7 @@ impl AppModel {
         if moves.is_empty() {
             return Err("nothing to fill".into());
         }
-        let (id, n) = (v.id.clone(), moves.len());
+        let (id, n) = (v.id, moves.len());
         self.edit_docs(&format!("Fill {id} from names"), None, true, move |_, s| {
             for (item, slot, existing, lent) in &moves {
                 clear_slot(s, &id, Some(*slot), existing);

@@ -1349,7 +1349,7 @@ impl AppModel {
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
-                disabled: locked.clone(),
+                disabled: locked,
             },
         ]
         .into_iter()
@@ -1596,7 +1596,7 @@ impl AppModel {
                     } else {
                         format!("From {host}")
                     },
-                    disabled: off.clone(),
+                    disabled: off,
                 },
             );
         }
@@ -1628,7 +1628,7 @@ impl AppModel {
         {
             menu.push(MenuEntry {
                 action: MenuAction::PgpLock {
-                    set: id.clone(),
+                    set: id,
                     n,
                     on: !on,
                 },

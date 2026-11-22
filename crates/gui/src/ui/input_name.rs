@@ -579,7 +579,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
         .collect();
         if !hover.is_empty() {
             // One tooltip for the frame and the text edit inside it.
-            inner.response.clone().union(r.clone()).on_hover_text(hover.join("\n"));
+            inner.response.union(r.clone()).on_hover_text(hover.join("\n"));
         }
         if r.has_focus() || r.changed() {
             ui.data_mut(|d| d.insert_temp(buf, (text.clone(), frame)));

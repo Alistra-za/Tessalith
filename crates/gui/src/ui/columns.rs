@@ -783,12 +783,14 @@ fn value_combo(
     present: &[String],
     show: impl Fn(&str) -> String,
 ) {
-    let mut values: Vec<&String> = present.iter().collect();
-    if let Some(c) = current.as_ref().filter(|c| !present.contains(c)) {
-        values.push(c);
-    }
+    let extra = current.as_ref().filter(|c| !present.contains(c));
     let mut options = vec![(None, "Any".to_string())];
-    options.extend(values.into_iter().map(|v| (Some(v.as_str()), show(v))));
+    options.extend(
+        present
+            .iter()
+            .chain(extra)
+            .map(|v| (Some(v.as_str()), show(v))),
+    );
     let mut now = current.as_deref();
     pick(ui, name, hover, &mut now, &options);
     if now != current.as_deref() {
