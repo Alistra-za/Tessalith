@@ -514,37 +514,6 @@ fn a_resolve_error_fails_the_file_at_resolve() {
     assert!(!d.path().join("out/textures/armor/iron_n.dds").exists());
 }
 
-/// Note LN: `alpha4`, `alpha32` and `alpha64` are set like `alpha16` and give bc7e `[1, 1, 1, w]`.
-#[test]
-fn bc7_weights_alpha4_alpha32_alpha64_resolve_to_their_weights() {
-    use engine::config::Bc7Weights;
-    let d = tempfile::tempdir().unwrap();
-    fixtures(d.path());
-    for (name, want, w) in [
-        ("alpha4", Bc7Weights::Alpha4, 4),
-        ("alpha32", Bc7Weights::Alpha32, 32),
-        ("alpha64", Bc7Weights::Alpha64, 64),
-    ] {
-        let mut req = request(d.path());
-        req.overrides = vec![parse_set(&format!("encoder.bc7_weights={name}")).unwrap()];
-        let plan = Engine::new()
-            .unwrap()
-            .plan(
-                req,
-                &Reporter::new(Arc::new(NullSink), "t"),
-                &CancelToken::default(),
-            )
-            .unwrap();
-        let job = plan
-            .jobs
-            .iter()
-            .find(|j| j.input.ends_with("iron.png"))
-            .unwrap();
-        assert_eq!(job.profile.encoder.bc7_weights, Some(want), "{name}");
-        assert_eq!(want.weights(), [1, 1, 1, w], "{name}");
-    }
-}
-
 /// Note CP: `--set encoder.bc7_weights=…` reaches the profile; ENC-WEIGHTS-IGNORED when perceptual wins, on a
 /// non-BC7 format; never when the field is unset.
 #[test]
@@ -579,6 +548,17 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
     let set = iron(&plan(&["encoder.bc7_weights=alpha8"]));
     assert_eq!(set.profile.encoder.bc7_weights, Some(Bc7Weights::Alpha8));
     assert!(!ignored(&set), "{:?}", set.warnings);
+    // Note LN: the weights added later resolve like the others, and bc7e is given `[1, 1, 1, w]`.
+    for (name, want, w) in [
+        ("alpha4", Bc7Weights::Alpha4, 4),
+        ("alpha32", Bc7Weights::Alpha32, 32),
+        ("alpha64", Bc7Weights::Alpha64, 64),
+    ] {
+        let j = iron(&plan(&[&format!("encoder.bc7_weights={name}")]));
+        assert_eq!(j.profile.encoder.bc7_weights, Some(want), "{name}");
+        assert!(!ignored(&j), "{name}: {:?}", j.warnings);
+        assert_eq!(want.weights(), [1, 1, 1, w], "{name}");
+    }
     for extra in [
         "file:**/iron.png.encoder.perceptual=true",
         "file:**/iron.png.format=bc1",
