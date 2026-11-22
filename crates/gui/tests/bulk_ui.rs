@@ -41,6 +41,27 @@ fn ctrl_click_on_tiles_selects_both_and_the_heading_counts_them() {
     assert_eq!(h.query_all_by_label("2 selected").count(), 1);
 }
 
+/// Pins today's behaviour (Unconfirmed 1): Shift-click on a drawn tile selects the range from the last click.
+#[test]
+fn shift_click_on_tiles_selects_the_range() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()));
+    h.run();
+    let shown: Vec<_> = h
+        .state()
+        .visible_items()
+        .into_iter()
+        .map(|i| h.state().items[i].key.clone())
+        .collect();
+    assert!(shown.len() >= 3, "premise: three tiles");
+    tile(&h, &shown[0]).click();
+    h.run();
+    tile(&h, &shown[2]).click_modifiers(Modifiers::SHIFT);
+    h.run();
+    assert_eq!(h.state().selected_items(), shown[..3].to_vec());
+    assert_eq!(h.query_all_by_label("3 selected").count(), 1);
+}
+
 /// Final fix wave A7: Reset all for one texture asks in the singular.
 #[test]
 fn reset_all_of_one_texture_asks_in_the_singular() {
