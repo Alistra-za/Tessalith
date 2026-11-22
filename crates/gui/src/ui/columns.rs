@@ -2,7 +2,7 @@
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
 use crate::model::bulk::{MenuAction, MenuEntry};
-use crate::model::items::{ItemStatus, TextureItem};
+use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::texture_view::{ColumnPrefs, FilterOptions, SetFilter, SortKey};
 use crate::model::AppModel;
 use eframe::egui;
@@ -186,8 +186,89 @@ fn tile_border(ui: &egui::Ui, status: &ItemStatus, no_set: bool) -> egui::Color3
     border_of(ui, status)
 }
 
+/// The packed output's sources as file names: each source once, by project key, sorted case-insensitively with the
+/// key as the tie-break. Empty for anything that is not a generated pack.
+fn pack_source_names(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    let (Some(root), Some(pack)) = (
+        model.root.as_deref(),
+        item.job.as_ref().and_then(|j| j.pack.as_ref()),
+    ) else {
+        return vec![];
+    };
+    let mut keys: Vec<String> = pack
+        .sources
+        .iter()
+        .map(|s| crate::model::items::key_of(root, &s.path))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let name = |k: &str| k.rsplit('/').next().unwrap_or(k).to_string();
+    keys.sort_by_key(|k| (name(k).to_lowercase(), k.clone()));
+    keys.iter().map(|k| name(k)).collect()
+}
+
+/// "a", "a and b", "a, b and c".
+fn join_and(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// The outputs (their keys, once each, sorted) whose actual source list holds `item`.
+fn packed_into_keys(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    let Some(root) = model.root.as_deref() else {
+        return vec![];
+    };
+    let mut outs: Vec<String> = model
+        .items
+        .iter()
+        .filter(|o| o.kind == ItemKind::Packed)
+        .filter(|o| {
+            o.job
+                .as_ref()
+                .and_then(|j| j.pack.as_ref())
+                .is_some_and(|p| {
+                    p.sources
+                        .iter()
+                        .any(|s| crate::model::items::key_of(root, &s.path) == item.key)
+                })
+        })
+        .map(|o| o.job_key.clone())
+        .collect();
+    outs.sort();
+    outs.dedup();
+    outs
+}
+
+/// What a bulk edit or a change does to a packed output or to a source packed into one; empty for other files.
+/// Built on hover only: it scans the outputs.
+fn pack_lines(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    if item.kind == ItemKind::Packed {
+        let names = pack_source_names(model, item);
+        if names.is_empty() {
+            return vec![];
+        }
+        return vec![format!(
+            "Packed output, made from {}. Bulk edits change unlocked settings on this output.",
+            join_and(&names)
+        )];
+    }
+    let mut lines: Vec<String> = packed_into_keys(model, item)
+        .iter()
+        .map(|j| format!("Packed into {j}: changing this file changes {j}."))
+        .collect();
+    if !lines.is_empty() && item.job.is_none() {
+        lines
+            .push("Bulk edits skip this source because it has no settings of its own.".to_string());
+    }
+    lines
+}
+
 /// The hover text of a tile: what the status means, then the warnings, the marked ones last under `MARKED_LINE`. A
-/// no-set texture says `No set` in place of its question and its warnings (Note HF1).
+/// no-set texture says `No set` in place of its question and its warnings (Note HF1). A packed output says what it is
+/// made from; a packed source says what changing it changes (Note 3d-R5).
 pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
     let mut lines = vec![item.key.clone()];
     if no_set {
@@ -196,7 +277,11 @@ pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> Strin
             return lines.join("\n");
         }
     }
+    let packs = pack_lines(model, item);
+    let explained = !packs.is_empty();
+    lines.extend(packs);
     match &item.status {
+        ItemStatus::PackedInto(_) if explained => {}
         ItemStatus::Failed(e) => lines.push(format!("Failed: {e}")),
         ItemStatus::Error(codes) => lines.push(format!(
             "Error: {}",
@@ -303,7 +388,9 @@ fn tile(
         })
         .response
         .interact(egui::Sense::click_and_drag())
-        .on_hover_text(tile_tooltip(model, item, no_set));
+        .on_hover_ui(|ui| {
+            ui.label(tile_tooltip(model, item, no_set));
+        });
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).
@@ -665,6 +752,13 @@ fn helper_row(
         format!("Helper {}: {role}{by_you}, {target}", item.name)
     };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+    // Hover on the row itself, built only while hovered: what changing this file changes (Note 3d-R5).
+    let resp = resp.on_hover_ui(|ui| {
+        let lines = pack_lines(model, &model.items[idx]);
+        if !lines.is_empty() {
+            ui.label(lines.join("\n"));
+        }
+    });
     if chosen.contains(&key) {
         ui.painter().rect_filled(
             rect,
@@ -717,10 +811,16 @@ fn helper_row(
                         format!("→ {}", target.trim_start_matches("fills "))
                     };
                     ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate())
-                        .on_hover_text(crate::model::items::helper_target_files(
-                            &h,
-                            model.helper_tails(&h),
-                        ));
+                        .on_hover_ui(|ui| {
+                            let mut text = crate::model::items::helper_target_files(
+                                &h,
+                                model.helper_tails(&h),
+                            );
+                            for l in pack_lines(model, item) {
+                                text = format!("{text}\n{l}");
+                            }
+                            ui.label(text);
+                        });
                 },
             );
     });

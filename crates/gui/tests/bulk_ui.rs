@@ -1405,3 +1405,199 @@ fn a_slot_locked_member_is_left_out_of_the_reach() {
         "{filter:?}"
     );
 }
+
+/// `harness` with instant tooltips, so a hover shows its text on the next frame.
+fn hover_harness(model: AppModel) -> Harness<'static, AppModel> {
+    let h = harness(model);
+    instant_tips(&h.ctx);
+    h
+}
+
+/// The tile of `key`: its exact file name outside the Sets column (a "packed into ..." badge never matches exactly).
+fn tile<'a>(h: &'a Harness<'static, AppModel>, key: &str) -> egui_kittest::Node<'a> {
+    let name: &'a str = &h.state().items.iter().find(|i| i.key == key).unwrap().name;
+    let mut found: Vec<_> = h
+        .query_all_by_label(name)
+        .filter(|n| !in_sets_column(h, n.rect()))
+        .collect();
+    assert_eq!(found.len(), 1, "one tile named {name}");
+    found.remove(0)
+}
+
+/// Pins today's behaviour (AG48/CD14, ruling 3d-R5): Ctrl+A keeps a packed tile. It passes before the hover change.
+#[test]
+fn ctrl_a_includes_packed_tiles() {
+    use sdc_gui::model::items::ItemKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = hover_harness(opened(d.path()));
+    h.run();
+    let packed = h
+        .state()
+        .items
+        .iter()
+        .find(|i| i.kind == ItemKind::Packed)
+        .unwrap()
+        .key
+        .clone();
+    tile(&h, &packed).click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    let selected = h.state().selected_items();
+    assert!(selected.contains(&packed) && selected.len() > 1);
+    assert!(selected
+        .iter()
+        .all(|k| h.state().item(k).unwrap().helper.is_none()));
+}
+
+#[test]
+fn a_packed_tile_says_what_it_is_made_from() {
+    use sdc_gui::model::items::ItemKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = hover_harness(opened(d.path()));
+    h.run();
+    let key = h
+        .state()
+        .items
+        .iter()
+        .find(|i| i.kind == ItemKind::Packed)
+        .unwrap()
+        .key
+        .clone();
+    tile(&h, &key).hover();
+    h.run();
+    h.run();
+    assert!(h
+        .query_by_label_contains(
+            "Packed output, made from rock01_ao.png and rock01_roughness.png. Bulk edits change unlocked settings on this output."
+        )
+        .is_some());
+}
+
+/// The drawn helper row named by `name`: the Button outside the Sets column.
+fn helper_row_of<'a>(h: &'a Harness<'static, AppModel>, name: &'a str) -> egui_kittest::Node<'a> {
+    h.query_all_by_label_contains(name)
+        .find(|n| {
+            n.accesskit_node().role() == eframe::egui::accesskit::Role::Button
+                && !in_sets_column(h, n.rect())
+        })
+        .expect("the drawn helper row")
+}
+#[test]
+fn a_packed_source_says_what_changing_it_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = hover_harness(opened(d.path()));
+    h.run();
+    let src = "landscape/rock01_roughness.png";
+    let helper = h.state().item(src).unwrap();
+    assert!(helper.helper.is_some(), "exercise the helper row");
+    let name = helper.name.clone();
+    h.state_mut().filter.hide_helpers = false;
+    h.run();
+    helper_row_of(&h, &name).scroll_to_me();
+    h.run();
+    helper_row_of(&h, &name).hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains("changing this file changes landscape/rock01_rmaos.dds.")
+        .is_some());
+    assert!(h
+        .query_by_label_contains(
+            "Bulk edits skip this source because it has no settings of its own."
+        )
+        .is_some());
+}
+
+/// A source feeding two packs lists both outputs once each; each output lists just its own sources.
+#[test]
+fn a_shared_source_lists_every_output_it_feeds() {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    for f in ["a/rock.png", "a/rock_roughness.png", "c/slab.png"] {
+        let p = root.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        if f.contains('_') {
+            image::ImageBuffer::from_fn(64, 64, |x, y| image::Luma([(x * 3 + y) as u8]))
+                .save(p)
+                .unwrap();
+        } else {
+            image::ImageBuffer::from_fn(64, 64, |x, y| {
+                image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+            })
+            .save(p)
+            .unwrap();
+        }
+    }
+    let mut m = opened_as_the_app(root, d.path().join("export"));
+    let rough = "a/rock_roughness.png";
+    assert_eq!(
+        m.drop_choice(rough, "c/slab", DropChoice::Share),
+        DropOutcome::Joined
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let tip = |k: &str| sdc_gui::ui::columns::tile_tooltip(&m, m.item(k).unwrap(), false);
+    let src = tip(rough);
+    assert_eq!(
+        src.matches("changing this file changes").count(),
+        2,
+        "{src}"
+    );
+    assert!(
+        src.contains(
+            "Packed into pbr/a/rock_rmaos.dds: changing this file changes pbr/a/rock_rmaos.dds."
+        ),
+        "{src}"
+    );
+    assert!(
+        src.contains("Packed into c/slab_rmaos.dds: changing this file changes c/slab_rmaos.dds."),
+        "{src}"
+    );
+    assert!(src.contains("Bulk edits skip this source"), "{src}");
+    for out in ["a/rock_rmaos", "a/slab_rmaos"] {
+        let t = tip(out);
+        assert!(
+            t.contains("Packed output, made from rock_roughness.png. Bulk edits"),
+            "{t}"
+        );
+    }
+}
+
+/// Preservation (passes before and after the hover change, a pin and not a RED): a packed output takes its own
+/// unlocked field on its own key; the consumed source with no job is skipped.
+#[test]
+fn a_packed_output_writes_its_own_mip_levels() {
+    use sdc_gui::model::bulk::{plan_bulk_edit, BulkOp, Change, NO_SETTINGS};
+    use sdc_gui::model::items::ItemKind;
+    use sdc_gui::project::ProjectDoc;
+    use serde_json::json;
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let packed = "landscape/rock01_rmaos";
+    let src = "landscape/rock01_roughness.png";
+    let out = m.item(packed).unwrap();
+    assert_eq!(out.kind, ItemKind::Packed);
+    assert!(out.job.is_some() && m.item(src).unwrap().job.is_none());
+    let field = "mips.levels";
+    let doc = m.project.as_ref().unwrap();
+    assert_eq!(doc.file_value(packed, field), None);
+    assert_eq!(doc.file_value(src, field), None);
+    let keys = [packed.to_owned(), src.to_owned()];
+    let op = BulkOp::Set(json!("none"));
+    assert_eq!(
+        plan_bulk_edit(&m, &keys, field, &op),
+        vec![
+            (packed.to_owned(), Change::Write),
+            (src.to_owned(), Change::Skip(NO_SETTINGS.into()))
+        ]
+    );
+    m.apply_bulk_edit(&keys, field, op);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.save().unwrap();
+    let root = m.root.as_ref().unwrap();
+    assert!(root.join("sdc.toml").is_file());
+    let saved = ProjectDoc::open(root);
+    assert_eq!(saved.file_value(packed, field), Some(json!("none")));
+    assert_eq!(saved.file_value(src, field), None);
+}
