@@ -826,6 +826,50 @@ fn bc7_alpha8_raises_alpha_psnr_on_smooth_alpha() {
     );
 }
 
+/// Summed squared alpha error of a BC7 encode against `px` (bcdec decode).
+fn alpha_sse(bc7: &[u8], px: &[[u8; 4]], w: u32, h: u32) -> f64 {
+    let blocks = encoders_sys::gather_blocks(px, w, h);
+    let mut se = 0f64;
+    for (b, src) in bc7.chunks(16).zip(blocks.chunks(16)) {
+        let mut d = [0u8; 64];
+        bcdec_rs::bc7(b, &mut d, 16);
+        for (t, s) in d.chunks(4).zip(src) {
+            se += (f64::from(t[3]) - f64::from(s[3])).powi(2);
+        }
+    }
+    se
+}
+
+/// Note LN: Alpha x64 reaches bc7e (the weight neither overflows nor is ignored): the bytes differ from Linear's and
+/// the summed squared alpha error, on an alpha of noise unrelated to a detailed colour, is at most half of Linear's.
+#[test]
+fn bc7_alpha64_cuts_alpha_error_to_half_of_linear_or_less() {
+    let (w, h) = (64, 64);
+    let mut s = 0x9e37_79b9_u32;
+    let mut next = move || {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        s
+    };
+    let px: Vec<[u8; 4]> = (0..w * h)
+        .map(|_| {
+            let (c, a) = (next(), next());
+            [c as u8, (c >> 8) as u8, (c >> 16) as u8, a as u8]
+        })
+        .collect();
+    let input = EncoderInput::Ldr(px.clone());
+    let lin = encode(&input, w, h, &weighted(Some(Bc7Weights::Linear)));
+    let a64 = encode(&input, w, h, &weighted(Some(Bc7Weights::Alpha64)));
+    assert_ne!(a64, lin, "alpha64 wrote Linear's bytes");
+    let (e_lin, e_64) = (alpha_sse(&lin, &px, w, h), alpha_sse(&a64, &px, w, h));
+    // Measured 2026-11-22: 8096170 against 232792, a ratio of 0.029.
+    assert!(
+        e_64 <= 0.5 * e_lin,
+        "alpha SSE linear {e_lin}, alpha64 {e_64}"
+    );
+}
+
 /// Note CP: the field is not serialised when unset, so every existing profile hash holds.
 #[test]
 fn bc7_weights_change_the_profile_hash_only_when_set() {

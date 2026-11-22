@@ -456,6 +456,12 @@ ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
 ARCHIVED (wording before the edit; superseded in part by Note LL, 2026-11-22)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK
 
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI
+
 ## Digest
 
 ARCHIVED (wording before the edit; superseded in part by Note JW6, 2026-11-20)
@@ -850,6 +856,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 
 ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 - A set card uses a one-row heading only when the name gets at least 80 px, or its whole width when that is less (HP12). [FI13, HP12]
+
+ARCHIVED (wording before the edit; superseded in part by Note LN1, 2026-11-22)
+- BC7 weighting is a dropdown with a stated precedence; inherited values are overridable; RMAOS weighting R4 G1 B2 A1 was dropped. [CP1, CP3, CP9, CP12]
 
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 

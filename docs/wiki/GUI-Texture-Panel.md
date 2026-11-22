@@ -42,9 +42,9 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 |---|---|---|
 | **Linear** (default) | Every channel weighs the same. | Clears `encoder.perceptual` and `encoder.bc7_weights`; over an inherited value it writes `perceptual = false` and `bc7_weights = "linear"`. |
 | **Perceptual** | bc7e's own weights. Greyed on anything but colour without data alpha. | `perceptual = true` |
-| **Alpha ×2**, **×8**, **×16** | Alpha error counts 2, 8 or 16 times. | `bc7_weights` |
+| **Alpha ×2**, **×4**, **×8**, **×16**, **×32**, **×64** | Alpha error counts 2, 4, 8, 16, 32 or 64 times. | `bc7_weights` |
 
-I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps more RGB than BC3 does. ×16 suits a `_n` with specular in its alpha. The measurements are in [Research](Research.md) ([BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21)).
+I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps more RGB than BC3 does. ×16 suits a `_n` with specular in its alpha. ×32 and ×64 trade more colour for a little more alpha: on colour with smooth alpha they gain only +0.3 and +0.45 dB of alpha over ×16. The measurements are in [Research](Research.md) ([BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21)).
 
 ### Effort
 

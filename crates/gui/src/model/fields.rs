@@ -46,7 +46,7 @@ pub const PERCEPTUAL_HOVER: &str =
 pub const WEIGHTING: &str = "encoder.bc7_weights";
 
 /// The BC7 weighting row's options: the row's value, its label, its hover text.
-pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
+pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 8] = [
     ("linear", "Linear", "Linear: every channel counts the same (the default)."),
     (
         "perceptual",
@@ -59,6 +59,11 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
         "Alpha ×2: a light lean towards alpha accuracy, for little colour cost.",
     ),
     (
+        "alpha4",
+        "Alpha ×4",
+        "Alpha ×4: a moderate lean towards alpha accuracy, between ×2 and ×8.",
+    ),
+    (
         "alpha8",
         "Alpha ×8",
         "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. Costs about 1 dB of RGB per 3 dB of alpha.",
@@ -66,7 +71,17 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
     (
         "alpha16",
         "Alpha ×16",
-        "Alpha ×16: the strongest alpha priority; best for a _n with specular in alpha.",
+        "Alpha ×16: strong alpha priority; best for a _n with specular in alpha.",
+    ),
+    (
+        "alpha32",
+        "Alpha ×32",
+        "Alpha ×32: stronger alpha priority than ×16, for alpha that matters more than colour; a small alpha gain over ×16 for more colour cost.",
+    ),
+    (
+        "alpha64",
+        "Alpha ×64",
+        "Alpha ×64: the strongest alpha priority; alpha first, colour last.",
     ),
 ];
 

@@ -514,6 +514,37 @@ fn a_resolve_error_fails_the_file_at_resolve() {
     assert!(!d.path().join("out/textures/armor/iron_n.dds").exists());
 }
 
+/// Note LN: `alpha4`, `alpha32` and `alpha64` are set like `alpha16` and give bc7e `[1, 1, 1, w]`.
+#[test]
+fn bc7_weights_alpha4_alpha32_alpha64_resolve_to_their_weights() {
+    use engine::config::Bc7Weights;
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    for (name, want, w) in [
+        ("alpha4", Bc7Weights::Alpha4, 4),
+        ("alpha32", Bc7Weights::Alpha32, 32),
+        ("alpha64", Bc7Weights::Alpha64, 64),
+    ] {
+        let mut req = request(d.path());
+        req.overrides = vec![parse_set(&format!("encoder.bc7_weights={name}")).unwrap()];
+        let plan = Engine::new()
+            .unwrap()
+            .plan(
+                req,
+                &Reporter::new(Arc::new(NullSink), "t"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        let job = plan
+            .jobs
+            .iter()
+            .find(|j| j.input.ends_with("iron.png"))
+            .unwrap();
+        assert_eq!(job.profile.encoder.bc7_weights, Some(want), "{name}");
+        assert_eq!(want.weights(), [1, 1, 1, w], "{name}");
+    }
+}
+
 /// Note CP: `--set encoder.bc7_weights=…` reaches the profile; ENC-WEIGHTS-IGNORED when perceptual wins, on a
 /// non-BC7 format; never when the field is unset.
 #[test]
@@ -570,12 +601,12 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
         assert!(!ignored(&j), "{extra}: {:?}", j.warnings);
     }
     // M3: an unknown value is refused, naming the key and the valid values. `rmaos` was dropped (Note CP12).
-    for bad in ["alpha4", "rmaos"] {
+    for bad in ["alpha3", "rmaos"] {
         let text = match try_plan(&[&format!("encoder.bc7_weights={bad}")]) {
             Err(e) => e.to_string(),
             Ok(_) => panic!("{bad} planned"),
         };
-        let valid = "expected one of `linear`, `alpha2`, `alpha8`, `alpha16`";
+        let valid = "expected one of `linear`, `alpha2`, `alpha4`, `alpha8`, `alpha16`, `alpha32`, `alpha64`";
         for want in [bad, "encoder.bc7_weights", valid] {
             assert!(text.contains(want), "{want}: {text}");
         }

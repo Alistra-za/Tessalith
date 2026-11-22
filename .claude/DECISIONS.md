@@ -12,7 +12,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH, LI, LK
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS, LA
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI, LN
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS, JE, JQ, JR, JS, JW
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW, JS, LA, LE
 - Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU, HX, JY
@@ -21,7 +21,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS, JH, JI, JN, JR, JS, JY, LB, LJ
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY, LG
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY, LB, LC, LD, LE, LF, LG, LI, LJ
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI, LN
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY, LD
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX, JH, JI, JJ, JL, JO, JR, JT, JV, JY
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS, JA, JF, JI, JK, JL, JN, JO, JQ, JR, JT, JU, JS, JW, JY, LB, LC, LD, LG, LJ
@@ -149,7 +149,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - BC1 is opaque unless `encoder.bc1_alpha` is on (opt-in 1-bit alpha). [F, FM20]
 - Perceptual BC1; vanilla colour is perceptual. [FM42, FM43]
 - BC1 and RGB8 are allowed on a `data`-alpha type when the alpha is empty. [FM39]
-- BC7 weighting is a dropdown with a stated precedence; inherited values are overridable; RMAOS weighting R4 G1 B2 A1 was dropped. [CP1, CP3, CP9, CP12]
+- BC7 weighting is a dropdown (Linear, Perceptual, Alpha ×2, ×4, ×8, ×16, ×32 and ×64) with a stated precedence; inherited values are overridable; RMAOS weighting R4 G1 B2 A1 was dropped. [CP1, CP3, CP9, CP12, LN1]
 - bc7e has an effort level `max`, off by default; the default stays byte-identical; level hashes are pinned per ISPC target; the endpoint search is not adopted in `veryslow`. [BZ1, BZ2, CB2, CB4]
 - BC6H defaults to the peak-preserving mode (ISPC TC patch 0001); Slowest and Max use it. [FE3, FF1, FM43]
 - BC4 block search: inner-anchored 6-value mode, least-squares refits, trimmed and local search, never worse per block; it carries a manifest tag. [FJ1, FJ2, FJ4]
@@ -2257,3 +2257,10 @@ This note was written as LG on the branch (its commits Note LG1 to LG3 say so) b
 - **LL1 `rustfmt.toml` sets `newline_style = "Native"`.** Measured with rustfmt 1.10.0 (on a tracked CRLF file, with a formatting break inserted as a CRLF line): under the default `Auto`, rustfmt rewrites a file that needs formatting as all LF, and leaves a file that needs none untouched, so a clean CRLF tree passes `cargo fmt --all --check` and only a reformatted file turns LF. Under `Native` the reformatted file stays CRLF. A file with mixed endings (first line ending LF) passes `--check` under `Auto` and fails it under `Native` ("Incorrect newline style"); `cargo fmt` then writes it back as CRLF. CONTRIBUTING.md (Conventions) says a Windows working copy is CRLF (`core.autocrlf=true`): with an LF working copy `cargo fmt --check` fails.
 - **LL2 The gate writes `<Out>\progress.txt`.** One line per step start, PASS or FAIL, skip, and the final result. Through the gate's own `Step`, a native child's stdout and stderr lines were readable with `Get-Content` 8 s into a 20 s step (12 bytes) and the final log kept all four lines in order, so `Step`'s redirection is unchanged. The 0 bytes seen on a long run were not reproduced; a stale NTFS size is a guess.
 - **LL3 The long-run results rule is in `CODING_STANDARDS.md`, "A long `#[ignore]` run keeps its per-item results".** The `bcenc` 10k corpus test is not changed here; Plan E's bcenc track, which already writes per-file hashes from a scratch test, brings it under the rule.
+
+## Note LN - BC7 weighting gains Alpha ×4, ×32 and ×64 (owner, 2026-11-22)
+
+- **LN1 `Bc7Weights` has `alpha4`, `alpha32` and `alpha64` (owner: "add in bc7 weight modes alpha modes x 4, x 32 and x64").** They give bc7e `[1, 1, 1, w]` and are accepted wherever `alpha16` is: `sdc.toml`, overrides, presets and `--set encoder.bc7_weights=alpha64`. Engine order (`Bc7Weights::ALL` and the "expected one of" text): linear, alpha2, alpha4, alpha8, alpha16, alpha32, alpha64. They reach bc7e only, as the others do (CP2, CP4, CP5, CP8), and a variant carries a `//` comment, never `///` (JT4). Test `bc7_alpha64_cuts_alpha_error_to_half_of_linear_or_less` encodes a noise alpha at ×64 and finds a summed squared alpha error of 0.029 of Linear's (8096170 against 232792).
+- **LN2 No existing byte changes.** No preset, sub-type or rule sets the new values, so the goldens, `encode_versions` and every profile hash are as before.
+- **LN3 The hover texts are proposals pending the owner's reading.** ×4: "a moderate lean towards alpha accuracy, between ×2 and ×8." ×16: "strong alpha priority; best for a _n with specular in alpha." ×32: "stronger alpha priority than ×16, for alpha that matters more than colour; a small alpha gain over ×16 for more colour cost." ×64: "the strongest alpha priority; alpha first, colour last." The ×16 text no longer says "the strongest", which ×64 now is. The ×32 claim is the measured +0.3 dB of alpha over ×16 on `alpha_real` (docs/research/bc7e-tuning.md).
+- **LN4 The dropdown's options, in order (`WEIGHTING_OPTIONS`):** Linear, Perceptual, Alpha ×2, Alpha ×4, Alpha ×8, Alpha ×16, Alpha ×32, Alpha ×64. Perceptual is `encoder.perceptual`, the rest are `encoder.bc7_weights`. An older version refuses an `sdc.toml` that uses the new values.
