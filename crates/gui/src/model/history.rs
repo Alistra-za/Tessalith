@@ -105,6 +105,7 @@ impl History {
         let entries = crate::project::NewFileEntries::new(writes);
         let mut patched = std::collections::HashMap::<String, String>::new();
         let mut apply = |text: &mut String| {
+            // `take` empties `text`, so `clone_from` below reuses no allocation here.
             let patched_text = patched
                 .entry(std::mem::take(text))
                 .or_insert_with_key(|original| {
