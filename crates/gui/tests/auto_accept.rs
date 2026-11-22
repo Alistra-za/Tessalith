@@ -9,7 +9,7 @@ use engine::presets::ConfigFile;
 use engine::shader::{MeshAlpha, Shader};
 use image::{ImageBuffer, Rgb, Rgba};
 use sdc_gui::model::bottom::{problems, At, BottomTab, Fix, Level, Problem};
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, PlanCause};
 use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
@@ -89,6 +89,8 @@ fn auto_accepted_types_are_recorded_as_the_baseline() {
     std::fs::write(root.join("sdc.toml"), "# my notes\n").unwrap();
     let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
     let job = m.item("a/rock_n.png").unwrap().job.clone().unwrap();
+    // The recorder's follow-up plan ran after the open settled: it is a re-check, not an open.
+    assert_eq!(m.plan_cause, PlanCause::Other);
     assert_eq!(job.profile.subtype, Subtype::Normal);
     assert_eq!(
         job.provenance["subtype"].to_string(),

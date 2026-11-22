@@ -119,11 +119,25 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
+/// Why a plan runs: an open says "Analysing", a re-plan after the user's edit says so, any other re-plan re-checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlanCause {
+    #[default]
+    Open,
+    Edit,
+    Other,
+}
+
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
-/// A7; not `counted`, which has no thousands separator).
-pub fn plan_bar_text(done: usize, total: usize) -> String {
+/// A7; not `counted`, which has no thousands separator). A re-plan reads "Re-checking …" (`PlanCause`).
+pub fn plan_bar_text(cause: PlanCause, done: usize, total: usize) -> String {
+    let lead = match cause {
+        PlanCause::Open => "Analysing",
+        PlanCause::Edit => "Re-checking after your change:",
+        PlanCause::Other => "Re-checking",
+    };
     format!(
-        "Analysing {} / {} {}…",
+        "{lead} {} / {} {}…",
         thousands(done),
         thousands(total),
         if total == 1 { "file" } else { "files" }
@@ -1134,6 +1148,8 @@ pub struct AppModel {
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
+    /// Why the plan in flight runs; words its status line and progress text.
+    pub plan_cause: PlanCause,
     /// While a folder's first plan is in flight: the folder open before it (`None`: none), Recent as it was, and that
     /// folder's undo history and selection (Note FC12). Cancel goes back to all of them.
     opening: Option<(Option<PathBuf>, Vec<PathBuf>, history::History, Selection)>,
@@ -1423,6 +1439,7 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
+            plan_cause: PlanCause::Open,
             opening: None,
             open_cancelled: false,
             tx,
@@ -1904,12 +1921,12 @@ impl AppModel {
 
     /// Plan again on a worker; a newer plan supersedes (cancels) an older one. Sends no partial plan.
     pub fn replan(&mut self) {
-        self.replan_with(false);
+        self.replan_with(false, PlanCause::Other);
     }
 
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
-    /// partial plan first (`send_partial`).
-    fn replan_with(&mut self, files_edit: bool) {
+    /// partial plan first (`send_partial`). `cause` words the status line; an open in progress always wins.
+    fn replan_with(&mut self, files_edit: bool, cause: PlanCause) {
         self.take_shown_next_step();
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
@@ -1939,7 +1956,17 @@ impl AppModel {
         let cancel = CancelToken::default();
         self.planning = Some(cancel.clone());
         self.plan_progress = None;
-        self.status_line = "Planning…".into();
+        self.plan_cause = if self.opening.is_some() {
+            PlanCause::Open
+        } else {
+            cause
+        };
+        self.status_line = match self.plan_cause {
+            PlanCause::Open => "Planning…",
+            PlanCause::Edit => "Re-checking after your change…",
+            PlanCause::Other => "Re-checking…",
+        }
+        .into();
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
@@ -2316,7 +2343,7 @@ impl AppModel {
                 self.plan_progress = Some((done, total));
                 // Note FL: a partial's "<counts> · planning…" stays until the full plan lands.
                 if !self.partial_shown() {
-                    self.status_line = plan_bar_text(done, total);
+                    self.status_line = plan_bar_text(self.plan_cause, done, total);
                 }
             }
             WorkerMsg::PlanProgress { .. } => {}
@@ -3083,16 +3110,16 @@ impl AppModel {
     /// A user edit recorded a step: re-plan as a change (`replan_changed`).
     fn replan_after_edit(&mut self, files_edit: bool) {
         self.type_edit_recorded();
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Edit);
     }
 
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
-    fn replan_changed(&mut self, files_edit: bool) {
+    fn replan_changed(&mut self, files_edit: bool, cause: PlanCause) {
         let cancel = (self.export_after_plan || self.armed.is_some())
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
-        self.replan_with(files_edit);
+        self.replan_with(files_edit, cause);
         if cancel {
             self.export_after_plan = false;
             self.disarm_write();
@@ -4614,7 +4641,7 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Other);
     }
 
     pub fn can_undo(&self) -> bool {

@@ -8,7 +8,7 @@
 //! evidence still never rewrites one.
 use super::items::{ItemKind, ItemStatus};
 use super::sets::{SlotFill, SlotKind};
-use super::{fields, AppModel};
+use super::{fields, AppModel, PlanCause};
 use crate::project::AutoWrite;
 use engine::config::{PackRecipe, Subtype, Target};
 use engine::group::{is_fuzz_stem, split_suffix_with};
@@ -744,7 +744,7 @@ impl AppModel {
             });
         }
         self.invalidate_views();
-        self.replan_changed(!listing_changed);
+        self.replan_changed(!listing_changed, PlanCause::Other);
         true
     }
 }

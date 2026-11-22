@@ -3,7 +3,7 @@ mod support;
 
 use sdc_gui::model::export::{ETA_MIN_FILES, ETA_MIN_TIME};
 use sdc_gui::model::meshes::MeshesModel;
-use sdc_gui::model::{plan_bar_text, AppModel, StaleKind};
+use sdc_gui::model::{plan_bar_text, AppModel, PlanCause, StaleKind};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::{PlanFailure, WorkerMsg};
 use std::time::{Duration, Instant};
@@ -33,14 +33,103 @@ fn progress_events_update_done_and_total() {
 
 #[test]
 fn the_bar_text_has_thousands_separators() {
-    assert_eq!(plan_bar_text(1234, 5000), "Analysing 1,234 / 5,000 files…");
-    assert_eq!(plan_bar_text(0, 7), "Analysing 0 / 7 files…");
+    let open = PlanCause::Open;
     assert_eq!(
-        plan_bar_text(999, 1_234_567),
+        plan_bar_text(open, 1234, 5000),
+        "Analysing 1,234 / 5,000 files…"
+    );
+    assert_eq!(plan_bar_text(open, 0, 7), "Analysing 0 / 7 files…");
+    assert_eq!(
+        plan_bar_text(open, 999, 1_234_567),
         "Analysing 999 / 1,234,567 files…"
     );
     // Final fix wave A7: one file in the singular.
-    assert_eq!(plan_bar_text(0, 1), "Analysing 0 / 1 file…");
+    assert_eq!(plan_bar_text(open, 0, 1), "Analysing 0 / 1 file…");
+    assert_eq!(
+        plan_bar_text(PlanCause::Edit, 0, 1),
+        "Re-checking after your change: 0 / 1 file…"
+    );
+    assert_eq!(
+        plan_bar_text(PlanCause::Other, 0, 1),
+        "Re-checking 0 / 1 file…"
+    );
+}
+
+#[test]
+fn controlled_progress_formats_each_cause() {
+    for (cause, expected) in [
+        (PlanCause::Open, "Analysing 1 / 5 files…"),
+        (
+            PlanCause::Edit,
+            "Re-checking after your change: 1 / 5 files…",
+        ),
+        (PlanCause::Other, "Re-checking 1 / 5 files…"),
+    ] {
+        let mut m = AppModel::placeholder(GuiSettings::default());
+        m.plan_cause = cause;
+        let g = m.generation();
+        progress(&mut m, g, 1, 5);
+        assert_eq!(m.plan_progress, Some((1, 5)));
+        assert_eq!(m.status_line, expected);
+    }
+}
+
+#[test]
+fn an_edit_replan_says_re_checking_after_your_change() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let key = m
+        .items
+        .iter()
+        .find(|i| i.key.ends_with("rock01_normal.png"))
+        .unwrap()
+        .key
+        .clone();
+    m.set_field(&key, "subtype", serde_json::json!("height"));
+    assert_eq!(m.status_line, "Re-checking after your change…"); // before polling
+    assert_eq!(m.plan_cause, PlanCause::Edit);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.undo();
+    assert_eq!(m.plan_cause, PlanCause::Other);
+    assert!(m.status_line.starts_with("Undid: "), "{}", m.status_line);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.redo();
+    assert_eq!(m.plan_cause, PlanCause::Other);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+#[test]
+fn a_plain_replan_counts_as_re_checking() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.replan();
+    assert_eq!(m.status_line, "Re-checking…"); // before polling
+    assert_eq!(m.plan_cause, PlanCause::Other);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+#[test]
+fn an_open_still_says_analysing() {
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    let mut m = AppModel::new(GuiSettings::default(), None, session());
+    m.open_folder(root);
+    assert_eq!(m.status_line, "Planning…");
+    assert_eq!(m.plan_cause, PlanCause::Open);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(!m.can_cancel_open());
+}
+
+#[test]
+fn a_re_plan_during_an_open_still_says_planning() {
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    let mut m = AppModel::new(GuiSettings::default(), None, session());
+    m.open_folder(root);
+    m.replan();
+    assert_eq!(m.plan_cause, PlanCause::Open);
+    assert_eq!(m.status_line, "Planning…");
+    assert!(m.wait_idle(Duration::from_secs(60)));
 }
 
 #[test]
