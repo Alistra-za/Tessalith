@@ -77,8 +77,8 @@ ISPC TC patch 0003 "BC6H only" (`ispctc/patches/0003-bc6h-only.patch`, 2026-11-1
 numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 is the next number not used anywhere under `vendor/`. It
 puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use in
 `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is moved
-or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (0004's `block_quant` fix would
-also reach the BC7 kernel there). `tools/regen-ispc.ps1` passes
+or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (the BC7 kernels call the same
+`block_quant`, so 0004's fix would also reach them there; `channel_opt_quant` keeps its own `int best_err`, as upstream). `tools/regen-ispc.ps1` passes
 `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and `build.rs` defines it for the C++ build. BC6H bytes
 were checked equal on every path (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one
 synthetic 64x64 HDR image, and 18 Poly Haven HDR files (1024x512) at all six levels. Object sizes before and after
@@ -97,12 +97,11 @@ partition count to the 32 entries of `part_list`; no profile in Tessalith asks f
 here and guards other callers. BC6H bytes unchanged (Note LM3). Fix #5: `get_span` returned a float through an `int`,
 which truncated mode 2's 204.8 to 204, so a block whose widest channel spans 99 half codes (204.39 UF16 units) was kept
 out of mode 2 at Fast; it now returns the float span. Proof test: `mode_2_takes_a_span_inside_its_fractional_limit`.
-Fix #5 changes BC6H bytes (Note LM4). Fix #1: `block_quant` summed each texel's error through an `int`, which overflows
+Fix #5 changes BC6H bytes (Note LM4). Fix #1: `block_quant` stored each texel's float error in an `int`, which overflows
 above 2^31 (a black texel beside one brighter than about 1344.0), and the overflowed value beat every honest candidate;
-it now keeps the float. Proof test: `black_beside_bright_keeps_both` (it fails at Slow, Veryslow and VeryslowPeak).
-Fix #1 changes BC6H bytes (Note LM7): at Veryfast none of the measured images moved, at every other level most did. These
-fixes change BC6H bytes (the pins in `tests/bc6h.rs` and the measured images; per-level counts in
-docs/research/encoder-benchmark.md).
+it now keeps the float. Proof test: `black_beside_bright_keeps_both` (on the pre-fix objects it failed at Slow and
+Veryslow, and at VeryslowPeak on the one-black block). Fixes #5 and #1 change BC6H bytes (Note LM4, LM7): the pins in
+`tests/bc6h.rs` and the measured images (per-level counts in docs/research/encoder-benchmark.md).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
