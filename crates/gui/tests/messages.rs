@@ -971,6 +971,13 @@ fn an_undo_drops_the_group_even_when_a_kept_choice_sits_on_a_new_card() {
     m.undo();
     assert_eq!(m.new_set_notes_pending(), 0);
     release(&mut m);
+    let views = sdc_gui::model::sets::views(&m);
+    assert!(
+        views
+            .iter()
+            .any(|v| v.members.contains(&a) && v.id == "actors/teeth_albedo2"),
+        "premise: the kept choice sits on a card that was not listed before"
+    );
     assert!(new_set_lines(&m, before).is_empty());
 }
 
@@ -1027,32 +1034,64 @@ fn a_cancelled_open_drops_the_queued_choice() {
 #[test]
 fn the_final_plan_announces_once_after_a_partial_and_an_intermediate_plan() {
     let d = tempfile::tempdir().unwrap();
+    use sdc_gui::worker::WorkerMsg;
     let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
     let key = item_key_ending(&m, "teeth_albedo2.png");
+    // An explicit pair the chosen type does not allow: the first full plan settles into a cleanup re-plan
+    // (`settle_types`, one of `finish_plan`'s early returns).
+    m.set_format(
+        &key,
+        engine::config::Format::Bc7,
+        engine::config::ColorTag::Unorm,
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(&key, "format"),
+        Some(serde_json::json!("bc7")),
+        "premise: the explicit format is written"
+    );
     let before = m.messages.entries().count();
     m.hold_plan_results = true;
-    // The first choice's partial and full plan are intermediate: the second choice supersedes them.
-    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&key, Answer::Subtype(Subtype::PbrAlbedo));
     let first = parked(&mut m);
-    m.decide(&key, Answer::Subtype(Subtype::Height));
+    let first_generation = m.generation();
+    assert!(
+        first.iter().any(|x| matches!(x, WorkerMsg::Partial { .. })),
+        "premise: a partial plan was sent for this edit"
+    );
+    for x in first {
+        let planned = matches!(x, WorkerMsg::Planned { .. });
+        m.handle_held(x);
+        let lines = new_set_lines(&m, before);
+        assert!(lines.is_empty(), "{lines:?}");
+        assert_eq!(m.new_set_notes_pending(), 1);
+        if planned {
+            assert!(
+                m.generation() > first_generation,
+                "premise: the full plan landed in finish_plan and asked for a follow-up plan"
+            );
+        }
+    }
+    // The follow-up plan is the final one.
     let last = parked(&mut m);
     m.hold_plan_results = false;
     let generation = m.generation();
-    for x in first.into_iter().chain(last) {
-        let is_final = matches!(&x, sdc_gui::worker::WorkerMsg::Planned { generation: g, .. } if *g == generation);
+    for x in last {
+        let is_final = matches!(&x, WorkerMsg::Planned { generation: g, .. } if *g == generation);
         m.handle_held(x);
         if is_final {
             break;
         }
-        let lines = new_set_lines(&m, before);
-        assert!(lines.is_empty(), "{lines:?}");
+        assert!(new_set_lines(&m, before).is_empty());
         assert_eq!(m.new_set_notes_pending(), 1);
     }
     assert!(m.wait_idle(Duration::from_secs(60)));
     let lines = new_set_lines(&m, before);
-    assert_eq!(
-        lines,
-        ["teeth_albedo2.png is now Height (parallax). New set actors/teeth_albedo2 (1 texture)."]
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("teeth_albedo2.png is now ")
+            && lines[0].ends_with(". New set actors/teeth_albedo2 (1 texture)."),
+        "{lines:?}"
     );
     let action = m.messages.entries().last().unwrap().action.clone().unwrap();
     assert!(m.logged_set_target(&action).is_some(), "Show resolves");
@@ -1062,22 +1101,34 @@ fn the_final_plan_announces_once_after_a_partial_and_an_intermediate_plan() {
 fn a_document_card_gaining_a_key_is_not_new() {
     let d = tempfile::tempdir().unwrap();
     let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
-    m.edit_docs("t", None, true, |_, s| s.create_set("actors/teeth_albedo2"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let listed = |m: &AppModel| {
-        sdc_gui::model::sets::views(m)
-            .iter()
-            .find(|v| v.id == "actors/teeth_albedo2")
-            .map(|v| v.key.clone())
-    };
-    assert!(listed(&m).is_some(), "premise: the document lists the card");
     let key = item_key_ending(&m, "teeth_albedo2.png");
-    let before = m.messages.entries().count();
-    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.edit_docs("t", None, true, |_, s| s.create_set("actors/ghost"));
     assert!(m.wait_idle(Duration::from_secs(60)));
+    // Planned as a keyed set of the plan (`m.sets`), or only listed by the document.
+    let in_plan = |m: &AppModel| {
+        let views = sdc_gui::model::sets::views(m);
+        let v = views.iter().find(|v| v.id == "actors/ghost")?;
+        Some(m.sets.iter().any(|s| s.key == v.key))
+    };
+    assert_eq!(
+        in_plan(&m),
+        Some(false),
+        "premise: the document lists a card that no plan set backs"
+    );
+    let before = m.messages.entries().count();
+    // The choice is queued while the card is document-only; then the document puts the file in the card.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.edit_docs("t", None, true, |_, s| s.add_member("actors/ghost", &key));
+    assert_eq!(m.new_set_notes_pending(), 1);
+    release(&mut m);
+    assert_eq!(
+        in_plan(&m),
+        Some(true),
+        "premise: the card gained a plan set"
+    );
     assert!(new_set_lines(&m, before).is_empty());
 }
-
 #[test]
 fn an_output_root_rekey_does_not_announce_a_card() {
     let d = tempfile::tempdir().unwrap();
@@ -1094,6 +1145,7 @@ fn an_output_root_rekey_does_not_announce_a_card() {
     let was = card(&m);
     m.hold_plan_results = true;
     m.set_field(&key, "subtype", serde_json::json!("height"));
+    assert_eq!(m.new_set_notes_pending(), 1, "premise: the choice queued");
     m.set_export_folder(d.path().join("other-export"));
     release(&mut m);
     let now = card(&m);
@@ -1103,4 +1155,44 @@ fn an_output_root_rekey_does_not_announce_a_card() {
         "premise: the plan key moved with the output root"
     );
     assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn an_invalid_type_value_queues_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.set_field(&key, "subtype", serde_json::json!("no_such_type"));
+    assert_eq!(m.new_set_notes_pending(), 0);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn a_settled_entry_stays_in_messages_and_its_show_is_off_in_another_folder() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mut m = lone(a.path(), &["actors/teeth_albedo2.png"]);
+    // B lists a card of the same ID from the start.
+    write_gradients(
+        b.path(),
+        &["actors/teeth_albedo2.png", "actors/teeth_albedo2_n.png"],
+    );
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let entry = m.messages.entries().last().unwrap().clone();
+    let action = entry.action.clone().expect("a Show action");
+    assert!(m.logged_set_target(&action).is_some(), "premise: live in A");
+    m.open_folder(b.path().join("textures"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "actors/teeth_albedo2"),
+        "premise: B has a card of that ID"
+    );
+    assert!(m.messages.entries().any(|e| *e == entry), "still logged");
+    assert!(m.logged_set_target(&action).is_none(), "off in B");
+    assert!(!m.show_logged_set(&action));
 }

@@ -24,6 +24,7 @@ fn several_line(ids: &[&str]) -> String {
             ids.len(),
             rest.len()
         ),
+        // Fewer than two cards is the single-set line, built by the caller.
         _ => String::new(),
     }
 }
