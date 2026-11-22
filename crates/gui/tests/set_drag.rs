@@ -363,6 +363,124 @@ fn hover_with<P: Clone + Send + Sync + 'static>(h: &mut H, payload: P, at: egui:
 
 const LEAF: &str = "landscape/leaf.png";
 
+/// A point on `card` that the strip of the card above never reaches: a strip is 184 wide from the card's left edge,
+/// and its captions make it tall enough to cover most of the next card (Note JW1), so a drag to the card's centre
+/// would end under that strip.
+fn aim(card: egui::Rect) -> egui::Pos2 {
+    egui::pos2(card.max.x - 8.0, card.center().y)
+}
+
+/// Note JW1: the "{label}: no file yet" captions of the strip `r`, each painted whole as one galley inside `r` and its
+/// paint clip and under the letter grid (`grid_h` high with its padding), in rows that never touch. The outer height is
+/// exactly the grid, a 2 px gap, the galleys and a 2 px gap between rows. Returns the rects in painted order.
+fn caption_rows(h: &H, r: egui::Rect, labels: &[&str], grid_h: f32) -> Vec<egui::Rect> {
+    let cells_bottom = r.min.y + grid_h - 4.0;
+    let mut rows = vec![];
+    let mut galleys = 0.0;
+    for c in &h.output().shapes {
+        let mut flat = vec![];
+        let mut stack = vec![&c.shape];
+        while let Some(s) = stack.pop() {
+            match s {
+                egui::Shape::Vec(v) => stack.extend(v),
+                s => flat.push(s),
+            }
+        }
+        for s in flat {
+            let egui::Shape::Text(t) = s else { continue };
+            let text = t.galley.text();
+            if let Some(label) = labels.iter().find(|l| text == format!("{l}: no file yet")) {
+                let b = t.visual_bounding_rect();
+                assert!(
+                    r.contains_rect(b) && c.clip_rect.contains_rect(b),
+                    "{label}: {b:?} in {r:?}, clip {:?}",
+                    c.clip_rect
+                );
+                assert!(b.min.y >= cells_bottom, "{label} below the boxes: {b:?}");
+                galleys += t.galley.size().y;
+                rows.push(b);
+            }
+        }
+    }
+    assert_eq!(
+        rows.len(),
+        labels.len(),
+        "one caption per empty slot: {rows:?}"
+    );
+    for (i, a) in rows.iter().enumerate() {
+        for b in &rows[i + 1..] {
+            assert!(!a.intersects(*b), "caption rows {a:?} and {b:?} overlap");
+        }
+    }
+    let height = grid_h + 2.0 + galleys + 2.0 * (labels.len() - 1) as f32;
+    assert!(
+        (r.height() - height).abs() <= 0.01,
+        "the outer height is the grid, 2 px, the galleys and their gaps: {r:?} against {height}"
+    );
+    rows
+}
+
+/// Note JW1: in a narrow Sets column the letter boxes wrap to more rows before the captions are measured, the captions
+/// still fit the outer rect and the clip, and a release over the last caption is the strip's card's.
+#[test]
+fn the_strip_captions_hold_in_a_narrow_column() {
+    use sdc_gui::ui::sets_column::DragItem;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(three_cards(d.path()));
+    h.ctx.data_mut(|d| {
+        d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), 200.0_f32)
+    });
+    h.run();
+    h.run();
+    let card = card_of(&h, ROCK);
+    let from = outside_sets(&h, "leaf.png").rect().center();
+    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    assert!(egui::DragAndDrop::payload::<DragItem>(&h.ctx).is_some());
+    let (set, r, _) = h.state().1.drops.strip.clone().expect("a strip on rock01");
+    assert_eq!(set, ROCK);
+    // the boxes' rows, from the dim letters' tops: a narrow card holds fewer than four a row
+    let letters = painted_text_in(&h, r)
+        .iter()
+        .filter(|(t, ..)| ["G", "P", "S"].contains(&t.as_str()))
+        .map(|(_, at, _)| at.min.y.round() as i32)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        letters.len() >= 2,
+        "premise: the four boxes wrap to two rows at this width: {letters:?}, {r:?}"
+    );
+    let rows = letters.len() as f32;
+    let grid_h = 8.0 + rows * 32.0 + (rows - 1.0) * 8.0;
+    let labels = [
+        "PBR emissive",
+        "Height (parallax)",
+        "PBR coat normal",
+        "PBR subsurface or coat colour",
+    ];
+    let captions = caption_rows(&h, r, &labels, grid_h);
+    let at = captions.last().unwrap().center();
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(2);
+    assert_eq!(
+        h.state().1.drops.strip.as_ref().map(|s| s.0.as_str()),
+        Some(ROCK),
+        "the pointer over a caption keeps the strip"
+    );
+    h.event(pointer_button(at, false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert!(
+        matches!(&h.state().1.drops.pending, Some(Pending::Choice { set, .. } | Pending::Replace { set, .. }) if set == ROCK),
+        "rock01 got the drop: {:?}",
+        h.state().1.drops.pending
+    );
+    egui::DragAndDrop::clear_payload(&h.ctx);
+    h.run();
+    assert_eq!(
+        h.state().1.drops.strip,
+        None,
+        "the strip goes with the drag"
+    );
+}
+
 /// Note JW1 (A4-1, A4-2, A4-3): rock01's empty slots (G, P, CNR, S under plain PBR) are not drawn at rest, are listed
 /// in the card's description, and float in a strip under a dragged texture or a dragged share, never under a dragged
 /// set. The strip's letters are dim and sit in their boxes where the D chip's letter sits (HP9).
@@ -398,6 +516,13 @@ fn empty_slots_hide_at_rest_and_float_under_a_dragged_image() {
     }
     assert_eq!(card_description(&h, ROCK).as_deref(), Some(LINE));
     assert_eq!(h.state().1.drops.strip, None);
+    // 3d-R2: the explanations live in the strip and the legend, never on a resting card
+    assert!(
+        !shapes(&h)
+            .iter()
+            .any(|s| matches!(s, egui::Shape::Text(t) if t.galley.text().contains("no file yet"))),
+        "a resting card paints no empty-slot caption"
+    );
     // the D chip's letter offset, to compare the strip's letters with (HP9)
     let d_chip = on_card_of(&h, ROCK, "D")[0].rect();
     let d_text = painted_text_in(&h, d_chip)
@@ -422,12 +547,21 @@ fn empty_slots_hide_at_rest_and_float_under_a_dragged_image() {
         .clone()
         .expect("a strip under a dragged texture");
     assert_eq!(set, ROCK);
-    // four boxes at five per row (JJ2): 4·32 + 3·16 + 2·4 wide, 32 + 2·4 high
-    assert_eq!(r.size(), egui::vec2(184.0, 40.0));
+    // four boxes at five per row (JJ2): the letter grid is 4·32 + 3·16 + 2·4 wide and 32 + 2·4 high, and the
+    // captions hang below it
+    assert_eq!(r.width(), 184.0);
     assert!(
         (r.min.x - card.min.x).abs() <= 1.0 && (r.min.y - (card.max.y + 2.0)).abs() <= 1.0,
         "{r:?} under {card:?}"
     );
+    // every caption is painted whole, in rows that never touch, below the boxes (the grid is 40 high)
+    let labels = [
+        "PBR emissive",
+        "Height (parallax)",
+        "PBR coat normal",
+        "PBR subsurface or coat colour",
+    ];
+    caption_rows(&h, r, &labels, 40.0);
     let dim = sdc_gui::ui::sets_column::dim_letter_colour(&h.ctx.global_style().visuals);
     let texts = painted_text_in(&h, r);
     for (i, l) in ["G", "P", "CNR", "S"].into_iter().enumerate() {
@@ -528,6 +662,10 @@ fn a_drop_on_the_strip_goes_to_its_card_not_the_one_under_it() {
         }
     }
     let (owner, card, strip, under) = found.expect("premise: a strip covers another card");
+    assert!(
+        strip.center().y >= strip.min.y + 36.0,
+        "premise: the release below lands on the captions, under the letter boxes: {strip:?}"
+    );
     // The payload is a member of the covered card. Dropped on the covered card it would change nothing (it is
     // already there), so only a drop on the strip's card can make `landed` the owner.
     // The drag starts on the member's own Textures-column widget, so the payload is the real one: a press on a chip of
@@ -595,12 +733,15 @@ fn a_drop_on_the_strip_goes_to_its_card_not_the_one_under_it() {
 #[test]
 fn a_flipped_strip_takes_the_drop_before_the_card_under_it() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = three_cards(d.path());
-    assert!(m.reorder_set(ROCK, 1));
-    idle(&mut m);
+    let m = three_cards(d.path());
+    // rock01 stays last of three, so the strip (a 4-slot strip with captions is about 100 high) has two cards of room
+    // above it to flip into.
+    assert_eq!(set_views(&m).last().map(|v| v.id.as_str()), Some(ROCK));
     let mut h = harness(m);
     h.run();
-    let (under, first) = drawn_cards(&h).into_iter().next().unwrap();
+    let cards = drawn_cards(&h);
+    let first = cards[0].1;
+    let (under, _) = cards[1].clone();
     assert_ne!(under, ROCK);
     let bottom = first.top() + h.state().1.drops.view.unwrap().1;
     let height = 1000.0 - (bottom - card_of(&h, ROCK).bottom()) + 8.0;
@@ -653,7 +794,7 @@ fn a_borrow_released_on_the_strip_keeps_its_lender() {
     h.run();
     let from = on_card_of(&h, leaf, "N")[0].rect().center();
     let card = card_of(&h, ROCK);
-    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    drag_over(&mut h, from, aim(card), egui::Modifiers::NONE);
     let (owner, strip, _) = h
         .state()
         .1
@@ -689,7 +830,7 @@ fn borrow_across_strip_edge(released_inside: bool) {
     h.run();
     let from = on_card_of(&h, leaf, "N")[0].rect().center();
     let card = card_of(&h, odd);
-    drag_over(&mut h, from, card.center(), egui::Modifiers::NONE);
+    drag_over(&mut h, from, aim(card), egui::Modifiers::NONE);
     let (owner, strip, bridge) = h.state().1.drops.strip.clone().expect("strip on odd");
     assert_eq!(owner, odd);
     let inside = strip.left_center() + egui::vec2(1.0, 0.0);
@@ -903,7 +1044,7 @@ fn normal_fill(m: &AppModel, id: &str) -> Option<SlotFill> {
 
 fn drag_normal(h: &mut H, leaf: &str, dest: &str, modifiers: egui::Modifiers) {
     let from = on_card_of(h, leaf, "N")[0].rect().center();
-    let to = card_of(h, dest).center();
+    let to = aim(card_of(h, dest));
     drag_to(h, from, to, modifiers);
 }
 
@@ -1629,7 +1770,7 @@ fn a_shared_chip_dropped_on_its_source_says_so() {
     h.run();
     h.run();
     let from = on_card_of(&h, &leaf, "N")[0].rect().center();
-    let to = card_of(&h, ROCK).center();
+    let to = aim(card_of(&h, ROCK));
     drag_to(&mut h, from, to, egui::Modifiers::NONE);
     assert_eq!(h.state().1.drops.pending, None);
     assert_eq!(

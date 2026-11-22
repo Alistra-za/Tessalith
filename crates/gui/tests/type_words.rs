@@ -102,6 +102,26 @@ fn the_table_reads_like_the_wiki() {
 }
 
 #[test]
+fn the_slot_labels_read_like_table_a() {
+    use sdc_gui::model::labels::slot_type_label as l;
+    use sdc_gui::model::sets::SlotKind::*;
+    assert_eq!(l(Normal, false, false, false), "Normal map");
+    assert_eq!(l(Normal, true, false, false), "PBR normal");
+    assert_eq!(l(Diffuse, false, true, false), "Skin albedo");
+    assert_eq!(l(Normal, false, true, false), "PBR normal");
+    assert_eq!(l(Emissive, false, false, false), "Glow");
+    assert_eq!(
+        l(Subsurface, true, false, false),
+        "PBR subsurface or coat colour"
+    );
+    assert_eq!(
+        l(Rmaos, true, false, true),
+        "Skin RFAOS (roughness, fuzz, AO, specular)"
+    );
+    assert_eq!(l(Height, true, false, false), "Height (parallax)");
+}
+
+#[test]
 fn the_undecided_card_hovers_the_description_not_the_id() {
     let dir = tempfile::tempdir().unwrap();
     let mut m = waiting_folder(dir.path());

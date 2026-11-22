@@ -1,6 +1,8 @@
 //! Display names for texture types and schema keys.
 
+use super::sets::{SetView, SlotKind};
 use engine::config::Subtype;
+use engine::shader::Shader;
 
 pub struct TypeInfo {
     pub label: &'static str,
@@ -68,6 +70,70 @@ pub fn type_hover(st: Subtype) -> String {
 pub fn subtype_name(st: Subtype) -> String {
     type_info(st).label.to_string()
 }
+
+/// What a set card's chip for `kind` is, in the words of the type table: the plain label of an ordinary set, `pbr`'s
+/// PBR names, `skin`'s Advanced skin names (the three differ for the diffuse, emissive and subsurface only, and the
+/// normal reads PBR in both). `rfaos` makes the Rmaos slot the skin recipe's pack.
+pub fn slot_type_label(kind: SlotKind, pbr: bool, skin: bool, rfaos: bool) -> &'static str {
+    match kind {
+        SlotKind::Diffuse if skin => "Skin albedo",
+        SlotKind::Diffuse if pbr => "PBR albedo",
+        SlotKind::Diffuse => "Diffuse",
+        SlotKind::Normal if pbr || skin => "PBR normal",
+        SlotKind::Normal => "Normal map",
+        SlotKind::Emissive if pbr && !skin => "PBR emissive",
+        SlotKind::Emissive => "Glow",
+        SlotKind::SkinSk => "Skin subsurface mask",
+        SlotKind::Height => "Height (parallax)",
+        SlotKind::Rmaos if rfaos => "Skin RFAOS (roughness, fuzz, AO, specular)",
+        SlotKind::Rmaos => "PBR RMAOS (roughness, metallic, AO, specular)",
+        SlotKind::Coat => "PBR coat normal",
+        SlotKind::Fuzz => "PBR fuzz",
+        SlotKind::Subsurface if pbr && !skin => "PBR subsurface or coat colour",
+        SlotKind::Subsurface => "Subsurface tint",
+        SlotKind::ProjectedNoise => "Projected noise",
+        SlotKind::DetailNormal => "Detail normal",
+        SlotKind::SkinWet => "Skin wet",
+        SlotKind::SkinDetail => "Skin detail",
+    }
+}
+
+/// `slot_type_label` for `kind` on set `v`. The resolved shader decides (an Advanced skin set takes its own column);
+/// a card with no files yet reads its saved shader; only a view with neither falls back to the member flags.
+pub fn set_slot_label(v: &SetView, kind: SlotKind) -> &'static str {
+    let shader = v.shader.as_ref().map(|p| p.shader).or(v
+        .key
+        .is_empty()
+        .then_some(v.shader_choice)
+        .flatten());
+    let (pbr, skin) = match shader {
+        Some(s) => (s.is_pbr_family(), s == Shader::AdvancedSkin),
+        None => (v.pbr, v.skin),
+    };
+    slot_type_label(kind, pbr, skin, v.rfaos)
+}
+
+/// The "?" legend beside the Sets heading, one line per entry, each "{name}: {meaning}".
+pub const LEGEND: [&str; 18] = [
+    "D: Diffuse, PBR albedo or Skin albedo",
+    "N: Normal map or PBR normal",
+    "G: Glow or PBR emissive",
+    "SK: Skin subsurface mask",
+    "P: Height (parallax)",
+    "RMAOS: PBR RMAOS (roughness, metallic, AO, specular)",
+    "RFAOS: Skin RFAOS (roughness, fuzz, AO, specular)",
+    "CNR: PBR coat normal",
+    "F: PBR fuzz",
+    "S: Subsurface tint, or PBR subsurface or coat colour",
+    "NOISE: Projected noise",
+    "DETAIL: Detail normal",
+    "WET: Skin wet",
+    "DETAIL_N: Skin detail",
+    "PBR → JSON: a PBR set that writes a PGPatcher JSON entry.",
+    "unused: a helper that fills no slot of this set.",
+    "(auto): Tessalith picked this shader from the set's files.",
+    "Empty slots: the letters shown while you drag have no file yet.",
+];
 
 /// Words kept upper case (compared lower case).
 const INITIALISMS: [&str; 5] = ["ao", "uv", "rgb", "sss", "f0"];
