@@ -142,9 +142,9 @@ pub struct BatchRequest {
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
     pub mem_budget: u64,
     pub dry_run: bool,
-    /// Decode and check every written output before it is written (spec §5.8). Off by default from Task 2 (Note LF);
-    /// `sdc convert --validate` and the GUI's Validate exported DDS turn it on. Not a planning input: left out of
-    /// `sig_without_files`.
+    /// Decode and check every written output before it is written (spec §5.8). Off by default (Note LF1); with
+    /// `if-changed` it also checks skipped current outputs in place (LF10). `sdc convert --validate` and the GUI's
+    /// Validate exported DDS turn it on. Not a planning input: left out of `sig_without_files`.
     pub validate: bool,
     /// GUI (DECISIONS AG91): counters the planner updates while it loads and resolves; nothing is emitted or written.
     pub plan_progress: Option<PlanProgress>,

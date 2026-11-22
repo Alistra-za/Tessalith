@@ -468,7 +468,7 @@ fn a_packed_output_whose_pass_one_pick_changed_is_not_checked_in_place() {
     assert!(rec["validation"].get("skipped").is_none());
 }
 
-/// D4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.
+/// Note LF4: a record that says `skipped` is `passed`, so `if-changed` keeps its output.
 #[test]
 fn a_record_not_validated_is_current_on_the_next_run() {
     let d = tempfile::tempdir().unwrap();

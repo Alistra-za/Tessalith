@@ -118,7 +118,7 @@ impl ValidationSummary {
     }
 }
 
-/// Note LF (owner OV-O1): these types are validated whatever BatchRequest::validate says.
+/// Note LF9: these types are validated whatever BatchRequest::validate says.
 pub fn always_validated(st: Subtype) -> bool {
     matches!(st, Subtype::ComplexMaterial | Subtype::ComplexGrass)
 }

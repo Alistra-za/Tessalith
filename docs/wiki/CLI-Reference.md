@@ -191,7 +191,7 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists: `if-changed` encodes it again only when something changed, `skip` keeps it, `overwrite` encodes it again ([below](#re-runs-and-if-changed)). |
 | `--ev` (alias `--encoder-version`) | off | With `if-changed`, also encode again the outputs written by an older encode version ([after an update](#re-encoding-after-an-update)). |
 | `--property <words>` | none | With `--ev`, only the outputs that have every word of the list. Repeatable: any list may match ([the words](#property-words)). |
-| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LF1,LF10 --> |
+| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it and `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LF1,LF10 --> |
 | `--dry-run` | off | Plan and report, write nothing. |
 
 The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
@@ -262,7 +262,7 @@ done: ..., N cancelled, N kept at a higher target
 | `skip` | kept | kept | kept | kept | kept |
 | `overwrite` | re-encoded | re-encoded | re-encoded | re-encoded | re-encoded |
 
-- `--validate` also reaches current outputs: [which ones](Validation-and-Output.md#what-is-checked).
+- `--validate` also reaches current outputs under `if-changed`: [which ones](Validation-and-Output.md#what-is-checked). Press Ctrl-C and the checks still waiting count as cancelled, so the run exits 1.
 - An existing output with no manifest record is kept under `if-changed`, reported as `OUT-UNKNOWN-EXISTING`, and the run exits 1. `--on-existing overwrite` replaces it.
 - What "older encode version" and "lower target" mean, and why those outputs are kept: [Validation and output](Validation-and-Output.md#re-runs-and-if-changed). `overwrite` encodes a lower-target output at the lower target.
 - `--ev` with `--on-existing skip` or `overwrite` exits 2: `--ev applies only with --on-existing if-changed`. <!-- D:JA7 -->

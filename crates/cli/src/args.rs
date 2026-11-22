@@ -204,8 +204,8 @@ pub struct ConvertArgs {
     /// takes it).
     #[arg(long = "property", requires = "ev")]
     pub property: Vec<PropertyGroup>,
-    /// Decode each output again after encoding and check it (the VAL-* codes; exit 4 when one is an error). Outputs an
-    /// earlier run left unchecked are checked in place. Off by default, except for complex_material and complex_grass;
+    /// Decode each output again after encoding and check it (the VAL-* codes; exit 4 when one is an error). With
+    /// `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place. Off by default, except for complex_material and complex_grass;
     /// `sdc validate` checks files afterwards.
     #[arg(long)]
     pub validate: bool,

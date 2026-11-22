@@ -267,7 +267,7 @@ fn a_solid_255_alpha_m_with_parallax_on_keeps_255_and_warns() {
     assert!(w.contains(&Code::SugContradiction), "{w:?}");
 }
 
-/// Note LF (owner OV-O1): a complex `_m` is validated whatever `BatchRequest::validate` says.
+/// Note LF9: a complex `_m` is validated whatever `BatchRequest::validate` says.
 #[test]
 fn a_complex_m_is_validated_with_the_switch_off() {
     let d = tempfile::tempdir().unwrap();

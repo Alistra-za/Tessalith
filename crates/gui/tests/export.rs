@@ -556,7 +556,7 @@ fn an_export_validates_only_when_the_setting_is_on() {
     }
 }
 
-/// Note LF (OV-O2): turning the setting on checks the last export's outputs where they are.
+/// Note LF10: turning the setting on checks the last export's outputs where they are.
 #[test]
 fn turning_validation_on_checks_the_last_export_in_place() {
     let d = tempfile::tempdir().unwrap();
