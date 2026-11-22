@@ -690,7 +690,7 @@ impl PresetRegistry {
             }
             if alias == "orm" {
                 return Err(bad(
-                    "suffix alias 'orm' is an exporter vocabulary term: orm is a built-in packing input since Note AL (AO, roughness, metallic); remove the alias".into(),
+                    "suffix alias 'orm' is an exporter vocabulary term: orm is a built-in packing input (AO, roughness, metallic); remove the alias".into(),
                 ));
             }
             if crate::group::is_vocabulary(alias) {
@@ -699,9 +699,7 @@ impl PresetRegistry {
                 )));
             }
             if crate::group::DETAIL_SPELLINGS.contains(&alias.as_str()) {
-                return Err(bad(format!(
-                    "suffix alias '{alias}' is a detail map name (DECISIONS Note GW)"
-                )));
+                return Err(bad(format!("suffix alias '{alias}' is a detail map name")));
             }
             if !SUFFIXES.contains(&canonical.as_str()) {
                 return Err(bad(format!(

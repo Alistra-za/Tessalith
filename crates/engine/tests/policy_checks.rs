@@ -2206,6 +2206,54 @@ fn filter_reasons_cite_no_spec() {
     assert!(!reason.contains('§'), "{reason}");
 }
 
+/// The two HDR filter reasons, read through the public `filter_allowed`, cite no spec either.
+#[test]
+fn hdr_filter_reasons_cite_no_spec() {
+    let mut p = PresetRegistry::builtin()
+        .unwrap()
+        .base_profile(Target::Cs, Subtype::Glow);
+    p.format = Format::Rgba16f;
+    p.mips.filter = MipFilter::Mitchell;
+    let non_tent = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(non_tent.contains("HDR mips use box or tent"), "{non_tent}");
+    p.mips.filter = MipFilter::Tent;
+    p.category = Category::Normal;
+    let not_colour = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(not_colour.contains("alpha weighting"), "{not_colour}");
+    for r in [non_tent, not_colour] {
+        assert!(!r.contains('§') && !r.contains("spec"), "{r}");
+    }
+}
+
+/// No user-visible engine message names a DECISIONS note: the RGBA16F and BC6H outside-cs errors and the two
+/// suffix-alias refusals.
+#[test]
+fn messages_cite_no_decision() {
+    let j = run(
+        Target::Vanilla,
+        "textures/a/x.png",
+        None,
+        &[],
+        opaque(),
+        &["subtype=glow", "format=rgba16f", "color.tag=n/a"],
+        &[Code::CfgUnavailable],
+    );
+    let mut texts = vec![warning(&j, Code::CfgUnavailable).message.clone()];
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for alias in ["orm", "detail"] {
+        let e = PresetRegistry::builtin()
+            .unwrap()
+            .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
+            .unwrap_err()
+            .to_string();
+        texts.push(e);
+    }
+    assert_eq!(texts.len(), 3);
+    for t in &texts {
+        assert!(!t.contains("DECISIONS") && !t.contains("Note "), "{t}");
+    }
+}
+
 #[test]
 fn non_box_filters_are_cfg_invalid_outside_srgb_colour() {
     for st in [

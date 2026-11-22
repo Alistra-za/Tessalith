@@ -2213,7 +2213,7 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
                 if p.format == Format::Bc6hUf16 {
                     "BC6H is usable only under Community Shaders; choose another format"
                 } else {
-                    "RGBA16F is usable only under Community Shaders (DECISIONS S4); choose another format"
+                    "RGBA16F is usable only under Community Shaders; choose another format"
                 },
             )
         });
