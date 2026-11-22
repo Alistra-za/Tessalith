@@ -9,7 +9,7 @@ use crate::events::{NullSink, Reporter};
 use crate::image::Rgba32F;
 use crate::manifest::{dispatched_isa, output_key, Manifest};
 use crate::ops::Domain;
-use crate::pipeline::{prepare, FileTracker, Keep, Prepared};
+use crate::pipeline::{prepare, FileError, FileTracker, Keep, Prepared};
 use crate::policy::{AcceptSuggestions, ResolvedJob};
 use crate::quantize::{stored_rgb, unorm8, EncoderInput};
 use serde_json::{json, Value};
@@ -197,7 +197,7 @@ struct Scoring {
     normal: NormalScore,
 }
 
-fn scored_channels(p: &Profile, alpha_present: bool) -> Scoring {
+fn scored_channels(p: &Profile, alpha_present: bool, kind: RefKind) -> Scoring {
     use Format::*;
     let rgb = match p.format {
         Bc4 | R8 => vec![0],
@@ -214,7 +214,7 @@ fn scored_channels(p: &Profile, alpha_present: bool) -> Scoring {
         match rgb.len() {
             2 => NormalScore::RebuiltZ,
             3 => NormalScore::Xyz {
-                keep: p.mips.normal_base == NormalBase::Keep,
+                keep: matches!(kind, RefKind::KeptNormal),
             },
             _ => NormalScore::None,
         }
@@ -409,18 +409,20 @@ fn plan(input: &Path, out: &Path, sets: &str) -> Plan {
         .plan(req, &reporter(), &CancelToken::default())
         .unwrap()
 }
-fn prepared(job: &ResolvedJob) -> Prepared {
+fn prepare_job(job: &ResolvedJob) -> Result<Prepared, FileError> {
     prepare(
         job,
         &CancelToken::default(),
         &FileTracker::default(),
         Keep::Preview { max_size: u32::MAX },
     )
-    .unwrap()
 }
-fn encoded(prep: &Prepared, i: usize, p: &Profile) -> Vec<u8> {
+type ScoreResult<T> = Result<T, (&'static str, String)>;
+
+fn encoded(prep: &Prepared, i: usize, p: &Profile) -> ScoreResult<Vec<u8>> {
     let (w, h) = prep.dims[i];
-    encode_level(&prep.inputs[i], w, h, p, &Default::default()).unwrap()
+    encode_level(&prep.inputs[i], w, h, p, &Default::default())
+        .map_err(|e| ("encode failed", format!("level {i}: {e}")))
 }
 fn ldr(input: &EncoderInput) -> &[[u8; 4]] {
     let EncoderInput::Ldr(px) = input else {
@@ -440,11 +442,18 @@ fn engine_stored(img: &Rgba32F, domain: Domain) -> Vec<[f64; 4]> {
         })
         .collect()
 }
-fn decode_codes(fmt: crate::dds::DdsPixelFormat, w: u32, h: u32, bytes: &[u8]) -> Vec<[u8; 4]> {
-    let Decoded::Ldr(px) = decode_level(fmt, w, h, bytes).unwrap() else {
+fn decode_codes(
+    fmt: crate::dds::DdsPixelFormat,
+    w: u32,
+    h: u32,
+    bytes: &[u8],
+) -> ScoreResult<Vec<[u8; 4]>> {
+    let Decoded::Ldr(px) =
+        decode_level(fmt, w, h, bytes).map_err(|e| ("decode failed", e.to_string()))?
+    else {
         unreachable!("HDR is not scored")
     };
-    px
+    Ok(px)
 }
 
 fn score_level(
@@ -453,17 +462,17 @@ fn score_level(
     i: usize,
     dds: &DdsFile,
     baseline: Option<f64>,
-) -> Value {
+) -> ScoreResult<Value> {
     let p = &job.profile;
     let kind = ref_kind(prep, p);
     let (w, h, range) = &dds.levels[i];
     let r = stored_reference(&prep.chain[0], (*w, *h), kind, prep.domain);
     let e = engine_stored(&prep.chain[i], prep.domain);
     let raw_q = ldr(&prep.inputs[i]);
-    let raw_d = decode_codes(dds.format, *w, *h, &dds.data[range.clone()]);
+    let raw_d = decode_codes(dds.format, *w, *h, &dds.data[range.clone()])?;
     let q = codes(raw_q);
     let d = codes(&raw_d);
-    let mut scoring = scored_channels(p, prep.alpha_present);
+    let mut scoring = scored_channels(p, prep.alpha_present, kind);
     if i > 0 && job.bake.is_some() {
         if p.subtype.is_roughness_member() {
             scoring.rgb.retain(|&c| c != 0);
@@ -522,7 +531,7 @@ fn score_level(
         let masks = edge_band(&alpha, *w, *h, p.alpha.threshold, p.alpha.compare, 2);
         row["edge"] = edge_metrics(&d, &r, &masks);
     }
-    row
+    Ok(row)
 }
 
 struct JobScore {
@@ -532,68 +541,110 @@ struct JobScore {
 
 fn score_prepared(
     job: &ResolvedJob,
-    output: String,
     prep: &Prepared,
     dds: &DdsFile,
     isa: &str,
-) -> JobScore {
+    score: &mut JobScore,
+) -> ScoreResult<()> {
     let p = &job.profile;
-    let mut row =
-        json!({"output":output,"subtype":p.subtype,"format":p.format,"levels":dds.mip_count});
-    let isa_skipped = matches!(p.format, Format::Bc7 | Format::Bc6hUf16) && isa != dispatched_isa();
-    let why = if job.cube.is_some() || dds.is_cubemap {
-        Some(json!("cube"))
-    } else if p.subtype == Subtype::ComplexGrass {
-        Some(json!("complex grass"))
-    } else {
-        let layout_matches = dds
-            .format
-            .as_format()
-            .is_some_and(|(format, _)| format == p.format)
-            && prep.dims.len() == dds.mip_count as usize
-            && dds
-                .levels
-                .iter()
-                .map(|(w, h, _)| (*w, *h))
-                .eq(prep.dims.iter().copied());
+    let layout_matches = dds
+        .format
+        .as_format()
+        .is_some_and(|(format, _)| format == p.format)
+        && prep.dims.len() == dds.mip_count as usize
+        && dds
+            .levels
+            .iter()
+            .map(|(w, h, _)| (*w, *h))
+            .eq(prep.dims.iter().copied());
+    if !layout_matches {
+        score.row["why"] = json!("layout mismatch");
+        return Ok(());
+    }
+    score.isa_skipped = p.format == Format::Bc7 && isa != dispatched_isa();
+    if !score.isa_skipped {
         let mut mismatches = Vec::new();
-        if layout_matches && !isa_skipped {
-            let last = prep.inputs.len() - 1;
-            let first = 1.min(last);
-            for i in std::iter::once(first).chain((last != first).then_some(last)) {
-                if encoded(prep, i, p) != dds.data[dds.levels[i].2.clone()] {
-                    mismatches.push(i);
-                }
+        let last = prep.inputs.len() - 1;
+        let first = 1.min(last);
+        for i in std::iter::once(first).chain((last != first).then_some(last)) {
+            if encoded(prep, i, p)? != dds.data[dds.levels[i].2.clone()] {
+                mismatches.push(i);
             }
         }
-        if !layout_matches || !mismatches.is_empty() {
-            row["mismatched_levels"] = json!(mismatches);
-            Some(json!("rebuild mismatch"))
-        } else if p.format.is_hdr() {
-            Some(json!(p.format))
-        } else {
-            None
+        if !mismatches.is_empty() {
+            score.row["mismatched_levels"] = json!(mismatches);
+            score.row["why"] = json!("rebuild mismatch");
+            return Ok(());
         }
-    };
-    if let Some(why) = why {
-        row["why"] = why;
-    } else {
-        let baseline = coverage_baseline(prep, p);
-        row["per_level"] = (0..dds.levels.len())
-            .map(|i| score_level(job, prep, i, dds, baseline))
-            .collect();
     }
-    JobScore { row, isa_skipped }
+    let baseline = coverage_baseline(prep, p);
+    score.row["per_level"] = (0..dds.levels.len())
+        .map(|i| score_level(job, prep, i, dds, baseline))
+        .collect::<ScoreResult<Value>>()?;
+    Ok(())
 }
 
-fn score_record(job: &ResolvedJob, output: String, isa: &str) -> JobScore {
-    let dds = read_dds(&fs::read(&job.output).unwrap()).unwrap();
-    score_prepared(job, output, &prepared(job), &dds, isa)
+fn score_record(
+    job: &ResolvedJob,
+    output: &str,
+    record: &Value,
+    prepare_job: impl FnOnce(&ResolvedJob) -> Result<Prepared, FileError>,
+) -> JobScore {
+    let p = &job.profile;
+    // The manifest retains the validated mip count even when the DDS is missing.
+    let mut score = JobScore {
+        row: json!({"output":output,"format":p.format,"subtype":p.subtype,
+        "levels":record["validation"]["levels"].as_u64()}),
+        isa_skipped: false,
+    };
+    let excluded = if job.cube.is_some() || p.subtype == Subtype::Cubemap {
+        Some("cube")
+    } else if p.subtype == Subtype::ComplexGrass {
+        Some("complex grass")
+    } else if p.format.is_hdr() {
+        Some("hdr")
+    } else {
+        None
+    };
+    if let Some(why) = excluded {
+        score.row["why"] = json!(why);
+        return score;
+    }
+    let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let bytes = fs::read(&job.output).map_err(|e| ("read failed", e.to_string()))?;
+        let dds = read_dds(&bytes).map_err(|e| ("invalid dds", e.to_string()))?;
+        drop(bytes);
+        score.row["levels"] = json!(dds.mip_count);
+        if dds.is_cubemap {
+            score.row["why"] = json!("cube");
+            return Ok(());
+        }
+        let isa = record["isa"]
+            .as_str()
+            .ok_or_else(|| ("missing isa", "manifest has no ISA string".into()))?;
+        let prep = prepare_job(job).map_err(|e| ("prepare failed", e.to_string()))?;
+        score_prepared(job, &prep, &dds, isa, &mut score)
+    }));
+    let (why, detail) = match attempt {
+        Ok(Ok(())) => return score,
+        Ok(Err(error)) => error,
+        Err(payload) => (
+            "scoring panic",
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "non-string panic payload".into()),
+        ),
+    };
+    score.row["why"] = json!(why);
+    score.row["detail"] = json!(detail);
+    score
 }
 fn score_job(job: &ResolvedJob, out_root: &Path) -> JobScore {
     let key = output_key(out_root, &job.output);
     let records = Manifest::at(out_root).read().unwrap();
-    score_record(job, key.clone(), records[&key].raw["isa"].as_str().unwrap())
+    score_record(job, &key, &records[&key].raw, prepare_job)
 }
 
 // Seeded ordering within each sub-type, then one from each nonempty stratum per round.
@@ -662,8 +713,7 @@ fn mip_quality_on_a_corpus() {
     let mut skipped = vec![];
     let mut isa_skips = 0;
     for (job, key) in sample(&plan.jobs, &plan.request.output_root, &records, limit, seed) {
-        let isa = records[&key].raw["isa"].as_str().unwrap();
-        let score = score_record(job, key, isa);
+        let score = score_record(job, &key, &records[&key].raw, prepare_job);
         isa_skips += usize::from(score.isa_skipped);
         if score.row.get("why").is_some() {
             skipped.push(score.row);
@@ -699,6 +749,10 @@ fn fixture(convert: bool) -> (tempfile::TempDir, Vec<ResolvedJob>) {
         assert_eq!(result.converted as usize, expected.len());
     }
     (dir, jobs)
+}
+
+fn prepared(job: &ResolvedJob) -> Prepared {
+    prepare_job(job).unwrap()
 }
 
 fn named<'a>(jobs: &'a [ResolvedJob], name: &str) -> &'a ResolvedJob {
@@ -737,6 +791,7 @@ fn box_reference_equals_the_engine_chain_on_a_power_of_two_stored_map() {
             (level.width, level.height),
             RefKind::Stored { roughness_r: true },
         );
+        assert_eq!(r.len(), level.px.len());
         for (a, b) in level.px.iter().flatten().zip(r.iter().flatten()) {
             assert!(
                 (f64::from(*a) - b).abs() < 1e-6,
@@ -745,6 +800,151 @@ fn box_reference_equals_the_engine_chain_on_a_power_of_two_stored_map() {
             );
         }
     }
+}
+
+#[test]
+fn linear_light_box_reference_matches_the_stored_engine_chain() {
+    let mut p = crate::presets::PresetRegistry::builtin()
+        .unwrap()
+        .profile("cs-quality", Target::Cs, Subtype::Diffuse)
+        .unwrap();
+    p.mips.filter = MipFilter::Box;
+    p.alpha.policy = AlphaPolicy::Remove;
+    let mut img = Rgba32F::new(8, 8, [0.; 4]);
+    for (i, px) in img.px.iter_mut().enumerate() {
+        *px = [
+            i as f32 / 63.,
+            (i % 3) as f32 / 255.,
+            (i % 5) as f32 / 4.,
+            1.,
+        ];
+    }
+    let work = crate::ops::preprocess(img, &p);
+    assert_eq!(work.domain, Domain::LinearLight);
+    let chain = crate::mips::build_chain(&work, &p);
+    assert_eq!(chain.len(), 4);
+    for level in &chain {
+        let r = stored_reference(
+            &chain[0],
+            (level.width, level.height),
+            RefKind::LinearLight { weighted: false },
+            work.domain,
+        );
+        let e = engine_stored(level, work.domain);
+        assert_eq!(r.len(), e.len());
+        for (r, e) in r.iter().flatten().zip(e.iter().flatten()) {
+            assert!((r - e).abs() < 1e-6, "{r} vs {e} at width {}", level.width);
+        }
+    }
+}
+
+#[test]
+fn a_failed_corpus_job_is_recorded_and_the_other_jobs_are_scored() {
+    let (dir, jobs) = fixture(true);
+    let out = dir.path().join("out");
+    let partial = dir.path().join("partial");
+    let manifest = Manifest::at(&partial);
+    fs::create_dir_all(manifest.path().parent().unwrap()).unwrap();
+    fs::copy(Manifest::at(&out).path(), manifest.path()).unwrap();
+    let missing = named(&jobs, "plain.dds");
+    for j in jobs.iter().filter(|j| j.output != missing.output) {
+        let path = partial.join(j.output.strip_prefix(&out).unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::copy(&j.output, path).unwrap();
+    }
+    let report = dir.path().join("quality.json");
+    let run = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "mip_quality::mip_quality_on_a_corpus",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("SDC_MIPQ_INPUT", dir.path().join("in"))
+        .env("SDC_MIPQ_OUT", &partial)
+        .env("SDC_MIPQ_REPORT", &report)
+        .env_remove("SDC_MIPQ_SET")
+        .env_remove("SDC_MIPQ_SAMPLE")
+        .env_remove("SDC_MIPQ_SEED")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "a missing DDS aborted the corpus: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    let scored = result["jobs"].as_array().unwrap();
+    let skipped = result["skipped"].as_array().unwrap();
+    assert_eq!((scored.len(), skipped.len()), (10, 2));
+    let ids: std::collections::BTreeSet<_> = scored
+        .iter()
+        .chain(skipped)
+        .map(|row| row["output"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        ids,
+        jobs.iter().map(|j| output_key(&out, &j.output)).collect()
+    );
+    let bad = skipped
+        .iter()
+        .find(|j| j["output"] == output_key(&out, &missing.output))
+        .unwrap();
+    assert_eq!(bad["why"], "read failed");
+    assert_eq!(bad["format"], json!(missing.profile.format));
+    assert_eq!(bad["subtype"], json!(missing.profile.subtype));
+    assert_eq!(bad["levels"], 7);
+    assert!(bad["detail"].as_str().is_some_and(|s| !s.is_empty()));
+    assert_eq!(result["self_check"]["rebuild_mismatches"], 0);
+}
+
+#[test]
+fn unscored_classes_do_not_require_a_readable_source() {
+    let (dir, jobs) = fixture(true);
+    for (name, reason) in [
+        ("plain.dds", "cube"),
+        ("glass.dds", "complex grass"),
+        ("lamp_g.dds", "hdr"),
+    ] {
+        let mut job = named(&jobs, name).clone();
+        job.input = dir.path().join("absent.png");
+        match reason {
+            "cube" => {
+                job.cube = Some(crate::cube::CubeJob {
+                    layout: CubeLayout::Faces,
+                    sources: vec![],
+                })
+            }
+            "complex grass" => job.profile.subtype = Subtype::ComplexGrass,
+            _ => {}
+        }
+        let score = score_job(&job, &dir.path().join("out"));
+        assert_eq!(score.row["why"], reason);
+        assert!(score.row["levels"].as_u64().unwrap() > 0);
+        assert!(!score.isa_skipped);
+    }
+}
+
+#[test]
+fn layout_mismatches_are_distinct_from_rebuilt_bytes() {
+    let (dir, jobs) = fixture(true);
+    let mut job = named(&jobs, "plain.dds").clone();
+    job.profile.format = Format::Rgba8;
+    let row = score_job(&job, &dir.path().join("out")).row;
+    assert_eq!(row["why"], "layout mismatch");
+    assert!(row.get("mismatched_levels").is_none());
+}
+
+#[test]
+fn model_space_keep_does_not_enable_kept_length_scoring() {
+    let (_dir, jobs) = fixture(true);
+    let mut job = named(&jobs, "keep_n.dds").clone();
+    job.profile.subtype = Subtype::Msn;
+    let prep = prepared(&job);
+    assert_eq!(prep.domain, Domain::Msn);
+    let dds = read_dds(&fs::read(&job.output).unwrap()).unwrap();
+    let row = score_level(&job, &prep, 0, &dds, None).unwrap();
+    assert_eq!(row["normal"]["length_target_mean"], 1.);
 }
 
 #[test]
@@ -807,7 +1007,11 @@ fn bc1_one_bit_alpha_scores_rgb_on_opaque_texels_and_alpha_as_coverage() {
     let (dir, jobs) = fixture(true);
     let job = named(&jobs, "onebit.dds");
     let prep = prepared(job);
-    let channels = scored_channels(&job.profile, prep.alpha_present);
+    let channels = scored_channels(
+        &job.profile,
+        prep.alpha_present,
+        ref_kind(&prep, &job.profile),
+    );
     assert_eq!(channels.rgb, [0, 1, 2]);
     assert_eq!(channels.alpha, AlphaScore::Coverage);
     let q = ldr(&prep.inputs[0]);
@@ -848,7 +1052,7 @@ fn bc5_normals_rebuild_z_and_skip_length() {
         .profile("cs-quality", Target::Cs, Subtype::Normal)
         .unwrap();
     p.format = Format::Bc5;
-    let mode = scored_channels(&p, false).normal;
+    let mode = scored_channels(&p, false, RefKind::Vector { normalise: true }).normal;
     assert_eq!(mode, NormalScore::RebuiltZ);
     let px = codes(&[[160, 150, 0, 255]]);
     let x = 2. * px[0][0] - 1.;
@@ -902,12 +1106,7 @@ fn the_bleed_control_changes_only_the_colour_under_zero_alpha() {
     let (_dir, jobs) = fixture(false);
     let job = named(&jobs, "leaf.dds");
     let first = prepared(job);
-    let second = crate::ops::SKIP_DILATE.with(|switch| {
-        switch.set(true);
-        let result = prepared(job);
-        switch.set(false);
-        result
-    });
+    let second = without_dilation(|| prepared(job));
     let base = &first.chain[0];
     let mut changed = false;
     for (a, b) in base.px.iter().zip(&second.chain[0].px) {
@@ -924,12 +1123,18 @@ fn the_bleed_control_changes_only_the_colour_under_zero_alpha() {
             job.profile.format.pixel_format(false),
             base.width,
             base.height,
-            &encoded(prep, 0, &job.profile),
+            &encoded(prep, 0, &job.profile).unwrap(),
         )
+        .unwrap()
     };
     let (a, b) = (decode(&first), decode(&second));
     let w = base.width as usize;
+    assert!(
+        w.is_multiple_of(4) && base.height.is_multiple_of(4),
+        "leaf fixture needs complete BC blocks"
+    );
     let mut solid_blocks = 0;
+    let mut has_mixed_block = false;
     for y in (0..base.height as usize).step_by(4) {
         for x in (0..w).step_by(4) {
             let block = (0..4).flat_map(|dy| (0..4).map(move |dx| (y + dy) * w + x + dx));
@@ -938,10 +1143,13 @@ fn the_bleed_control_changes_only_the_colour_under_zero_alpha() {
                 for i in block {
                     assert_eq!(a[i], b[i]);
                 }
+            } else if block.clone().any(|i| base.px[i][3] > 0.) {
+                has_mixed_block = true;
             }
         }
     }
     assert!(solid_blocks > 0);
+    assert!(has_mixed_block, "the alpha edge must cross a BC block");
     let k = ref_kind(&first, &job.profile);
     let r = stored_from_reference(&reference_level(base, first.dims[0], k), k);
     let alpha: Vec<_> = base.px.iter().map(|q| unorm8(q[3])).collect();
@@ -961,7 +1169,7 @@ fn the_bleed_control_changes_only_the_colour_under_zero_alpha() {
 
 #[test]
 fn the_self_check_catches_a_wrong_middle_level() {
-    let (_dir, jobs) = fixture(true);
+    let (dir, jobs) = fixture(true);
     let job = named(&jobs, "plain.dds");
     let bytes = fs::read(&job.output).unwrap();
     let dds = read_dds(&bytes).unwrap();
@@ -974,20 +1182,17 @@ fn the_self_check_catches_a_wrong_middle_level() {
     }
     let last = prep.inputs.len() - 1;
     assert_ne!(
-        encoded(&prep, 1, &job.profile),
+        encoded(&prep, 1, &job.profile).unwrap(),
         dds.data[dds.levels[1].2.clone()]
     );
     assert_eq!(
-        encoded(&prep, last, &job.profile),
+        encoded(&prep, last, &job.profile).unwrap(),
         dds.data[dds.levels[last].2.clone()]
     );
-    let score = score_prepared(
-        job,
-        output_key(&_dir.path().join("out"), &job.output),
-        &prep,
-        &dds,
-        dispatched_isa(),
-    );
+    let out = dir.path().join("out");
+    let key = output_key(&out, &job.output);
+    let records = Manifest::at(&out).read().unwrap();
+    let score = score_record(job, &key, &records[&key].raw, |_| Ok(prep));
     assert_eq!(score.row["why"], "rebuild mismatch");
     assert_eq!(score.row["mismatched_levels"], json!([1]));
 }
@@ -1004,7 +1209,7 @@ fn every_fixture_job_scores_or_says_why() {
         let levels = row["levels"].as_u64().unwrap() as usize;
         assert!(levels > 0);
         if job.profile.format.is_hdr() {
-            assert_eq!(row["why"], json!(job.profile.format));
+            assert_eq!(row["why"], "hdr");
         } else {
             let per_level = row["per_level"]
                 .as_array()
@@ -1061,7 +1266,7 @@ fn attribution_measures_direct_steps_even_when_errors_cancel() {
     let dds = read_dds(&fs::read(&job.output).unwrap()).unwrap();
     let i = 1;
     let (w, h, range) = &dds.levels[i];
-    let d = decode_codes(dds.format, *w, *h, &dds.data[range.clone()]);
+    let d = decode_codes(dds.format, *w, *h, &dds.data[range.clone()]).unwrap();
     let q = ldr(&prep.inputs[i]);
     let r = reference_level(&prep.chain[0], (*w, *h), ref_kind(&prep, &job.profile));
     let mut sums = [0.; 5];
@@ -1074,7 +1279,7 @@ fn attribution_measures_direct_steps_even_when_errors_cancel() {
         }
     }
     let expected = sums.map(|s| s / d.len() as f64);
-    let row = score_level(job, &prep, i, &dds, coverage_baseline(&prep, &job.profile));
+    let row = score_level(job, &prep, i, &dds, coverage_baseline(&prep, &job.profile)).unwrap();
     let close = |v: &Value, x: f64| assert!((v.as_f64().unwrap() - x).abs() < 1e-9, "{v} vs {x}");
     for (name, value) in [
         "e_alpha",
@@ -1134,23 +1339,96 @@ fn sampling_is_seeded_stratified_and_requires_a_record() {
 
 #[test]
 fn self_check_skips_only_isa_dependent_encoders_on_a_different_isa() {
-    let (_dir, jobs) = fixture(true);
+    let (dir, jobs) = fixture(true);
     for (name, skip) in [
         ("plain.dds", true),
         ("onebit.dds", false),
-        ("lamp_g.dds", true),
+        ("lamp_g.dds", false),
     ] {
-        let job = named(&jobs, name);
-        let mut dds = read_dds(&fs::read(&job.output).unwrap()).unwrap();
-        let at = dds.levels[1].2.start;
-        dds.data[at] ^= 1;
-        let prep = prepared(job);
-        let score = score_prepared(job, name.into(), &prep, &dds, "other ISA");
-        assert_eq!(score.isa_skipped, skip);
-        assert_eq!(score.row["why"] == "rebuild mismatch", !skip);
-        let same = score_prepared(job, name.into(), &prep, &dds, dispatched_isa());
-        assert_eq!(same.row["why"], "rebuild mismatch");
+        let mut job = named(&jobs, name).clone();
+        let mut bytes = fs::read(&job.output).unwrap();
+        let dds = read_dds(&bytes).unwrap();
+        let at = bytes.len() - dds.data.len() + dds.levels[1].2.start;
+        bytes[at] ^= 1;
+        job.output = dir.path().join(name);
+        fs::write(&job.output, bytes).unwrap();
+        for isa in ["other ISA", dispatched_isa()] {
+            let score = score_record(
+                &job,
+                name,
+                &json!({"isa":isa,"validation":{"levels":dds.mip_count}}),
+                prepare_job,
+            );
+            assert_eq!(score.isa_skipped, skip && isa != dispatched_isa());
+            if job.profile.format.is_hdr() {
+                assert_eq!(score.row["why"], "hdr");
+            } else if score.isa_skipped {
+                assert!(score.row["per_level"].is_array());
+            } else {
+                assert_eq!(score.row["why"], "rebuild mismatch");
+            }
+        }
     }
+}
+
+fn without_dilation<T>(run: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            crate::ops::SKIP_DILATE.set(self.0);
+        }
+    }
+    let _restore = Restore(crate::ops::SKIP_DILATE.replace(true));
+    run()
+}
+
+#[test]
+fn the_dilation_control_restores_the_previous_value_on_unwind() {
+    assert!(!crate::ops::SKIP_DILATE.get());
+    let panic = std::panic::catch_unwind(|| {
+        without_dilation(|| {
+            without_dilation(|| assert!(crate::ops::SKIP_DILATE.get()));
+            assert!(crate::ops::SKIP_DILATE.get());
+            panic!("test unwind")
+        })
+    });
+    assert_eq!(
+        panic.unwrap_err().downcast_ref::<&str>(),
+        Some(&"test unwind")
+    );
+    assert!(!crate::ops::SKIP_DILATE.get());
+}
+
+#[test]
+fn scoring_failures_preserve_the_job_and_explain_the_skip() {
+    let (dir, jobs) = fixture(true);
+    let out = dir.path().join("out");
+    let mut job = named(&jobs, "plain.dds").clone();
+    let key = output_key(&out, &job.output);
+    let records = Manifest::at(&out).read().unwrap();
+    let record = &records[&key].raw;
+    let check = |score: JobScore, reason: &str| {
+        assert_eq!(score.row["why"], reason);
+        assert_eq!(score.row["output"], key);
+        assert_eq!(score.row["levels"], 7);
+        assert!(score.row["detail"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(score.row.get("per_level").is_none());
+    };
+    check(
+        score_record(&job, &key, &json!({}), prepare_job),
+        "missing isa",
+    );
+    let panicked = score_record(&job, &key, record, |_| panic!("fixture engine panic"));
+    assert_eq!(panicked.row["detail"], "fixture engine panic");
+    check(panicked, "scoring panic");
+    job.input = dir.path().join("absent.png");
+    check(
+        score_record(&job, &key, record, prepare_job),
+        "prepare failed",
+    );
+    job.output = dir.path().join("invalid.dds");
+    fs::write(&job.output, b"not a DDS").unwrap();
+    check(score_record(&job, &key, record, prepare_job), "invalid dds");
 }
 
 #[test]
