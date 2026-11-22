@@ -102,6 +102,7 @@ codes! {
     ResizeNoReference = "RESIZE-NO-REFERENCE" => Info,
     SetMissingCompanion = "SET-MISSING-COMPANION" => Info,
     SetCompanionDds = "SET-COMPANION-DDS" => Warning,
+    SetSharedRoughnessNormal = "SET-SHARED-ROUGHNESS-NORMAL" => Warning,
     // Never raised since Note HD2; kept so an `allow` list naming it still loads.
     SetBakeRatio = "SET-BAKE-RATIO" => Warning,
     SetEditStale = "SET-EDIT-STALE" => Info,
@@ -260,7 +261,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 94);
+        assert_eq!(Code::ALL.len(), 95);
         assert_eq!(Code::OutKeptOlderEncode.severity(), Severity::Info);
         assert_eq!(Code::OutKeptLowerTarget.severity(), Severity::Info);
         assert_eq!(

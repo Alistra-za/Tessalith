@@ -517,6 +517,12 @@ fn partner_groups(p: &Prepared) -> Vec<BTreeSet<String>> {
     if !shared.is_empty() {
         groups.push(shared);
     }
+    for group in &p.req.shared_roughness_groups {
+        let ids = std::iter::once(&group.producer)
+            .chain(group.users.keys())
+            .chain(group.users.values().flatten().map(|(owner, _)| owner));
+        groups.push(ids.map(|id| crate::sets::set_key(root, id)).collect());
+    }
     // Note HH1: a set that shares helpers and the own set of each.
     for set in p.sets.iter().filter(|s| !s.shares.is_empty()) {
         let mut g = BTreeSet::from([set.key.clone()]);

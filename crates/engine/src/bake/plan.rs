@@ -1,6 +1,5 @@
-//! Set-level bake decisions (spec §6.2–6.3, DECISIONS R6–R10): which roughness member bakes which `_n`, and the
-//! two `SET-*` codes it raises (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). `Engine::plan` runs this after packing, so a packed `_rmaos`/`_rfaos` is a member like a
-//! pre-packed one, and before `set_resolved` and `file_planned`, so both show the decision.
+//! Set-level variance bake decisions and companion warnings (R6–R10, LE). The engine plans the bake after packing
+//! so packed and pre-packed roughness jobs participate, and reports the decision on both the set and its files.
 use super::{bake_shift, BakeJob};
 use crate::codes::{Code, Warning};
 use crate::config::{ColorContent, NormalMips, Profile, RawMap, Subtype, Target};
@@ -19,8 +18,12 @@ pub struct BakeCtx<'a> {
     pub files: &'a [InputFile],
     /// Preset suffix aliases (`PresetRegistry::alias_table`), for reading companions' names.
     pub aliases: &'a BTreeMap<String, String>,
-    /// Keys of the sets whose roughness slot is shared (`BatchRequest::shared_roughness`, as set keys; DECISIONS R7).
+    /// Explicit bake exclusions from `BatchRequest::shared_roughness`, as planner set keys.
     pub shared: &'a BTreeSet<String>,
+    /// Resolved slot-6 groups with the Normal slot each user reads (Note LE).
+    pub groups: &'a [crate::api::SharedRoughness],
+    /// Output root used to translate group set IDs to planner keys.
+    pub output_root: &'a Path,
     /// Borrower set key → the key of the set whose `_n` it borrows (`BatchRequest::borrowed_normal`, as set keys;
     /// DECISIONS Note R M4-final-1).
     pub borrowed: &'a BTreeMap<String, String>,
@@ -397,6 +400,37 @@ fn roughness_members(jobs: &[ResolvedJob], idx: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+/// Verify the effective slot image against the planner's normal priority for each receiving shader (JS2).
+fn shared_normal(
+    group: &crate::api::SharedRoughness,
+    root: &Path,
+    jobs: &[ResolvedJob],
+    by_set: &BTreeMap<String, Vec<usize>>,
+) -> Result<usize, String> {
+    let of = |id: &str| {
+        by_set
+            .get(&crate::sets::set_key(root, id))
+            .map(Vec::as_slice)
+    };
+    let mut common = None;
+    for (user, slot) in &group.users {
+        let normal = slot.as_ref().and_then(|(owner, path)| {
+            let n = own_normal(jobs, of(owner)?, of(user)?)?;
+            (decided(&jobs[n]) && jobs[n].input == *path).then_some(n)
+        });
+        let Some(n) = normal else {
+            return Err(format!("The shared roughness skips the variance bake because {user} has no verified normal map for it."));
+        };
+        if common.is_some_and(|first| first != n) {
+            return Err("The shared roughness skips the variance bake because its sets use different normal maps.".into());
+        }
+        common = Some(n);
+    }
+    common.ok_or_else(|| {
+        "The shared roughness has no verified normal map for the variance bake.".into()
+    })
+}
+
 /// Decide every set's bake (spec §6.2–6.3). Attaches `ResolvedJob::bake` to each baking roughness member, records
 /// the `_n`'s `mips.normal = renormalize_bake` with provenance `set`, and appends the `SET-*` codes to the jobs they
 /// concern. Returns the keys of the sets that bake (`set_resolved.bake`).
@@ -412,14 +446,49 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         by_set.entry(j.set_key.clone()).or_default().push(i);
     }
     let of = |key: &str| by_set.get(key).map_or(&[][..], Vec::as_slice);
-    // DECISIONS Note R M4-final-1: the `_n` jobs that a borrower set with a roughness member of its own uses. Such an
-    // `_n` reports no missing roughness in its own set, whether the borrower bakes or is shared (R7).
-    let lent: BTreeSet<usize> = cx
+    // A normal used by a borrower's roughness, or verified for a shared output below, has a companion (M4-final-1, LE).
+    let mut lent: BTreeSet<usize> = cx
         .borrowed
         .iter()
         .filter(|(b, _)| !roughness_members(jobs, of(b)).is_empty())
         .filter_map(|(b, o)| own_normal(jobs, of(o), of(b)))
         .collect();
+    // A shared output has only one DDS mip chain. Decide it once on its producer (Note LE).
+    let mut shared = cx.shared.clone();
+    for group in cx.groups {
+        if cx.target != Target::Cs {
+            break;
+        }
+        let key = |id: &str| crate::sets::set_key(cx.output_root, id);
+        let producer = key(&group.producer);
+        let Some(&m) = of(&producer).iter().find(|&&i| {
+            let j = &jobs[i];
+            j.profile.subtype.is_roughness_member()
+                && j.profile.subtype == group.subtype
+                && j.pack.is_none().then_some(&j.input) == group.source.as_ref()
+        }) else {
+            continue;
+        };
+        shared.insert(producer.clone());
+        shared.extend(group.users.keys().map(|id| key(id)));
+        // An errored producer, or a DDS (S6), keeps R7 suppression for every user even though it cannot bake.
+        if !writable(&jobs[m])
+            || is_dds(&jobs[m])
+            || cx.shared.contains(&producer)
+            || group.users.keys().any(|id| cx.shared.contains(&key(id)))
+        {
+            continue;
+        }
+        match shared_normal(group, cx.output_root, jobs, &by_set) {
+            Ok(n) => {
+                lent.insert(n);
+                if bake_set(jobs, n, &[m]) {
+                    baking.insert(producer);
+                }
+            }
+            Err(reason) => note(&mut jobs[m], Code::SetSharedRoughnessNormal, reason, None),
+        }
+    }
     for set in cx.sets {
         let idx = of(&set.key);
         // Spec §10 SET-MISSING-COMPANION, the two triggers that are not about the bake (any target).
@@ -452,14 +521,14 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         if cx.target != Target::Cs {
             continue;
         }
-        let shared = cx.shared.contains(&set.key);
+        let shared = shared.contains(&set.key);
         // A borrowed Normal slot (GUI) stands in for the set's own `_n` (DECISIONS Note R M4-final-1).
         let owner = cx.borrowed.get(&set.key);
         let normal = own_normal(jobs, owner.map_or(idx, |o| of(o)), idx);
         let members = roughness_members(jobs, idx);
         match (normal, members.is_empty()) {
             (None, true) => {}
-            // A shared roughness skips the bake silently (DECISIONS R7).
+            // Shared slots were handled once on their producer (Note LE).
             _ if shared => {}
             (None, false) => match owner.and_then(|o| cx.sets.iter().find(|s| &s.key == o)) {
                 Some(os) => {

@@ -92,6 +92,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         DimFlowSmall => "This flow map is small — use a bigger image, or mark it as intended",
         DimTooLarge => "This texture is larger than the format allows — resize it",
         SetCompanionDds => "A companion file of this set is a DDS and can't be combined — use its original image",
+        SetSharedRoughnessNormal => "The sets sharing this roughness map need the same normal for the variance bake.",
         SetBakeRatio => "The maps of this set differ a lot in size — use matching sizes",
         SetSlotBorrowedUnused => "This set borrows a slot and still writes its own file for it.",
         SugLowConfidence => "Tessalith isn't sure what this alpha means — choose what it means",
@@ -181,6 +182,7 @@ pub fn row_class(code: Code) -> RowClass {
         | DimFlowSmall
         | SetCompanionDds
         | SetBakeRatio
+        | SetSharedRoughnessNormal
         | SetSlotBorrowedUnused
         | SugContradiction
         | ValCoverage
@@ -404,6 +406,7 @@ fn names_its_map(code: Code) -> bool {
             | Code::PackConflict
             | Code::PackUnusedInput
             | Code::ShaderExtraMap
+            | Code::SetSharedRoughnessNormal
             | Code::SetSlotBorrowedUnused
             | Code::ShaderMissingMap
     )

@@ -208,7 +208,7 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .iter()
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
-    assert_eq!(engine::codes::Code::ALL.len(), 94);
+    assert_eq!(engine::codes::Code::ALL.len(), 95);
     assert_eq!(notes, 22);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),

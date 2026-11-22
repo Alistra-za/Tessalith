@@ -69,6 +69,17 @@ pub enum PreviewVerdict {
     OnExistingSkip,
 }
 
+/// A shared roughness job and the normal input in each user's resolved slot (Note LE).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedRoughness {
+    pub producer: String,
+    /// The pre-packed input, or None for the producer's pack of this subtype.
+    pub source: Option<PathBuf>,
+    pub subtype: Subtype,
+    /// Set id to (normal owner id, input path). An empty or external slot has no local input.
+    pub users: BTreeMap<String, Option<(String, PathBuf)>>,
+}
+
 /// One batch, as the CLI or GUI hands it to the engine. `output_root` and `on_existing` are the spec §3.2
 /// `output {path, on_existing}` batch settings.
 #[derive(Debug, Clone)]
@@ -102,10 +113,10 @@ pub struct BatchRequest {
     pub set_edits: Vec<crate::sets::SetEdit>,
     /// GUI output paths (M3b, DECISIONS P1), relative to `output_root`. Empty for the CLI.
     pub output_paths: BTreeMap<crate::sets::OutputKey, PathBuf>,
-    /// GUI (M3b spec §3.3, DECISIONS R7): ids of the sets whose roughness slot (`_rmaos`/`_rfaos`) is one output used
-    /// by more than one set, owner and borrowers alike. The engine bakes no normal variance into it and reports no
-    /// missing companion for those sets. Empty for the CLI.
+    /// Explicit R7 exclusions for callers that flag shared sets off without resolved slots.
     pub shared_roughness: BTreeSet<String>,
+    /// GUI slot-6 outputs with multiple users, including their effective Normal slots.
+    pub shared_roughness_groups: Vec<SharedRoughness>,
     /// GUI (DECISIONS Note R M4-final-1): borrower set id → the id of the set whose `_n` its Normal slot borrows. The
     /// engine bakes the borrower's own roughness member from that `_n`, under every usual bake rule. Empty for the CLI.
     pub borrowed_normal: BTreeMap<String, String>,
@@ -206,6 +217,7 @@ impl BatchRequest {
             set_edits: vec![],
             output_paths: BTreeMap::new(),
             shared_roughness: BTreeSet::new(),
+            shared_roughness_groups: Vec::new(),
             borrowed_normal: BTreeMap::new(),
             set_shaders: BTreeMap::new(),
             pinned_files: BTreeSet::new(),
@@ -284,6 +296,7 @@ impl BatchRequest {
             set_edits,
             output_paths,
             shared_roughness,
+            shared_roughness_groups,
             borrowed_normal,
             set_shaders,
             pinned_files,
@@ -308,7 +321,7 @@ impl BatchRequest {
             // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
             write_only: _,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 33] = [
+        let fields: [&dyn std::fmt::Debug; 34] = [
             inputs,
             output_root,
             target,
@@ -324,6 +337,7 @@ impl BatchRequest {
             set_edits,
             output_paths,
             shared_roughness,
+            shared_roughness_groups,
             borrowed_normal,
             set_shaders,
             pinned_files,
@@ -3076,6 +3090,8 @@ impl Engine {
             files,
             aliases: registry.alias_table(),
             shared: &shared,
+            groups: &req.shared_roughness_groups,
+            output_root: &req.output_root,
             borrowed: &borrowed,
         };
         let mut baking = crate::bake::plan::plan_bakes(&bake_cx, &mut jobs);
