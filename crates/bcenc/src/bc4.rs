@@ -1368,6 +1368,10 @@ mod tests {
             batch.push(&mut best, &v, 2, 1);
             let after = crate::hits::counts();
             assert_eq!(taken(&before, &after, Hit::BoundSkip), 1, "path {p}");
+            if path_of(isa) == Path::Avx2 {
+                // The skip neither decided the waiting winner early nor dropped it: only the flush decides it.
+                assert_eq!(best.err, 1, "the skip decided the waiting pair on path {p}");
+            }
             batch.flush(&mut best, &v);
             assert_eq!((best.err, best.e0, best.e1), (0, 1, 0), "path {p}");
         });
