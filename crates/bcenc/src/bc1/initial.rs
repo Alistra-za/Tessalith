@@ -1,8 +1,13 @@
 //! The initial endpoints of a BC1 block. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain): `encode_bc1_pick_initial`, the arms the ported levels reach (Notes HY3, HY15).
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 use super::fit::{precise_round_565, to_5, to_6};

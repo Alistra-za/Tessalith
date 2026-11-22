@@ -248,7 +248,10 @@ fn read_only_output_file_fails_at_write_alone() {
     let o = convert(&d.path().join("in"), &out, &["--on-existing", "overwrite"])
         .output()
         .unwrap();
-    #[allow(clippy::permissions_set_readonly_false)]
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "the test restores write access to its own temp file so the temp dir can be deleted"
+    )]
     perm.set_readonly(false);
     std::fs::set_permissions(&locked, perm).unwrap();
 

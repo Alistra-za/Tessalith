@@ -5,11 +5,18 @@
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
 //! The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
-// Index loops mirror the C++ they port.
-#![allow(clippy::needless_range_loop)]
+#![allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.

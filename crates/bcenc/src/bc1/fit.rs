@@ -8,8 +8,13 @@
 //! Float maths follows the C++ operation by operation in `f32` (MSVC `/fp:precise`, x64 SSE2, no FMA). No float here
 //! can be NaN or out of `i32` range where it is cast: see [`precise_round_565`].
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 use std::sync::OnceLock;
 
@@ -73,7 +78,10 @@ impl Hist4 {
 
 /// `compute_selector_factors4`: the inverse of the least-squares normal matrix of a histogram, scaled by 3/255;
 /// zero when the matrix is singular. Returns (iz00, iz10, iz11).
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
 fn compute_selector_factors4(h: &Hist4) -> [f32; 3] {
     let mut weight_accum: u32 = 0;
     for sel in 0..4 {
@@ -137,7 +145,10 @@ impl Hist3 {
 }
 
 /// `compute_selector_factors3`: as [`compute_selector_factors4`] for a 3-colour histogram, scaled by 2/255.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
 fn compute_selector_factors3(h: &Hist3) -> [f32; 3] {
     let mut weight_accum: u32 = 0;
     for sel in 0..3 {
@@ -243,7 +254,6 @@ pub(crate) fn ls_endpoints4_ordered(
 /// The selector form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1 scale,
 /// as the 3/255 factor puts it) for selectors `sels` (rgbcx's linear order). `None` when every texel has one
 /// selector (the C++ returns false). Returns (xl, xh).
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(crate) fn ls_endpoints4(
     px: &[[u8; 4]; 16],
     sels: &[u8; 16],
@@ -327,7 +337,6 @@ pub(crate) fn ls_endpoints3_ordered(
 ///
 /// Selector 3 (transparent black) comes only from `encode_bc1_alpha`, which gives it to every masked texel; those
 /// texels add nothing to the sums or the totals. `try_3color_block`'s selectors never hold 3.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32; 3], [f32; 3])> {
     const S_TRAN: [i32; 3] = [0, 2, 1];
     let mut uq00 = [0i32; 3];

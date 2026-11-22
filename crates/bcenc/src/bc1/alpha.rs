@@ -8,8 +8,13 @@
 //! fits and the endpoint steps read no weights. Its errors are in kernel units (twice rgbcx's, Note HY9); this file
 //! only compares them with each other and with 0.
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 use super::encode::{bc1_encode3, encode, round_ls, single_colour_ends3};
@@ -22,7 +27,10 @@ use super::{Ends, DUAL};
 /// transparent. Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise
 /// a 3-colour block fitted to the opaque texels (principal axis, extreme texels, up to 8 least-squares refits, then up
 /// to 64 rounds of +-1 endpoint steps), masked texels on selector 3.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
 pub(crate) fn encode_alpha<const LEVEL: u32>(
     px: &[[u8; 4]; 16],
     transparent: u16,

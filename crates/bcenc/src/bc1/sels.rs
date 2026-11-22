@@ -250,7 +250,6 @@ mod scalar {
     /// strictly better; every texel whose bit is set in `mask` gets selector 3 (transparent black) and adds no error.
     /// No cutoff: all 16 selectors are written. Returns the summed error of the opaque texels. Tests only.
     #[cfg(test)]
-    #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
     pub(super) fn find_sels3_masked(
         px: &[[u8; 4]; 16],
         mask: u32,
@@ -349,7 +348,6 @@ mod scalar {
     }
 
     /// [`find_sels3_masked`]'s loop with the decoder weights `dec`.
-    #[allow(clippy::needless_range_loop)] // As `find_sels3_masked`.
     pub(super) fn find_sels3_masked_dec(
         px: &[[u8; 4]; 16],
         mask: u32,

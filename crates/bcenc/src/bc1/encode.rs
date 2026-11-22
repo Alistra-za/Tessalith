@@ -15,8 +15,13 @@
 //! levels take or reads the level's `Params`; `allow_3color` is the one flag left. The level is a const generic: each
 //! level is its own code, with constant loop bounds.
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 use super::fit::{ls_endpoints3, ls_endpoints4, order_tables, precise_round_565, Hist3, Hist4};
@@ -309,7 +314,6 @@ pub(super) fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
 /// The prefix sums `encode_bc1` and `try_3color_block` build for their total-ordering loops: the texels sorted by
 /// their dot product with the current endpoints' axis (the texel index breaks ties), `sums[c][i]` the sum of channel
 /// `c` over the first `i` of them and `sums[c][16]` the block total.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(super) fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] {
     let (lr, lg, lb) = (e.l[0], e.l[1], e.l[2]);
     let (hr, hg, hb) = (e.h[0], e.h[1], e.h[2]);
@@ -417,8 +421,10 @@ fn total_orderings<const LEVEL: u32>(
 /// Every selector array this reads was written by [`find_sels3`] because its total was below the cutoff the search was
 /// given (the first search passes `UINT32_MAX`, a block's error is far below it), and a search writes `sels` only
 /// then. The searches return full totals, so a trial's error is its whole block error, not a partial one.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-#[allow(clippy::too_many_arguments)] // The C++ call's own list, plus the block's set of scored pairs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the C++ call's own list, plus the block's set of scored pairs"
+)]
 fn try_3color_block<const LEVEL: u32>(
     px: &[[u8; 4]; 16],
     texels: &Texels,
@@ -559,8 +565,14 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
 /// rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour blocks (`use_black` false, see
 /// [`find_sels3`]).
 fn endpoint_search<const LEVEL: u32>(
-    // Read only by the shadow checks (the searches take `texels`).
-    #[cfg_attr(not(test), allow(unused_variables))] px: &[[u8; 4]; 16],
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_variables,
+            reason = "read only by the shadow checks in the unit tests; the searches take texels"
+        )
+    )]
+    px: &[[u8; 4]; 16],
     texels: &Texels,
     three: bool,
     seen: &mut Seen,

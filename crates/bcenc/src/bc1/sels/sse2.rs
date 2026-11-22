@@ -46,8 +46,10 @@ impl Texels {
         ];
         let (mut xa, mut xb, mut t) = ([[0i16; 8]; 4], [[0i16; 8]; 4], [[0i32; 4]; 4]);
         let mut keep = [[0i32; 4]; 4];
-        // The index is the texel of several arrays at once.
-        #[allow(clippy::needless_range_loop)]
+        #[allow(
+            clippy::needless_range_loop,
+            reason = "the index is the texel of several arrays at once"
+        )]
         for i in 0..16 {
             let (v, l) = (i / 4, i % 4);
             let c = [px[i][0] as i32, px[i][1] as i32, px[i][2] as i32];
@@ -171,8 +173,6 @@ fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     ];
     let zero = _mm_setzero_si128();
     let (mut least, mut sum) = ([zero; 4], zero);
-    // The index is the row of several arrays at once.
-    #[allow(clippy::needless_range_loop)]
     for v in 0..4 {
         least[v] = min32(min32(r[0][v], r[1][v]), min32(r[2][v], r[3][v]));
         sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
@@ -181,7 +181,6 @@ fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     if total < cutoff {
         let (one, three) = (_mm_set1_epi32(1), _mm_set1_epi32(3));
         let mut q = [zero; 4];
-        #[allow(clippy::needless_range_loop)]
         for v in 0..4 {
             let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
             let (eq0, eq1, eq2, eq3) = (eq(0), eq(1), eq(2), eq(3));
@@ -209,7 +208,6 @@ fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     ];
     let zero = _mm_setzero_si128();
     let (mut least, mut sum) = ([zero; 4], zero);
-    #[allow(clippy::needless_range_loop)]
     for v in 0..4 {
         least[v] = min32(min32(r[0][v], r[1][v]), r[2][v]);
         sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
@@ -218,7 +216,6 @@ fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     if total < cutoff {
         let two = _mm_set1_epi32(2);
         let mut q = [zero; 4];
-        #[allow(clippy::needless_range_loop)]
         for v in 0..4 {
             let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
             // 0 where entry 0 holds the least, else 1 where entry 1 does, else 2 (a true compare is -1).
@@ -242,7 +239,6 @@ fn sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
     let (zero, two, three) = (_mm_setzero_si128(), _mm_set1_epi32(2), _mm_set1_epi32(3));
     let mut sum = zero;
     let mut q = [zero; 4];
-    #[allow(clippy::needless_range_loop)]
     for v in 0..4 {
         let least = min32(min32(r[0][v], r[1][v]), r[2][v]);
         sum = _mm_add_epi32(sum, _mm_and_si128(t.keep[v], _mm_add_epi32(t.t[v], least)));

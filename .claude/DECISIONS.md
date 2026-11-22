@@ -9,7 +9,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR, JS, LA
 - Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ
@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, LD
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH
 
 ## Digest
 
@@ -2209,3 +2209,7 @@ The owner: "Probably turn validate into an optional setting flag in the gui, and
 - **LG9 Always validated (owner, "Always validate those two").** `validate::always_validated(subtype)` is true for `ComplexMaterial` and `ComplexGrass` only, by resolved subtype and never by the `_m` suffix (a derived `EnvM` writes `_m` and follows the switch). `process_file` validates when `req.validate || always_validated(subtype)`, so these records never say `skipped`, and the complex-material card's smallest-mip alpha lines keep working.
 - **LG10 Checking in place (owner, "Check them in place"; OV-R1 from the controller).** A validating run under `if-changed` reads and checks an up to date output whose record says `skipped: true`, without encoding it (`pipeline::check_in_place`, then `commit_check`), and appends its record again with only `validation` and `ts` changed. `Manifest::append` is the path, after a second cancel and output-stamp check; the DDS is never opened for writing. An output kept for an older encode version is not checked (an older engine built its encoder input). The event is `FileSkipped { UpToDate }` with the reason suffix `; checked in place`, or `; checked in place: failed validation`; `BatchSummary` and `BatchDone` gain `checked` and `checked_failed`, Also export's sum adds them, and `exit_code` gives 4 for `validation_failed + checked_failed > 0`. A read or prepare failure is a failed file, not up to date. A check still queued when the run is cancelled counts as cancelled, not as up to date (before this note an up to date output was never queued). `--dry-run` returns before the manifest is opened, so a dry run checks nothing. In the GUI a finished check counts as work in the files/s rate and the ETA, though its row ends as up to date (it refines AG35). This amends JA1.
 - **LG11 What a check in place leaves alone (controller, OV-R3 and OV-R4).** A packed output is checked only when its recorded `pack.*` provenance equals what `prepare` would assemble now. Only a `Current` output is checked, so an output kept for a lower quality target and every Vanilla copy (`copied_from`) stay not validated until re-encoded, and no verdict passes from a twin to its copy. JA7's copy path is unchanged. A derived output (derived diffuse, legacy `_n`, `EnvM`) is checked like any other: its `DeriveJob` carries the `[export.legacy]` numbers (`params`), `identity_sha256` hashes them, `recorded_sources` records that identity on each source, and `currency` compares it, so a changed recipe value makes the output stale and never reaches a check. A check in place that ends as a failed file (the output changed during the run, a source unreadable) leaves a failed row, so the PBR JSON export refuses that dependency (HF9); no DDS was touched.
+
+## Note LH - Rust audit follow-ups (main team, 2026-11-22)
+
+The recommended actions of the 2026-11-21 Rust patterns audit (`F:\ai\dds\reports\2026-11-21-ai-rust-patterns-audit.md`) beyond Note LF: suppressions state their reason, two allocation lints, a scan for silent test skips, enum ids that do not allocate, a measured allocation budget for the re-plan's skeleton patch, and the repo copies of the Rust CLI skills removed. No encoded byte changes.

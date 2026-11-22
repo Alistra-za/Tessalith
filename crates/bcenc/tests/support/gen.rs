@@ -2,11 +2,17 @@
 //! BC3-alpha classes and the BC1 transparency masks; the BC1 colour classes live in `bc1_classes.rs` and are
 //! re-exported here. Shared by `crates/bcenc/tests`, the crate's unit tests (the crate-level `gen` module, through
 //! `#[path]`) and the encoders-sys and engine BC4 reference tests. No crate dependencies.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by the unit tests, examples/speed, the bc1, bc1_alpha, bc3, bc4 and levels tests, the engine encode and mesh_alpha tests and encoders-sys/tests/bc4ref.rs; each uses a subset and no item is dead in all"
+)]
 
 #[path = "bc1_classes.rs"]
 mod bc1_classes;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "every includer leaves some of the four re-exports unused (none uses all four)"
+)]
 pub use bc1_classes::{colour_classes, round_code, round_code_midpoint, COLOUR_CLASSES};
 
 pub struct Rng(pub u64);

@@ -62,7 +62,10 @@ pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
     let seen = Arc::new(AtomicU32::new(0));
     // The second Ctrl-C must end the process at once: a running native encode call cannot be interrupted, and
     // `write_atomic` leaves no partial final DDS output (temporary files can remain, as the module docs say).
-    #[allow(clippy::exit)]
+    #[allow(
+        clippy::exit,
+        reason = "the second Ctrl-C ends the process at once; see the comment above"
+    )]
     let abort = |c| std::process::exit(c);
     ctrlc::set_handler(move || {
         on_interrupt(

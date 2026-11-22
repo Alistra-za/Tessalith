@@ -96,8 +96,13 @@ mod sse2;
 /// kernel's reference, and what a target without SSE2 runs.
 #[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
 mod scalar {
-    // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-    #[cfg_attr(not(test), allow(unused_imports))]
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_imports,
+            reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there; this module builds outside them only for a target without SSE2"
+        )
+    )]
     use crate::hits::{hit, Hit};
 
     use super::super::encode::round_ls;
