@@ -1,7 +1,8 @@
 //! Allocation budgets (Note LF1): how many allocation calls a warm full plan and a one-edit re-plan of the fast
-//! fixture make, and enum ids that do not allocate (Note LH4). The plan counter is process-wide (the engine plans on a rayon pool), so every request runs with
-//! `jobs = 1` to keep the count the same from run to run. The tests share the counter, so each measuring test holds
-//! one static `Mutex` (`MEASURE`) for its whole body; no two run their setup or measuring at the same time.
+//! fixture make, and enum ids that do not allocate (Note LH4). The plan counter is process-wide (the engine plans on
+//! a rayon pool), so every request runs with `jobs = 1` to keep the count the same from run to run. The tests share
+//! the counter, so each measuring test holds one static `Mutex` (`MEASURE`) for its whole body; no two run their setup
+//! or measuring at the same time.
 //! `enum_ids_do_not_allocate` counts per thread instead (`counted_here`): its work runs on the test's own thread, and
 //! the harness's threads must not reach an exact-zero count.
 #[path = "common/fast_fixture.rs"]
