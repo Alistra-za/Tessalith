@@ -237,8 +237,10 @@ fn bc3_choices_write_the_spec_pairs() {
     }
 }
 
+/// Slowest on BC3, BC4 and BC5 writes the radius; every Effort pick, on any format, undoes as "Change Effort" and its
+/// reset as "Reset Effort" (Note LI1), not as the raw key.
 #[test]
-fn slowest_writes_slowest_on_bc4_and_bc3() {
+fn slowest_writes_slowest_and_undoes_as_effort_on_bc3_bc4_and_bc5() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(single(d.path(), Format::Bc4));
     let entries = open_effort(&mut h);
@@ -247,6 +249,7 @@ fn slowest_writes_slowest_on_bc4_and_bc3() {
     assert_eq!(h.state().undo_label(), Some("Change Effort"));
     h.state_mut().clear_field(ROCK, RADIUS);
     assert_eq!(h.state().undo_label(), Some("Reset Effort"));
+    assert_eq!(file(h.state(), ROCK, RADIUS), None);
 
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(single(d.path(), Format::Bc5));
@@ -264,6 +267,24 @@ fn slowest_writes_slowest_on_bc4_and_bc3() {
     assert_eq!(h.state().undo_label(), Some("Change Effort"));
 }
 
+/// The other two fields the Effort row writes, `encoder.effort` (BC7) and `encoder.bc1_search` (BC1), read "Effort"
+/// in the undo step too.
+#[test]
+fn a_bc7_or_bc1_effort_pick_undoes_as_change_effort() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(single(d.path(), Format::Bc7));
+    let entries = open_effort(&mut h);
+    pick(&mut h, &entries, "Fast");
+    assert_eq!(file(h.state(), ROCK, "encoder.effort"), Some(json!("fast")));
+    assert_eq!(h.state().undo_label(), Some("Change Effort"));
+
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(single(d.path(), Format::Bc1));
+    let entries = open_effort(&mut h);
+    pick(&mut h, &entries, "Fast");
+    assert_eq!(file(h.state(), ROCK, BC1), Some(json!("fast")));
+    assert_eq!(h.state().undo_label(), Some("Change Effort"));
+}
 #[test]
 fn a_mixed_bc3_pair_shows_custom_and_a_pick_writes_both() {
     let d = tempfile::tempdir().unwrap();
