@@ -511,6 +511,104 @@ fn filters_sort_and_tile_round_trip_through_gui_toml() {
 }
 
 #[test]
+fn status_pills_are_not_restored_but_sort_and_tile_are() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let mut s = GuiSettings::default();
+    s.layout.filters = vec![
+        "needs-decision".into(),
+        "warnings".into(),
+        "failed".into(),
+        "not-in-set".into(),
+        "hide-helpers".into(),
+    ]; // an old file
+    s.layout.sets_filters = ["attention", "ready", "no-json"].map(String::from).to_vec();
+    s.layout.filter_format = Some("bc5".into());
+    s.layout.filter_set = "not-in".into();
+    s.layout.sets_shader = Some("pbr_landscape".into());
+    s.layout.filter_subtype = Some("normal".into());
+    s.layout.sort = "status".into();
+    s.layout.tile = 150.0;
+    s.save(&p).unwrap();
+    let old = std::fs::read_to_string(&p).unwrap();
+    for word in [
+        "needs-decision",
+        "warnings",
+        "failed",
+        "not-in-set",
+        "attention",
+        "ready",
+        "no-json",
+    ] {
+        assert!(
+            old.contains(&format!("\"{word}\"")),
+            "legacy fixture missing {word}"
+        );
+    }
+    let (back, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    let mut m = AppModel::new(back, None, session());
+    sdc_gui::layout::restore_model(
+        &m.settings.layout.clone(),
+        &mut m.filter,
+        &mut m.prefs,
+        &mut m.sets_filter,
+        &mut sdc_gui::model::view::ViewState::default(),
+    );
+    assert!(
+        !m.filter.needs_decision && !m.filter.warnings && !m.filter.failed && !m.filter.not_in_set
+    );
+    assert!(m.filter.hide_helpers);
+    assert!(!m.sets_filter.ready && !m.sets_filter.attention && !m.sets_filter.no_json);
+    assert_eq!(m.filter.subtype.as_deref(), Some("normal"));
+    assert_eq!((m.prefs.sort, m.prefs.tile), (SortKey::Status, 150.0));
+    assert_eq!(m.filter.set, SetFilter::NotIn);
+    m.filter.needs_decision = true;
+    m.filter.warnings = true;
+    m.filter.failed = true;
+    m.filter.not_in_set = true;
+    m.sets_filter.attention = true;
+    m.sets_filter.ready = true;
+    m.sets_filter.no_json = true;
+    m.settings.layout = sdc_gui::layout::capture(
+        &egui::Context::default(),
+        &m.settings.layout,
+        &m.filter,
+        &m.prefs,
+        &m.sets_filter,
+        &Default::default(),
+        (&Default::default(), &Default::default()),
+    );
+    m.settings.save(&p).unwrap();
+    let disk = std::fs::read_to_string(&p).unwrap();
+    let raw: toml::Table = toml::from_str(&disk).unwrap();
+    let layout = raw["layout"].as_table().unwrap();
+    let filters = layout["filters"].as_array().unwrap();
+    assert_eq!(
+        filters
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["hide-helpers"]
+    );
+    assert!(layout
+        .get("sets_filters")
+        .is_none_or(|v| v.as_array().unwrap().is_empty()));
+    let (saved, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert_eq!(saved.layout.filters, ["hide-helpers"]);
+    assert!(saved.layout.sets_filters.is_empty());
+    assert_eq!(saved.layout.sets_shader.as_deref(), Some("pbr_landscape"));
+    assert_eq!(saved.layout.filter_subtype.as_deref(), Some("normal"));
+    assert_eq!(saved.layout.filter_format.as_deref(), Some("bc5"));
+    assert_eq!(saved.layout.filter_set, "not-in");
+    assert_eq!(
+        (saved.layout.sort.as_str(), saved.layout.tile),
+        ("status", 150.0)
+    );
+}
+
+#[test]
 fn a_bad_saved_value_goes_back_to_its_default() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("gui.toml");

@@ -159,7 +159,8 @@ pub struct LayoutSettings {
     /// The Meshes view instead of the Textures view.
     #[serde(deserialize_with = "lenient")]
     pub meshes_view: bool,
-    /// The Textures filters that are on, by [`FILTER_NAMES`] name.
+    /// The Textures filters that are kept, by [`FILTER_NAMES`] name: only `hide-helpers` is saved and restored. The
+    /// status pills in an old file are read and ignored, and the next save drops them (E19).
     #[serde(deserialize_with = "lenient_strings")]
     pub filters: Vec<String>,
     /// The Textures combo filters: a sub-type id, a format id (none: Any), and the set membership one
@@ -175,8 +176,8 @@ pub struct LayoutSettings {
     pub sort: String,
     #[serde(deserialize_with = "lenient_tile")]
     pub tile: f32,
-    /// The Sets column pills that are on, by [`SETS_FILTER_NAMES`] name, and its shader filter (a `Shader` id; none:
-    /// Any). Its search is not saved (R17).
+    /// The Sets column pills of an old file, by [`SETS_FILTER_NAMES`] name: read and ignored, never saved (E19). Its
+    /// shader filter below (a `Shader` id; none: Any) is kept; its search is not saved (R17).
     #[serde(deserialize_with = "lenient_strings")]
     pub sets_filters: Vec<String>,
     #[serde(deserialize_with = "lenient")]

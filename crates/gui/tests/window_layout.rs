@@ -23,7 +23,11 @@ fn full() -> LayoutSettings {
         }),
         widths: [("textures".to_string(), 410.0), ("sets".to_string(), 275.5)].into(),
         meshes_view: true,
-        filters: vec!["warnings".into(), "not-in-set".into()],
+        filters: vec![
+            "warnings".into(),
+            "not-in-set".into(),
+            "hide-helpers".into(),
+        ],
         filter_subtype: Some("normal".into()),
         filter_format: None,
         filter_set: "in".into(),
@@ -320,21 +324,21 @@ fn the_app_writes_a_changed_layout_once_per_two_seconds_and_on_exit() {
     let t0 = Instant::now();
     app.sync_layout_at(&ctx, t0);
     assert!(!path.exists(), "nothing changed, nothing written");
-    app.model.filter.warnings = true;
+    app.model.filter.hide_helpers = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(100));
     app.model.view.channel = Channel::G;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(1500));
     assert!(!path.exists(), "inside the 2 s");
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2200));
     let (s, _) = GuiSettings::load(&path);
-    assert_eq!(s.layout.filters, vec!["warnings".to_string()]);
+    assert_eq!(s.layout.filters, vec!["hide-helpers".to_string()]);
     assert_eq!(s.layout.preview_channel, Channel::G.shader_id() as u8);
     // A change after that waits for its own 2 s, but the exit writes it.
-    app.model.filter.failed = true;
+    app.model.prefs.tile = 150.0;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2300));
-    assert_eq!(GuiSettings::load(&path).0.layout.filters.len(), 1);
+    assert_eq!(GuiSettings::load(&path).0.layout.tile, 96.0);
     eframe::App::on_exit(&mut app);
-    assert_eq!(GuiSettings::load(&path).0.layout.filters.len(), 2);
+    assert_eq!(GuiSettings::load(&path).0.layout.tile, 150.0);
 }
 
 #[test]
@@ -355,10 +359,12 @@ fn a_new_app_starts_from_the_saved_layout() {
     model.open_folder(dir.path().to_owned());
     assert!(model.wait_idle(Duration::from_secs(60)));
     let mut app = SdcApp::new(model);
-    assert!(app.model.filter.warnings && app.model.filter.not_in_set);
+    // The fixture's status pills are an old file's: ignored (E19). Hide-helpers is kept.
+    assert!(app.model.filter.hide_helpers);
+    assert!(!app.model.filter.warnings && !app.model.filter.not_in_set);
     assert!(!app.model.filter.failed && !app.model.filter.needs_decision);
     let s = &app.model.sets_filter;
-    assert!(s.attention && s.no_json && !s.ready);
+    assert!(!s.attention && !s.no_json && !s.ready);
     assert_eq!(s.shader, Some(engine::shader::Shader::PbrLandscape));
     assert_eq!(app.model.view.channel, Channel::B);
     assert_eq!(
@@ -380,6 +386,9 @@ fn a_new_app_starts_from_the_saved_layout() {
     // The same layout comes back out of the context, the partial set look included.
     app.sync_layout_at(&ctx, Instant::now());
     let mut want = full();
+    // The old pills are dropped on the way out (E19).
+    want.filters = vec!["hide-helpers".into()];
+    want.sets_filters = vec![];
     want.set_look = Some(LookSettings {
         sun: Some(0.5),
         ..LookSettings::default()
@@ -471,7 +480,7 @@ fn a_restored_width_survives_a_session_without(name: &str) {
     let t0 = Instant::now();
     app.sync_layout_at(&ctx, t0);
     // One real change, so the debounce writes the file.
-    app.model.filter.warnings = true;
+    app.model.filter.hide_helpers = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(100));
     app.sync_layout_at(&ctx, t0 + Duration::from_millis(2200));
     assert!(path.exists(), "the change was written");
@@ -541,12 +550,12 @@ fn a_start_that_changes_nothing_writes_nothing() {
     eframe::App::on_exit(&mut app);
     assert!(!path.exists(), "and so did the exit");
     // A real change still writes.
-    app.model.filter.failed = true;
+    app.model.filter.hide_helpers = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_secs(4));
     app.sync_layout_at(&ctx, t0 + Duration::from_secs(7));
     assert_eq!(
         GuiSettings::load(&path).0.layout.filters,
-        vec!["failed".to_string()]
+        vec!["hide-helpers".to_string()]
     );
 }
 
@@ -706,12 +715,12 @@ fn a_legacy_grey_is_saved_back_as_bg_after_an_unrelated_change() {
     let ctx = egui::Context::default();
     let t0 = Instant::now();
     app.sync_layout_at(&ctx, t0);
-    app.model.filter.failed = true;
+    app.model.filter.hide_helpers = true;
     app.sync_layout_at(&ctx, t0 + Duration::from_secs(3));
     app.sync_layout_at(&ctx, t0 + Duration::from_secs(6));
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
-        text.contains("failed"),
+        text.contains("hide-helpers"),
         "the unrelated change was written: {text}"
     );
     assert!(text.contains("bg") && !text.contains("grey"), "{text}");
