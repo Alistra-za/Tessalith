@@ -1314,14 +1314,14 @@ struct Setup {
 #[derive(Clone)]
 pub(crate) struct Prepared {
     pub(crate) req: BatchRequest,
+    // The fields below that are `Arc`s are shared by a skeleton patch's copy (Note LH5); a patch writes only
+    // `req`, `project_config`, `file_scopes`, `typed` (replaced whole) and, through `Arc::make_mut`, `sets`.
     pub(crate) registry: Arc<PresetRegistry>,
     pub(crate) user_config: Option<Arc<ConfigFile>>,
     pub(crate) project_config: Option<ConfigFile>,
     pub(crate) target: Target,
     pub(crate) target_src: Provenance,
     pub(crate) preset_id: String,
-    // The fields below that are `Arc`s are shared by a skeleton patch's copy (Note LH5); a patch writes only
-    // `req`, `project_config`, `file_scopes`, `typed` (replaced whole) and, through `Arc::make_mut`, `sets`.
     pub(crate) files: Arc<Vec<InputFile>>,
     /// `group_sets_with`'s sets, before `drop_typed_roles` and the joins.
     pub(crate) grouped: Arc<Vec<TextureSet>>,

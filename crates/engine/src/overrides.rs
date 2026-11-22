@@ -135,7 +135,7 @@ pub struct FileScopes {
     /// Key → codes acknowledged for that file only.
     pub allow: BTreeMap<String, BTreeSet<Code>>,
     /// The planned files' match forms by path (`index`), with the file name they were worked out for. `None` until
-    /// `index`.
+    /// `index` builds it (it does not when the layer is off or empty).
     pub(crate) forms: Option<Arc<FormsByPath>>,
     /// Note DW: indices (into the planned files, as `TextureSet::members`) of the GUI's pinned files named as a
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.

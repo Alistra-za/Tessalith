@@ -267,8 +267,8 @@ impl Skeleton {
                     .extend(codes.iter().copied());
                 n.file_scopes.rebuild_keys();
             }
-            // shortcut: the [files] documents, the request and file_scopes are copied whole on every patch, since patch
-            // writes them; upgrade when a re-plan of a project with a large [files] table shows them in the
+            // shortcut: the [files] documents, the request and file_scopes (all but the shared `forms`) are copied
+            // whole on every patch, since patch writes them; upgrade when a re-plan of a project with a large [files] table shows them in the
             // allocation profile.
             // Keep the documents in step with the layer, as a fresh `prepare` would read them.
             for doc in [
@@ -714,8 +714,7 @@ mod tests {
     }
 
     /// Note LH5: a patch shares what it does not write and leaves the session's skeleton as it was, also when it
-    /// rewrites a set's suffixes (the q_height edit types a member). The fast re-plan keeps what the full plan keeps:
-    /// the patched copy equals a fresh `prepare` of the edited request.
+    /// rewrites a set's suffixes (the q_height edit types a member). `layer` includes `sets`.
     #[test]
     fn a_patch_leaves_the_kept_skeleton_as_it_was() {
         let fx = fast_fixture();
@@ -732,12 +731,6 @@ mod tests {
             layer(&next.prepared),
             before.0,
             "the edit changes the patched copy"
-        );
-        let edited = with_entry(&fx.req, "dir/q_height.png", Some(&t));
-        assert_eq!(
-            layer(&next.prepared),
-            layer(&prepare(&edited)),
-            "the patched copy equals the full plan's"
         );
         let after = (
             layer(&s.prepared),

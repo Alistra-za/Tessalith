@@ -250,7 +250,7 @@ fn read_only_output_file_fails_at_write_alone() {
         .unwrap();
     #[allow(
         clippy::permissions_set_readonly_false,
-        reason = "the file is the test's own temp file on Windows, where read-only has no world-writable meaning, and clearing the flag lets the temp dir be deleted"
+        reason = "the test restores write access to its own temp file so the temp dir can be deleted"
     )]
     perm.set_readonly(false);
     std::fs::set_permissions(&locked, perm).unwrap();
