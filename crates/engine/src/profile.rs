@@ -107,6 +107,11 @@ impl Stage {
     }
 }
 
+/// Convert a batch span's descending ID to its call number. This mapping is its own inverse.
+pub fn call_of_batch(batch_id: u32) -> u32 {
+    u32::MAX - batch_id
+}
+
 type RawSpan = (u8, u32, u16, u64, u64, u64, u32);
 
 #[derive(Serialize, Deserialize)]
@@ -367,7 +372,7 @@ impl Recorder {
 
     pub fn enter_batch(&self, call: u32) -> Scope {
         // Batch ids count down so a batch span cannot look like file zero.
-        self.enter(u32::MAX - call, false)
+        self.enter(call_of_batch(call), ScopeKind::Batch)
     }
 
     pub fn enter_input(&self, path: &Path) -> Scope {
@@ -384,7 +389,7 @@ impl Recorder {
             data.input_ids.insert(path.into(), id);
             id
         };
-        self.enter(id, false)
+        self.enter(id, ScopeKind::Input)
     }
 
     pub fn enter_job(&self, call: u32, output: &str) -> Scope {
@@ -403,15 +408,15 @@ impl Recorder {
             data.job_ids.insert(key, id);
             id
         };
-        self.enter(id, true)
+        self.enter(id, ScopeKind::Job)
     }
 
-    fn enter(&self, id: u32, job: bool) -> Scope {
+    fn enter(&self, id: u32, kind: ScopeKind) -> Scope {
         LOCAL.with_borrow_mut(|local| {
             local.stack.push(Context {
                 rec: self.clone(),
                 id,
-                job,
+                kind,
             })
         });
         Scope(PhantomData)
@@ -536,11 +541,18 @@ impl Recorder {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScopeKind {
+    Batch,
+    Input,
+    Job,
+}
+
 #[derive(Clone)]
 struct Context {
     rec: Recorder,
     id: u32,
-    job: bool,
+    kind: ScopeKind,
 }
 
 #[must_use]
@@ -623,10 +635,18 @@ pub fn span(stage: Stage) -> Span {
 /// The size Rayon actually built, including its environment overrides for an automatic pool.
 pub(crate) fn note_pool_threads(threads: usize) {
     LOCAL.with_borrow(|local| {
-        if let Some(ctx) = local.stack.last() {
+        let Some(active) = local.stack.last() else {
+            return;
+        };
+        if let Some(ctx) = local
+            .stack
+            .iter()
+            .rev()
+            .take_while(|ctx| ctx.rec.0.id == active.rec.0.id)
+            .find(|ctx| ctx.kind == ScopeKind::Batch)
+        {
             let mut data = ctx.rec.0.data.lock().unwrap();
-            // enter_batch numbers batch scopes down from u32::MAX.
-            if let Some(call) = data.calls.get_mut((u32::MAX - ctx.id) as usize) {
+            if let Some(call) = data.calls.get_mut(call_of_batch(ctx.id) as usize) {
                 call.pool_threads = threads;
             }
         }
@@ -634,8 +654,13 @@ pub(crate) fn note_pool_threads(threads: usize) {
 }
 
 pub fn note_job(make: impl FnOnce() -> JobNote) {
-    if let Some(ctx) = LOCAL.with_borrow(|local| local.stack.last().filter(|ctx| ctx.job).cloned())
-    {
+    if let Some(ctx) = LOCAL.with_borrow(|local| {
+        local
+            .stack
+            .last()
+            .filter(|ctx| ctx.kind == ScopeKind::Job)
+            .cloned()
+    }) {
         let note = make();
         ctx.rec.0.data.lock().unwrap().jobs[ctx.id as usize].note = note;
     }
@@ -646,6 +671,27 @@ mod tests {
     use super::*;
     use std::{collections::HashSet, sync::Barrier, thread, time::Duration};
     use Stage::*;
+
+    #[test]
+    fn pool_threads_belong_to_the_enclosing_batch() {
+        let rec = Recorder::new();
+        let call = rec.begin_call(CallKind::Plan, 0);
+        let _batch = rec.enter_batch(call);
+        let _input = rec.enter_input(Path::new("source.png"));
+        note_pool_threads(4);
+        assert_eq!(
+            rec.report("pool", vec![]).calls[call as usize].pool_threads,
+            4
+        );
+        let other = Recorder::new();
+        let _other_input = other.enter_input(Path::new("other.png"));
+        note_pool_threads(8);
+        assert_eq!(
+            rec.report("pool", vec![]).calls[call as usize].pool_threads,
+            4,
+            "a nested recorder has its own scopes"
+        );
+    }
 
     #[test]
     fn stage_table_is_complete() {

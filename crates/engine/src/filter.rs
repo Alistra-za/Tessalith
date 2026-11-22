@@ -197,98 +197,64 @@ fn resample_core<const N: usize>(
     let ty = axis_taps(src.height, h, f, edge);
     let (sw, dw) = (src.width as usize, w as usize);
     let mut mid = vec![[0f32; N]; src.height as usize * dw];
-    match profile::capture() {
-        None => mid.par_chunks_mut(dw).enumerate().for_each(|(y, row)| {
-            let line = &src.px[y * sw..(y + 1) * sw];
-            for (o, taps) in row.iter_mut().zip(&tx) {
-                let mut acc = [0f64; N];
-                for &(k, wt) in taps {
-                    let px = line[k as usize];
-                    let wt = if weighted { wt * f64::from(px[3]) } else { wt };
-                    for (a, v) in acc.iter_mut().zip(&px[..3]) {
-                        *a += wt * f64::from(*v);
-                    }
-                    if let Some(sum) = acc.get_mut(3) {
-                        *sum += wt;
-                    }
+    let rows = mid.par_chunks_mut(dw).enumerate();
+    let horizontal = |(y, row): (usize, &mut [[f32; N]])| {
+        let line = &src.px[y * sw..(y + 1) * sw];
+        for (o, taps) in row.iter_mut().zip(&tx) {
+            let mut acc = [0f64; N];
+            for &(k, wt) in taps {
+                let px = line[k as usize];
+                let wt = if weighted { wt * f64::from(px[3]) } else { wt };
+                for (a, v) in acc.iter_mut().zip(&px[..3]) {
+                    *a += wt * f64::from(*v);
                 }
-                // Saturate: a huge finite source must not become Inf, then NaN in the vertical pass.
-                *o = acc.map(|v| v.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32);
+                if let Some(sum) = acc.get_mut(3) {
+                    *sum += wt;
+                }
             }
-        }),
+            // Saturate: a huge finite source must not become Inf, then NaN in the vertical pass.
+            *o = acc.map(|v| v.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32);
+        }
+    };
+    match profile::capture() {
+        None => rows.for_each(horizontal),
         Some(cap) => {
-            let _span = profile::span(Timing::RowJoin);
-            mid.par_chunks_mut(dw).enumerate().for_each(|(y, row)| {
+            let _join = profile::span(Timing::RowJoin);
+            rows.for_each(|row| {
                 let _row = cap.span(Timing::FilterRows);
-                let line = &src.px[y * sw..(y + 1) * sw];
-                for (o, taps) in row.iter_mut().zip(&tx) {
-                    let mut acc = [0f64; N];
-                    for &(k, wt) in taps {
-                        let px = line[k as usize];
-                        let wt = if weighted { wt * f64::from(px[3]) } else { wt };
-                        for (a, v) in acc.iter_mut().zip(&px[..3]) {
-                            *a += wt * f64::from(*v);
-                        }
-                        if let Some(sum) = acc.get_mut(3) {
-                            *sum += wt;
-                        }
-                    }
-                    // Saturate: a huge finite source must not become Inf, then NaN in the vertical pass.
-                    *o = acc.map(|v| v.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32);
-                }
+                horizontal(row);
             });
         }
     }
     let mut out = Rgba32F::new(w, h, [0.0; 4]);
-    match profile::capture() {
-        None => out
-            .px
-            .par_chunks_mut(dw)
-            .zip(ty.par_iter())
-            .for_each(|(row, taps)| {
-                for (x, o) in row.iter_mut().enumerate() {
-                    let mut acc = [0f64; N];
-                    for &(k, wt) in taps {
-                        for (a, v) in acc.iter_mut().zip(mid[k as usize * dw + x]) {
-                            *a += wt * f64::from(v);
-                        }
-                    }
-                    let wsum = acc.get(3).copied().unwrap_or(1.0);
-                    *o = if !weighted {
-                        [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0]
-                    } else if wsum > 0.0 {
-                        let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / wsum) as f32);
-                        [r, g, b, 0.0]
-                    } else {
-                        [0.0, 0.0, 0.0, -1.0]
-                    };
+    let rows = out.px.par_chunks_mut(dw).zip(ty.par_iter());
+    let vertical = |(row, taps): (&mut [[f32; 4]], &Vec<(u32, f64)>)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            let mut acc = [0f64; N];
+            for &(k, wt) in taps {
+                for (a, v) in acc.iter_mut().zip(mid[k as usize * dw + x]) {
+                    *a += wt * f64::from(v);
                 }
-            }),
+            }
+            let wsum = acc.get(3).copied().unwrap_or(1.0);
+            *o = if !weighted {
+                [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0]
+            } else if wsum > 0.0 {
+                let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / wsum) as f32);
+                [r, g, b, 0.0]
+            } else {
+                [0.0, 0.0, 0.0, -1.0]
+            };
+        }
+    };
+    match profile::capture() {
+        None => rows.for_each(vertical),
         Some(cap) => {
-            let _span = profile::span(Timing::RowJoin);
-            out.px
-                .par_chunks_mut(dw)
-                .zip(ty.par_iter())
-                .for_each(|(row, taps)| {
-                    let _row = cap.span(Timing::FilterRows);
-                    for (x, o) in row.iter_mut().enumerate() {
-                        let mut acc = [0f64; N];
-                        for &(k, wt) in taps {
-                            for (a, v) in acc.iter_mut().zip(mid[k as usize * dw + x]) {
-                                *a += wt * f64::from(v);
-                            }
-                        }
-                        let wsum = acc.get(3).copied().unwrap_or(1.0);
-                        *o = if !weighted {
-                            [acc[0] as f32, acc[1] as f32, acc[2] as f32, 0.0]
-                        } else if wsum > 0.0 {
-                            let [r, g, b] = [acc[0], acc[1], acc[2]].map(|v| (v / wsum) as f32);
-                            [r, g, b, 0.0]
-                        } else {
-                            [0.0, 0.0, 0.0, -1.0]
-                        };
-                    }
-                });
+            let _join = profile::span(Timing::RowJoin);
+            rows.for_each(|row| {
+                let _row = cap.span(Timing::FilterRows);
+                vertical(row);
+            });
         }
     }
     out

@@ -335,25 +335,21 @@ fn encode_level_with(
                 p.format.block_bytes().expect("block format"),
             );
             let mut out = vec![0u8; blocks.len() / BLOCK_TEXELS * bs];
+            let rows = out
+                .par_chunks_mut(bw * bs)
+                .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
+                .filter(|_| go());
+            let encode = |(o, b): (&mut [u8], &[[u8; 4]])| {
+                encode_band(b, o, p);
+            };
             match profile::capture() {
-                None => out
-                    .par_chunks_mut(bw * bs)
-                    .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
-                    .for_each(|(o, b)| {
-                        if go() {
-                            encode_band(b, o, p);
-                        }
-                    }),
+                None => rows.for_each(encode),
                 Some(cap) => {
-                    let _span = profile::span(Timing::RowJoin);
-                    out.par_chunks_mut(bw * bs)
-                        .zip(blocks.par_chunks(bw * BLOCK_TEXELS))
-                        .for_each(|(o, b)| {
-                            if go() {
-                                let _row = cap.span(Timing::EncodeBand);
-                                encode_band(b, o, p);
-                            }
-                        });
+                    let _join = profile::span(Timing::RowJoin);
+                    rows.for_each(|row| {
+                        let _row = cap.span(Timing::EncodeBand);
+                        encode(row);
+                    });
                 }
             }
             if p.subtype == Subtype::ComplexGrass
@@ -368,25 +364,21 @@ fn encode_level_with(
             let (padded, pw, ph) = pad_hdr(px, w, h);
             let level = bc6h_level(p.encoder.effort);
             let mut out = vec![0u8; (pw / 4 * (ph / 4) * 16) as usize];
+            let rows = out
+                .par_chunks_mut((pw / 4 * 16) as usize)
+                .zip(padded.par_chunks((pw * 4) as usize))
+                .filter(|_| go());
+            let encode = |(o, rows): (&mut [u8], &[[u16; 4]])| {
+                bc6h_compress_rows(rows, pw, 4, o, level);
+            };
             match profile::capture() {
-                None => out
-                    .par_chunks_mut((pw / 4 * 16) as usize)
-                    .zip(padded.par_chunks((pw * 4) as usize))
-                    .for_each(|(o, rows)| {
-                        if go() {
-                            bc6h_compress_rows(rows, pw, 4, o, level);
-                        }
-                    }),
+                None => rows.for_each(encode),
                 Some(cap) => {
-                    let _span = profile::span(Timing::RowJoin);
-                    out.par_chunks_mut((pw / 4 * 16) as usize)
-                        .zip(padded.par_chunks((pw * 4) as usize))
-                        .for_each(|(o, rows)| {
-                            if go() {
-                                let _row = cap.span(Timing::EncodeBand);
-                                bc6h_compress_rows(rows, pw, 4, o, level);
-                            }
-                        });
+                    let _join = profile::span(Timing::RowJoin);
+                    rows.for_each(|row| {
+                        let _row = cap.span(Timing::EncodeBand);
+                        encode(row);
+                    });
                 }
             }
             out

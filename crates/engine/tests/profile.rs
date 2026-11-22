@@ -33,7 +33,9 @@ fn the_fixture_project_plans_every_case() {
     assert_eq!(job("leaf.dds").profile.alpha.policy, AlphaPolicy::Cutout);
     assert_eq!(job("glass.dds").profile.alpha.policy, AlphaPolicy::Blend);
     let one = &job("onebit.dds").profile;
+    assert_eq!(one.format, Format::Bc1);
     assert!(one.bc1_one_bit_alpha() && one.alpha.policy == AlphaPolicy::Cutout);
+    assert_eq!(job("keep_n.dds").profile.subtype, Subtype::Normal);
     assert_eq!(job("keep_n.dds").profile.mips.normal_base, NormalBase::Keep);
     let flow = &job("water_flow.dds").profile;
     assert_eq!((flow.subtype, flow.format), (Subtype::Flow, Format::Bc5));
@@ -55,11 +57,29 @@ fn write_project_refuses_an_existing_folder() {
 }
 
 #[test]
+fn fixture_writer_requires_its_destination() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "write_fixture_project",
+            "--nocapture",
+        ])
+        .env_remove("SDC_PROFILE_FIXTURE_DIR")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "writer succeeded without a destination"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("set SDC_PROFILE_FIXTURE_DIR"));
+}
+
+#[test]
 #[ignore]
 fn write_fixture_project() {
-    let Some(root) = std::env::var_os("SDC_PROFILE_FIXTURE_DIR") else {
-        return;
-    };
+    let root = std::env::var_os("SDC_PROFILE_FIXTURE_DIR")
+        .expect("set SDC_PROFILE_FIXTURE_DIR to a new fixture directory");
     let keys = profile_fixture::write_project(&PathBuf::from(&root)).unwrap();
     let mut list = root;
     list.push("-expected.txt");
@@ -90,6 +110,12 @@ fn profile_on_and_off_write_the_same_bytes() {
         fixture.dir.path().join("off"),
         fixture.dir.path().join("on"),
     );
+    let hdr = "textures/pbr/lamp_g.dds";
+    assert!(fixture.expected.contains(hdr), "missing HDR parity fixture");
+    for out in [&off, &on] {
+        let dds = engine::dds::read_dds(&fs::read(out.join(hdr)).unwrap()).unwrap();
+        assert_eq!(dds.format, engine::dds::DdsPixelFormat::Bc6hUf16);
+    }
     let records = |p| Manifest::at(p).read().unwrap();
     let (a, b) = (records(&off), records(&on));
     assert_eq!(
@@ -136,8 +162,10 @@ fn row_spans_lie_inside_their_job() {
     let cancel = CancelToken::default();
     run(f.plan("out", Some(&rec), &cancel), &cancel);
     let r = rec.report("fixture", vec![]);
+    let run = call_of_kind(&r, CallKind::Run);
     for (stage, suffix) in [
         (Stage::EncodeBand, ".dds"),
+        (Stage::EncodeBand, "lamp_g.dds"),
         (Stage::ResizeRows, "wide.dds"),
         (Stage::FilterRows, "plain.dds"),
     ] {
@@ -149,10 +177,7 @@ fn row_spans_lie_inside_their_job() {
             "missing {stage:?} for {suffix}"
         );
         for row in spans(&r, stage) {
-            assert!(r
-                .jobs
-                .iter()
-                .any(|j| j.call == r.calls[1].call && j.id == row.1));
+            assert!(r.jobs.iter().any(|j| j.call == run.call && j.id == row.1));
             for parent in [Stage::File, Stage::RowJoin] {
                 assert!(
                     spans(&r, parent).any(|s| s.1 == row.1 && inside(row, s)),

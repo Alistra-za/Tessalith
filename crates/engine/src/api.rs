@@ -433,6 +433,14 @@ impl PlanFailure {
     }
 }
 
+fn profile_first_source<T>(
+    recorder: Option<&profile::Recorder>,
+    sources: &[T],
+    path: impl FnOnce(&T) -> &Path,
+) -> Option<profile::Scope> {
+    recorder.and_then(|r| sources.first().map(|s| r.enter_input(path(s))))
+}
+
 /// Packing pass 2 and the derive step (spec §5.9, §6.4; Note CN): each item is admitted on the calling thread at
 /// `est(item)` bytes, then `work` runs on the pool under `catch_unwind`, so a panic fails that item alone at the stage
 /// it had entered (preflight P18). One result per item, in order; `None` = cancelled before its Load started.
@@ -2723,10 +2731,8 @@ impl Engine {
             },
             |c| &c.virtual_input.output,
             |c, admitted, stage| {
-                let _input = req
-                    .profile
-                    .as_ref()
-                    .map(|r| r.enter_input(&c.job.sources[0].path));
+                let _input =
+                    profile_first_source(req.profile.as_ref(), &c.job.sources, |s| &s.path);
                 let _span = profile::span(Timing::PlanPack);
                 // The key includes every source's stamp, so an edited source misses the cache. A recipe
                 // without a key (a source with no stamp) is assembled every time and never stored.
@@ -3032,10 +3038,8 @@ impl Engine {
                 },
                 |c| &c.input.output,
                 |c, admitted, stage| {
-                    let _input = req
-                        .profile
-                        .as_ref()
-                        .map(|r| r.enter_input(&c.job.sources[0].path));
+                    let _input =
+                        profile_first_source(req.profile.as_ref(), &c.job.sources, |s| &s.path);
                     let _span = profile::span(Timing::PlanDerive);
                     let (asm, mean_rough) = crate::derive::assemble::assemble_derived_rough(&c.job)
                         .map_err(PlanFailure::of_pack)?;
@@ -4467,6 +4471,19 @@ mod tests {
     use crate::manifest::ENGINE_VERSION;
 
     /// DECISIONS DS7: admission counts a cube DDS as the 6w x h strip it loads as, in both header forms.
+    #[test]
+    fn empty_candidate_has_no_profile_input() {
+        let recorder = profile::Recorder::new();
+        let result = std::panic::catch_unwind(|| {
+            profile_first_source(Some(&recorder), &[] as &[PathBuf], PathBuf::as_path)
+        });
+        assert!(
+            matches!(result, Ok(None)),
+            "profiling an empty candidate must leave it to the planner"
+        );
+        assert!(recorder.report("empty", vec![]).inputs.is_empty());
+    }
+
     #[test]
     fn cube_dds_input_dims_are_the_loaded_strip() {
         use crate::dds::{dds_bytes_cube, DdsDesc, ResolvedHeader};

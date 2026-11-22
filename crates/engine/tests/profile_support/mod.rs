@@ -6,7 +6,7 @@ use engine::config::Target;
 use engine::events::{Reporter, VecSink};
 use engine::manifest::output_key;
 use engine::policy::{AcceptSuggestions, JobStatus};
-use engine::profile::{CallKind, Recorder, Report, Stage};
+use engine::profile::{call_of_batch, Call, CallKind, Recorder, Report, Stage};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -79,6 +79,56 @@ pub fn inside(child: &Span, parent: &Span) -> bool {
     parent.3 <= child.3 && child.4 <= parent.4
 }
 
+pub fn call_of_kind(report: &Report, kind: CallKind) -> &Call {
+    report
+        .calls
+        .iter()
+        .find(|c| c.kind == kind)
+        .expect("missing profile call")
+}
+
+fn run_only(stage: Stage) -> bool {
+    use Stage::*;
+    matches!(
+        stage,
+        Run | RunAdmitEstimate
+            | RunAdmitWait
+            | RunClassify
+            | Currency
+            | CurrencyHash
+            | File
+            | StampCheck
+            | HashSource
+            | BakeLoad
+            | Decode
+            | PackAssemble
+            | DeriveAssemble
+            | Fill
+            | CubePrepare
+            | Preprocess
+            | Dilate
+            | SrgbDecode
+            | Resize
+            | ResizeRows
+            | Mips
+            | FilterRows
+            | RowJoin
+            | Coverage
+            | DetailCheck
+            | Quantize
+            | Encode
+            | EncodeGather
+            | EncodePack
+            | EncodeBand
+            | DdsAssemble
+            | Validate
+            | ManifestRecord
+            | Write
+            | ManifestWait
+            | ManifestAppend
+    )
+}
+
 pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
     let mut ordered = r.spans.clone();
     ordered.sort_by_key(|s| (s.2, s.3, std::cmp::Reverse(s.4)));
@@ -100,32 +150,33 @@ pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
         ends.push(s.4);
     }
     assert_eq!(r.calls.len(), 2);
-    for (call, kind) in r.calls.iter().zip([CallKind::Plan, CallKind::Run]) {
-        assert_eq!(call.kind, kind);
+    let plan = call_of_kind(r, CallKind::Plan);
+    let run = call_of_kind(r, CallKind::Run);
+    assert!(plan.end_ns <= run.start_ns);
+    for call in [plan, run] {
         assert_eq!(call.pool_threads, 4);
         assert!(call.budget_limit > 0 && call.budget_peak > 0);
-        let id = u32::MAX - call.call;
-        let stage = if kind == CallKind::Plan {
+        let stage = if call.kind == CallKind::Plan {
             Stage::Plan
         } else {
             Stage::Run
         };
-        let root = spans(r, stage).find(|s| s.1 == id).unwrap();
+        let root = spans(r, stage)
+            .find(|s| call_of_batch(s.1) == call.call)
+            .unwrap();
         assert!(call.start_ns <= root.3 && root.4 <= call.end_ns);
-        let coordinator = |s: &&Span| s.1 == id && s.2 == root.2 && inside(s, root);
+        let coordinator = |s: &&Span| s.1 == root.1 && s.2 == root.2 && inside(s, root);
         assert!(spans(r, Stage::ScopeJoin)
             .filter(coordinator)
             .any(|join| spans(r, Stage::Dispatch)
                 .filter(coordinator)
                 .any(|s| inside(s, join))));
-        if kind == CallKind::Run {
+        if call.kind == CallKind::Run {
             assert!(spans(r, Stage::RunClassify).any(|s| coordinator(&s)));
             for s in &r.spans {
                 let stage = Stage::ALL[s.0 as usize];
                 // Shared stages (e.g. event delivery and pool construction) can belong to either call.
-                let run_only =
-                    s.0 >= Stage::Run as u8 && !matches!(stage, Stage::Events | Stage::EventsWait);
-                if run_only || s.4 > r.calls[0].end_ns {
+                if run_only(stage) || s.4 > plan.end_ns {
                     assert!(inside(s, root), "outside Run span {s:?}");
                 }
             }
@@ -169,6 +220,10 @@ pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
             }
         }
         let dds = engine::dds::read_dds(&std::fs::read(out.join(&job.output)).unwrap()).unwrap();
+        if job.output.ends_with("wide.dds") {
+            let source = image::image_dimensions(&job.note.input).unwrap();
+            assert_eq!((source, (dds.width, dds.height)), ((31, 20), (32, 16)));
+        }
         let n = &job.note;
         assert_eq!(
             (n.width, n.height, n.levels),
@@ -176,7 +231,7 @@ pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
         );
         assert_eq!((n.packed, n.baked), (*packed, *baked));
         assert_eq!(n.alpha_policy, alpha.as_str().unwrap());
-        assert_eq!(job.call, r.calls[1].call);
+        assert_eq!(job.call, run.call);
     }
 }
 

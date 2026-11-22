@@ -103,6 +103,15 @@ pub fn write_project(root: &Path) -> io::Result<Vec<&'static str>> {
         "textures/landscape/cliff_h.png",
         ImageBuffer::from_fn(512, 512, |x, y| Luma([((x + 2 * y) / 6) as u8])).into(),
     )?;
+    let emissive = ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgb([4.0 * x as f32 / 63.0, 2.0 * y as f32 / 63.0, 0.25])
+    });
+    DynamicImage::ImageRgb32F(emissive)
+        .write_to(
+            &mut create(&root.join("textures/pbr/lamp_g.hdr"))?,
+            ImageFormat::Hdr,
+        )
+        .map_err(io::Error::other)?;
     Ok(vec![
         "textures/clutter/glass.dds",
         "textures/clutter/keep_n.dds",
@@ -114,6 +123,7 @@ pub fn write_project(root: &Path) -> io::Result<Vec<&'static str>> {
         "textures/pbr/fx/crate.dds",
         "textures/pbr/fx/crate_n.dds",
         "textures/pbr/fx/crate_rmaos.dds",
+        "textures/pbr/lamp_g.dds",
         "textures/plants/leaf.dds",
     ])
 }
