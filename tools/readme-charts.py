@@ -269,7 +269,7 @@ def chart_formats():
 
 # ------------------------------------- chart 3: BC3 against BC7 alpha weights
 def chart_alpha_weights():
-    # Names use the GUI dropdown labels where the setting is offered (Note CP1).
+    # Names use the GUI dropdown labels where the setting is offered (Notes CP1, LN).
     NAMES = ["BC3 (rgbcx L18 -r)", "Linear (w1, default)", "Alpha ×2 (w2)",
              "Alpha ×4 (w4)", "Alpha ×8 (w8)", "Alpha ×16 (w16)", "Alpha ×32 (w32)",
              "Alpha ×64 (w64)", "Perceptual"]
