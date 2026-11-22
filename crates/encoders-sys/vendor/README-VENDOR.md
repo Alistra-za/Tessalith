@@ -88,9 +88,10 @@ synthetic 64x64 HDR image, and 18 Poly Haven HDR files (1024x512) at all six lev
 pins (Note JB5).
 
 ISPC TC patch 0004 "BC6H kernel fixes" (`ispctc/patches/0004-bc6h-kernel-fixes.patch`, 2026-11-22) applies on top of
-patches 0001 and 0003. It is produced with `git diff --output=<patch> <base> -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
-against the post-0003 kernel at `fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated
-whole, never edited by hand), and it is built with both compilers as before (Note LM1). Fix #6: `bc6h_bounds` declared
+patches 0001 and 0003. It is produced with
+`git diff --output=<patch> <base> -- crates/encoders-sys/vendor/ispctc/kernel.ispc` against the post-0003 kernel at
+`fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated whole, never edited by hand), and it
+is built with both compilers as before (Note LM1). Fix #6: `bc6h_bounds` declared
 `float rgb_span[0]` and wrote and read three elements; it is now `rgb_span[3]`. ISPC 1.31.0 printed no diagnostic for
 it. BC6H bytes unchanged: every pin and every measured image hash equal (Note LM2). Fix #7: `bc6h_enc_2p` clamps the
 partition count to the 32 entries of `part_list`; no profile in Tessalith asks for more than 32, so it is unreachable
@@ -104,8 +105,12 @@ Veryslow, and at VeryslowPeak on the one-black block). Fix #3: `bc6h_enc_1p` sub
 can be worse than its first quantisation or an earlier pass; it still refines in upstream's order but submits the best.
 Proof test: `refinement_never_ends_worse_than_veryfast` (on the pre-fix objects Basic and Veryslow ended certainly worse
 than Veryfast on seeded blocks). Veryfast and Fast do not refine a one-region encode, so their bytes did not change.
-Fixes #5, #1 and #3 change BC6H bytes (Note LM4, LM7, LM8): the pins in `tests/bc6h.rs` and the measured images
-(per-level counts in docs/research/encoder-benchmark.md).
+Fix #2: `ep_quant_bc6h` rounded an endpoint by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds an interior code q
+at (q + 0.5) * 65536 / 2^bits, so the code could be one too high near 0 and one too low near the top; below 15 bits it
+now takes the code the decoder rebuilds nearest to the endpoint (16-bit mode 13 keeps upstream's rule, already nearest).
+Proof test: `one_region_endpoints_take_the_nearest_code` (mode 10 at Veryfast; on the pre-fix objects every block's G
+and B fields missed the nearest code). Fixes #5, #1, #3 and #2 change BC6H bytes (Note LM4, LM7, LM8, LM9): the pins
+in `tests/bc6h.rs` and the measured images (per-level counts in docs/research/encoder-benchmark.md).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

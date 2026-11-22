@@ -86,23 +86,23 @@ fn hdr_image() -> Vec<[u16; 4]> {
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "f803b49eba0cad2880b811f039f65567133a4b7e8e281d0df42541522afb57a5",
+        "a1d86ce13ea28a4845aaaf64ecdf948763f67c6d514cea8f598ed254e848ecdc",
     ),
     (
         Bc6hLevel::Fast,
-        "6e863a5eb712ddd98f113ae993cd35bd6811f6faf6e23bcfd32ba3e73ca8b420",
+        "8d00c0c10ee93e258239d55757965af02cd1a5431d44590b5979703e4a26aae0",
     ),
     (
         Bc6hLevel::Basic,
-        "a3815f73f1faa1991f89bd2d251f0c43d623f382c4e76aad0eb0ce405e001177",
+        "21a38f0cf43a75ae4ab867b5c87414d4d621c5d4038634e71133eb7551317add",
     ),
     (
         Bc6hLevel::Slow,
-        "4f5a52c6d602af099219a8a1461e96da250d3db076f6f1e5524baa2f1cf7a993",
+        "140a5cdb9359ff82d3f8d6cf9305a99be0b14d9d59ad971419b3d18ebc56929a",
     ),
     (
         Bc6hLevel::Veryslow,
-        "27319321e56deb1d397198fe8dcafac45f704c3ac0f96b93f1246b22f00357cd",
+        "6223e3309df86ec4d88be0fb872b0ac114d6466269a2811780fc2849da6fb788",
     ),
 ];
 
@@ -111,23 +111,23 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "2429f2f010d831a5e8392d7452e8b7e5defb334e943a97076fae0786d76c248b",
+        "98215a3ca45c12c0f2ebc70fd0a14781b9368f159fc89ec1b3d098e1ac400d08",
     ),
     (
         Bc6hLevel::Fast,
-        "b557c183267ca7205902aa27ad831bd3961d9691b5b44755094d81ef2fc3c455",
+        "5a27639f81f2781b265a8d7e74bd17da579b9a63b82f23dc39a4df919369a341",
     ),
     (
         Bc6hLevel::Basic,
-        "1ac7db96d1a36c074cfa8e2339070880ee11ec9bed41c515ea39ef51990629d7",
+        "2ceecbcd810ffc4bd599fb87e5f8bd39335d93c008128d5e19989e3b171fee41",
     ),
     (
         Bc6hLevel::Slow,
-        "f31409ce5530d9b9713b882207443b9fc1c5da53ad7b92f3508f25db605cdd17",
+        "563d7eb914134fca56acf98f8925b8f72d6dd5f22183d4351026745f7812a5c9",
     ),
     (
         Bc6hLevel::Veryslow,
-        "4daf6ac2b51011af4988808a54a67a7a1559f7de5e8928ec953f5187bf6ff7ff",
+        "4e39ad0b15e856d80c6d7994892d202b3a9bfd3f6d5e309c6e5f492b30182597",
     ),
 ];
 
@@ -136,23 +136,23 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "67d2ab6a029a5e5b9427d3dfb7fe3c53191e5f027aa007f6259ff06a8c664e0d",
+        "593df3a2389f7fb381458647461d28ad7a7b7602cbc37d9809ce019bba023cff",
     ),
     (
         Bc6hLevel::Fast,
-        "d75be99d5b345c3653a23464859b534020e9450b7324b5550016ce4c0ee9d8d3",
+        "ad1505e9e6d1c49b582c6bcb2fadff07be08696eebae8504fc13d63147a29cd8",
     ),
     (
         Bc6hLevel::Basic,
-        "56266f916dbd71a7c5fe23639d29a5a9acef72d9dad5850061e32dba275ee9ef",
+        "610dcf00562c7bfb07dbcda1981aa749c4db05b0cfcb37d1995bb3500142260f",
     ),
     (
         Bc6hLevel::Slow,
-        "b84cd4a2bdbcfce6314d942a849de18c724f2e93eab4ab73e18aa4613ce1605d",
+        "cf1d4c07d29e1c2ca0d72e787718291d168db71728ec0fdfe8d02ca41f447bd5",
     ),
     (
         Bc6hLevel::Veryslow,
-        "842b34375b4e0526d4387c6cab6fcd6515b716fb4a0e4c01ebfe9571debab3c7",
+        "58f8016368c8cd211e6cd17cf60bdcb58a0bcba2de9bde3fac2d0c48a43a8607",
     ),
 ];
 
@@ -200,9 +200,9 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
 /// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
 const RECORDED_PEAK: [&str; 3] = [
-    "f382b224094a93524ef6594d352ef32a977b65bfbba46c619214797f426d6e3b",
-    "a36d9aaa489ef3dc9d1bbbd5cb52aec4babca0f3584d8b8ad471d9a73e6ff74b",
-    "62840b034aebaceeb13faf2765aac521873c5ea83f72baa5d68e5a3607725a9e",
+    "a2b6930bf3296db9b4caeff929581d32ed18da0ea2cbe4a27805dafff1336252",
+    "303e36d9d646693463545040a814a900cc45bf9506b4101d2066400d1a502a7f",
+    "6ca34e50b1565c7c9020d998cd109f47e46e5a634adfdbe29d16473d642ae52f",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -750,6 +750,120 @@ fn refinement_never_ends_worse_than_veryfast() {
     assert!(
         failures.is_empty(),
         "{} ends worse than Veryfast:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// A copy of the kernel's `unpack_to_uf16`: the UF16 value the decoder rebuilds from code `q` of a `bits`-bit endpoint.
+fn unpack_to_uf16(q: u32, bits: u32) -> u32 {
+    if bits >= 15 {
+        q
+    } else if q == 0 {
+        0
+    } else if q == (1 << bits) - 1 {
+        0xFFFF
+    } else {
+        (2 * q + 1) << (15 - bits)
+    }
+}
+
+/// The 10-bit code whose rebuilt value is nearest to `v` (the lower one on a tie).
+fn nearest10(v: f64) -> u32 {
+    let dist = |q: u32| (unpack_to_uf16(q, 10) as f64 - v).abs();
+    (0..1024u32)
+        .min_by(|&a, &b| dist(a).total_cmp(&dist(b)))
+        .unwrap()
+}
+
+/// The 10-bit rounding the kernel shipped (in f32), used only to pick the inputs of
+/// `one_region_endpoints_take_the_nearest_code`.
+fn shipped10(v: f32) -> u32 {
+    ((v / 65535.0 * 1023.0 + 0.5) as i32).clamp(0, 1023) as u32
+}
+
+/// Survey #2. The decoder rebuilds an interior code q of a `bits`-bit endpoint at (q + 0.5) * 65536 / 2^bits
+/// (`unpack_to_uf16`, the D3D formula), but `ep_quant_bc6h` rounded by `ep * (2^bits - 1) / 65535`. That misses the
+/// nearest code near both ends of the range: one too high near 0, one too low near the top.
+///
+/// Only G and B are tested. A channel that is constant over the block gets the channel's mean as both endpoints,
+/// exactly. Along the varying channel the PCA axis is renormalised with a fast-math reciprocal square root, which can
+/// move the endpoints by several UF16 units. So R varies only to force mode 10 (its span is far beyond mode 11's
+/// 7782.3 UF16 units, so Veryfast writes mode 10: 10-bit absolute endpoints), and G and B are each constant.
+///
+/// The inputs are half codes h (UF16 value v = h * 64 / 31) where the shipped rule and the nearest code differ, the
+/// nearest code is strict, and v is at least 4 UF16 units from both edges of that mismatch window: G from nearest codes
+/// 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too low).
+#[test]
+fn one_region_endpoints_take_the_nearest_code() {
+    let (mut g_list, mut b_list) = (Vec::new(), Vec::new());
+    for h in 0..=MAX_UF16 as u16 {
+        let v32 = (h as f32 / 31.0) * 64.0; // as the kernel's bc6h_setup
+        let v64 = h as f64 * 64.0 / 31.0;
+        let (s, n) = (shipped10(v32), nearest10(v64));
+        // Both rules are monotone step functions, so equal codes 4 units either side mean no edge within 4 units
+        // (which also makes the nearest code strict).
+        let clear = shipped10(v32 - 4.0) == s
+            && shipped10(v32 + 4.0) == s
+            && nearest10(v64 - 4.0) == n
+            && nearest10(v64 + 4.0) == n;
+        if !clear {
+            continue;
+        }
+        if (8..=150).contains(&n) && s == n + 1 {
+            g_list.push(h);
+        } else if (870..=1015).contains(&n) && s + 1 == n {
+            b_list.push(h);
+        }
+    }
+    assert!(
+        !g_list.is_empty() && !b_list.is_empty(),
+        "no inputs: G {g_list:?} B {b_list:?}"
+    );
+    let mut r = Lcg(0x5678_9abc);
+    let blocks: Vec<(u16, u16)> = (0..16)
+        .map(|_| {
+            let g = g_list[r.next() as usize % g_list.len()];
+            let b = b_list[r.next() as usize % b_list.len()];
+            (g, b)
+        })
+        .collect();
+    let one = f16::ONE.to_bits();
+    let mut failures = Vec::new();
+    for target in paths() {
+        for (k, &(g, b)) in blocks.iter().enumerate() {
+            let px: [[u16; 4]; 16] =
+                std::array::from_fn(|t| [if t < 8 { 0x2000 } else { 0x7000 }, g, b, one]);
+            let out = encode_block(&px, Bc6hLevel::Veryfast, target);
+            assert_eq!(
+                field(&out, 0, 5),
+                3,
+                "block {k} {target:?}: not mode 10, the fixture assumption broke"
+            );
+            let codes = [
+                field(&out, 15, 10),
+                field(&out, 45, 10),
+                field(&out, 25, 10),
+                field(&out, 55, 10),
+            ];
+            let (vg, vb) = (g as f64 * 64.0 / 31.0, b as f64 * 64.0 / 31.0);
+            let (ng, nb) = (nearest10(vg), nearest10(vb));
+            if codes != [ng, ng, nb, nb] {
+                let (sg, sb) = (
+                    shipped10((g as f32 / 31.0) * 64.0),
+                    shipped10((b as f32 / 31.0) * 64.0),
+                );
+                failures.push(format!(
+                    "block {k} {target:?} (G half {g:#06x}, B half {b:#06x}): G codes {} {}, B codes {} {}; \
+                     nearest G {ng} B {nb}; shipped rule G {sg} B {sb}",
+                    codes[0], codes[1], codes[2], codes[3]
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} blocks miss the nearest code:\n{}",
         failures.len(),
         failures.join("\n")
     );

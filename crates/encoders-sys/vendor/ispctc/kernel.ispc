@@ -27,6 +27,7 @@
 // #5 get_span returns the float span (it truncated through an int).
 // #1 block_quant keeps each texel's error as a float (an int overflowed on high-contrast blocks).
 // #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
+// #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2284,7 +2285,28 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
 
     for (uniform int i = 0; i < 8 * pairs; i++)
     {
-        int v = ((int)(ep[i] / (256 * 256f - 1) * (levels - 1) + 0.5));
+        // sdc patch 0004: take the code the decoder rebuilds nearest to ep. unpack_to_uf16 reconstructs an interior code
+        // q at (q + 0.5) * 65536 / levels, so round(ep * (levels - 1) / 65535) missed it by up to one code near both
+        // ends of the range. Clamping ep first keeps out-of-range endpoints at 0 and levels - 1 and keeps (int) in range.
+        // bits >= 15 (mode 13) keeps upstream's rule, which is already nearest there.
+        int v;
+        if (bits >= 15)
+        {
+            v = ((int)(ep[i] / (256 * 256f - 1) * (levels - 1) + 0.5));
+        }
+        else
+        {
+            float e = clamp(ep[i], 0.0f, 65535.0f);
+            int v0 = (int)(e * levels / 65536.0f);
+            v = clamp(v0 - 1, 0, levels - 1);
+            float best_d = abs((float)unpack_to_uf16((uint32)v, bits) - e);
+            for (uniform int d = 0; d <= 1; d++)
+            {
+                int c = clamp(v0 + d, 0, levels - 1);
+                float cd = abs((float)unpack_to_uf16((uint32)c, bits) - e);
+                if (cd < best_d) { v = c; best_d = cd; }
+            }
+        }
         qep[i] = clamp(v, 0, levels - 1);
     }
 }
