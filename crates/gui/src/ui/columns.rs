@@ -63,6 +63,34 @@ fn rounded_width(step: f32, gap: f32, max: f32, cap: f32) -> f32 {
 mod tests {
     use super::*;
 
+    fn s(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn join_and_reads_one_two_three_and_four_names() {
+        assert_eq!(join_and(&s(&["a"])), "a");
+        assert_eq!(join_and(&s(&["a", "b"])), "a and b");
+        assert_eq!(join_and(&s(&["a", "b", "c"])), "a, b and c");
+        assert_eq!(join_and(&s(&["a", "b", "c", "d"])), "a, b, c and d");
+    }
+
+    /// Ruling 3d-R5: case-insensitive order, the key breaks a tie, a source listed twice counts once.
+    #[test]
+    fn source_names_sort_without_case_break_ties_by_key_and_drop_repeats() {
+        let keys = s(&[
+            "m/b_Rough.png",
+            "m/a_ao.png",
+            "m/B_rough.png",
+            "z/a_ao.png",
+            "m/a_ao.png",
+        ]);
+        assert_eq!(
+            sorted_file_names(keys),
+            s(&["a_ao.png", "a_ao.png", "B_rough.png", "b_Rough.png"])
+        );
+    }
+
     /// Review fix: a cap below the next whole column leaves the width as it is (Sets keeps its room).
     #[test]
     fn rounding_does_not_take_room_for_a_column_it_cannot_reach() {
@@ -195,11 +223,16 @@ fn pack_source_names(model: &AppModel, item: &TextureItem) -> Vec<String> {
     ) else {
         return vec![];
     };
-    let mut keys: Vec<String> = pack
-        .sources
-        .iter()
-        .map(|s| crate::model::items::key_of(root, &s.path))
-        .collect();
+    sorted_file_names(
+        pack.sources
+            .iter()
+            .map(|s| crate::model::items::key_of(root, &s.path))
+            .collect(),
+    )
+}
+
+/// The file names of `keys`: each key once, sorted by lowercase file name, then by key.
+fn sorted_file_names(mut keys: Vec<String>) -> Vec<String> {
     keys.sort();
     keys.dedup();
     let name = |k: &str| k.rsplit('/').next().unwrap_or(k).to_string();
@@ -267,8 +300,8 @@ fn pack_lines(model: &AppModel, item: &TextureItem) -> Vec<String> {
 }
 
 /// The hover text of a tile: what the status means, then the warnings, the marked ones last under `MARKED_LINE`. A
-/// no-set texture says `No set` in place of its question and its warnings (Note HF1). A packed output says what it is
-/// made from; a packed source says what changing it changes (Note 3d-R5).
+/// no-set texture says `No set` in place of its question and its warnings (Note HF1), and returns before the pack
+/// lines. A packed output says what it is made from; a packed source says what changing it changes (ruling 3d-R5).
 pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
     let mut lines = vec![item.key.clone()];
     if no_set {
@@ -389,6 +422,7 @@ fn tile(
         .response
         .interact(egui::Sense::click_and_drag())
         .on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(tile_tooltip(model, item, no_set));
         });
     ui.set_opacity(opacity);
@@ -752,13 +786,17 @@ fn helper_row(
         format!("Helper {}: {role}{by_you}, {target}", item.name)
     };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-    // Hover on the row itself, built only while hovered: what changing this file changes (Note 3d-R5).
-    let resp = resp.on_hover_ui(|ui| {
-        let lines = pack_lines(model, &model.items[idx]);
-        if !lines.is_empty() {
-            ui.label(lines.join("\n"));
-        }
-    });
+    // Ruling 3d-T19-1: what changing this file changes is the row's AccessKit description (the name stays as
+    // above); the drawn hover is the target label's. A no-set helper has neither. AccessKit runs the closure only
+    // while a screen reader or a test reads the tree.
+    if !no_set {
+        ui.ctx().accesskit_node_builder(resp.id, |b| {
+            let lines = pack_lines(model, item);
+            if !lines.is_empty() {
+                b.set_description(lines.join("\n"));
+            }
+        });
+    }
     if chosen.contains(&key) {
         ui.painter().rect_filled(
             rect,
@@ -812,14 +850,13 @@ fn helper_row(
                     };
                     ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate())
                         .on_hover_ui(|ui| {
-                            let mut text = crate::model::items::helper_target_files(
+                            ui.set_max_width(ui.spacing().tooltip_width);
+                            let mut lines = vec![crate::model::items::helper_target_files(
                                 &h,
                                 model.helper_tails(&h),
-                            );
-                            for l in pack_lines(model, item) {
-                                text = format!("{text}\n{l}");
-                            }
-                            ui.label(text);
+                            )];
+                            lines.extend(pack_lines(model, item));
+                            ui.label(lines.join("\n"));
                         });
                 },
             );

@@ -1479,10 +1479,30 @@ fn helper_row_of<'a>(h: &'a Harness<'static, AppModel>, name: &'a str) -> egui_k
     h.query_all_by_label_contains(name)
         .find(|n| {
             n.accesskit_node().role() == eframe::egui::accesskit::Role::Button
+                && n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l.starts_with("Helper "))
                 && !in_sets_column(h, n.rect())
         })
         .expect("the drawn helper row")
 }
+
+/// The target label ("→ ..." on the right) drawn in the helper row of `name`: the hover the pack lines live on.
+fn target_label_of<'a>(h: &'a Harness<'static, AppModel>, name: &'a str) -> egui_kittest::Node<'a> {
+    let row = helper_row_of(h, name).rect();
+    ["→", "used by", "not used"]
+        .into_iter()
+        .flat_map(|w| h.query_all_by_label_contains(w))
+        .find(|n| row.contains(n.rect().center()))
+        .unwrap_or_else(|| {
+            let all: Vec<_> = h
+                .query_all_by_label_contains("")
+                .map(|n| (n.accesskit_node().label().unwrap_or_default(), n.rect()))
+                .collect();
+            panic!("no target label in {row:?}: {all:?}")
+        })
+}
+
 #[test]
 fn a_packed_source_says_what_changing_it_changes() {
     let d = tempfile::tempdir().unwrap();
@@ -1496,7 +1516,7 @@ fn a_packed_source_says_what_changing_it_changes() {
     h.run();
     helper_row_of(&h, &name).scroll_to_me();
     h.run();
-    helper_row_of(&h, &name).hover();
+    target_label_of(&h, &name).hover();
     h.run();
     assert!(h
         .query_by_label_contains("changing this file changes landscape/rock01_rmaos.dds.")
@@ -1506,6 +1526,16 @@ fn a_packed_source_says_what_changing_it_changes() {
             "Bulk edits skip this source because it has no settings of its own."
         )
         .is_some());
+    // Ruling 3d-T19-1: the row's AccessKit description holds the lines; its name does not.
+    let row = helper_row_of(&h, &name);
+    let node = row.accesskit_node();
+    assert!(node
+        .description()
+        .is_some_and(|d| d.contains("changing this file changes landscape/rock01_rmaos.dds.")));
+    assert!(!node
+        .label()
+        .unwrap_or_default()
+        .contains("changing this file"));
 }
 
 /// A source feeding two packs lists both outputs once each; each output lists just its own sources.
@@ -1537,7 +1567,23 @@ fn a_shared_source_lists_every_output_it_feeds() {
     );
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     let tip = |k: &str| sdc_gui::ui::columns::tile_tooltip(&m, m.item(k).unwrap(), false);
-    let src = tip(rough);
+    let outs: Vec<String> = ["a/rock_rmaos", "a/slab_rmaos"].map(tip).into();
+    // The source is a helper: the hover drawn on its row's target label lists both outputs, once each.
+    let mut h = hover_harness(m);
+    h.run();
+    h.state_mut().filter.hide_helpers = false;
+    h.run();
+    let name = h.state().item(rough).unwrap().name.clone();
+    helper_row_of(&h, &name).scroll_to_me();
+    h.run();
+    target_label_of(&h, &name).hover();
+    h.run();
+    h.run();
+    let node = h
+        .query_by_label_contains("changing this file changes")
+        .expect("the helper's hover");
+    // A tooltip's text is the Label's value.
+    let src = node.accesskit_node().value().unwrap_or_default();
     assert_eq!(
         src.matches("changing this file changes").count(),
         2,
@@ -1554,8 +1600,7 @@ fn a_shared_source_lists_every_output_it_feeds() {
         "{src}"
     );
     assert!(src.contains("Bulk edits skip this source"), "{src}");
-    for out in ["a/rock_rmaos", "a/slab_rmaos"] {
-        let t = tip(out);
+    for t in outs {
         assert!(
             t.contains("Packed output, made from rock_roughness.png. Bulk edits"),
             "{t}"
