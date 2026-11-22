@@ -1,6 +1,9 @@
 //! Fast re-plan fixture (R2 §6): one generated cs project with every set shape the skeleton patch and the partial
 //! plan must get right. Used by `engine::skeleton`'s lib tests (through `#[path]`) and by `tests/fast_replan.rs`.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by engine::skeleton's unit tests, alloc_budget and fast_replan; each uses a subset (alloc_budget never reads FastFixture::dir)"
+)]
 use engine::api::BatchRequest;
 use engine::config::Target;
 use engine::presets::ConfigFile;

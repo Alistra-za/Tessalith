@@ -459,8 +459,14 @@ fn admit_all<T: Sync>(
     cancel: &CancelToken,
     items: &[T],
     est: impl Fn(&T) -> u64,
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))] output: impl Fn(&T) -> &Path
-        + Sync,
+    #[cfg_attr(
+        not(feature = "test-hooks"),
+        allow(
+            unused_variables,
+            reason = "only the test hook reads each item's output path"
+        )
+    )]
+    output: impl Fn(&T) -> &Path + Sync,
     work: impl Fn(&T, Admitted<'_>, &Cell<Stage>) -> Result<ResolvedJob, PlanFailure> + Sync,
 ) -> Vec<Option<Result<ResolvedJob, PlanFailure>>> {
     let slots: Vec<Mutex<Option<Result<ResolvedJob, PlanFailure>>>> =
@@ -1346,7 +1352,6 @@ impl Prepared {
 
 /// The pass-1 `ResolveCtx` (no shader picks). `prepare` and `plan_sets` both build theirs here, so the two cannot
 /// drift.
-#[allow(clippy::too_many_arguments)]
 fn base_ctx<'a>(
     req: &'a BatchRequest,
     target: Target,
@@ -4022,7 +4027,10 @@ fn check_one(
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
 /// output was written (manifest append) has that output removed, best effort, so no output is
 /// left on disk without a record (review I1). A panic is reported at the last stage the file entered (review M10).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one file's call from the batch worker, whose job, request, preset, cancel token, reporter, manifest, summary state and replace flag each have a different owner; most go on unchanged to process_file"
+)]
 fn run_one(
     job: &ResolvedJob,
     req: &BatchRequest,
@@ -4174,7 +4182,10 @@ pub(crate) fn pre_edit_shaders(
 /// `plan_packing` re-tags an unused one; duplicates and failed files are left out. A raw-named image set to
 /// `helper.role = "none"` (Note DY) is an ordinary member. A member's suffix and a kept DDS's sub-type are read
 /// against the set it was typed with (`member_set`, Fuzz-1a's `f` from `f_sets`).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the shader map check's inputs for one set, each a separate borrow from the planner's locals and registry (the resolve context, the set, the f-set ids, files, job index, skipped files, alias table, target), read by its only caller"
+)]
 fn map_members(
     ctx: &ResolveCtx,
     set: &TextureSet,

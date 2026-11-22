@@ -29,7 +29,10 @@ fn run(
     run_info(target, game, suffix, sets, img, &RGBA8, sets_cli, allow)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the test fixture's independent knobs (target, game path, suffix, sets, image, source info, --set strings, allow list); `run` fills the source info, so a struct would be spelled out at every call"
+)]
 fn run_info(
     target: Target,
     game: &str,

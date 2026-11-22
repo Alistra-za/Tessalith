@@ -1,7 +1,5 @@
 //! Shared cube-test fixtures: the arrow cube and the raw layouts built from it with literal cell offsets (not
 //! `layout::cells`, so a wrong table cannot agree with itself).
-// Each test binary uses a different part of this module.
-#![allow(dead_code)]
 use engine::analyse::code8;
 use engine::image::Rgba32F;
 use image::DynamicImage;

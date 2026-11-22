@@ -1,7 +1,10 @@
 //! Shared fixtures for the Also export tests (Track A Task 7): a PBR set `textures/pbr/arm/steel`, a plain set
 //! `textures/clutter/cup`, a PBR landscape set `textures/landscape/dirt` and a complex-material set
 //! `textures/clutter/plate` (a raw `_height`: cs packs a `_p`, vanilla a complex `_m`, Note AZ2), in `<tmp>/mods/Mod`.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by also_export, also_export_bc1 and events_manifest; each uses a subset (also_export_bc1 never calls dirt or record; events_manifest none of steel, dirt, plate, dds_files or BOTH)"
+)]
 use engine::also::*;
 use engine::api::*;
 use engine::config::Target;

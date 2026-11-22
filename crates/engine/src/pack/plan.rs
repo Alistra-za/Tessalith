@@ -447,7 +447,10 @@ fn prepacked_aliased(ctx: &ResolveCtx, img: &InputFile) -> bool {
 /// AO (or was not analysed), the generated AO is skipped `GEN-REPLACED` and leaves `raw`. When it is empty and the
 /// AO is the set's only `_rmaos`/`_rfaos` source, the image joins `raw` as `RawMap::Rmaos` and `recipes_for_with`
 /// builds R, G and A from it, B from the AO. With other loose sources the M9 conflict of today stands.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "plan_packing's per-set loop state: the context, set, files and flat_b it reads, and the raw, members, jobs, skipped and out collections it changes in place, each owned separately there"
+)]
 fn prepacked_b<'a>(
     ctx: &ResolveCtx,
     set: &TextureSet,
@@ -946,7 +949,10 @@ pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
 /// `Parallax` recipe, which the vanilla target otherwise never plans. It is empty without `derive` (C6).
 /// `flat_b` holds the pass-1 images whose B is empty (`!pack::b_has_content`, Note CO103), `flat_a` those whose alpha
 /// is flat (Note HC1). `output_root` turns set keys into the set ids a fuzz-map message names.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pass 1's inputs, each documented above and owned separately by the planner (context, sets, files, the jobs edited in place, failed and cancelled paths, skipped, packed_outputs, derive_heights, flat_b, flat_a, fills, output_root)"
+)]
 pub fn plan_packing(
     ctx: &ResolveCtx,
     sets: &[TextureSet],

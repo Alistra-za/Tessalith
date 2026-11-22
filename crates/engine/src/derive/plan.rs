@@ -479,7 +479,10 @@ pub fn plan_derived(
 /// terminal event, keyed by its own output: `_g`, members left out (C2), the other members of a set
 /// skipped for DDS or no albedo, and the sources of an error or failed derived job. A member in `own` (its own
 /// output is written by a job) is ended by that job.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the derive step's read-only inputs (request, member sets, files, jobs, failed, cancelled, own) and the skipped list it appends to, each a separate local of the planner at its one call site"
+)]
 pub fn report_unread(
     d: &DeriveRequest,
     member_sets: &BTreeMap<PathBuf, String>,

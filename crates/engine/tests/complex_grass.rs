@@ -430,7 +430,7 @@ fn an_rgb_grass_source_encodes_opaque_and_passes() {
 /// decoded bottom-left texel passes CS's 0.03 test. Owner data, read only (copied into a temp dir):
 /// `$env:SDC_COMPLEX_GRASS_PNG='<grassfieldtundra.png>'; cargo test -p engine --test complex_grass -- --ignored`
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_COMPLEX_GRASS_PNG"]
 fn owner_example_encodes_and_stays_complex() {
     let Some(src) = std::env::var_os("SDC_COMPLEX_GRASS_PNG").map(std::path::PathBuf::from) else {
         eprintln!("skipped: set SDC_COMPLEX_GRASS_PNG");

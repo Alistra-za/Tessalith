@@ -863,7 +863,10 @@ fn rebase_write_only(r: &mut BatchRequest, from: &Path) {
 }
 
 /// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "run_also's state, each from a different owner (the engine and its analysis cache, the request, spec, sink and cancel token, the PBR phase's reporter, the recorder), handed down from its only caller"
+)]
 fn run_phases(
     engine: &Engine,
     cache: &AnalysisCache,

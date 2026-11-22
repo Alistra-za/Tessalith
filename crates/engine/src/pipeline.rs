@@ -489,7 +489,10 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
 ///
 /// Check 3 (`req.low_detail`): a flagged texture is written in full and carries the warning in its report under
 /// `Warn`.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one file's whole conversion: the job, request, preset, cancel token, reporter, manifest and replace flag from the batch worker, and the tracker its caller reads after a panic, each with a different owner"
+)]
 pub fn process_file(
     job: &ResolvedJob,
     req: &BatchRequest,
@@ -576,8 +579,13 @@ pub fn process_file(
     // Validate the exact bytes about to be written: `validate` parses them with the engine's DDS reader (spec §5.8).
     // Skipped, it only reads, so the bytes written are the same.
     let validated = req.validate || always_validated(p.subtype);
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
-    // only the test hook mutates the report
+    #[cfg_attr(
+        not(feature = "test-hooks"),
+        allow(
+            unused_mut,
+            reason = "only the test hook (force_validation_failure_for_test) mutates the report"
+        )
+    )]
     let mut report = if validated {
         enter(Stage::Validate);
         validate_prepared(&bytes, p, &prep)
@@ -682,7 +690,13 @@ pub(crate) fn check_in_place(
             FileError::Failed(_, msg) => FileError::Failed(Stage::Validate, msg),
             FileError::Cancelled => FileError::Cancelled,
         })?;
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
+    #[cfg_attr(
+        not(feature = "test-hooks"),
+        allow(
+            unused_mut,
+            reason = "only the test hook (force_validation_failure_for_test) mutates the report"
+        )
+    )]
     let mut report = validate_prepared(&bytes, &job.profile, &prep);
     #[cfg(feature = "test-hooks")]
     force_validation_failure_for_test(job, &mut report);
