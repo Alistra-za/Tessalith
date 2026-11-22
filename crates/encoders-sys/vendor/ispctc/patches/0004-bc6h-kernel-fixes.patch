@@ -1,0 +1,24 @@
+diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+index 9a8a776e..c380813e 100644
+--- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
++++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+@@ -20,6 +20,10 @@
+ // the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
+ // marked "sdc patch 0003". Without the define the file compiles as before.
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
++// Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by an
++// audit. Changes are marked "sdc patch 0004".
++// #6 bc6h_bounds' rgb_span holds three floats.
++///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #ifndef ISPC_UINT_IS_DEFINED
+ //these are defined in ISPC version 1.13.0 and later
+@@ -3224,7 +3228,7 @@ void bc6h_bounds(bc6h_enc_state state[])
+     state->max_span = 0;
+     state->max_span_idx = 0;
+ 
+-    float rgb_span[0] = { 0, 0, 0 };
++    float rgb_span[3] = { 0, 0, 0 }; // sdc patch 0004: was rgb_span[0] (written and read out of bounds)
+     for (uniform int p = 0; p < 3; p++)
+     {
+         rgb_span[p] = state->rgb_bounds[3+p] - state->rgb_bounds[p];
