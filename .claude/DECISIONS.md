@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, LD
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK, LL
 
 ## Digest
 
@@ -2251,3 +2251,9 @@ This note was written as LG on the branch (its commits Note LG1 to LG3 say so) b
 ## Note LK - Warm plan and re-plan budgets (owner, 2026-11-22)
 
 - **LK1 `WARM_PLAN_CALLS` is 120,000 and `REPLAN_CALLS` is 26,000.** Each is the LF1 rule on its measured count (5 runs, `--exact --nocapture`: warm plan 106930 to 106932, re-plan 23133), rounded up to two significant figures. Both are lowered although neither would fail the earlier code they were measured on (warm plan 112683 at LF3, re-plan 25691 at LH4): the owner, 2026-11-22: "Lower the warm plan budget to 120000 anyways, to allow less regression" and "Lower replan to 26000 aswell", so a later regression has less room to hide. `PATCH_CALLS` and `FRAME_CALLS` are unchanged. Amends LF3, LH4 and LH5.
+
+## Note LL - Tooling from the 2026-11-22 retro (main team, 2026-11-22)
+
+- **LL1 `rustfmt.toml` sets `newline_style = "Native"`.** Measured with rustfmt 1.10.0 (on a tracked CRLF file, with a formatting break inserted as a CRLF line): under the default `Auto`, rustfmt rewrites a file that needs formatting as all LF, and leaves a file that needs none untouched, so a clean CRLF tree passes `cargo fmt --all --check` and only a reformatted file turns LF. Under `Native` the reformatted file stays CRLF. A file with mixed endings (first line ending LF) passes `--check` under `Auto` and fails it under `Native` ("Incorrect newline style"); `cargo fmt` then writes it back as CRLF. CONTRIBUTING.md (Conventions) says a Windows working copy is CRLF (`core.autocrlf=true`): with an LF working copy `cargo fmt --check` fails.
+- **LL2 The gate writes `<Out>\progress.txt`.** One line per step start, PASS or FAIL, skip, and the final result. Through the gate's own `Step`, a native child's stdout and stderr lines were readable with `Get-Content` 8 s into a 20 s step (12 bytes) and the final log kept all four lines in order, so `Step`'s redirection is unchanged. The 0 bytes seen on a long run were not reproduced; a stale NTFS size is a guess.
+- **LL3 The long-run results rule is in `CODING_STANDARDS.md`, "A long `#[ignore]` run keeps its per-item results".** The `bcenc` 10k corpus test is not changed here; Plan E's bcenc track, which already writes per-file hashes from a scratch test, brings it under the rule.

@@ -4,6 +4,10 @@
   Runs the full gate on the current checkout and prints PASS or FAIL per step.
 .DESCRIPTION
   Each step's output goes to <Out>\<step>.txt, ending in "exit N". Exits 1 if a step fails, 2 if it didn't start.
+  <Out>\progress.txt gets one line per event (start, PASS or FAIL, skipped, final gate result), so a long run shows
+  which step is running. The step logs fill as a step runs (measured through Step: a native child's stdout and stderr
+  lines were readable with Get-Content while the step was still going). A 0-byte size seen on a long run was not
+  reproduced; read a log's content, not its size, to see how far a step has got.
   Set CARGO_TARGET_DIR first (CLAUDE.md, Disk). A failed fmt, clippy or render3d-alone step skips the tests, which take about an hour.
   Test builds encode on AVX2 at most; the avx512 step re-runs the ISPC pins (level_identity, bc6h, target) with
   SDC_TEST_AVX512=1, so on an AVX-512 CPU they check the AVX-512 path too. The script clears SDC_TEST_AVX512 in the
@@ -23,13 +27,16 @@ if (-not $env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS = 4 }
 New-Item -ItemType Directory -Force $Out | Out-Null
 Remove-Item (Join-Path $Out '*.txt')
 
+$progress = Join-Path $Out 'progress.txt'
+function Note([string]$Text) { "$(Get-Date -Format HH:mm:ss) $Text" >> $progress }
 $failed = $false
 function Step([string]$Name, [scriptblock]$Run) {
     $log = Join-Path $Out "$Name.txt"
+    Note "start $Name"
     & $Run *> $log
     $code = $LASTEXITCODE
     "exit $code" >> $log
-    if ($code) { $script:failed = $true; "$Name FAIL, see $log" } else { "$Name PASS" }
+    if ($code) { $script:failed = $true; Note "$Name FAIL (exit $code)"; "$Name FAIL, see $log" } else { Note "$Name PASS"; "$Name PASS" }
 }
 
 # Every step but avx512 runs capped at AVX2, whatever the caller's shell holds.
@@ -41,6 +48,7 @@ Step clippy { cargo clippy --offline --workspace -- -D warnings }
 Step render3d-alone { cargo check --offline -p render3d }
 if ($failed) {
     'Tests skipped: fix fmt, clippy and the render3d check first.'
+    foreach ($s in 'test', 'avx512', 'render') { Note "$s skipped (an earlier step failed)" }
 } else {
     Step test { cargo test --offline --workspace --no-fail-fast -- --skip render_ --skip render:: --test-threads=4 }
     Step avx512 {
@@ -53,4 +61,5 @@ if ($failed) {
 Step doc-dupes { py -3.13 -I "$top/tools/doc-dupes.py" --root $top }
 Step doc-lint { py -3.13 -I "$top/tools/doc-lint.py" --root $top }
 Step doc-markers { pwsh -NoProfile -File "$top/tools/doc-markers.ps1" -Root $top }
+Note "gate $(if ($failed) { 'FAIL' } else { 'PASS' })"
 exit $(if ($failed) { 1 } else { 0 })

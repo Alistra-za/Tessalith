@@ -1,0 +1,3 @@
+# With the default (Auto), rustfmt 1.10 writes a CRLF file that needs formatting back as all LF on Windows. Native
+# keeps CRLF there and uses LF on Linux. A Windows working copy is expected to be CRLF (CONTRIBUTING.md, Conventions).
+newline_style = "Native"

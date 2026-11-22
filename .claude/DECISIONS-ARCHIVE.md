@@ -453,6 +453,9 @@ ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
 ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH
 
+ARCHIVED (wording before the edit; superseded in part by Note LL, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK
+
 ## Digest
 
 ARCHIVED (wording before the edit; superseded in part by Note JW6, 2026-11-20)
