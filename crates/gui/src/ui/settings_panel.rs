@@ -1678,12 +1678,18 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str, actions: &mut Vec
     };
     // A read still outstanding (or a scan since the answer) leaves the answer on screen for context, but nothing
     // that acts on it: its copy ids may not exist any more, in this store or in the one Meshes reads.
-    let reading =
-        model.used_by.pending.is_some() || model.used_by.stale || model.meshes_rows_loading;
+    // While a scan is unsettled the store is being rewritten and no read runs: the links say so, not "reading".
+    let unsettled = model.scan_store_unsettled;
+    let reading = !unsettled
+        && (model.used_by.pending.is_some() || model.used_by.stale || model.meshes_rows_loading);
+    // `MeshesModel::store_path` and `AppModel::scan_db` are the one value (`SdcApp::new` copies it, nothing sets
+    // either again), so a plain comparison cannot differ by spelling.
     let other_store = u
         .as_ref()
         .is_some_and(|u| model.meshes_store.as_ref().is_some_and(|s| *s != u.store));
-    let why_off = if reading {
+    let why_off = if unsettled {
+        Some(USED_BY_SCAN_WHY)
+    } else if reading {
         Some(USED_BY_READING_WHY)
     } else if other_store {
         Some(USED_BY_OTHER_STORE_WHY)
@@ -1734,6 +1740,9 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str, actions: &mut Vec
         });
 }
 
+/// Why they are off while a scan runs, or after one that did not finish.
+const USED_BY_SCAN_WHY: &str =
+    "A scan is running or did not finish, so this list may change. These links work once a scan has finished.";
 /// Why the Used-by links are off while the list is being read.
 const USED_BY_READING_WHY: &str =
     "The mesh list is still being read. These links work once it has finished.";
@@ -1761,8 +1770,9 @@ fn used_by_group(
             .truncate()
             .show_tooltip_when_elided(!elided),
     );
+    // The whole path is the name whether or not our cut applied: egui may still end-truncate a path it did not cut.
+    label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &r.nif));
     if elided {
-        label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &r.nif));
         label.on_hover_text(&r.nif);
     }
     for c in &r.copies {

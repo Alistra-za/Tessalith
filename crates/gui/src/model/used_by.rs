@@ -112,6 +112,8 @@ pub struct UsedByState {
     pub generation: u64,
     /// The item key of the read in flight.
     pub pending: Option<String>,
+    /// The scan database the read in flight reads, so a read that panics labels its error with it.
+    pub pending_db: Option<std::path::PathBuf>,
     /// The texture asked for last and since when: its read starts once it has stayed [`USED_BY_SETTLE`] (AG128).
     pub wanted: Option<(String, Instant)>,
     /// When a draw last asked (`used_by_for`): the wait above keeps frames coming only while something still asks.
@@ -305,8 +307,10 @@ fn users(rows: Vec<ShapeRow>, alpha: bool) -> (Vec<MeshUser>, usize, usize) {
 }
 
 impl AppModel {
-    /// The "Used by N meshes" list of texture `key`: `None` hides it (no scan database, or the texture has no job);
-    /// `Some(None)` while the first read runs, or when the answer held is from another database. The first ask for a texture, or after a finished scan, starts the read.
+    /// The "Used by N meshes" list of texture `key`: `None` hides it (no scan database, or the texture has no job).
+    /// Otherwise the answer held for this texture and this database (kept while a newer read runs), or `Some(None)`
+    /// while none is held. The first ask for a texture, a database or a finished scan starts the read. While a
+    /// scan is unsettled no read starts: the held answer is returned, and `None` when there is none.
     pub fn used_by_for(&mut self, key: &str) -> Option<Option<Arc<UsedBy>>> {
         let db = self.scan_db.clone().filter(|d| self.stat_is_file(d))?;
         let j = self.item(key)?.job.as_ref()?;
@@ -345,6 +349,7 @@ impl AppModel {
                 return Some(have);
             }
             self.used_by.pending = Some(key.to_string());
+            self.used_by.pending_db = Some(db.clone());
             let (generation, item) = (self.used_by.generation, key.to_string());
             spawn_guarded(self.tx.clone(), "used-by", move |tx| {
                 let u = read_users(&db, &item, &tex, alpha);
@@ -363,6 +368,7 @@ impl AppModel {
             return;
         }
         self.used_by.pending = None;
+        self.used_by.pending_db = None;
         self.used_by.stale = false;
         self.used_by.current = Some(Arc::new(result));
     }
@@ -390,7 +396,7 @@ impl AppModel {
         st.stale = false;
         st.current = Some(Arc::new(UsedBy {
             item,
-            store: self.scan_db.clone().unwrap_or_default(),
+            store: st.pending_db.take().unwrap_or_default(),
             error: Some(format!("Reading the scan database failed: {message}")),
             ..UsedBy::default()
         }));

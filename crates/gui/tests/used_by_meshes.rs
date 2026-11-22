@@ -1,4 +1,4 @@
-//! Item 9 (Task 12): the settings panel's "Used by meshes" list, read off the UI thread from the scan database.
+//! Item 9 (Task 12): the settings panel's "Used by N meshes" list, read off the UI thread from the scan database.
 mod support;
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
@@ -322,9 +322,24 @@ fn panel_with(
     tempfile::TempDir,
     Harness<'static, AppModel>,
 ) {
+    panel_prep(users, extra_sql, width, &|_| {})
+}
+
+/// [`panel_with`] after `prep` changed the model, before the plan is replanned and the harness is built.
+fn panel_prep(
+    users: &[User],
+    extra_sql: &str,
+    width: f32,
+    prep: &dyn Fn(&mut AppModel),
+) -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Harness<'static, AppModel>,
+) {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let key = "landscape/leaf.png";
+    prep(&mut m);
     m.select_item(key);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -542,7 +557,16 @@ fn a_scan_since_the_answer_turns_the_links_off_until_it_is_read_again() {
     named(&h, link).click();
     h.run();
     assert_eq!(h.state().show_mesh, None);
-    wait_used_by(h.state_mut(), "landscape/leaf.png");
+    // The read lands on a poll: wait for it (`wait_used_by` returns the held answer at once while stale).
+    let t = Instant::now();
+    while h.state().used_by.stale || h.state().used_by.pending.is_some() {
+        h.state_mut().poll();
+        assert!(
+            t.elapsed() < Duration::from_secs(30),
+            "the read never landed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     h.run();
     h.run();
     assert!(h.query_by_label("Reading meshes...").is_none());
@@ -574,7 +598,9 @@ fn a_panicked_read_draws_without_a_reading_link() {
     let (_d, _db, mut h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]);
     open_header(&mut h, "Used by 1 mesh");
     let key = "landscape/leaf.png";
+    // The read in flight, as `used_by_for` leaves it.
     h.state_mut().used_by.pending = Some(key.to_string());
+    h.state_mut().used_by.pending_db = h.state().scan_db.clone();
     h.state()
         .sender()
         .send(WorkerMsg::Panicked {
@@ -592,6 +618,107 @@ fn a_panicked_read_draws_without_a_reading_link() {
         "the error shows"
     );
     assert!(h.query_by_label("Reading meshes...").is_none());
+}
+
+/// While a scan runs (or did not finish) the retained answer stays, its links are off, and the reason says why; it
+/// is not "Reading meshes...", because no read runs.
+#[test]
+fn links_are_off_while_a_scan_is_unsettled() {
+    let (_d, _db, mut h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]);
+    instant_tips(&h.ctx);
+    open_header(&mut h, "Used by 1 mesh");
+    let link = "Open meshes/tree.nif at Shape 0 (copy 2, block 0)";
+    h.state_mut().scan_store_unsettled = true;
+    h.run();
+    assert!(
+        h.query_by_label("Trees · MO2 priority 7").is_some(),
+        "context stays"
+    );
+    assert!(h.query_by_label("Reading meshes...").is_none());
+    named(&h, link).click();
+    named(&h, "Show all in Meshes").click();
+    h.run();
+    assert_eq!(
+        (
+            h.state().show_mesh.clone(),
+            h.state().show_in_meshes.clone()
+        ),
+        (None, None)
+    );
+    named(&h, "Show all in Meshes").hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains("A scan is running or did not finish")
+        .is_some());
+}
+
+/// The decided-alpha tag is drawn on the copy whose shapes decided the texture's alpha.
+#[test]
+fn the_decided_alpha_tag_is_drawn() {
+    let (_d, _db, mut h) = panel_prep(
+        &[
+            ("meshes/a.nif", "A", 1, 2, Some(1), Some(0)),
+            ("meshes/b.nif", "B", 1, 1, None, None),
+        ],
+        "",
+        1280.0,
+        &|m| {
+            // A job whose alpha meaning came from the meshes: the Used-by read marks the copies that decided it.
+            let item = m
+                .items
+                .iter_mut()
+                .find(|i| i.key == "landscape/leaf.png")
+                .unwrap();
+            item.job.as_mut().unwrap().provenance.insert(
+                "alpha.policy".to_string(),
+                engine::policy::Provenance::MeshAlpha,
+            );
+        },
+    );
+    open_header(&mut h, "Used by 2 meshes");
+    assert_eq!(
+        h.query_all_by_label("decided the alpha").count(),
+        1,
+        "only copy A"
+    );
+}
+
+/// A read that panics labels its error with the database it read, not the one current when the panic lands.
+#[test]
+fn a_panicked_read_keeps_the_database_it_read() {
+    use sdc_gui::worker::WorkerMsg;
+    let (_d, _db, mut h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]);
+    let key = "landscape/leaf.png";
+    let a = h.state().scan_db.clone().unwrap();
+    h.state_mut().used_by.pending = Some(key.to_string());
+    h.state_mut().used_by.pending_db = Some(a.clone());
+    h.state_mut().scan_db = Some(a.with_file_name("other.db"));
+    h.state()
+        .sender()
+        .send(WorkerMsg::Panicked {
+            what: "used-by",
+            message: "boom".into(),
+        })
+        .unwrap();
+    h.state_mut().poll();
+    assert_eq!(h.state().used_by.current.as_ref().unwrap().store, a);
+}
+
+/// `SdcApp::route_3d` carries Meshes' store and row-read state to the panel.
+#[test]
+fn route_3d_carries_the_meshes_store_and_row_state_to_the_panel() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = sdc_gui::app::SdcApp::new(opened(root.path()));
+    let ctx = eframe::egui::Context::default();
+    let store = root.path().join("scan.db");
+    app.meshes.store_path = Some(store.clone());
+    app.route_3d(&ctx);
+    assert_eq!(app.model.meshes_store, Some(store));
+    assert!(!app.model.meshes_rows_loading);
+    let _held = app.meshes.hold_rows_read();
+    assert!(app.meshes.rows_loading());
+    app.route_3d(&ctx);
+    assert!(app.model.meshes_rows_loading);
 }
 
 /// A cut path keeps its whole value on hover (and, tested above, in its name).
