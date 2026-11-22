@@ -21,6 +21,7 @@ use crate::sets_doc::SetEntry;
 use crate::ui::pgp_fields::edit_key;
 use engine::sets::same_id;
 use serde_json::Value;
+use std::fmt::Write as _;
 
 /// The six places a set keeps JSON settings, in the dialog's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -112,7 +113,7 @@ fn copy_report(label: &str, plan: &[(String, Change)]) -> String {
     }
     let mut s = format!("{label}: written to {written} of {n}");
     for (r, k) in skipped {
-        s.push_str(&format!("; skipped on {k} of {n}: {r}"));
+        let _ = write!(s, "; skipped on {k} of {n}: {r}");
     }
     s
 }
