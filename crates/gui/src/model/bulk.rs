@@ -1088,6 +1088,10 @@ pub enum MenuAction {
     CopyFromActive,
     /// The sets menus' Copy JSON settings from the active set to the other selected sets (the dialog opens).
     CopyJsonFromActive,
+    /// The sets menus' Copy JSON settings: the active set's rows go on the session clipboard.
+    CopyJsonToClip,
+    /// The sets menus' Paste JSON settings: the clipboard's rows to the selected sets (the dialog opens).
+    PasteJson,
     ResetAll,
     SelectMembersOfKind(Option<SlotKind>),
     /// F3a Task 8: a Slot commands window command on slot `n` of set `set` (an id), through the same model call.
@@ -1449,6 +1453,8 @@ impl AppModel {
                 disabled: None,
             },
             self.copy_json_entry(),
+            self.copy_clip_entry(),
+            self.paste_clip_entry(),
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
@@ -1847,6 +1853,8 @@ impl AppModel {
             }
             MenuAction::CopyFromActive => self.open_copy_settings(),
             MenuAction::CopyJsonFromActive => self.open_copy_set_json(),
+            MenuAction::CopyJsonToClip => self.copy_json_to_clip(),
+            MenuAction::PasteJson => self.open_paste_json(),
             MenuAction::ResetAll => self.ask_reset_all(),
             MenuAction::SelectMembersOfKind(k) => self.select_members_of_kind(k),
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),

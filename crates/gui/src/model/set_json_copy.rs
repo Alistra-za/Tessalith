@@ -67,6 +67,14 @@ impl JsonRow {
     }
 }
 
+/// The session clipboard: a snapshot of a set's rows at Copy. `source` is the copied set's card name. It is kept across
+/// opening another project and never saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonClip {
+    pub source: String,
+    pub rows: Vec<JsonRow>,
+}
+
 /// The rows a dialog has ticked, in order: the one conversion at the Apply boundary.
 pub fn ticked(rows: &[(JsonRow, bool)]) -> Vec<JsonRow> {
     rows.iter().filter(|r| r.1).map(|r| r.0.clone()).collect()
@@ -505,6 +513,78 @@ impl AppModel {
             paste: false,
             to,
             rows,
+        });
+    }
+
+    /// W7, W8, W3: the menus' "Copy JSON settings", which puts the active set's rows on the clipboard. It only reads, so
+    /// it has no read-only check (a read-only document holds no entries, so it is off with W3 there).
+    pub fn copy_clip_entry(&self) -> MenuEntry {
+        let (name, source) = self.copy_source();
+        let no_rows = source
+            .as_deref()
+            .is_none_or(|id| self.json_rows(id).is_empty());
+        let disabled = (self.selected_set_ids().len() >= 2)
+            .then(|| "select one set to copy from".to_string())
+            .or_else(|| no_rows.then(|| format!("{name} has no JSON settings of its own")));
+        MenuEntry {
+            action: MenuAction::CopyJsonToClip,
+            label: "Copy JSON settings".to_string(),
+            disabled,
+        }
+    }
+
+    /// W10, or W11 with W12: the menus' "Paste JSON settings from {set} to {n} selected…". The read-only reason comes
+    /// first, then an empty clipboard.
+    pub fn paste_clip_entry(&self) -> MenuEntry {
+        let n = self.selected_set_ids().len();
+        let label = match &self.json_clip {
+            Some(c) => format!("Paste JSON settings from {} to {n} selected…", c.source),
+            None => "Paste JSON settings…".to_string(),
+        };
+        let disabled = self.sets_read_only_reason().or_else(|| {
+            self.json_clip
+                .is_none()
+                .then(|| "copy a set's JSON settings first".to_string())
+        });
+        MenuEntry {
+            action: MenuAction::PasteJson,
+            label,
+            disabled,
+        }
+    }
+
+    /// Put the active set's rows on the clipboard (W9); nothing while the entry is off.
+    pub fn copy_json_to_clip(&mut self) {
+        if self.copy_clip_entry().disabled.is_some() {
+            return;
+        }
+        let (name, source) = self.copy_source();
+        let Some(source) = source else {
+            return;
+        };
+        let rows = self.json_rows(&source);
+        self.status_line = format!("Copied {} JSON settings from {name}", rows.len());
+        self.json_clip = Some(JsonClip { source: name, rows });
+    }
+
+    /// Open the checklist over the clipboard's rows, every row ticked, for every selected set (the source included);
+    /// nothing while the entry is off.
+    pub fn open_paste_json(&mut self) {
+        if self.paste_clip_entry().disabled.is_some() {
+            return;
+        }
+        let to = self.selected_set_ids();
+        let Some(clip) = self.json_clip.clone() else {
+            return;
+        };
+        if to.is_empty() {
+            return;
+        }
+        self.dialog = Some(Dialog::CopySetJson {
+            source: clip.source,
+            paste: true,
+            to,
+            rows: clip.rows.into_iter().map(|r| (r, true)).collect(),
         });
     }
 

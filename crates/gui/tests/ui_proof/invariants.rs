@@ -782,6 +782,7 @@ pub const AUTHORED: &[&str] = &[
     "Move to…",
     "Open folder…",
     "PGPatcher JSON editor…",
+    "Paste JSON settings…",
     "Path…",
     "Reset all settings for 1 selected…",
     "Review 23 files…",

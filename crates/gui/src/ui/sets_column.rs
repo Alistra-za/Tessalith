@@ -3805,6 +3805,20 @@ fn menu(
         acts.push(Act::ExportSet(v.key.clone(), v.id.clone()));
         ui.close();
     }
+    // It only reads (the clipboard is not the document), so it sits above the disable and shows its own reason.
+    let copy_clip = model.copy_clip_entry();
+    let r = ui.add_enabled(
+        copy_clip.disabled.is_none(),
+        egui::Button::new(&copy_clip.label),
+    );
+    let r = match &copy_clip.disabled {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(copy_clip.action));
+        ui.close();
+    }
     if !editing.on {
         ui.disable();
     }
@@ -3846,6 +3860,16 @@ fn menu(
     };
     if r.clicked() {
         acts.push(Act::Bulk(copy.action));
+        ui.close();
+    }
+    let paste = model.paste_clip_entry();
+    let r = ui.add_enabled(paste.disabled.is_none(), egui::Button::new(&paste.label));
+    let r = match &paste.disabled {
+        Some(why) if editing.on => r.on_disabled_hover_text(why),
+        _ => tip(r),
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(paste.action));
         ui.close();
     }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {

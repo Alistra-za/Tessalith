@@ -121,6 +121,229 @@ fn copy_json_settings_from_the_set_menu_writes_the_other_set() {
     assert_eq!(leaf_value, Some(json!(0.8)));
 }
 
+#[test]
+fn copy_on_one_card_then_paste_on_another_writes_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    let (rock, leaf) = (key_of(&m, ROCK), key_of(&m, LEAF));
+    m.click_set(&rock, false, false);
+    let mut h = harness(m);
+    h.run();
+    open_card_menu(&mut h, ROCK);
+    assert!(h.query_by_label("Copy JSON settings").is_some());
+    h.get_by_label("Copy JSON settings").click();
+    h.run();
+    h.state_mut().click_set(&leaf, false, false);
+    h.run();
+    open_card_menu(&mut h, LEAF);
+    h.get_by_label_contains("Paste JSON settings from").click();
+    h.run();
+    h.get_by_label("Apply").click();
+    h.run();
+    idle(h.state_mut());
+    assert_eq!(
+        entry(h.state(), LEAF).and_then(|e| e.settings.get("roughness_scale").cloned()),
+        Some(json!(0.8))
+    );
+}
+
+/// Copy from rock through its card menu (rock selected alone).
+fn copy_rock_through_the_menu(h: &mut Harness<'static, AppModel>) {
+    let rock = key_of(h.state(), ROCK);
+    h.state_mut().click_set(&rock, false, false);
+    h.run();
+    open_card_menu(h, ROCK);
+    h.get_by_label("Copy JSON settings").click();
+    h.run();
+}
+
+#[test]
+fn paste_writes_the_snapshot_even_onto_its_source() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    let short = view(&m, ROCK).short;
+    let mut h = harness(m);
+    h.run();
+    copy_rock_through_the_menu(&mut h);
+    h.state_mut()
+        .set_json_value(ROCK, "roughness_scale", Some(json!(0.3)));
+    idle(h.state_mut());
+    select(h.state_mut(), &[LEAF, ROCK]);
+    h.run();
+    open_card_menu(&mut h, ROCK);
+    h.get_by_label_contains("Paste JSON settings from").click();
+    h.run();
+    let Some(Dialog::CopySetJson { paste, to, .. }) = h.state().dialog.clone() else {
+        panic!("the paste dialog opens: {:?}", h.state().dialog);
+    };
+    assert!(paste);
+    assert_eq!(to, [LEAF, ROCK], "the source is a target too");
+    let before = doc_text(h.state());
+    h.get_by_label("Apply").click();
+    h.run();
+    idle(h.state_mut());
+    let m = h.state_mut();
+    for id in [ROCK, LEAF] {
+        assert_eq!(
+            entry(m, id).and_then(|e| e.settings.get("roughness_scale").cloned()),
+            Some(json!(0.8)),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        m.history.undo.last().unwrap().label,
+        format!("Paste JSON settings from {short}")
+    );
+    m.undo();
+    assert_eq!(doc_text(m), before);
+    assert_eq!(
+        entry(m, ROCK).and_then(|e| e.settings.get("roughness_scale").cloned()),
+        Some(json!(0.3))
+    );
+}
+
+#[test]
+fn an_all_skipped_paste_on_one_set_says_why_and_changes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    let short = view(&m, ROCK).short;
+    let mut h = harness(m);
+    h.run();
+    copy_rock_through_the_menu(&mut h);
+    select(h.state_mut(), &[ODD]);
+    h.run();
+    open_card_menu(&mut h, ODD);
+    h.get_by_label_contains("Paste JSON settings from").click();
+    h.run();
+    let (before, undo) = (doc_text(h.state()), h.state().history.undo.len());
+    h.get_by_label("Apply").click();
+    h.run();
+    idle(h.state_mut());
+    let m = h.state();
+    assert_eq!(m.history.undo.len(), undo);
+    assert_eq!(doc_text(m), before);
+    assert!(
+        m.status_line.starts_with(&format!(
+            "Paste JSON settings from {short}: 0 written, 1 skipped (see Messages)"
+        )),
+        "{:?}",
+        m.status_line
+    );
+    assert!(
+        logged(m)
+            .iter()
+            .any(|t| t.ends_with("skipped on 1 of 1: writes no PGPatcher JSON")),
+        "{:?}",
+        logged(m)
+    );
+}
+
+#[test]
+fn the_clipboard_survives_opening_another_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    select(&mut m, &[ROCK]);
+    m.run_menu(MenuAction::CopyJsonToClip);
+    let clip = m.json_clip.clone();
+    assert!(clip.is_some(), "premise: the copy filled the clipboard");
+    let d2 = tempfile::tempdir().unwrap();
+    let root = mod_folder(d2.path());
+    m.open_folder(root);
+    idle(&mut m);
+    m.decide(LEAF_FILE, Answer::Subtype(Subtype::PbrAlbedo));
+    idle(&mut m);
+    m.set_shader(LEAF, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    assert!(
+        is_json_set(&view(&m, LEAF), m.target),
+        "premise: the new project's leaf is a JSON set"
+    );
+    assert_eq!(m.json_clip, clip);
+    select(&mut m, &[LEAF]);
+    let mut h = harness(m);
+    h.run();
+    open_card_menu(&mut h, LEAF);
+    h.get_by_label_contains("Paste JSON settings from").click();
+    h.run();
+    h.get_by_label("Apply").click();
+    h.run();
+    idle(h.state_mut());
+    assert_eq!(
+        entry(h.state(), LEAF).and_then(|e| e.settings.get("roughness_scale").cloned()),
+        Some(json!(0.8))
+    );
+}
+
+#[test]
+fn copy_and_paste_entries_say_why_they_are_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = three_sets(d.path());
+    m.set_json_value(ROCK, "roughness_scale", Some(json!(0.8)));
+    idle(&mut m);
+    let odd = view(&m, ODD).short;
+    select(&mut m, &[ROCK]);
+    // Nothing copied.
+    let e = m.paste_clip_entry();
+    assert_eq!(e.label, "Paste JSON settings…");
+    assert_eq!(
+        e.disabled.as_deref(),
+        Some("copy a set's JSON settings first")
+    );
+    let e = m.copy_clip_entry();
+    assert_eq!((e.label.as_str(), e.disabled), ("Copy JSON settings", None));
+    // Two sets selected: Copy has no single source; both entries sit after the Copy-to-selected entry.
+    select(&mut m, &[LEAF, ROCK]);
+    assert_eq!(
+        m.copy_clip_entry().disabled.as_deref(),
+        Some("select one set to copy from")
+    );
+    assert_eq!(m.set_menu()[2].action, MenuAction::CopyJsonToClip);
+    assert_eq!(m.set_menu()[3].action, MenuAction::PasteJson);
+    // Odd alone.
+    select(&mut m, &[ODD]);
+    assert_eq!(
+        m.copy_clip_entry().disabled,
+        Some(format!("{odd} has no JSON settings of its own"))
+    );
+    // A filled clipboard names its source and the count.
+    select(&mut m, &[ROCK]);
+    m.run_menu(MenuAction::CopyJsonToClip);
+    let rock = view(&m, ROCK).short;
+    assert_eq!(m.status_line, format!("Copied 1 JSON settings from {rock}"));
+    select(&mut m, &[LEAF, ODD]);
+    let e = m.paste_clip_entry();
+    assert_eq!(
+        e.label,
+        format!("Paste JSON settings from {rock} to 2 selected…")
+    );
+    assert_eq!(e.disabled, None);
+    // A read-only sets document: the clipboard is full, rock's card is the copy source.
+    select(&mut m, &[ROCK]);
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "this is = = not toml\n").unwrap();
+    m.sets_doc = Some(SetsDoc::open(&bad));
+    assert!(m.sets_doc.as_ref().unwrap().read_only());
+    assert_eq!(
+        m.copy_clip_entry().disabled,
+        Some(format!("{rock} has no JSON settings of its own"))
+    );
+    let why = m.sets_read_only_reason();
+    assert!(why.is_some());
+    assert_eq!(m.paste_clip_entry().disabled, why);
+    // The read-only reason comes before the empty clipboard.
+    m.json_clip = None;
+    assert_eq!(m.paste_clip_entry().disabled, why);
+}
+
 fn view(m: &AppModel, id: &str) -> SetView {
     views(m)
         .iter()

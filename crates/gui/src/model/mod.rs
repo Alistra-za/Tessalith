@@ -942,6 +942,8 @@ pub struct AppModel {
     pub marker_note: Option<(messages::Severity, String)>,
     /// F3b D4: the rename dialog's last applied recipe, offered again on the next open (this session only).
     pub last_recipe: rename::Recipe,
+    /// The Copy JSON settings clipboard (SM-R1): kept across opening another project, never saved.
+    pub json_clip: Option<set_json_copy::JsonClip>,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
     /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
@@ -1321,6 +1323,7 @@ impl AppModel {
             marker: Default::default(),
             marker_note: None,
             last_recipe: Default::default(),
+            json_clip: None,
             expanded: None,
             export: export::ExportModel::default(),
             reencode_all: false,
