@@ -87,10 +87,12 @@ pins (Note JB5).
 
 ISPC TC patch 0004 "BC6H kernel fixes" (`ispctc/patches/0004-bc6h-kernel-fixes.patch`, 2026-11-22) applies on top of
 patches 0001 and 0003. It is produced with `git diff --output=<patch> <base> -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
-against the post-0003 kernel at `fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated whole, never edited by hand), and it is
-built with both compilers as before (Note LM1). Fix #6: `bc6h_bounds` declared `float rgb_span[0]` and wrote and read
-three elements; it is now `rgb_span[3]`. ISPC 1.31.0 printed no diagnostic for it. BC6H bytes unchanged: every pin and
-every measured image hash equal (Note LM2).
+against the post-0003 kernel at `fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated
+whole, never edited by hand), and it is built with both compilers as before (Note LM1). Fix #6: `bc6h_bounds` declared
+`float rgb_span[0]` and wrote and read three elements; it is now `rgb_span[3]`. ISPC 1.31.0 printed no diagnostic for
+it. BC6H bytes unchanged: every pin and every measured image hash equal (Note LM2). Fix #7: `bc6h_enc_2p` clamps the
+partition count to the 32 entries of `part_list`; no profile in Tessalith asks for more than 32, so it is unreachable
+here and guards other callers. BC6H bytes unchanged (Note LM3).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

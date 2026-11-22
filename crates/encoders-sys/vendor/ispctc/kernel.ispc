@@ -23,6 +23,7 @@
 // Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by
 // an audit. Changes are marked "sdc patch 0004".
 // #6 bc6h_bounds' rgb_span holds three floats.
+// #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2442,8 +2443,9 @@ void bc6h_enc_2p(bc6h_enc_state state[])
         part_list[part] = part + bound * 64;
     }
     
-    partial_sort_list(part_list, 32, state->fastSkipTreshold);
-    bc6h_enc_2p_list(state, part_list, state->fastSkipTreshold);
+    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
+    partial_sort_list(part_list, 32, n);
+    bc6h_enc_2p_list(state, part_list, n);
 }
 
 void bc6h_enc_1p(bc6h_enc_state state[])
