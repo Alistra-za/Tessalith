@@ -2711,9 +2711,18 @@ fn chips_say_what_their_slot_is() {
     chip(&h, ROCK, "RMAOS").hover();
     h.run();
     h.run();
-    assert!(h
-        .query_by_label_contains("PBR RMAOS (roughness, metallic, AO, specular)")
-        .is_some());
+    // the tooltip itself, not another label that happens to carry the words: its own lines, the hint once
+    let tip = h
+        .get_by_label_contains("PBR RMAOS (roughness, metallic, AO, specular)")
+        .accesskit_node()
+        .value()
+        .expect("the hover text");
+    assert!(
+        tip.lines()
+            .any(|l| l == "PBR RMAOS (roughness, metallic, AO, specular)")
+            && tip.matches("Shift+click to open its settings.").count() == 1,
+        "{tip:?}"
+    );
     assert!(on_card_of(&h, ROCK, "P, empty").is_empty());
 }
 
@@ -2728,6 +2737,48 @@ fn the_legend_lists_the_letters_and_the_pills() {
         assert!(h.query_by_label(line).is_some(), "{line}");
     }
     assert!(h.query_by_label("N: Normal map or PBR normal").is_some());
+}
+
+/// 3d-T5-2: a read-only card's disabled auto combo still says where the shader came from, without the fix hint.
+#[test]
+fn a_disabled_auto_shader_combo_keeps_its_first_sentence() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.save().unwrap();
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    assert!(
+        m.sets_read_only_reason().is_some(),
+        "premise: the project file is read-only"
+    );
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let shader_name = format!("Shader for {ROCK}");
+    let combo = h.get_by_role_and_label(egui::accesskit::Role::ComboBox, &shader_name);
+    assert!(
+        combo.accesskit_node().is_disabled(),
+        "premise: the combo is disabled"
+    );
+    assert!(
+        combo
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+            .ends_with(" (auto)"),
+        "premise: the shader is automatic"
+    );
+    combo.hover();
+    h.run();
+    h.run();
+    let tip = h
+        .get_by_label_contains("Tessalith picked this shader from the set's files.")
+        .accesskit_node()
+        .value()
+        .expect("the hover text");
+    assert!(!tip.contains("Pick one yourself"), "{tip:?}");
 }
 
 #[test]

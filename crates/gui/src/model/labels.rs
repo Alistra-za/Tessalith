@@ -1,5 +1,6 @@
 //! Display names for texture types and schema keys.
 
+use super::also;
 use super::sets::{SetView, SlotKind};
 use engine::config::Subtype;
 use engine::shader::Shader;
@@ -101,14 +102,19 @@ pub fn slot_type_label(kind: SlotKind, pbr: bool, skin: bool, rfaos: bool) -> &'
 /// `slot_type_label` for `kind` on set `v`. The resolved shader decides (an Advanced skin set takes its own column);
 /// a card with no files yet reads its saved shader; only a view with neither falls back to the member flags.
 pub fn set_slot_label(v: &SetView, kind: SlotKind) -> &'static str {
-    let shader = v.shader.as_ref().map(|p| p.shader).or(v
-        .key
-        .is_empty()
-        .then_some(v.shader_choice)
-        .flatten());
-    let (pbr, skin) = match shader {
-        Some(s) => (s.is_pbr_family(), s == Shader::AdvancedSkin),
-        None => (v.pbr, v.skin),
+    let document_only = v.shader.is_none() && v.key.is_empty();
+    let pbr = if v.shader.is_some() {
+        also::is_pbr_set(v)
+    } else if document_only {
+        also::document_pbr_set(v)
+    } else {
+        v.pbr
+    };
+    let saved = if document_only { v.shader_choice } else { None };
+    let skin = match (v.shader.as_ref(), saved) {
+        (Some(p), _) => p.shader == Shader::AdvancedSkin,
+        (None, Some(saved)) => saved == Shader::AdvancedSkin,
+        (None, None) => v.skin,
     };
     slot_type_label(kind, pbr, skin, v.rfaos)
 }
@@ -178,4 +184,46 @@ pub fn readable(key: &str) -> String {
         out.push_str(&word);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine::shader::{ShaderOrigin, ShaderPick};
+
+    fn pick(shader: Shader) -> ShaderPick {
+        ShaderPick {
+            shader,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        }
+    }
+
+    /// The label follows the resolved shader (the answer `also::is_pbr_set` gives), the saved one on a card with no
+    /// files yet, and the member flags only when neither exists: each case below disagrees with the flags.
+    #[test]
+    fn a_chip_reads_the_resolved_shader_before_the_member_flags() {
+        let mut v = SetView::new("k".into(), "s".into(), vec![]);
+        v.shader = Some(pick(Shader::Pbr));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "PBR albedo");
+        v.pbr = true;
+        v.shader = Some(pick(Shader::Default));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "Diffuse");
+        v.shader = Some(pick(Shader::AdvancedSkin));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "Skin albedo");
+        assert_eq!(set_slot_label(&v, SlotKind::Emissive), "Glow");
+        // a card with no files: the saved shader, then the flags
+        let mut doc = SetView::new(String::new(), "s".into(), vec![]);
+        doc.shader_choice = Some(Shader::PbrLandscape);
+        assert_eq!(set_slot_label(&doc, SlotKind::Normal), "PBR normal");
+        doc.pbr = true;
+        doc.shader_choice = Some(Shader::Default);
+        assert_eq!(set_slot_label(&doc, SlotKind::Diffuse), "Diffuse");
+        doc.shader_choice = None;
+        assert_eq!(set_slot_label(&doc, SlotKind::Diffuse), "PBR albedo");
+        // a keyed card the plan has not picked for yet: the flags
+        let mut keyed = SetView::new("k".into(), "s".into(), vec![]);
+        keyed.skin = true;
+        assert_eq!(set_slot_label(&keyed, SlotKind::Diffuse), "Skin albedo");
+    }
 }

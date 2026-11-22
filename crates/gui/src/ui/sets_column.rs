@@ -282,7 +282,7 @@ fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
 }
 
 /// The chips one row of a card `width` wide holds (at least one).
-fn chips_per_row(width: f32, frame_x: f32) -> usize {
+pub fn chips_per_row(width: f32, frame_x: f32) -> usize {
     ((width - frame_x + DOCK_GAP_X) / (CHIP + DOCK_GAP_X))
         .floor()
         .max(1.0) as usize
@@ -400,9 +400,8 @@ fn strip_rect(card: egui::Rect, size: egui::Vec2, clip: egui::Rect) -> egui::Rec
     egui::Rect::from_min_size(egui::pos2(x, y), size)
 }
 
-/// The strip's least outer width, that of four chips in a row, so a caption never wraps to a sliver.
-const STRIP_MIN_W: f32 = 4.0 * CHIP + 3.0 * DOCK_GAP_X + 2.0 * STRIP_PAD;
-/// The gap between two caption rows.
+/// The gap between the last row of letter boxes and the first caption, and between two caption rows.
+const CAPTION_TOP_GAP: f32 = 2.0;
 const CAPTION_GAP: f32 = 2.0;
 
 /// The strip as measured before it is placed: the columns of letter boxes, one "{label}: no file yet" galley per empty
@@ -427,8 +426,7 @@ fn strip_layout(
     clip: egui::Rect,
 ) -> StripLayout {
     let per_row = chips_per_row(zone_w, frame_x).min(chips_per_row(clip.width(), 2.0 * STRIP_PAD));
-    let mut grid = strip_size(v.empty.len(), per_row);
-    grid.x = grid.x.max(STRIP_MIN_W.min(clip.width()));
+    let grid = strip_size(v.empty.len(), per_row);
     let font = egui::TextStyle::Small.resolve(style);
     let colour = style.visuals.text_color();
     let captions: Vec<_> = v
@@ -452,7 +450,7 @@ fn strip_layout(
         per_row,
         grid,
         captions,
-        size: egui::vec2(grid.x, grid.y + STRIP_GAP + text_h),
+        size: egui::vec2(grid.x, grid.y + CAPTION_TOP_GAP + text_h),
     }
 }
 
@@ -467,7 +465,7 @@ fn paint_strip(p: &egui::Painter, style: &egui::Style, rect: egui::Rect, lay: &S
         vis.window_stroke(),
         egui::StrokeKind::Inside,
     );
-    let mut y = rect.min.y + lay.grid.y - STRIP_PAD + STRIP_GAP;
+    let mut y = rect.min.y + lay.grid.y - STRIP_PAD + CAPTION_TOP_GAP;
     for g in &lay.captions {
         p.galley(
             egui::pos2(rect.min.x + STRIP_PAD, y),
@@ -1196,6 +1194,7 @@ fn helper_tile(
     v: &SetView,
     mk: &str,
     role: &str,
+    detail: Option<&str>,
     sel_items: &HashSet<String>,
     acts: &mut Vec<Act>,
     member_menu: &mut bool,
@@ -1219,7 +1218,10 @@ fn helper_tile(
         acts,
         member_menu,
     );
-    let text = || format!("{}\n{role}\n{MEMBER_HINT}", item.name);
+    let text = || match detail {
+        Some(d) => format!("{}\n{role}\n{d}\n{MEMBER_HINT}", item.name),
+        None => format!("{}\n{role}\n{MEMBER_HINT}", item.name),
+    };
     ui.ctx()
         .accesskit_node_builder(r.id, |b| b.set_description(text()));
     Some(r.on_hover_ui(|ui| {
@@ -3327,11 +3329,15 @@ fn pill(
             let lay = strip_layout(&p, ui.style(), v, zone.rect.width(), look.frame_x, clip);
             let rect = strip_rect(zone.rect, lay.size, clip);
             paint_strip(&p, ui.style(), rect, &lay);
-            let painted = rect.intersect(clip);
+            // Note 3d-T5-1: the captions are painted over whatever lies below, but only the letter grid owns a
+            // release, so a drop where the user sees another card goes to that card.
+            let painted = egui::Rect::from_min_size(rect.min, lay.grid).intersect(clip);
             let mut hit = painted;
             if rect.top() >= zone.rect.bottom() {
                 hit.min.y = zone.rect.bottom();
             } else if rect.bottom() <= zone.rect.top() {
+                // shortcut: a strip flipped above its card keeps the captions between the grid and the card in the
+                // bridge, or the grid could not be reached from the card; upgrade if captions should never own a drop.
                 hit.max.y = zone.rect.top();
             }
             // The bridge reaches only the part of the strip that faces the card.
@@ -3553,9 +3559,11 @@ fn chip_row<'a>(
             }
             SlotShown::Replaced { item, by } => {
                 let file = model.item(item).map_or(item, |i| i.name.as_str());
-                let game = k.game_slot().map_or_else(String::new, |n| format!(" {n}"));
+                let slot = k
+                    .game_slot()
+                    .map_or_else(|| "this slot".to_string(), |n| format!("game slot {n}"));
                 let r = letter_box(ui, &letter(), None, None).on_hover_text(format!(
-                    "{} (empty)\n{}: the link to {} supplies game slot{game}, so {file} is not written here",
+                    "{} (empty)\n{}: the link to {} supplies {slot}, so {file} is not written here",
                     v.slot_text(k),
                     set_slot_label(v, k),
                     by.path
@@ -3686,6 +3694,11 @@ fn chip_row<'a>(
             (None, None, Some(j)) => subtype_name(j.profile.subtype),
             _ => "not converted".to_string(),
         };
+        // For a member with a job, what its type is (`type_info`), under its role.
+        let detail = item
+            .job
+            .as_ref()
+            .map(|j| type_info(j.profile.subtype).description);
         let r = if item.kind == ItemKind::Helper && kind.is_none() {
             let was = ui.opacity();
             if item.helper.as_ref().is_some_and(|h| h.fills.is_empty()) {
@@ -3698,6 +3711,7 @@ fn chip_row<'a>(
                 v,
                 mk,
                 &role,
+                detail,
                 sel_items,
                 acts,
                 member_menu,
@@ -3705,9 +3719,8 @@ fn chip_row<'a>(
             ui.set_opacity(was);
             r
         } else {
-            // The role, and for a member with a job what its type is (`type_info`).
-            let note = || match &item.job {
-                Some(j) => format!("{role}\n{}", type_info(j.profile.subtype).description),
+            let note = || match detail {
+                Some(d) => format!("{role}\n{d}"),
                 None => role.clone(),
             };
             let r = member_chip(
@@ -3805,13 +3818,18 @@ fn shader_combo(
                             ui.label(&text);
                         }
                         if auto {
-                            ui.label(AUTO_SHADER_HOVER);
+                            ui.label(format!("{AUTO_SHADER_FIRST} {AUTO_SHADER_FIX}"));
                         }
                     });
-                    // "Pick one yourself" does not help a card that cannot be edited: only the cut value shows.
-                    if cut {
-                        r.on_disabled_hover_text(&text);
-                    }
+                    // "Pick one yourself" does not help a card that cannot be edited: it keeps the first sentence only.
+                    r.on_disabled_hover_ui(|ui| {
+                        if cut {
+                            ui.label(&text);
+                        }
+                        if auto {
+                            ui.label(AUTO_SHADER_FIRST);
+                        }
+                    });
                 }
                 r.rect
             })
@@ -3822,8 +3840,8 @@ fn shader_combo(
 }
 
 /// The hover of a shader the engine picked from the set's files.
-const AUTO_SHADER_HOVER: &str =
-    "Tessalith picked this shader from the set's files. Pick one yourself to fix it.";
+const AUTO_SHADER_FIRST: &str = "Tessalith picked this shader from the set's files.";
+const AUTO_SHADER_FIX: &str = "Pick one yourself to fix it.";
 
 /// The free card area left of the shader combo, which still opens the set (Note HP12).
 const COMBO_FREE: f32 = 48.0;
@@ -5106,6 +5124,45 @@ mod tests {
         assert_eq!(strip_size(6, 5), egui::vec2(232.0, 80.0));
     }
 
+    /// The outer size is the letter grid (JW size, no minimum width), a 2 px gap, one galley a caption and 2 px between
+    /// rows; the columns shrink to what a narrow clip holds before the captions are measured.
+    #[test]
+    fn the_strip_layout_adds_the_measured_captions_to_the_grid() {
+        let mut v = SetView::new("k/a".into(), "a".into(), vec![]);
+        v.empty = vec![SlotKind::Emissive, SlotKind::Height];
+        v.empty_line = "Empty: G, P".into();
+        let sizes = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+        let out = sizes.clone();
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .build_ui(move |ui| {
+                let wide = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 600.0));
+                let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 600.0));
+                for (zone_w, clip) in [(600.0, wide), (600.0, narrow)] {
+                    let lay = strip_layout(ui.painter(), ui.style(), &v, zone_w, 30.0, clip);
+                    let galleys: f32 = lay.captions.iter().map(|g| g.size().y).sum();
+                    out.borrow_mut()
+                        .push((lay.per_row, lay.grid, lay.size, galleys));
+                }
+            });
+        h.run();
+        let sizes = sizes.borrow();
+        let (per_row, grid, size, galleys) = sizes[0];
+        assert!(per_row >= 2, "a wide clip keeps both boxes in a row");
+        assert_eq!(
+            grid,
+            egui::vec2(88.0, 40.0),
+            "the letter grid, with no minimum width"
+        );
+        assert_eq!(size, egui::vec2(88.0, 40.0 + 2.0 + galleys + 2.0));
+        // 80 px holds one box (32 + 2·4), so the two wrap to two rows before the captions are measured
+        let (per_row, grid, size, galleys) = sizes[1];
+        assert_eq!((per_row, grid), (1, egui::vec2(40.0, 80.0)));
+        assert_eq!(size, egui::vec2(40.0, 80.0 + 2.0 + galleys + 2.0));
+    }
+
     #[test]
     fn the_empty_strip_sits_below_flips_above_and_clamps() {
         let clip = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(266.0, 600.0));
@@ -5186,6 +5243,70 @@ mod tests {
             kind: None,
             row: Some(row),
         }
+    }
+
+    /// A cell whose game slot holds a link that fills another row (a view's own normal under a link to a height on
+    /// slot 2) draws the empty box, whose hover says the link supplies the slot. No set card reaches this through the
+    /// planner (a link's row follows its game slot), so the view is built by hand.
+    #[test]
+    fn a_replaced_slots_box_says_the_link_supplies_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut v = SetView::new("k/a".into(), "a".into(), vec![]);
+        v.shader = Some(engine::shader::ShaderPick {
+            shader: Shader::Pbr,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        });
+        v.slots.insert(
+            SlotKind::Normal,
+            SlotFill::Own {
+                item: "a/n.png".into(),
+            },
+        );
+        v.linked.insert(2, link("p\\x.dds", SlotKind::Height));
+        assert!(
+            matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Replaced { .. }),
+            "premise"
+        );
+        let session = std::sync::Arc::new(engine::session::Session::new().expect("a session"));
+        let model = AppModel::new(crate::settings::GuiSettings::default(), None, session);
+        let editing = Editing {
+            on: true,
+            why: "",
+            reorder: false,
+            exporting: false,
+        };
+        let mut thumbs = ThumbCache::default();
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+                ctx.global_style_mut(|s| {
+                    s.interaction.tooltip_delay = 0.0;
+                    s.interaction.show_tooltips_only_when_still = false;
+                });
+            })
+            .build_ui(move |ui| {
+                chip_row(
+                    ui,
+                    &model,
+                    &mut thumbs,
+                    &v,
+                    &[],
+                    &mut FoldedBySlice::new(),
+                    &editing,
+                    &HashSet::new(),
+                    &mut vec![],
+                    &mut false,
+                    vec![],
+                );
+            });
+        h.run();
+        h.get_by_label("N, empty").hover();
+        h.run();
+        h.run();
+        h.get_by_label(
+            "Normal _n (empty)\nPBR normal: the link to p\\x.dds supplies game slot 2, so a/n.png is not written here",
+        );
     }
 
     /// How many chips `chip_row` draws for `v` (every chip pushes its rect on `fixed`), and what `chip_rows` counts
