@@ -11,7 +11,7 @@
 mod bc1_classes;
 #[allow(
     unused_imports,
-    reason = "every includer leaves some of the four re-exports unused (none uses all four)"
+    reason = "the bc4, engine encode, engine mesh_alpha and encoders-sys bc4ref includers use none of the four re-exports; the bc1_alpha, bc3 and levels tests and examples/speed use only colour_classes, the bc1 test also COLOUR_CLASSES, and the unit tests all but COLOUR_CLASSES"
 )]
 pub use bc1_classes::{colour_classes, round_code, round_code_midpoint, COLOUR_CLASSES};
 

@@ -2,7 +2,7 @@
 //! `colour_classes` and `COLOUR_CLASSES`. Deterministic in the seed, no crate dependencies.
 #![allow(
     dead_code,
-    reason = "reached through gen.rs by the unit tests, examples/speed, the bc1, bc1_alpha, bc3 and levels tests, which use all of it; the bc4, engine encode, engine mesh_alpha and encoders-sys bc4ref tests use none of it, and no item is dead in all"
+    reason = "reached through gen.rs by the unit tests, examples/speed, the bc1, bc1_alpha, bc3 and levels tests, in which no item is dead; the bc4, engine encode, engine mesh_alpha and encoders-sys bc4ref tests use none of it, and no item is dead in all"
 )]
 
 use super::Rng;

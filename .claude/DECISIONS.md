@@ -2212,4 +2212,4 @@ The owner: "Probably turn validate into an optional setting flag in the gui, and
 
 ## Note LH - Rust audit follow-ups (main team, 2026-11-22)
 
-The recommended actions of the 2026-11-21 Rust patterns audit (`F:\ai\dds\reports\2026-11-21-ai-rust-patterns-audit.md`) beyond Note LF: suppressions state their reason, two allocation lints, a scan for silent test skips, enum ids that do not allocate, a measured allocation budget for the re-plan's skeleton patch, and the repo copies of the Rust CLI skills removed. No encoded byte changes.
+The recommended actions of the AI Rust patterns audit of 2026-11-21 beyond Note LF: suppressions state their reason, two allocation lints, a scan for silent test skips, enum ids that do not allocate, a measured allocation budget for the re-plan's skeleton patch, and the repo copies of the Rust CLI skills removed. No encoded byte changes.
