@@ -1,0 +1,19 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Index¶- Engine policy (formats, alpha gate, versions, writes):	Index	12	back	LM		partial	2026-11-22		goes: the line without LM (LM3, LM4: engine messages say type and cite no spec or ruling); the tool skips this prefix (archived before), so it is archived by hand
+Index¶- Presets and config:	Index	19	back	LM		partial	2026-11-22		goes: the line without LM (LM3: preset and override messages say type); archived by hand
+Index¶- CLI:	Index	22	back	LM		partial	2026-11-22		goes: the line without LM (LM3: CLI output prose says type); archived by hand
+Index¶- GUI Files and Inspector:	Index	23	back	LM		partial	2026-11-22		goes: the line without LM (LM5 to LM12, LM15 to LM18); archived by hand
+Index¶- GUI Settings panel:	Index	24	back	LM		partial	2026-11-22		goes: the line without LM (LM1, LM2, LM9, LM10, LM13); archived by hand
+Index¶- GUI Meshes view:	Index	25	back	LM		partial	2026-11-22		goes: the line without LM (LM14: show_shape in model/meshes.rs); archived by hand
+Digest¶- "(auto)" in the Sub-type row	Digest	100	back	LM		partial	2026-11-22		goes: the row name Sub-type (LM3: the row reads Texture type); stays: the rest of U4
+Digest¶- A rule's `overrides` may not set `subtype`	Digest	271	back	LM		partial	2026-11-22		goes: the quoted message wording (LM3: set the type with `subtype =` on the rule); stays: the refusal
+Digest¶- Textures combos: Sub-type	Digest	381	back	LM		partial	2026-11-22		goes: the combo name Sub-type (LM3: Filter by type); stays: the rest
+Digest¶- One type picker for Set type	Digest	424	back	LM		partial	2026-11-22		goes: the field name Sub-type (LM3) and FB9's bulk combo with no one suggestion as the whole answer (LM8: the bulk panel adds the undecided card); stays: the one picker and the Problems accept
+Digest¶- Window and layout live in `gui.toml`	Digest	427	back	LM		partial	2026-11-22		goes: AG17's saved Textures filter toggles (LM12: the status pills are not saved); stays: the rest
+Digest¶- "Used by meshes (N)"	Digest	495	back	LM		partial	2026-11-22		goes: AG96's header words, placement and one row per (NIF, mod) (LM13); stays: the off-thread read, stale answers dropped, the panic line, Open in Textures
+Digest¶- Meshes list: picking a mod never deselects	Digest	640	back	LM		partial	2026-11-22		goes: the link name Show in Meshes (LM13: Show all in Meshes); stays: the rest; the tool skips this prefix (archived before), so it is archived by hand
+FM10	FM	703	back	LM		partial	2026-11-22		goes: the quoted error name unknown sub-type (LM3: unknown type); stays: the rest
+GU2	GU	1165	back	LM		partial	2026-11-22		goes: the quoted message ending Change this file's sub-type. (LM3: type); stays: the rest
+IB9	IB	1310	back	LM		partial	2026-11-22		goes: the quoted stdout line no sub-type from the name (LM3: no type from the name); stays: the rest
+HI4	HI	1330	back	LM		partial	2026-11-22		goes: the row name Sub-type (LM3: the row reads Texture type); stays: the rest
+JL¶- **A link under the clip is scrolled to.**	JL	1651	back	LM		partial	2026-11-22		goes: the link name Show in Meshes (LM13: Show all in Meshes); stays: the rest
