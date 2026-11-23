@@ -198,6 +198,8 @@ pub fn draw_with_scan(
     scan: Option<&mut crate::model::meshes::MeshesModel>,
 ) {
     state.thumbs.sweep(model.items_rev());
+    // The texture panel's forced-open latch follows the selection even in a frame no panel draws.
+    model.observe_panel_selection();
     // Trace-debug #52: a modal or Slot commands left open would act on the new folder's set of the same id.
     if state
         .folder_epoch

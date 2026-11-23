@@ -1,6 +1,6 @@
 //! The texture panel's collapsible groups, which group each field sits in, and the open state kept in `gui.toml`
 //! (texture-panel-compact plan, Task 1). No egui types.
-use super::bottom::Problem;
+use super::bottom::{Level, Problem};
 use super::code_text::{row_class, RowClass};
 use super::fields::{
     cube_views, edge_view, exr_straight_view, field_hidden, field_views, filter_view, levels_view,
@@ -329,11 +329,22 @@ pub fn fix_field(code: &str) -> Option<&'static str> {
 /// first-screen field (Format) is in no group. Allocates when a group is found, so the panel builds it once per list
 /// change and keeps it (`texture_problems`), never per frame.
 pub fn groups_with_problems(rows: &[Problem]) -> BTreeSet<PanelGroup> {
-    rows.iter()
-        .filter_map(|p| p.code)
-        .filter_map(|c| fix_field(c.as_str()))
-        .filter_map(panel_group)
-        .collect()
+    problem_levels(rows).into_keys().collect()
+}
+
+/// [`groups_with_problems`] with each group's worst level (`Level` orders Blocks first). A row counts for its code and
+/// for the codes it also names (TPC-T5-3), as `panel_problem_rows` treats them as part of the row.
+pub fn problem_levels(rows: &[Problem]) -> BTreeMap<PanelGroup, Level> {
+    let mut out: BTreeMap<PanelGroup, Level> = BTreeMap::new();
+    for p in rows {
+        for c in p.code.iter().chain(p.also.iter()) {
+            if let Some(g) = fix_field(c.as_str()).and_then(panel_group) {
+                let worst = out.get(&g).map_or(p.level, |l| (*l).min(p.level));
+                out.insert(g, worst);
+            }
+        }
+    }
+    out
 }
 
 pub fn set_open(settings: &mut GuiSettings, g: PanelGroup, open: bool) {

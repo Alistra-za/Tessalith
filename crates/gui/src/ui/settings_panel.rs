@@ -21,7 +21,7 @@ use crate::model::labels::{
     VARIANCE_BAKE_HOVER,
 };
 use crate::model::panel_groups::{self, GroupSummary, PanelGroup, SummaryExtra};
-use crate::model::{Answer, AppModel, ForcedOpen, Selection, SetTarget};
+use crate::model::{Answer, AppModel, Selection, SetTarget};
 use crate::ui::group::{collapsing_group, GroupHead};
 use eframe::egui;
 use engine::codes::{Code, Warning};
@@ -900,7 +900,8 @@ pub struct Ctx<'a> {
     /// Groups opened for a problem or a Go to, until the user's click (`model.panel_forced`, for the selected item).
     pub forced: &'a BTreeSet<PanelGroup>,
     /// Groups that hold a field one of this texture's problems points at: each header's dot (`texture_problems`).
-    pub problem_groups: &'a BTreeSet<PanelGroup>,
+    /// and the worst level of each (`panel_groups::problem_levels`).
+    pub problem_groups: &'a BTreeMap<PanelGroup, Level>,
     /// The header summaries and marks, built with `views` (`panel_cache`).
     pub summaries: &'a [(PanelGroup, GroupSummary)],
 }
@@ -1370,7 +1371,16 @@ fn push_edit(actions: &mut Vec<Action>, field: &'static str, edit: Option<RowEdi
 
 /// Whether group `g` is drawn open: the user's saved state, or forced open (a problem or a Go to).
 pub(super) fn group_open(cx: &Ctx, g: PanelGroup) -> bool {
-    panel_groups::is_open_in(cx.groups, g) || cx.forced.contains(&g)
+    open_with(cx.groups, cx.forced, g)
+}
+
+/// [`group_open`] over its two inputs, for the header drawn after `Ctx` is gone (Sources).
+fn open_with(
+    groups: &BTreeMap<String, bool>,
+    forced: &BTreeSet<PanelGroup>,
+    g: PanelGroup,
+) -> bool {
+    panel_groups::is_open_in(groups, g) || forced.contains(&g)
 }
 
 /// The no-group set a draw of a key other than the selected item reads as `Ctx::forced`.
@@ -1386,8 +1396,8 @@ pub(super) fn group_head<'a>(cx: &'a Ctx, g: PanelGroup) -> GroupHead<'a> {
         changed: s.is_some_and(|s| s.changed),
         problem: cx
             .problem_groups
-            .contains(&g)
-            .then_some(super::status::Status::Warning),
+            .get(&g)
+            .map(|l| super::problems::status_of(*l)),
     }
 }
 
@@ -1636,8 +1646,8 @@ struct ProblemSlot {
     source: Arc<Vec<Problem>>,
     rows: Arc<Vec<Problem>>,
     notes: usize,
-    /// `panel_groups::groups_with_problems(rows)`, built with them: a header reads it every frame.
-    groups: Arc<BTreeSet<PanelGroup>>,
+    /// `panel_groups::problem_levels(rows)`, built with them: a header reads it every frame.
+    groups: Arc<BTreeMap<PanelGroup, Level>>,
 }
 
 /// The codes whose first-screen widget is not the problem row: the card's low-confidence line, the green line and the
@@ -1650,7 +1660,8 @@ const SAID_ELSEWHERE: [Code; 4] = [
 ];
 
 /// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says), its note count and
-/// the groups those rows point at (`groups_with_problems`, for the header dots and the forced-open fill), in the
+/// the groups those rows point at with their worst level (`problem_levels`, for the header dots and the forced-open
+/// fill), in the
 /// surface's slot. The slot is used while its key is the drawn one and its source list is
 /// `bottom::problems(model)` itself (`Arc::ptr_eq`: `problems` hands out the cached `Arc` until its key moves), so a
 /// frame does not rescan the list. `alpha_asked` is read only on a rebuild: it is a function of the item, and the list
@@ -1660,7 +1671,7 @@ fn texture_problems(
     surface: Surface,
     model: &AppModel,
     key: &str,
-) -> (Arc<Vec<Problem>>, usize, Arc<BTreeSet<PanelGroup>>) {
+) -> (Arc<Vec<Problem>>, usize, Arc<BTreeMap<PanelGroup, Level>>) {
     let all = crate::model::bottom::problems(model);
     let id = slot_id("panel-problems", surface);
     if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<ProblemSlot>>(id)) {
@@ -1672,7 +1683,7 @@ fn texture_problems(
         .item(key)
         .is_some_and(|i| crate::model::items::alpha_asked(i).is_some());
     let (rows, notes) = panel_problem_rows(&all, key, alpha_asked);
-    let groups = Arc::new(panel_groups::groups_with_problems(&rows));
+    let groups = Arc::new(panel_groups::problem_levels(&rows));
     let rows = Arc::new(rows);
     let slot = Arc::new(ProblemSlot {
         key: key.to_owned(),
@@ -2196,16 +2207,12 @@ fn used_by_group(
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface) {
     let compact = surface == Surface::Strip;
     // `panel_forced` rule 1: a new selection starts a new latch. Only the model's selection resets it, whichever key
-    // this call draws (the centre and the strip draw two items in one frame).
-    if let Selection::Item(k) = &model.selection {
-        if *k != model.panel_forced.item {
-            model.panel_forced = ForcedOpen {
-                item: k.clone(),
-                ..ForcedOpen::default()
-            };
-        }
-    }
-    let selected = matches!(&model.selection, Selection::Item(k) if k == key);
+    // this call draws (the centre and the strip draw two items in one frame). `draw_with_scan` observes it too, every
+    // frame; this call covers a caller that draws the panel alone.
+    model.observe_panel_selection();
+    // The latch holds groups for this draw only when it is the selected item's (read once: every header uses it).
+    let forced_here = matches!(&model.selection, Selection::Item(k) if k == key)
+        && model.panel_forced.item == key;
     let Some(item) = model.item(key) else {
         ui.weak("This texture is no longer in the plan.");
         return;
@@ -2366,12 +2373,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             let size = (!compact).then(|| model.size_of(key));
             let (rows, notes, problem_groups) = texture_problems(ui.ctx(), surface, model, key);
             // Rule 2: the selected item's first draw with a job adds its problems' groups, once.
-            let forced_here = selected && model.panel_forced.item == key;
             if forced_here && !model.panel_forced.filled {
                 model
                     .panel_forced
                     .groups
-                    .extend(problem_groups.iter().copied());
+                    .extend(problem_groups.keys().copied());
                 model.panel_forced.filled = true;
             }
             let forced = if forced_here {
@@ -2475,6 +2481,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                             key,
                             &group_head(&cx, g),
                             open,
+                            cx.forced.contains(&g),
                         );
                         if toggled {
                             actions.push(Action::SetGroupOpen(g, !open));
@@ -2502,10 +2509,14 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
     if !compact {
         // Note JI3: the preset inspector, folded by default, last.
         let g = PanelGroup::Sources;
-        // Through the same rule as every other header: a forced open (rule 1 to 3) reaches this hand-built one too.
-        let forced =
-            selected && model.panel_forced.item == key && model.panel_forced.groups.contains(&g);
-        let open = panel_groups::is_open_in(&model.settings.texture_groups, g) || forced;
+        // `Ctx` is gone here, so the header reads the same two inputs through `open_with`, the rule `group_open` is.
+        let forced = if forced_here {
+            &model.panel_forced.groups
+        } else {
+            &NO_GROUPS
+        };
+        let open = open_with(&model.settings.texture_groups, forced, g);
+        let instant = forced.contains(&g);
         let head = GroupHead {
             title: g.title(),
             summary: panel_groups::SOURCES_SUMMARY,
@@ -2513,7 +2524,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             changed: false,
             problem: None,
         };
-        if super::inspector_section::section(ui, model, key, &head, open) {
+        if super::inspector_section::section(ui, model, key, &head, open, instant) {
             actions.push(Action::SetGroupOpen(g, !open));
         }
     }

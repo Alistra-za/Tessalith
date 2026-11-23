@@ -1919,7 +1919,7 @@ fn the_mipmaps_group_draws_the_rows_that_are_present() {
                         surface: Surface::Centre,
                         groups,
                         forced: &forced,
-                        problem_groups: &forced,
+                        problem_groups: &std::collections::BTreeMap::new(),
                         summaries: &[],
                     };
                     let mut acts = vec![];
@@ -2070,7 +2070,8 @@ fn a_late_problem_shows_its_dot_without_opening() {
 
 #[test]
 fn a_note_does_not_open_a_group_or_draw_a_dot() {
-    // resize = half raises DIM-RESIZED, an Info code, so `is_note()` is true under 3a
+    // A pin of existing behaviour: resize = half raises DIM-RESIZED, an Info code that no `FIX_FIELDS` entry maps, so
+    // this passes whatever the note filter does; `a_note_with_a_mapped_code_...` tests the filter.
     let d = tempfile::tempdir().unwrap();
     let mut m = rock(d.path());
     panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
@@ -2173,17 +2174,130 @@ fn every_mapped_code_points_at_a_panel_field_and_is_a_problem() {
 
 #[test]
 fn the_sources_header_honours_a_forced_open() {
-    // Every group a task can open goes through `group_open`: Sources is drawn by hand after the rows.
+    // Sources is drawn by hand after the rows, and reads the same forced set as every other header.
     let d = tempfile::tempdir().unwrap();
-    let mut m = rock(d.path());
-    m.panel_forced = sdc_gui::model::ForcedOpen {
-        item: KEY.into(),
-        filled: true,
-        groups: [PanelGroup::Sources].into(),
-    };
-    assert!(matches!(&m.selection, Selection::Item(k) if k == KEY));
-    let h = harness(m, 1280.0, 800.0);
+    let m = rock(d.path());
+    let mut h = harness(m, 1280.0, 800.0); // the first frame starts the latch for KEY
+    h.state_mut()
+        .panel_forced
+        .groups
+        .insert(PanelGroup::Sources);
+    h.run();
     assert!(h
         .query_by_label_contains("Where these settings come from, expanded")
         .is_some());
+}
+
+/// Close the forced Mipmaps (rule 4 takes it out of the latch), so only a fresh fill can open it again.
+fn closed_by_the_user(dir: &std::path::Path) -> Harness<'static, AppModel> {
+    let (mut h, _) = closed_mipmaps(dir);
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run_steps(10);
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+    h
+}
+
+fn decided_flat(h: &mut Harness<'static, AppModel>) {
+    h.state_mut()
+        .decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+}
+
+#[test]
+fn selecting_a_texture_again_opens_its_group_again() {
+    // Rule 1: another item is a new selection, so coming back to the cube fills the latch again.
+    let d = tempfile::tempdir().unwrap();
+    let mut h = closed_by_the_user(d.path());
+    decided_flat(&mut h);
+    h.state_mut().select_item(FLAT);
+    h.run();
+    h.state_mut().select_item(CUBE);
+    h.run();
+    assert!(h.query_by_label_contains("Mipmaps, expanded").is_some());
+}
+
+#[test]
+fn selecting_through_nothing_starts_a_new_latch() {
+    // Rule 1: the latch still names the cube after the selection went to nothing and back, and a draw may not have
+    // seen the in-between. Both orders: a frame drawn in between, and none.
+    for frame_between in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = closed_by_the_user(d.path());
+        h.state_mut().selection = Selection::None;
+        if frame_between {
+            h.run();
+        }
+        h.state_mut().select_item(CUBE);
+        h.run();
+        assert!(
+            h.query_by_label_contains("Mipmaps, expanded").is_some(),
+            "frame between: {frame_between}"
+        );
+    }
+}
+
+#[test]
+fn selecting_the_selected_texture_again_keeps_a_closed_group_closed() {
+    // A click on the item already selected is not a new selection.
+    let d = tempfile::tempdir().unwrap();
+    let mut h = closed_by_the_user(d.path());
+    h.state_mut().select_item(CUBE);
+    h.run();
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+}
+
+fn problem_at(code: Code, level: Level) -> Problem {
+    Problem {
+        code: Some(code),
+        level,
+        ..problem_row("p")
+    }
+}
+
+#[test]
+fn a_group_dot_shows_the_worst_level_of_its_rows() {
+    let rows = [
+        problem_at(Code::ValMipError, Level::Warning),
+        problem_at(Code::CubeNoMips, Level::Blocks),
+        problem_at(Code::FmtBc1Alpha, Level::Warning), // Format is on the first screen: in no group
+    ];
+    let levels = panel_groups::problem_levels(&rows);
+    assert_eq!(levels.get(&PanelGroup::Mipmaps), Some(&Level::Blocks));
+    assert_eq!(levels.len(), 1, "{levels:?}");
+    assert_eq!(
+        panel_groups::groups_with_problems(&rows),
+        [PanelGroup::Mipmaps].into()
+    );
+}
+
+#[test]
+fn a_row_s_also_codes_map_to_their_groups() {
+    // TPC-T5-3: a merged row names more codes than its own.
+    let row = Problem {
+        also: vec![Code::CubeNoMips],
+        ..problem_row("merged")
+    };
+    assert_eq!(
+        panel_groups::groups_with_problems(&[row]),
+        [PanelGroup::Mipmaps].into()
+    );
+}
+
+#[test]
+fn a_note_with_a_mapped_code_maps_to_no_group() {
+    // The note filter, not the table, is under test: CUBE-NO-MIPS is mapped, the user marked the row as intended.
+    let mut row = problem_at(Code::CubeNoMips, Level::Warning);
+    let all = |rows: &[Problem]| -> Vec<Problem> {
+        rows.iter()
+            .filter(|p| panel_groups::is_panel_problem(p))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        panel_groups::groups_with_problems(&all(&[row.clone()])),
+        [PanelGroup::Mipmaps].into(),
+        "premise: unmarked, it maps"
+    );
+    row.intended = true;
+    assert!(panel_groups::groups_with_problems(&all(&[row])).is_empty());
 }

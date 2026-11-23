@@ -4,6 +4,9 @@ use eframe::egui;
 use egui::collapsing_header::CollapsingState;
 
 /// The group's persistent id under `ui`.
+// shortcut: the id is the group's salt under `ui`, so two panel draws that share one parent `Ui` (two `ui.columns`
+// children) share header ids and merge their AccessKit nodes. The app draws each surface in its own panel; give each
+// draw a `push_id` scope if one parent ever holds two.
 // shortcut: the Debug bound of egui ids is dodged by hashing to a u64 first; upgrade to `make_persistent_id(id)` if egui
 // drops the Debug bound or every caller's id type derives Debug.
 fn persistent_id(ui: &egui::Ui, id: impl std::hash::Hash) -> egui::Id {

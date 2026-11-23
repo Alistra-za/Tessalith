@@ -42,13 +42,14 @@ pub(super) fn section(
     key: &str,
     head: &GroupHead<'_>,
     open: bool,
+    instant: bool,
 ) -> bool {
     collapsing_group(
         ui,
         crate::model::panel_groups::PanelGroup::Sources.id(),
         head,
         open,
-        false,
+        instant,
         |ui| body(ui, model, key),
     )
     .toggled

@@ -245,13 +245,15 @@ fn grid<R>(ui: &mut egui::Ui, cx: &Cx, name: &str, add: impl FnOnce(&mut egui::U
 
 /// The cubemap section under its group header `head` (open when `open`); no edits and nothing drawn unless every
 /// selected item is a cube (a mixed selection shows no cube rows and writes no `cubemap.*` key, Note DT8). Returns
-/// the edits, and whether the header was toggled (the caller writes the open state).
+/// the edits, and whether the header was toggled (the caller writes the open state). `instant`: the group is forced
+/// open, so it opens without sliding.
 pub fn cube_section(
     ui: &mut egui::Ui,
     model: &AppModel,
     key: &str,
     head: &GroupHead<'_>,
     open: bool,
+    instant: bool,
 ) -> (Edits, bool) {
     if !all_cubes(model, key) {
         return (vec![], false);
@@ -285,7 +287,7 @@ pub fn cube_section(
         crate::model::panel_groups::PanelGroup::Cubemap.id(),
         head,
         open,
-        false,
+        instant,
         |ui| {
             grid(ui, &cx, "Source", |ui| {
                 let f = find(&views, "cubemap.layout");

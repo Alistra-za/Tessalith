@@ -200,7 +200,7 @@ fn the_section_guard_hides_a_mixed_selection() {
                     problem: None,
                 };
                 let (edits, toggled) =
-                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true);
+                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true, false);
                 assert!(edits.is_empty() && !toggled);
             },
             m,
@@ -1056,4 +1056,53 @@ mod marker {
             h.get_by_label("Save…");
         }
     }
+}
+
+/// A cube header drawn forced open (`instant`) opens in the frame it is told to; one not forced slides (TPC-T5-1).
+fn cube_header_top_after_one_step(instant: bool) -> (f32, f32) {
+    let d = tempfile::tempdir().unwrap();
+    let m = cube_model(d.path(), CUBE);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(800.0, 1600.0))
+        .with_step_dt(1.0 / 120.0)
+        .with_max_steps(40)
+        .build_ui_state(
+            move |ui, s: &mut (AppModel, bool)| {
+                let head = sdc_gui::ui::group::GroupHead {
+                    title: "Cubemap",
+                    summary: "",
+                    summary_hover: None,
+                    changed: false,
+                    problem: None,
+                };
+                sdc_gui::ui::cube_section::cube_section(ui, &s.0, CUBE, &head, s.1, instant);
+                ui.label("below");
+            },
+            (m, false),
+        );
+    h.ctx.all_styles_mut(|s| s.animation_time = 1.0 / 12.0);
+    sdc_gui::ui::motion::force_reduced(&h.ctx, false);
+    h.run();
+    h.state_mut().1 = true;
+    h.step();
+    let one = h.get_by_label("below").rect().top();
+    h.run();
+    (one, h.get_by_label("below").rect().top())
+}
+
+#[test]
+fn a_forced_cube_header_opens_without_sliding() {
+    let (one, settled) = cube_header_top_after_one_step(true);
+    assert_eq!(
+        one, settled,
+        "the body is at its final height at the first step"
+    );
+    let (one, settled) = cube_header_top_after_one_step(false);
+    assert!(
+        one < settled,
+        "premise: an unforced header slides ({one} vs {settled})"
+    );
 }

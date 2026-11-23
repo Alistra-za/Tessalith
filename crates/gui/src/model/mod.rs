@@ -200,8 +200,9 @@ pub enum CentreTab {
     Settings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Selection {
+    #[default]
     None,
     Item(String),
     Set(String),
@@ -212,6 +213,10 @@ pub enum Selection {
 /// `settings_panel::draw` resets and fills it; `Action::SetGroupOpen(g, false)` takes a group out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ForcedOpen {
+    /// The selection this latch was started for: any change of `AppModel::selection` (a set, nothing, another item,
+    /// the same item again) starts a new latch, whether or not a panel was drawn in between
+    /// (`AppModel::observe_panel_selection`). A writer that sets the latch after a `select_item` (Go to) sets this too.
+    pub seen: Selection,
     pub item: String,
     /// The problems' groups were added: the fill runs once per selection.
     pub filled: bool,
@@ -4338,9 +4343,32 @@ impl AppModel {
         };
     }
 
+    /// `panel_forced` rule 1: a selection that differs from the one the latch was started for (through a set, through
+    /// nothing, another item, or the same item again) starts a new, empty latch for the selected item. Runs every frame
+    /// from `ui::draw_with_scan` and at the start of `settings_panel::draw`; a compare of two enums, and a clone only
+    /// when the selection moved.
+    pub fn observe_panel_selection(&mut self) {
+        if self.panel_forced.seen != self.selection {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: match &self.selection {
+                    Selection::Item(k) => k.clone(),
+                    _ => String::new(),
+                },
+                ..ForcedOpen::default()
+            };
+        }
+    }
+
     /// Select one texture; any multi-selection ends (F3a D1).
     pub fn select_item(&mut self, key: &str) {
-        self.selection = Selection::Item(key.to_string());
+        let next = Selection::Item(key.to_string());
+        // `panel_forced` rule 1: coming from anything else (a set, nothing, another item) is a new selection, even when
+        // no frame was drawn in between and the latch still holds this key. A click on the selected item is not.
+        if self.selection != next {
+            self.panel_forced = ForcedOpen::default();
+        }
+        self.selection = next;
         self.reset_multi();
         self.bulk = Default::default();
         // Note FB7: also a click on the texture already selected brings it to the front of the centre.
