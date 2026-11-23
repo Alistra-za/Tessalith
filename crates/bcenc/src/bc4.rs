@@ -19,8 +19,8 @@
 //! Before scoring, `Batch::push` skips a pair when the best as it stands has error 0 or the pair's lower bound
 //! (`bound::Bound`, whose module doc gives the proof) is at or above that error: the pair's error is at least its
 //! bound, so `try_pair` would refuse it, and skipping it changes no byte. On `Avx2` a waiting pair may still lower that
-//! best; a best that is higher only prunes less. [`search_on`] and [`search_max_on`] build one bound per block (an
-//! empty one, which never prunes on its own, for a solid block); [`upstream`] uses the empty one.
+//! best; a best that is higher only prunes less. [`search_on`] and [`search_max_on`] build one bound per block, except
+//! that a solid block shares `bound::EMPTY`, which never prunes on its own; [`upstream`] uses `EMPTY` too.
 #![allow(
     clippy::needless_range_loop,
     reason = "index loops mirror the C++ they port"

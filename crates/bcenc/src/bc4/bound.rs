@@ -15,9 +15,9 @@
 
 use super::minmax;
 
-/// The tables of one block, on the stack of that block's search.
+/// The tables of one block, on the stack of that block's search; a solid block shares [`EMPTY`].
 pub(crate) struct Bound {
-    /// The window, both ends included; `lo > hi` for [`Bound::empty`].
+    /// The window, both ends included; `lo > hi` for [`Bound::empty`] and [`EMPTY`].
     lo: u8,
     hi: u8,
     a: [u32; 256],
