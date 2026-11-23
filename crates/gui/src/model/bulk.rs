@@ -95,6 +95,80 @@ pub struct BulkView {
     /// The header summaries and marks of the groups the panel draws, in panel order (`bulk_summary`); empty when no
     /// selected texture has a job.
     pub groups: Vec<(PanelGroup, GroupSummary)>,
+    /// What the Green row reaches (A3), built here with the rest of the cached view.
+    pub green: GreenReach,
+}
+
+pub const SKIP_NOT_NORMAL: &str = "not a normal map";
+pub const SKIP_MSN: &str = "model-space normal (_msn): no green to flip";
+pub const SKIP_NO_PLAN: &str = "not planned yet";
+pub const SKIP_UNDECIDED: &str = "type not decided yet";
+pub const GREEN_NONE: &str = "No selected texture takes green.";
+
+/// A3-1, A3-4: what the bulk panel's Green row reaches. Built in `bulk_view()`'s cache, never per frame.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GreenReach {
+    /// Typed textures whose type reads `channels.green_convention` (`engine::policy::takes_green`), in order.
+    pub takes: Vec<String>,
+    /// (reason, count) of the other textures of `keys`, in first-seen order (the `BulkField.skipped` shape).
+    pub skipped: Vec<(String, usize)>,
+    /// The convention every one of `takes` resolves to (unset reads DirectX, as the engine assumes:
+    /// IN-GREEN-UNSTATED); `None` when they differ or `takes` is empty.
+    pub value: Option<engine::config::GreenConvention>,
+    /// The row's label, "Green: OpenGL" (empty when `takes` is).
+    pub label: String,
+    /// The row's note, "applies to {k} of {n}".
+    pub note: String,
+    /// The note's hover: the note, then one "locked on {count} of {n}: {reason}" line per skip reason.
+    pub hover: String,
+}
+
+/// A3-1, A3-4: `keys` split by reach: a planned job whose sub-type takes green and that is not waiting for its
+/// type (a written DirectX stays in reach).
+pub fn green_reach(m: &AppModel, keys: &[String]) -> GreenReach {
+    use engine::config::GreenConvention;
+    let mut r = GreenReach::default();
+    let mut values: Vec<GreenConvention> = vec![];
+    for k in keys {
+        let reason = match m.item(k) {
+            None => SKIP_NO_PLAN,
+            Some(i) if i.waiting => SKIP_UNDECIDED,
+            Some(i) => match i.job.as_ref() {
+                None => SKIP_NO_PLAN,
+                Some(j) if j.profile.subtype == Subtype::Msn => SKIP_MSN,
+                Some(j) if !engine::policy::takes_green(j.profile.subtype) => SKIP_NOT_NORMAL,
+                Some(j) => {
+                    r.takes.push(k.clone());
+                    let g = j
+                        .profile
+                        .channels
+                        .green_convention
+                        .unwrap_or(GreenConvention::Directx);
+                    if !values.contains(&g) {
+                        values.push(g);
+                    }
+                    continue;
+                }
+            },
+        };
+        match r.skipped.iter_mut().find(|e| e.0 == reason) {
+            Some(e) => e.1 += 1,
+            None => r.skipped.push((reason.to_string(), 1)),
+        }
+    }
+    if let [g] = values[..] {
+        r.value = Some(g);
+    }
+    if !r.takes.is_empty() {
+        r.label = format!("Green: {}", r.value.map_or("mixed", green_name));
+        r.note = format!("applies to {} of {}", r.takes.len(), keys.len());
+        r.hover = if r.skipped.is_empty() {
+            r.note.clone()
+        } else {
+            format!("{}\n{}", r.note, skipped_lines(&r.skipped, keys.len()))
+        };
+    }
+    r
 }
 
 impl AppModel {
@@ -657,11 +731,24 @@ impl BulkField {
 
     /// The note's hover: one "locked on M of N: <reason>" line per reason.
     pub fn skipped_text(&self) -> String {
-        self.skipped
-            .iter()
-            .map(|(r, n)| format!("locked on {n} of {}: {r}", self.total))
-            .collect::<Vec<_>>()
-            .join("\n")
+        skipped_lines(&self.skipped, self.total)
+    }
+}
+
+/// One "locked on {count} of {total}: {reason}" line per skip reason (Note LM11), shared by the rows and the Green row.
+fn skipped_lines(skipped: &[(String, usize)], total: usize) -> String {
+    skipped
+        .iter()
+        .map(|(r, n)| format!("locked on {n} of {total}: {r}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// "OpenGL" or "DirectX": the green convention as the single panel words it.
+fn green_name(g: engine::config::GreenConvention) -> &'static str {
+    match g {
+        engine::config::GreenConvention::Opengl => "OpenGL",
+        engine::config::GreenConvention::Directx => "DirectX",
     }
 }
 
@@ -989,6 +1076,50 @@ impl AppModel {
             return;
         }
         self.apply_bulk_edit(&eligible, "subtype", BulkOp::Set(serde_json::json!(st)));
+    }
+
+    /// A3-1, A3-2, TPC-R2: write `channels.green_convention = g` (`decide`, so DirectX is written, not cleared) on
+    /// every key of `keys` that is still selected and that `green_reach` takes, as one step. Refuses with
+    /// `Err(fix_off())` while a plan is pending or `sdc.toml` is read-only; with no key still selected it writes
+    /// nothing and reports nothing. The report is "Green: {OpenGL|DirectX} written to {k} of {n}" (n = the keys still
+    /// selected), set only when something changed or was skipped; with no texture that takes green it is `GREEN_NONE`.
+    pub fn decide_many_green(
+        &mut self,
+        keys: &[String],
+        g: engine::config::GreenConvention,
+    ) -> Result<usize, String> {
+        if let Some(why) = self.fix_off() {
+            return Err(why);
+        }
+        let current = self.bulk_targets();
+        let mut kept: Vec<String> = vec![];
+        for k in keys {
+            if current.contains(k) && !kept.contains(k) {
+                kept.push(k.clone());
+            }
+        }
+        if kept.is_empty() {
+            return Ok(0);
+        }
+        let r = green_reach(self, &kept);
+        if r.takes.is_empty() {
+            self.bulk.report = Some(GREEN_NONE.into());
+            return Ok(0);
+        }
+        let changed = self.batch_edit(&format!("Green for {}", textures(r.takes.len())), |m| {
+            for k in &r.takes {
+                m.decide(k, super::Answer::Green(g));
+            }
+        });
+        if changed || !r.skipped.is_empty() {
+            self.bulk.report = Some(format!(
+                "Green: {} written to {} of {}",
+                green_name(g),
+                r.takes.len(),
+                kept.len()
+            ));
+        }
+        Ok(r.takes.len())
     }
 
     /// F3a D2/D5: write (or clear) `field` on every texture of `keys` it applies to, through the single-texture
@@ -1490,7 +1621,9 @@ impl AppModel {
                 })
                 .collect()
         });
+        let green = green_reach(self, &keys);
         let view = std::sync::Arc::new(BulkView {
+            green,
             keys,
             rows,
             chips,

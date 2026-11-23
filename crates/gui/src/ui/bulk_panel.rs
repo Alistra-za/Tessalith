@@ -7,14 +7,14 @@ use super::settings_panel::{
     set_group_open, subtype_label, RowEdit,
 };
 use crate::look::Combo036 as _;
-use crate::model::bulk::{is_value_dependent, BulkField, BulkOp};
+use crate::model::bulk::{is_value_dependent, BulkField, BulkOp, GreenReach};
 use crate::model::fields::{effort_field, field_help, FieldView, EFFORT_FIELDS};
 use crate::model::labels::type_hover;
 use crate::model::panel_groups::{self, PanelGroup};
 use crate::model::sets::SlotKind;
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::{Subtype, Target};
+use engine::config::{GreenConvention, Subtype, Target};
 use engine::policy::ResolvedJob;
 use serde_json::Value;
 
@@ -27,6 +27,7 @@ enum Act {
     Reencode(Vec<String>),
     Decide(Vec<String>, Subtype),
     SetGroupOpen(PanelGroup, bool),
+    Green(Vec<String>, GreenConvention),
 }
 
 /// "{m} other selected textures already have a type." (the card's line under Apply).
@@ -260,6 +261,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                                 }
                             }
                         });
+                    green_row(ui, model, keys, &view.green, &mut acts);
                 });
                 // Each header sits outside the disabled scope (R1-1, FK3): only its rows are greyed.
                 for (g, summary) in &view.groups {
@@ -299,11 +301,48 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             Act::Kind(k) => model.bulk.kind = k,
             Act::Reencode(ks) => model.set_reencode(&ks, true),
             Act::Decide(ks, st) => model.decide_many(&ks, st),
+            // The row already shows why a refusal happened (its buttons are off with the reason).
+            Act::Green(ks, g) => drop(model.decide_many_green(&ks, g)),
             Act::SetGroupOpen(g, open) => set_group_open(model, g, open),
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
         }
     }
+}
+
+/// A3: the Green row, right under Format. "Green: OpenGL", the two buttons that write a convention on every selected
+/// texture that takes green, and the reach note with the skip reasons on hover. Drawn only when some texture takes
+/// green; every string comes from the cached view (`GreenReach`).
+fn green_row(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    keys: &[String],
+    green: &GreenReach,
+    acts: &mut Vec<Act>,
+) {
+    if green.takes.is_empty() {
+        return;
+    }
+    let off = model.fix_off();
+    // Wrapped, not a grid row: two long buttons in the first-screen grid would widen its columns past the panel.
+    ui.horizontal_wrapped(|ui| {
+        ui.label(green.label.as_str());
+        for (text, g) in [
+            ("Treat as OpenGL (flip green)", GreenConvention::Opengl),
+            ("Treat as DirectX", GreenConvention::Directx),
+        ] {
+            let r = ui.add_enabled(off.is_none(), egui::Button::new(text));
+            let r = match &off {
+                Some(why) => r.on_disabled_hover_text(why),
+                None => r,
+            };
+            if r.clicked() && off.is_none() {
+                acts.push(Act::Green(keys.to_vec(), g));
+            }
+        }
+        ui.label(egui::RichText::new(green.note.as_str()).small().weak())
+            .on_hover_text(green.hover.as_str());
+    });
 }
 
 /// One bulk row: the label; the editor (its mixed state, disabled when the field applies to none); the note, with

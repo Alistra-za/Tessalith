@@ -3010,3 +3010,415 @@ fn the_bulk_view_is_rebuilt_when_the_active_texture_the_target_or_a_job_changes(
     m.bulk_view();
     assert!(m.bulk_computes() > n + 2, "a changed job");
 }
+
+// Task 7a (A3): the bulk Green row.
+
+use engine::config::{GreenConvention, Subtype};
+
+/// Two tangent normals, one model-space normal and a colour texture in `textures/g`, all decided. `sdc_toml` is
+/// written to the project root before the folder opens; `bump` adds a lone `g/d_bump.png` that waits for its type.
+fn normals_in(dir: &std::path::Path, sdc_toml: Option<&str>, bump: bool) -> AppModel {
+    let r = dir.join("textures/g");
+    std::fs::create_dir_all(&r).unwrap();
+    let flat = |_, _| image::Rgb([128u8, 128, 255]);
+    for n in ["a_n.png", "b_n.png", "c_msn.png"] {
+        image::RgbImage::from_fn(64, 64, flat)
+            .save(r.join(n))
+            .unwrap();
+    }
+    if bump {
+        image::RgbImage::from_fn(64, 64, flat)
+            .save(r.join("d_bump.png"))
+            .unwrap();
+    }
+    image::RgbImage::from_fn(64, 64, |x, y| image::Rgb([x as u8, y as u8, 90]))
+        .save(r.join("plain.png"))
+        .unwrap();
+    if let Some(t) = sdc_toml {
+        std::fs::write(dir.join("textures/sdc.toml"), t).unwrap();
+    }
+    let mut m = support::opened_as_the_app(dir.join("textures"), dir.join("export"));
+    m.decide("g/a_n.png", Answer::Subtype(Subtype::Normal));
+    m.decide("g/b_n.png", Answer::Subtype(Subtype::Normal));
+    m.decide("g/c_msn.png", Answer::Subtype(Subtype::Msn));
+    m.decide("g/plain.png", Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+fn normals_and_others(dir: &std::path::Path) -> AppModel {
+    normals_in(dir, None, false)
+}
+const GREEN_KEYS: [&str; 4] = ["g/a_n.png", "g/b_n.png", "g/c_msn.png", "g/plain.png"];
+fn green_keys() -> Vec<String> {
+    GREEN_KEYS.iter().map(|k| k.to_string()).collect()
+}
+fn green_of(m: &AppModel, k: &str) -> Option<serde_json::Value> {
+    m.project
+        .as_ref()
+        .unwrap()
+        .file_value(k, "channels.green_convention")
+}
+/// The planned convention of `k`, as the engine reads it (unset is DirectX).
+fn green_read(m: &AppModel, k: &str) -> GreenConvention {
+    let job = m.item(k).and_then(|i| i.job.as_ref()).expect("planned");
+    job.profile
+        .channels
+        .green_convention
+        .unwrap_or(GreenConvention::Directx)
+}
+/// Select `keys` (two or more, so the bulk panel is in effect) and return them as the click passes them: the model
+/// re-reads the selection at the click (TPC-R2), so a model-level call selects first, as the panel's click does.
+fn select(m: &mut AppModel, keys: &[&str]) -> Vec<String> {
+    m.select_item(keys[0]);
+    for k in &keys[1..] {
+        m.click_item(k, true, false);
+    }
+    let ks: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    let (mut got, mut want) = (m.bulk_targets(), ks.clone());
+    got.sort();
+    want.sort();
+    assert_eq!(got, want, "premise: the bulk targets are these keys");
+    ks
+}
+/// `keys` selected, every group closed (so the panel looks the same whatever the group state). `tall`: the 1280 x 1600
+/// harness; otherwise `bulk_harness`. Both only draw: `ui::draw` never polls the planner, so a plan lands only at
+/// `wait_idle`, and a plan left pending by `set_field` stays pending.
+fn green_panel(mut m: AppModel, keys: &[&str], tall: bool) -> Harness<'static, AppModel> {
+    select(&mut m, keys);
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, false);
+    }
+    if tall {
+        return harness(m, 1280.0, 1600.0);
+    }
+    bulk_harness(m)
+}
+/// The Green row's own "applies to ..." note: the one on or just below the "Green: ..." label, not another row's.
+fn green_reach_note(h: &Harness<'_, AppModel>, green: &str, note: &str) -> egui::Rect {
+    let g = h.get_by_label(green).rect();
+    h.query_all_by_label(note)
+        .map(|n| n.rect())
+        .filter(|r| r.top() >= g.top() - 2.0 && r.top() <= g.bottom() + 24.0)
+        .min_by(|a, b| {
+            (a.top() - g.top())
+                .abs()
+                .total_cmp(&(b.top() - g.top()).abs())
+        })
+        .unwrap_or_else(|| panic!("{note} on the {green} row"))
+}
+
+#[test]
+fn green_reaches_the_normals_that_take_it_in_one_step() {
+    use sdc_gui::model::bulk::{green_reach, SKIP_MSN, SKIP_NOT_NORMAL};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let r = green_reach(&m, &green_keys());
+    assert_eq!(r.takes, ["g/a_n.png", "g/b_n.png"]);
+    assert_eq!(
+        r.skipped,
+        [(SKIP_MSN.to_string(), 1), (SKIP_NOT_NORMAL.to_string(), 1)]
+    );
+    assert_eq!(
+        r.value,
+        Some(GreenConvention::Directx),
+        "unset reads DirectX"
+    );
+    let keys = select(&mut m, &GREEN_KEYS); // TPC-R2: the click's keys are still selected
+                                            // A bulk Format write first: the Green write must replace its result line (the panel's one line).
+    m.apply_bulk_edit(
+        &keys,
+        "format",
+        sdc_gui::model::bulk::BulkOp::Set(json!("bc7")),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        m.bulk
+            .report
+            .as_deref()
+            .is_some_and(|r| r.starts_with("Format: ")),
+        "premise: {:?}",
+        m.bulk.report
+    );
+    let steps = m.history.undo.len();
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(2));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+    assert_eq!(m.history.undo.last().unwrap().label, "Green for 2 textures");
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(green_of(&m, k), Some(json!("opengl")), "{k}");
+    }
+    for k in ["g/c_msn.png", "g/plain.png"] {
+        assert_eq!(green_of(&m, k), None, "{k} is skipped");
+    }
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Green: OpenGL written to 2 of 4"),
+        "the Format line is replaced"
+    );
+    m.undo();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(green_of(&m, "g/a_n.png"), None, "Undo takes both back");
+    assert_eq!(green_of(&m, "g/b_n.png"), None);
+    // One texture reads "1 texture". Bulk needs two selected, so one normal and the colour texture.
+    let one = select(&mut m, &["g/a_n.png", "g/plain.png"]);
+    assert_eq!(m.decide_many_green(&one, GreenConvention::Opengl), Ok(1));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.history.undo.last().unwrap().label, "Green for 1 texture");
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Green: OpenGL written to 1 of 2")
+    );
+    // A second click on the same button changes nothing: no step and no report, as `apply_bulk_edit` does.
+    let two = select(&mut m, &["g/a_n.png", "g/b_n.png"]);
+    assert_eq!(m.decide_many_green(&two, GreenConvention::Opengl), Ok(2)); // writes b_n; a_n is already OpenGL
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let steps = m.history.undo.len();
+    m.bulk.report = None;
+    assert_eq!(m.decide_many_green(&two, GreenConvention::Opengl), Ok(2));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.history.undo.len(), steps, "same value: no step");
+    assert_eq!(m.bulk.report, None, "same value: nothing was written");
+}
+
+#[test]
+fn a_selection_with_no_normal_has_no_green_row_and_writes_nothing() {
+    use sdc_gui::model::bulk::GREEN_NONE;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let keys = select(&mut m, &["g/c_msn.png", "g/plain.png"]);
+    let steps = m.history.undo.len();
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(0));
+    assert_eq!(m.bulk.report.as_deref(), Some(GREEN_NONE));
+    assert_eq!(m.history.undo.len(), steps);
+    let mut h = green_panel(m, &["g/c_msn.png", "g/plain.png"], false);
+    h.run();
+    assert!(h.query_by_label("Treat as OpenGL (flip green)").is_none());
+    assert!(h.query_by_label_contains("Green: ").is_none());
+}
+
+#[test]
+fn the_green_row_reads_mixed_and_its_buttons_write_both_ways() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    m.decide("g/a_n.png", Answer::Green(GreenConvention::Opengl));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut h = green_panel(m, &GREEN_KEYS, false);
+    h.run();
+    let note = green_reach_note(&h, "Green: mixed", "applies to 2 of 4");
+    h.hover_at(note.center());
+    h.run();
+    h.get_by_label_contains("locked on 1 of 4: model-space normal (_msn): no green to flip");
+    h.get_by_label("Treat as DirectX").click();
+    h.run();
+    let m = h.state_mut();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(green_of(m, k), Some(json!("directx")), "{k}");
+    }
+    h.run();
+    h.get_by_label("Green: DirectX");
+}
+
+/// A3-2: a `[subtypes.normal]` line that says OpenGL is overridden by the bulk DirectX, which a Clear would not do.
+#[test]
+fn a_layer_opengl_reads_directx_after_the_bulk_click() {
+    let d = tempfile::tempdir().unwrap();
+    let m = normals_in(
+        d.path(),
+        Some("[subtypes.normal]\nchannels = { green_convention = \"opengl\" }\n"),
+        false,
+    );
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(
+            green_read(&m, k),
+            GreenConvention::Opengl,
+            "{k}: the layer reads OpenGL"
+        );
+        assert_eq!(green_of(&m, k), None, "{k}");
+    }
+    let mut h = green_panel(m, &GREEN_KEYS, false);
+    h.run();
+    h.get_by_label("Green: OpenGL");
+    h.get_by_label("Treat as DirectX").click();
+    h.run();
+    let m = h.state_mut();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(green_of(m, k), Some(json!("directx")), "{k}");
+        assert_eq!(
+            green_read(m, k),
+            GreenConvention::Directx,
+            "{k} reads DirectX now"
+        );
+    }
+    h.run();
+    h.get_by_label("Green: DirectX");
+}
+
+/// A3-3: a texture still waiting for its type gets no green, with its own reason.
+#[test]
+fn a_texture_waiting_for_its_type_is_skipped() {
+    use sdc_gui::model::bulk::{green_reach, SKIP_UNDECIDED};
+    const BUMP: &str = "g/d_bump.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_in(d.path(), None, true);
+    assert!(
+        m.item(BUMP).expect("listed").waiting,
+        "premise: {BUMP} waits for a type"
+    );
+    let keys: Vec<String> = ["g/a_n.png", BUMP].iter().map(|k| k.to_string()).collect();
+    let r = green_reach(&m, &keys);
+    assert_eq!(r.takes, ["g/a_n.png"]);
+    assert_eq!(r.skipped, [(SKIP_UNDECIDED.to_string(), 1)]);
+    let keys = select(&mut m, &["g/a_n.png", BUMP]);
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(1));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        green_of(&m, BUMP),
+        None,
+        "the waiting texture is not written"
+    );
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Green: OpenGL written to 1 of 2")
+    );
+    let mut h = green_panel(m, &["g/a_n.png", BUMP], false);
+    h.run();
+    let note = green_reach_note(&h, "Green: OpenGL", "applies to 1 of 2");
+    h.hover_at(note.center());
+    h.run();
+    h.get_by_label_contains("locked on 1 of 2: type not decided yet");
+}
+
+/// FK3 and TPC-R2: while a plan is pending both buttons are off with the wait reason, and the model refuses a write
+/// that lands anyway (as `decide_many` returns on `fix_off()`).
+#[test]
+fn the_green_buttons_wait_for_the_plan_and_the_model_refuses() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    m.set_field("g/plain.png", "resize", serde_json::json!("half"));
+    assert_eq!(
+        m.fix_off().as_deref(),
+        Some("Wait for the plan to finish"),
+        "premise: the edit left a plan in flight"
+    );
+    let keys = select(&mut m, &GREEN_KEYS);
+    let steps = m.history.undo.len();
+    m.bulk.report = None;
+    assert_eq!(
+        m.decide_many_green(&keys, GreenConvention::Opengl),
+        Err("Wait for the plan to finish".to_string())
+    );
+    assert_eq!(
+        m.history.undo.len(),
+        steps,
+        "nothing written while the plan is pending"
+    );
+    assert_eq!(m.bulk.report, None, "no report");
+    assert!(
+        m.fix_off().is_some(),
+        "still pending: the refusal is what the test saw"
+    );
+    let mut h = green_panel(m, &GREEN_KEYS, true);
+    h.run_steps(3);
+    for b in ["Treat as OpenGL (flip green)", "Treat as DirectX"] {
+        assert!(
+            h.get_by_label(b).accesskit_node().is_disabled(),
+            "{b} is off"
+        );
+    }
+    let r = h.get_by_label("Treat as DirectX").rect();
+    h.hover_at(r.center());
+    h.run();
+    h.get_by_label("Wait for the plan to finish");
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(green_of(h.state(), k), None, "{k}");
+    }
+}
+
+/// A read-only `sdc.toml`: the buttons are off with its reason; the model refuses and writes nothing.
+#[test]
+fn a_read_only_sdc_toml_takes_no_green() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
+    let why = m.toml_read_only_reason().expect("read-only");
+    assert_eq!(m.fix_off().as_deref(), Some(why.as_str()));
+    let keys = select(&mut m, &GREEN_KEYS);
+    let steps = m.history.undo.len();
+    assert_eq!(
+        m.decide_many_green(&keys, GreenConvention::Opengl),
+        Err(why.clone())
+    );
+    assert_eq!(m.history.undo.len(), steps, "nothing written");
+    assert_eq!(
+        m.bulk.report, None,
+        "no report, as apply_bulk_edit on a read-only sdc.toml"
+    );
+    let mut h = green_panel(m, &GREEN_KEYS, false);
+    h.run();
+    for b in ["Treat as OpenGL (flip green)", "Treat as DirectX"] {
+        assert!(
+            h.get_by_label(b).accesskit_node().is_disabled(),
+            "{b} is off"
+        );
+    }
+    // The panel already shows the reason as a line, so the hover is one more node.
+    let shown = h.query_all_by_label(&why).count();
+    let r = h.get_by_label("Treat as OpenGL (flip green)").rect();
+    h.hover_at(r.center());
+    h.run();
+    assert!(
+        h.query_all_by_label(&why).count() > shown,
+        "the button's hover gives the reason"
+    );
+}
+
+/// TPC-R2: the click re-reads the selection, as the type card's Apply does.
+#[test]
+fn a_stale_green_click_writes_only_to_what_is_still_selected() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let keys = select(&mut m, &GREEN_KEYS);
+    // The selection moved on to one texture before the click landed: no bulk selection is left.
+    m.click_item("g/a_n.png", false, false);
+    let steps = m.history.undo.len();
+    m.bulk.report = None;
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(0));
+    assert_eq!(m.history.undo.len(), steps, "nothing written");
+    assert_eq!(
+        m.bulk.report, None,
+        "no report, as decide_many with nothing eligible"
+    );
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        assert_eq!(green_of(&m, k), None, "{k}");
+    }
+    // The selection shrank to a_n and plain: only a_n is written, and the counts are of what is still selected.
+    select(&mut m, &["g/a_n.png", "g/plain.png"]);
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(1));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(green_of(&m, "g/a_n.png"), Some(json!("opengl")));
+    assert_eq!(
+        green_of(&m, "g/b_n.png"),
+        None,
+        "no longer selected: not written"
+    );
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Green: OpenGL written to 1 of 2")
+    );
+}
+
+/// Pin of existing behaviour (Z5): Green is no field, so Copy settings never carries it.
+#[test]
+fn green_stays_out_of_the_copied_fields() {
+    assert!(!sdc_gui::model::bulk::panel_fields()
+        .iter()
+        .any(|(f, _)| *f == "channels.green_convention"));
+    assert!(!sdc_gui::model::fields::FIELDS
+        .iter()
+        .any(|(f, _)| *f == "channels.green_convention"));
+}
