@@ -562,8 +562,7 @@ fn main() {
     }
 }
 
-// Run with `cargo test --offline -p encoders-sys --example bc6h_quality` (plain `cargo test` does not build examples
-// with the test harness).
+// `test = true` on the `[[example]]` in Cargo.toml makes a plain `cargo test -p encoders-sys` run these.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,11 +570,11 @@ mod tests {
     const HEAD: &str = "set,image,level,target,clamped,mpsnr,rmsle,peak_ratio,seconds,sha256\n";
 
     fn csv(rows: &[(&str, &str, &str)]) -> Vec<Row> {
-        let mut t = String::from(HEAD);
-        for (s, i, l) in rows {
-            t += &format!("{s},{i},{l},avx2,0,50.0000,0.003000,0.900000,1.000,aa\n");
-        }
-        parse_csv(&t, "t.csv").unwrap()
+        let body: String = rows
+            .iter()
+            .map(|(s, i, l)| format!("{s},{i},{l},avx2,0,50.0000,0.003000,0.900000,1.000,aa\n"))
+            .collect();
+        parse_csv(&format!("{HEAD}{body}"), "t.csv").unwrap()
     }
 
     #[test]

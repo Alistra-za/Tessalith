@@ -856,10 +856,12 @@ fn nearest_code_equals_the_exhaustive_search() {
 /// (`unpack_to_uf16`, the D3D formula), but `ep_quant_bc6h` rounded by `ep * (2^bits - 1) / 65535`. That misses the
 /// nearest code near both ends of the range: one too high near 0, one too low near the top.
 ///
-/// Only G and B are tested. A channel that is constant over the block gets the channel's mean as both endpoints,
-/// exactly. Along the varying channel the PCA axis is renormalised with a fast-math reciprocal square root, which can
-/// move the endpoints by several UF16 units. So R varies only to force mode 10 (its span is far beyond mode 11's
-/// 7782.3 UF16 units, so Veryfast writes mode 10: 10-bit absolute endpoints), and G and B are each constant.
+/// Only G and B are tested. A channel that is constant over the block gets endpoints close to the channel's mean, not
+/// exactly at it: the PCA axis is renormalised with a fast-math reciprocal square root, which can move the endpoints
+/// by several UF16 units along the varying channel and a little in the others. So R varies only to force mode 10 (its
+/// span is far beyond mode 11's 7782.3 UF16 units, so Veryfast writes mode 10: 10-bit absolute endpoints), and G and B
+/// are each constant. The test holds because that mode's 10-bit step is 64 UF16 units, and every input is at least 4
+/// units from an edge between two codes, so a small shift of the endpoint cannot change the nearest code.
 ///
 /// The inputs are half codes h (UF16 value v = h * 64 / 31) where the shipped rule and the nearest code differ, the
 /// nearest code is strict, and v is at least 4 UF16 units from both edges of that mismatch window: G from nearest codes

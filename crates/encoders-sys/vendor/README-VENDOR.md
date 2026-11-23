@@ -98,7 +98,7 @@ it. BC6H bytes unchanged: every pin and every measured image hash equal (Note LM
 partition count to the 32 entries of `part_list`; no profile in Tessalith asks for more than 32, so it is unreachable
 here and guards other callers. BC6H bytes unchanged (Note LM3). Fix #5: `get_span` returned a float through an `int`,
 which truncated mode 2's 204.8 to 204, so a block whose widest channel spans 99 half codes (204.39 UF16 units) was kept
-out of mode 2 at Fast; it now returns the float span. Proof test: `mode_2_takes_a_span_inside_its_fractional_limit`.
+out of mode 2 at Fast and Basic; it now returns the float span. Proof test: `mode_2_takes_a_span_inside_its_fractional_limit`.
 Fix #5 changes BC6H bytes (Note LM4). Fix #1: `block_quant` stored each texel's float error in an `int`, which overflows
 above 2^31 (a black texel beside one brighter than about 1344.0), and the overflowed value beat every honest candidate;
 it now keeps the float. Proof test: `black_beside_bright_keeps_both` (on the pre-fix objects it failed at Slow and

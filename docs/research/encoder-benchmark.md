@@ -704,14 +704,14 @@ Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `
 I audited the vendored ISPC TC BC6H kernel and fixed what reproduced, in patch 0004 (`crates/encoders-sys/vendor/ispctc/patches/0004-bc6h-kernel-fixes.patch`). Every BC6H row above, and the peak-mode numbers, measured upstream ISPC TC, before this patch.
 
 **Fixed.** Each fix has a test that failed on the kernel before it and passes after (or, for #6 and #7, pins that stay byte for byte equal).
-- #5, `get_span` returned its span through an `int`: a block whose widest channel spans 204.39 UF16 units was kept out of mode 2 at Fast, because 204.8 became 204. Changes bytes.
+- #5, `get_span` returned its span through an `int`: a block whose widest channel spans 204.39 UF16 units was kept out of mode 2 at Fast and Basic, because 204.8 became 204. Changes bytes.
 - #1, `block_quant` kept each texel's float error in an `int`: above 2^31 (a black texel beside one brighter than about 1344.0) it overflowed, and the overflowed value beat every honest candidate. Slow, Veryslow and VeryslowPeak turned such a block grey. Changes bytes.
 - #3, the one-region encode submitted its last refinement pass, which can be worse than its first quantisation: it submits the best now. Changes bytes at Basic and slower.
 - #2, endpoints rounded by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds a code at (q + 0.5) * 65536 / 2^bits: the code could be one too high near 0 and one too low near the top. They take the code the decoder rebuilds nearest now. Changes bytes, and carries most of the mPSNR gain below (+0.066 of +0.069 dB).
 - #6, `rgb_span` was declared with no elements and used with three: it has three now. No byte moves.
 - #7, `bc6h_enc_2p` could read past its 32 partitions: it clamps. No profile asks for more, so no byte moves.
 
-**Dropped.** #4, negative and non-finite halves read as large values: Tessalith's `clamp_half` clamps every BC6H input first, so the kernel never sees them.
+**Out of scope, not tested.** #4, negative and non-finite halves read as large values: Tessalith's `clamp_half` clamps every BC6H input first, so the kernel never sees them.
 
 **Method.** `crates/encoders-sys/examples/bc6h_quality.rs` encodes the 18 `hdr_real` images (Poly Haven, 1024x512) and the 4 synthetic `hdr_grad` images at all six levels, one 4-row strip per call, decodes with `bcdec_rs`, and scores mPSNR, RMSLE and the peak ratio against the input as the engine sends it (every channel through `clamp_half`). The base is the kernel before patch 0004, the final is the kernel after it, both on the AVX2 path, paired per image: n = 18, 95 % Student-t intervals. Machine: Windows, Ryzen 7 9800X3D. A fix that lowered a metric's mean with an interval excluding 0 would have been dropped; only #2 trips that at Veryfast, and the owner accepted it.
 
@@ -736,7 +736,7 @@ Base to final, mean delta (+ is better) with its 95 % half-width, and images bet
 - basic and slower: every image gains, from +0.006 to +1.803 (slow, dim_ramp), except slow's sky_sun, which is unchanged (+0.000).
 - veryslow_peak equals veryslow on all four.
 
-**Changed images.** At every level, base against final on AVX2: 0 of 18 `hdr_real` and 0 of 4 `hdr_grad` images are byte-identical, so all six levels changed all 22. Per fix, against the one before: #6 and #7 changed none; #5 changed most images at Fast and slower (3 of 18 identical at Veryfast); #1 changed none at Veryfast, 17 of 18 at Fast, Basic and Slow, and every image at Veryslow and VeryslowPeak; #3 changed Basic and slower; #2 changed every image at every level.
+**Changed images.** At every level, base against final on AVX2: 0 of 18 `hdr_real` and 0 of 4 `hdr_grad` images are byte-identical, so all six levels changed all 22. Per fix, against the one before: #6 and #7 changed none; #5 changed 15 of 18 `hdr_real` images at Veryfast, 17 at Basic and all 18 at the other levels; #1 changed none at Veryfast, 17 of 18 at Fast, Basic and Slow, and every image at Veryslow and VeryslowPeak; #3 changed Basic and slower; #2 changed every image at every level.
 
 **SSE2 and AVX-512.** The same comparison on SSE2 and on AVX-512 agrees with AVX2 in direction at every level and metric, all means within 0.001 of AVX2 and the same single negative (Veryfast mPSNR, -0.003 ±0.002). The win and loss counts differ here and there.
 
