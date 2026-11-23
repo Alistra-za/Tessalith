@@ -1553,10 +1553,21 @@ fn a_packed_tile_says_what_it_is_made_from() {
         .unwrap()
         .key
         .clone();
+    // Rulings 3d-F-9 and 3d-F-9b: the tile's node carries its key, status and warnings, never the pack lines, which
+    // stay on hover (and on helper rows).
+    let node = h
+        .query_all(egui_kittest::kittest::by().predicate(|n| {
+            n.description().is_some() && n.label().is_some_and(|l| l.starts_with(key.as_str()))
+        }))
+        .next()
+        .unwrap_or_else(|| panic!("the {key} tile's node"));
+    let name = node.accesskit_node().label().unwrap_or_default();
+    assert!(!name.contains("Packed output, made from"), "{name:?}");
+    assert!(!name.contains("Bulk edits"), "{name:?}");
     tile(&h, &key).hover();
     h.run();
     h.run();
-    // The tile's own node carries its hover too (ruling 3d-F-9); only the drawn tooltip counts here.
+    // Only the drawn tooltip counts here.
     assert_eq!(
         shown_containing(
             &h,

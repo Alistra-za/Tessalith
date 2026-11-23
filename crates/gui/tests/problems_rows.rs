@@ -679,8 +679,8 @@ fn one_line_replaces_the_three_alpha_lines() {
         .unwrap();
     assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
     // Positive control for the "gone" lines: the engine's message is in the leaf tile's hover; hovered, it shows, and
-    // the same query finds it. The tile builds that hover only while hovered (`on_hover_ui`, ruling 3d-R5), so egui no
-    // longer copies it into the tile's name: the tile is found by its file name in the Textures column instead.
+    // the same query finds it. The tile to hover is found by its file name in the Textures column; the tile's node
+    // carries the message too (checked below), but `shown_containing` leaves such a copied node out.
     let g = "non-constant alpha would be discarded";
     let column =
         sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures").expect("the Textures column");

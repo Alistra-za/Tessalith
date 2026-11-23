@@ -276,7 +276,8 @@ fn packed_into_keys(model: &AppModel, item: &TextureItem) -> Vec<String> {
 }
 
 /// What a bulk edit or a change does to a packed output or to a source packed into one; empty for other files.
-/// Built on hover only: it scans the outputs.
+/// It scans the outputs, so only a hover builds it, and a helper row's AccessKit description (ruling 3d-T19-1);
+/// a tile's AccessKit node never does (`tile_access_text`, ruling 3d-F-9b).
 fn pack_lines(model: &AppModel, item: &TextureItem) -> Vec<String> {
     if item.kind == ItemKind::Packed {
         let names = pack_source_names(model, item);
@@ -303,6 +304,21 @@ fn pack_lines(model: &AppModel, item: &TextureItem) -> Vec<String> {
 /// no-set texture says `No set` in place of its question and its warnings (Note HF1), and returns before the pack
 /// lines. A packed output says what it is made from; a packed source says what changing it changes (ruling 3d-R5).
 pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
+    tile_text(model, item, no_set, || pack_lines(model, item))
+}
+
+/// The tile's AccessKit text: [`tile_tooltip`] without the pack lines (the key, the status with its plain "Packed
+/// into {j}" line, the warnings), as the hover read before ruling 3d-R5 (rulings 3d-F-9, 3d-F-9b).
+fn tile_access_text(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
+    tile_text(model, item, no_set, Vec::new)
+}
+
+fn tile_text(
+    model: &AppModel,
+    item: &TextureItem,
+    no_set: bool,
+    pack_lines: impl FnOnce() -> Vec<String>,
+) -> String {
     let mut lines = vec![item.key.clone()];
     if no_set {
         lines.push("No set".to_string());
@@ -310,7 +326,7 @@ pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> Strin
             return lines.join("\n");
         }
     }
-    let packs = pack_lines(model, item);
+    let packs = pack_lines();
     let explained = !packs.is_empty();
     lines.extend(packs);
     match &item.status {
@@ -425,16 +441,24 @@ fn tile(
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(tile_tooltip(model, item, no_set));
         });
-    // Ruling 3d-F-9: egui copies an `on_hover_text` string into the node's description and, with no name, its name;
-    // `on_hover_ui` copies nothing. Do the same copy here, so a screen reader still reads the hover (key, status,
-    // warnings). The closure runs only while AccessKit builds the tree, so the hover text is not built every frame.
-    ui.ctx().accesskit_node_builder(resp.id, |b| {
-        let text = tile_tooltip(model, item, no_set);
-        if b.label().is_none_or(str::is_empty) {
-            b.set_label(text.clone());
-        }
-        b.set_description(text);
-    });
+    // Rulings 3d-F-9, 3d-F-9b: egui copies an `on_hover_text` string into the node (`describe_for_accessibility`);
+    // `on_hover_ui` copies nothing. Make that copy here with egui's guards, from `tile_access_text` (key, status,
+    // warnings; never the pack lines). While AccessKit is on, this runs for every visible tile each pass, as the old
+    // `on_hover_text` string did; it builds no pack lines, so it scans no outputs.
+    if ui.ctx().has_accesskit_node(resp.id) {
+        ui.ctx().accesskit_node_builder(resp.id, |b| {
+            let text = tile_access_text(model, item, no_set);
+            if b.description().is_none() {
+                b.set_description(text.clone());
+            }
+            if b.role() != egui::accesskit::Role::Label
+                && b.labelled_by().is_empty()
+                && b.label().is_none_or(str::is_empty)
+            {
+                b.set_label(text);
+            }
+        });
+    }
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).
