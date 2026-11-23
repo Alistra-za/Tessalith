@@ -1790,7 +1790,6 @@ fn the_first_screen_leaves_out_what_another_widget_says() {
         Code::SugLowConfidence,
         Code::InGreenUnstated,
         Code::ChkGreenGuess,
-        Code::FmtHdrSource,
     ] {
         all.push(coded(c, false));
         all.push(coded(c, true));
@@ -3833,4 +3832,18 @@ fn the_green_row_skips_a_locked_slot_after_the_fast_plan_and_the_full_plan_each_
     assert!(m.wait_idle(Duration::from_secs(60)));
     h.run();
     green_reach_note(&h, "Green: DirectX", "applies to 1 of 2"); // and its full plan
+}
+
+/// LQ7 and TPC-F-1 (Minor 5): FMT-HDR-SOURCE is an Info code. As a row's own code it is a note (counted, never listed);
+/// in a problem row's `also` it no longer hides that row.
+#[test]
+fn an_hdr_source_line_is_a_note_and_hides_no_problem_row() {
+    use sdc_gui::ui::settings_panel::panel_problem_rows;
+    let mut own = problem_row("hdr");
+    own.code = Some(Code::FmtHdrSource);
+    let mut also = problem_row("a problem that also names the HDR line");
+    also.also = vec![Code::FmtHdrSource];
+    let (rows, notes) = panel_problem_rows(&[own, also.clone()], KEY, false);
+    assert_eq!(rows, vec![also], "listed as any problem row");
+    assert_eq!(notes, 1, "the Info row is counted as a note");
 }

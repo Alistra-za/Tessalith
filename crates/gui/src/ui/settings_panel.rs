@@ -1692,13 +1692,13 @@ struct ProblemSlot {
     groups: Arc<BTreeMap<PanelGroup, Level>>,
 }
 
-/// The codes whose first-screen widget is not the problem row: the card's low-confidence line, the green line and the
-/// Compression HDR line.
-const SAID_ELSEWHERE: [Code; 4] = [
+/// The codes whose first-screen widget is not the problem row: the card's low-confidence line and the green line.
+/// FMT-HDR-SOURCE is not one: its line is in the Compression group, which starts closed, and as an Info code it counts
+/// as a note (LQ7).
+const SAID_ELSEWHERE: [Code; 3] = [
     Code::SugLowConfidence,
     Code::InGreenUnstated,
     Code::ChkGreenGuess,
-    Code::FmtHdrSource,
 ];
 
 /// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says), its note count and
