@@ -1493,7 +1493,7 @@ pub fn group_section(
                     .iter()
                     .filter(|f| panel_groups::panel_group(f.field) == Some(g))
                     .filter(|f| !(g == PanelGroup::Mipmaps && own.contains(&f.field)))
-                    // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
+                    // Note LQ2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
                     // nor DDS header (Note JI3).
                     .filter(|f| {
                         !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))

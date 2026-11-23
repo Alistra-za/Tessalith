@@ -21,7 +21,7 @@ pub const FIELDS: [(&str, &str); 21] = [
     ("mips.normal", "Normal handling"),
     ("mips.normal_base", "Normal base level"),
     ("format", "Format"),
-    // Note HI2: the colour rows sit in Compression, after Format.
+    // Note LQ2: the colour rows sit in Compression, after Format.
     ("color.tag", "DDS tag"),
     ("color.content", "Input content"),
     ("encoder.effort", "Effort"),

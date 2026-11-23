@@ -863,7 +863,7 @@ fn the_settings_strip_is_compact() {
     for group in ["Alpha", "Mipmaps", "Compression"] {
         assert!(h.query_all_by_label_contains(group).count() > 0, "{group}");
     }
-    // Note HI2: the colour rows moved into Compression, and the strip still leaves them out.
+    // Note LQ2: the colour rows moved into Compression, and the strip still leaves them out.
     for row in ["Colour", "Input content", "DDS tag"] {
         assert!(h.query_by_label_contains(row).is_none(), "{row}");
     }
