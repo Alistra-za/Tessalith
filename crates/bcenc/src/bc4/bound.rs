@@ -1,5 +1,5 @@
 //! A lower bound on a BC4 endpoint pair's error, from four per-block tables (docs/research/bcenc-max-speed-vm.md, "The
-//! bound"; Note LI3 holds the proof). With the block's 16 values x:
+//! bound"; Note HY24 records the skip). With the block's 16 values x:
 //!
 //! - `A[e]` = sum over x < e of (e - x)^2, `B[e]` = sum over x > e of (x - e)^2;
 //! - `C[e]` = sum over x < e of min(e - x, x)^2, `D[e]` = sum over x > e of min(x - e, 255 - x)^2.

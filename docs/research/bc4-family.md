@@ -167,15 +167,15 @@ Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref
 
 The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Shipped as `max` (Note LI). On BC4, BC5 and BC3 at cut 128 the port in `bcenc` writes the bench's bytes (pinned against the bench code in `crates/bcenc/tests/bc4.rs`); at another alpha-test cut the BC3 guard tests that cut instead of 128, so those bytes can differ from the bench's.
 
-Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. Measured with the BC45 plan's Task 5 (a3099de2), before the plan E merge gave Max an AVX2 frame (Note HY22), so both searches ran the base SSE2 code; on a CPU with AVX2 the example now runs a different build of both. The measurement ran while other builds were running, so both encoders were slowed alike; compare the ratio, not the times:
+Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. Measured for the BC4 pair-search pruning (Note HY24), commits `fca6cb41` (before) and `f78c9a6b` (after), on the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, the Windows exe under Wine 11.0), with `Path::best()` (AVX2) and `max_speed 5`, 3 alternating rounds with the median of 5 passes each, on 20 PNGs (1,310,720 blocks), every round clean (no other process busy at its start or end), recorded 2026-11-22/23. Times are for whole passes; the first two columns are the median and the range over the rounds of Max over `slowest` (radius 10), the last two the minimum over the rounds of after over before:
 
-| format | max over `slowest` (radius 10) |
-|---|---|
-| BC3 (alpha and colour) | 1.53x (about 2x) |
-| BC4 | 4.47x (about 4x) |
-| BC5 | 4.71x (about 5x) |
+| format | max over `slowest`, before | max over `slowest`, after | `slowest` after/before | `max` after/before |
+|---|---|---|---|---|
+| BC3 (alpha at cut 128 and colour) | 1.182x (1.180-1.182) | 1.061x (1.059-1.062) | 0.923 | 0.831 |
+| BC4 (channel 0) | 4.902x (4.848-4.913) | 2.652x (2.648-2.654) | 0.718 | 0.388 |
+| BC5 (both channels) | 4.764x (4.754-4.774) | 2.606x (2.605-2.612) | 0.701 | 0.384 |
 
-BC4 and BC5 are far from the bench's 2.4x above (about 4 and 5 times `slowest`); the cause was not investigated (a different image mix, and the bench's figure is for its Rust reference against v4, not for `bcenc`). BC3 is much lower, as expected, since its colour half dominates (about 2 times; see the end-to-end table below). On the synthetic blocks the example generates when it gets no PNG (2,200 blocks, the hard classes of `gen::bc4_classes`) the ratios are 6.6x, 9.6x to 10.8x (two runs) and 13.4x (about 7x, 10x and 10x); those blocks are not texture content, so they are not quoted elsewhere.
+The pruning skips an endpoint pair when a lower bound on its error is at or above the best so far, so the bytes are the same (Note HY24; per block on the 20 PNGs at cut 128 for BC4 channel 0, BC5 and BC4 alpha Max, 0 mismatches on both paths). BC4 and BC5 Max now take about 0.39 of their old time; BC3 Max 0.83, because its colour half is untouched. An older figure, about 4 times `slowest` on BC4 and 5 on BC5 from a busy machine and the base SSE2 code, is replaced by these quiet ones. Earlier quiet records elsewhere (docs/research/bcenc-max-speed-vm.md) are from older commits and other builds; do not mix them with this table. The bench's 2.4x above is its Rust reference against v4, not `bcenc`. The synthetic blocks the example generates when it gets no PNG are not texture content and are not quoted.
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
