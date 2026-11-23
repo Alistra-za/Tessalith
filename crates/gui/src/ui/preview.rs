@@ -167,7 +167,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| settings_panel::draw(ui, model, &key, true));
+                    .show(ui, |ui| {
+                        settings_panel::draw(ui, model, &key, settings_panel::Surface::Strip)
+                    });
             });
     } else {
         // Its own id: a strip under "preview-settings" would store 24 px as that panel's width (A6).

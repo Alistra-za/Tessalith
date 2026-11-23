@@ -2,6 +2,7 @@
 //! groups. Drawing only: the edits come back as (item key, dotted field, value) and the panel applies them through
 //! `AppModel::set_field` / `clear_field`, so sdc.toml stays the only place a setting is written.
 use super::columns::RED;
+use super::group::{collapsing_group, GroupHead};
 use super::settings_panel::{combo, options_of, Options};
 use crate::model::code_text::not_a_cube;
 use crate::model::fields::{cube_views, provenance_text, FieldView};
@@ -242,14 +243,21 @@ fn grid<R>(ui: &mut egui::Ui, cx: &Cx, name: &str, add: impl FnOnce(&mut egui::U
         .inner
 }
 
-/// The cubemap section; no edits and nothing drawn unless every selected item is a cube (a mixed selection shows no
-/// cube rows and writes no `cubemap.*` key, Note DT8).
-pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
+/// The cubemap section under its group header `head` (open when `open`); no edits and nothing drawn unless every
+/// selected item is a cube (a mixed selection shows no cube rows and writes no `cubemap.*` key, Note DT8). Returns
+/// the edits, and whether the header was toggled (the caller writes the open state).
+pub fn cube_section(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    key: &str,
+    head: &GroupHead<'_>,
+    open: bool,
+) -> (Edits, bool) {
     if !all_cubes(model, key) {
-        return vec![];
+        return (vec![], false);
     }
     let Some(job) = model.item(key).and_then(|i| i.job.clone()) else {
-        return vec![];
+        return (vec![], false);
     };
     let views = cube_views(model.target, &job);
     let cx = Cx {
@@ -272,10 +280,13 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
     let opts = |field: &str| options_of(field, model.target, &job.profile).unwrap_or_default();
     let name = |f: &FieldView| format!("Cubemap {}", f.label.to_lowercase());
     ui.add_space(6.0);
-    egui::CollapsingHeader::new("Cubemap")
-        .id_salt(("cube-section", key))
-        .default_open(true)
-        .show(ui, |ui| {
+    let r = collapsing_group(
+        ui,
+        crate::model::panel_groups::PanelGroup::Cubemap.id(),
+        head,
+        open,
+        false,
+        |ui| {
             grid(ui, &cx, "Source", |ui| {
                 let f = find(&views, "cubemap.layout");
                 let e = cx.row(ui, f, |ui| {
@@ -445,8 +456,9 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
             });
-        });
-    edits
+        },
+    );
+    (edits, r.toggled)
 }
 
 /// One compact row per face: rotation and flip. Both fields are whole arrays, so a pick rewrites the array, and an

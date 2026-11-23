@@ -990,3 +990,736 @@ fn changed_covers_every_row_source() {
     let s = summary(Cubemap, &panel_views(m.target, j), m.target, &j.profile, &E);
     assert!(s.changed);
 }
+
+// Task 4: the first screen and the groups, drawn.
+
+use engine::codes::Code;
+use sdc_gui::model::bottom::{At, Level, Problem};
+use sdc_gui::model::SetTarget;
+use sdc_gui::settings::GuiSettings;
+use sdc_gui::ui::settings_panel::{first_screen_problems, Action, Surface};
+
+/// `texture_panel_layout.rs::sized_harness`, copied: the whole window, the preview and the 3D view off, so the centre
+/// is the only surface and each "{Title}, " name is unique. Fonts go in before kittest's first frame.
+fn harness(m: AppModel, w: f32, h: f32) -> Harness<'static, AppModel> {
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(w, h))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    h.run();
+    h
+}
+
+/// `support::opened`'s fixture, with nothing decided.
+fn opened(d: &std::path::Path) -> AppModel {
+    support::opened(d)
+}
+
+/// A 64x64 RGB PNG with a 116-character CJK name, decided Diffuse and selected. Task 8 reuses it.
+fn long_named(d: &std::path::Path) -> (AppModel, String) {
+    let name = format!("{}.png", "皮".repeat(116));
+    let dir = d.join("textures/landscape");
+    std::fs::create_dir_all(&dir).unwrap();
+    image::RgbImage::from_fn(64, 64, |x, y| image::Rgb([x as u8, y as u8, 9]))
+        .save(dir.join(&name))
+        .unwrap();
+    let mut m = opened(d);
+    let key = format!("landscape/{name}");
+    m.decide(&key, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(&key);
+    (m, key)
+}
+
+/// A Warning row at `KEY`; no code, so `shown` is the text itself.
+fn problem_row(text: &str) -> Problem {
+    Problem {
+        level: Level::Warning,
+        at: At::Texture(KEY.into()),
+        text: text.into(),
+        code: None,
+        also: vec![],
+        fix: None,
+        second_fix: None,
+        suggested: None,
+        detail: None,
+        carried: false,
+        intended: false,
+        mark: None,
+        target: None,
+    }
+}
+
+#[test]
+fn the_first_screen_comes_before_every_group_header() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 800.0);
+    let first = h.get_by_label_contains("Alpha, ").rect().top(); // only the header's name contains "Alpha, "
+    for l in ["Texture type", "Format"] {
+        assert!(
+            h.get_by_role_and_label(Role::ComboBox, l).rect().bottom() <= first,
+            "{l}"
+        );
+    }
+    assert!(h.get_by_label_contains("Output: ").rect().bottom() <= first);
+}
+
+/// `used_by_meshes.rs`'s scan database, copied: texture `tex` used by two NIFs (one copy each).
+fn scan_db_for(db: &std::path::Path, tex: &str) {
+    let s = modscan::store::Store::open(db).unwrap();
+    let c = s.conn();
+    c.execute("INSERT INTO path(id, p) VALUES (1, ?1)", [tex])
+        .unwrap();
+    c.execute_batch(
+        "INSERT INTO texset(id, n, t0) VALUES (1, 1, 1);
+         INSERT INTO tex_use(tex_path_id, texset_id, slot) VALUES (1, 1, 0);",
+    )
+    .unwrap();
+    for (i, nif) in ["meshes/a.nif", "meshes/b.nif"].iter().enumerate() {
+        let id = i as i64 + 2;
+        c.execute(
+            "INSERT INTO path(id, p) VALUES (?1, ?2)",
+            rusqlite::params![id, nif],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO origin(id, kind, name, root, priority, enabled) VALUES (?1, 1, ?2, ?2, ?3, 1)",
+            rusqlite::params![id, format!("Mod {i}"), 7 + i as i64],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO nif_copy(id, path_id, origin_id, parse_status, is_derived) VALUES (?1, ?1, ?1, 0, 0)",
+            rusqlite::params![id],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO shape(copy_id, block, kind, shader_kind, shader_type, slsf2, texset_id, alpha_flags, alpha_threshold) VALUES (?1, 0, 'BSTriShape', 1, 0, 0, 1, NULL, NULL)",
+            rusqlite::params![id],
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn used_by_is_a_group_header_in_3d_s_place() {
+    let d = tempfile::tempdir().unwrap();
+    let m = rock(d.path());
+    let mut h = harness(m, 1280.0, 800.0);
+    // The scan key of the item, as the plan names its output (`used_by_meshes.rs::tex_of`).
+    let j = job(h.state(), KEY);
+    let stem = j.output.file_stem().unwrap().to_string_lossy().into_owned();
+    let tex = format!("{}.dds", engine::shader::mesh_key(&j.game_path, &stem));
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    scan_db_for(&db, &tex);
+    h.state_mut().scan_db = Some(db);
+    let t = std::time::Instant::now();
+    loop {
+        h.state_mut().poll();
+        if matches!(h.state_mut().used_by_for(KEY), Some(Some(_))) {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(30),
+            "the read never landed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.run();
+    h.run();
+    let n = h.get_by_label("Used by 2 meshes, collapsed");
+    assert_eq!(n.accesskit_node().role(), Role::DisclosureTriangle);
+    assert!(n.rect().height() >= 24.0);
+    assert!(
+        n.rect().top()
+            < h.get_by_role_and_label(Role::ComboBox, "Texture type")
+                .rect()
+                .top(),
+        "LM13's place, unchanged"
+    );
+    // Closed at start; a click opens it, and the open state is not a setting.
+    h.get_by_label("Used by 2 meshes, collapsed").click();
+    h.run();
+    h.get_by_label("Used by 2 meshes, expanded");
+    assert!(h.state().settings.texture_groups.is_empty());
+}
+
+#[test]
+fn a_closed_header_follows_an_edit_made_while_it_is_drawn() {
+    // The panel_cache must rebuild when the plan lands, not only when the document moves (Review Focus 1). Every
+    // other test here builds its harness after wait_idle, so none would see a stale cache.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    let before = h
+        .get_by_label_contains("Mipmaps, ")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_string();
+    assert!(!before.contains(", changed"), "{before}");
+    h.state_mut().set_field(KEY, "mips.filter", json!("box"));
+    h.run();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    let after = h
+        .get_by_label_contains("Mipmaps, ")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_string();
+    assert!(
+        after.starts_with("Mipmaps, collapsed, changed: Box"),
+        "{after}"
+    );
+}
+
+#[test]
+fn the_type_group_is_gone() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 800.0);
+    assert!(h.query_by_label_contains("Type, ").is_none());
+    // The old header was named by its title alone.
+    assert!(h.query_by_label("Type").is_none());
+}
+
+#[test]
+fn baked_in_sits_in_the_normal_map_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let key = "landscape/rock01_normal.png";
+    m.decide(key, Answer::Subtype(engine::config::Subtype::Msn));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(key);
+    panel_groups::set_open(&mut m.settings, PanelGroup::NormalMap, false); // R3-2: the state this test needs, set here
+    let mut h = harness(m, 1280.0, 800.0);
+    h.get_by_label_contains("Normal map, collapsed").click();
+    h.run();
+    let head = h.get_by_label_contains("Normal map, expanded").rect();
+    let baked = h.get_by_role_and_label(Role::ComboBox, "Baked in").rect();
+    assert!(baked.top() > head.bottom());
+    assert!(baked.top() < h.get_by_label_contains("Size, ").rect().top());
+}
+
+#[test]
+fn disabled_rows_still_say_why_inside_a_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path()); // rock01 has no alpha: not a cutout
+    panel_groups::set_open(&mut m.settings, PanelGroup::Alpha, false);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.get_by_label_contains("Alpha, collapsed").click();
+    h.run();
+    assert!(h.query_by_label_contains("Alpha, expanded").is_some());
+    assert!(
+        h.query_all_by_label("used only by cutout and cutout + blend")
+            .count()
+            >= 1
+    );
+}
+
+#[test]
+fn an_unused_group_says_so_while_closed_and_opens_to_each_row_s_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::NormalMap, false);
+    let mut h = harness(m, 1280.0, 800.0);
+    let head = h.get_by_label("Normal map, collapsed: not used for this texture");
+    assert!(!head.accesskit_node().is_disabled());
+    head.click();
+    h.run();
+    // TPC-R1 (JR6): open, the rows say why, so the header drops its summary.
+    assert!(
+        h.query_by_label("Normal map, expanded").is_some(),
+        "it still opens, with no summary"
+    );
+    assert!(h
+        .query_by_label_contains("Normal map, expanded: ")
+        .is_none());
+    assert!(
+        h.query_all_by_label("normal maps only").count() >= 2,
+        "Normal handling and Normal base level say why"
+    );
+}
+
+#[test]
+fn headers_toggle_while_the_plan_is_pending() {
+    // The resize_field.rs:190-222 pattern: an edit with no wait leaves a plan in flight, and a harness that only
+    // draws (ui::draw never polls the planner) keeps it in flight until wait_idle. edit_off = fix_off() = "Wait for
+    // the plan to finish" (model/review.rs:1299-1304).
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, true);
+    m.set_field(KEY, "mips.filter", json!("box"));
+    assert_eq!(m.fix_off().as_deref(), Some("Wait for the plan to finish"));
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run_steps(3);
+    h.get_by_label_contains("Size, expanded").click();
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Size, collapsed").is_some(),
+        "the header still works"
+    );
+    h.get_by_label_contains("Size, collapsed").click();
+    h.run_steps(3);
+    assert!(
+        h.get_by_role_and_label(Role::ComboBox, "Resize")
+            .accesskit_node()
+            .is_disabled(),
+        "the row waits"
+    );
+    assert!(
+        h.state().fix_off().is_some(),
+        "still pending: the test proved what it meant to"
+    );
+}
+
+#[test]
+fn the_cubemap_and_sources_sections_use_the_group_header() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Sources, false);
+    let h = harness(m, 1280.0, 800.0);
+    assert_eq!(
+        h.get_by_label_contains("Cubemap, ").accesskit_node().role(),
+        Role::DisclosureTriangle
+    );
+    let src = h.get_by_label_contains("Where these settings come from, ");
+    assert_eq!(src.accesskit_node().role(), Role::DisclosureTriangle);
+    assert!(src
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .contains(", collapsed"));
+}
+
+/// A `first_screen_problems` harness over `rows`, `notes` and `set`, its state the actions it pushed.
+fn problems_harness(
+    rows: Vec<Problem>,
+    notes: usize,
+    set: Option<SetTarget>,
+) -> Harness<'static, Vec<Action>> {
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .build_ui_state(
+            move |ui, acts: &mut Vec<Action>| {
+                first_screen_problems(ui, &rows, notes, set.as_ref(), acts)
+            },
+            vec![],
+        );
+    h.run();
+    h
+}
+
+#[test]
+fn the_problem_list_on_the_first_screen_shows_three_then_a_button() {
+    let rows: Vec<Problem> = (0..5)
+        .map(|i| problem_row(&format!("Problem {i}")))
+        .collect();
+    let mut h = problems_harness(rows, 2, Some(SetTarget::Key("landscape/rock01".into())));
+    assert!(h.query_by_label("Problem 2").is_some());
+    assert!(h.query_by_label("Problem 3").is_none());
+    assert!(h.query_by_label("2 notes in Problems").is_some());
+    h.get_by_label("2 more problems: open Problems").click();
+    h.run();
+    assert_eq!(
+        h.state(),
+        &vec![Action::OpenProblems(Some(SetTarget::Key(
+            "landscape/rock01".into()
+        )))]
+    );
+}
+
+#[test]
+fn more_problems_names_a_key_less_set_by_its_id() {
+    // JP5: a key-less set is filtered by its id, through open_set_problems (which also sets name_kind)
+    let rows: Vec<Problem> = (0..4)
+        .map(|i| problem_row(&format!("Problem {i}")))
+        .collect();
+    let mut h = problems_harness(rows, 0, Some(SetTarget::Id("set-7".into())));
+    h.get_by_label("1 more problem: open Problems").click();
+    h.run();
+    assert_eq!(
+        h.state(),
+        &vec![Action::OpenProblems(Some(SetTarget::Id("set-7".into())))]
+    );
+}
+
+#[test]
+fn is_panel_problem_drops_notes_and_marked_rows() {
+    // a mapped code (CUBE-NO-MIPS, in FIX_FIELDS), so only the predicate can keep it off the panel
+    let mut p = problem_row("x");
+    p.code = Some(Code::CubeNoMips);
+    assert!(panel_groups::is_panel_problem(&p), "a counted Warning");
+    let mut marked = p.clone();
+    marked.intended = true;
+    assert!(
+        !panel_groups::is_panel_problem(&marked),
+        "marked as intended (3a)"
+    );
+    let mut info = p.clone();
+    info.level = Level::Info;
+    assert!(
+        !panel_groups::is_panel_problem(&info),
+        "an Info row is a Note (3a is_note)"
+    );
+    // A Warning whose code Plan 3a classes as a Note (row_class), which is_note does not see.
+    let mut note_code = p.clone();
+    note_code.code = Some(Code::DimNpot);
+    assert!(
+        !panel_groups::is_panel_problem(&note_code),
+        "a Note-class code"
+    );
+}
+
+#[test]
+fn one_more_problem_and_one_note_read_in_the_singular() {
+    let rows: Vec<Problem> = (0..4)
+        .map(|i| problem_row(&format!("Problem {i}")))
+        .collect();
+    let mut h = problems_harness(rows, 1, None);
+    assert!(h.query_by_label("1 note in Problems").is_some());
+    h.get_by_label("1 more problem: open Problems").click();
+    h.run();
+    assert_eq!(
+        h.state(),
+        &vec![Action::OpenProblems(None)],
+        "no set: Problems unfiltered"
+    );
+}
+
+#[test]
+fn three_problems_need_no_more_button() {
+    let rows: Vec<Problem> = (0..3)
+        .map(|i| problem_row(&format!("Problem {i}")))
+        .collect();
+    let h = problems_harness(rows, 0, None);
+    assert!(h.query_by_label("Problem 2").is_some());
+    assert!(h.query_by_label_contains("more problem").is_none());
+    assert!(h.query_by_label_contains("in Problems").is_none());
+}
+
+#[test]
+fn a_header_click_saves_the_group() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    let mut m = rock(d.path());
+    m.settings_path = Some(p.clone()); // model/mod.rs:703, the path save_settings (1609) writes
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, true);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.get_by_label_contains("Size, expanded").click();
+    h.run();
+    assert_eq!(
+        GuiSettings::load(&p).0.texture_groups.get("size"),
+        Some(&false)
+    );
+}
+
+// Two surfaces, one harness: the state carries which surface draws, so a click finds one header and the check after
+// it finds the other surface's header alone (R2-4: no lookup with two matches).
+#[derive(Clone, Copy, PartialEq)]
+enum Draw {
+    Centre,
+    Strip,
+    Window,
+}
+
+fn surfaces(m: AppModel) -> Harness<'static, (AppModel, Draw)> {
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_ui_state(
+            |ui, (m, d): &mut (AppModel, Draw)| match d {
+                Draw::Centre => sdc_gui::ui::settings_panel::draw(ui, m, KEY, Surface::Centre),
+                Draw::Strip => sdc_gui::ui::settings_panel::draw(ui, m, KEY, Surface::Strip),
+                Draw::Window => {
+                    m.settings.set_settings_open = true;
+                    sdc_gui::ui::set_preview::settings_window(ui.ctx(), m, true)
+                }
+            },
+            (m, Draw::Centre),
+        );
+    h.run();
+    h
+}
+
+#[test]
+fn the_preview_strip_shares_the_open_state() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, true);
+    let mut h = surfaces(m);
+    h.state_mut().1 = Draw::Strip;
+    h.run();
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run();
+    h.state_mut().1 = Draw::Centre;
+    h.run();
+    assert!(
+        h.query_by_label_contains("Mipmaps, collapsed").is_some(),
+        "the centre reads the strip's click"
+    );
+}
+
+#[test]
+fn the_3d_settings_window_shares_the_open_state() {
+    // settings_window (set_preview.rs:502) draws the selected item's panel in a Window; rock() selects rock01
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, true);
+    let mut h = surfaces(m);
+    h.state_mut().1 = Draw::Window;
+    h.run_steps(3);
+    h.get_by_label_contains("Size, expanded").click();
+    h.run_steps(3);
+    h.state_mut().1 = Draw::Centre;
+    h.run();
+    assert!(
+        h.query_by_label_contains("Size, collapsed").is_some(),
+        "the centre reads the window's click"
+    );
+}
+
+#[test]
+fn headers_fit_at_1100_1280_and_1600() {
+    for w in [1100.0, 1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, key) = long_named(d.path()); // a 116-character CJK file name, decided Diffuse and selected
+        for (f, v) in [
+            ("resize", json!("half")),
+            ("resize_relative_to", json!("slot8")),
+        ] {
+            m.set_field(&key, f, v);
+        }
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        // TPC-R1: only a closed header draws its summary, so close every group (R3-2: never rely on the default).
+        for g in PanelGroup::ALL {
+            panel_groups::set_open(&mut m.settings, g, false);
+        }
+        let h = harness(m, w, 800.0);
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        let heads: Vec<egui::Rect> = h
+            .query_all_by_role(Role::DisclosureTriangle)
+            .map(|n| n.rect())
+            .collect();
+        for n in h.query_all_by_role(Role::DisclosureTriangle) {
+            assert!(
+                n.rect().max.x <= centre.max.x + 0.5,
+                "{w}: {:?}",
+                n.accesskit_node().label()
+            );
+        }
+        // The header rect is the whole row, so also check what is painted in it: "● changed" (Size has one) ends at
+        // or inside its own header, as Task 2's changed_is_never_cut_at_1100_px checks.
+        let changed: Vec<_> = h
+            .query_all_by_label("● changed")
+            .map(|n| n.rect())
+            .collect();
+        assert!(
+            !changed.is_empty(),
+            "{w}: premise: the Size group is changed"
+        );
+        for c in changed {
+            let head = heads
+                .iter()
+                .find(|r| r.top() <= c.center().y && c.center().y <= r.bottom())
+                .expect("its header");
+            assert!(
+                c.max.x <= head.max.x + 0.5,
+                "{w}: changed {c:?} past its header {head:?}"
+            );
+        }
+    }
+}
+
+/// FM35: while the alpha question is open, its LOSS-ALPHA-DATA line is the question's, not a first-screen problem row.
+#[test]
+fn the_open_alpha_question_is_not_listed_as_a_problem() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let leaf = "landscape/leaf.png";
+    m.decide(leaf, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(leaf);
+    let proposal = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .find(|p| p.at == At::Texture(leaf.into()) && p.level == Level::Decide)
+        .map(|p| p.text.clone())
+        .expect("the Undecided row that says the alpha question");
+    let h = harness(m, 1280.0, 800.0);
+    h.get_by_label("Confirm alpha"); // the question is on screen
+    let lines = h
+        .query_all_by_label_contains(&proposal)
+        .filter(|n| n.accesskit_node().role() == Role::Label)
+        .count();
+    assert_eq!(lines, 0, "no first-screen row repeats the question");
+}
+
+const FLAT: &str = "a/flat.png";
+
+/// One slot per surface holds one texture at a time: the next texture drawn on the same surface rebuilds it, so the
+/// header summary and the problem rows are the new texture's, though no model revision moved.
+#[test]
+fn the_caches_follow_the_drawn_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    m.set_field(CUBE, "mips.levels", json!("none")); // CUBE-NO-MIPS: a Problem on the cube only
+    m.set_field(FLAT, "mips.filter", json!("box")); // a changed Mipmaps row on the flat texture only
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    let problem = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .find(|p| p.at == At::Texture(CUBE.into()) && panel_groups::is_panel_problem(p))
+        .map(|p| p.shown().to_string())
+        .expect("premise: the cube has a Problem row");
+    let mut h = harness(m, 1280.0, 800.0);
+    let label = |h: &Harness<'static, AppModel>| {
+        h.get_by_label_contains("Mipmaps, ")
+            .accesskit_node()
+            .label()
+            .unwrap()
+            .to_string()
+    };
+    let listed = |h: &Harness<'static, AppModel>| {
+        h.query_all_by_label(&problem)
+            .any(|n| n.accesskit_node().role() == Role::Label)
+    };
+    assert!(
+        label(&h).ends_with("None (base level only)"),
+        "the cube's summary: {}",
+        label(&h)
+    );
+    assert!(listed(&h), "the cube's problem is on its first screen");
+    h.state_mut().select_item(FLAT);
+    h.run();
+    assert!(
+        label(&h).ends_with("Box, full chain"),
+        "the flat texture's summary: {}",
+        label(&h)
+    );
+    assert!(!listed(&h), "the flat texture has no such problem");
+}
+
+/// A problem on this texture shows on its first screen (drawn from the real problem list, not a hand-built row).
+#[test]
+fn a_texture_s_problems_are_on_its_first_screen() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    m.set_field(CUBE, "mips.levels", json!("none"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let rows: Vec<Problem> = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .filter(|p| p.at == At::Texture(CUBE.into()) && panel_groups::is_panel_problem(p))
+        .cloned()
+        .collect();
+    assert!(!rows.is_empty(), "premise: CUBE-NO-MIPS is a Problem row");
+    let shown = rows[0].shown().to_string();
+    let h = harness(m, 1280.0, 800.0);
+    assert!(
+        h.query_all_by_label(&shown)
+            .any(|n| n.accesskit_node().role() == Role::Label),
+        "the first screen lists {shown:?}"
+    );
+}
+
+/// `ui_smoke.rs::land_partial`, copied: poll until the partial of the newest edit is parked, then handle it alone. The
+/// full plans stay parked in `full`, so none can land in between (`hold_plan_results`).
+fn land_partial(h: &mut Harness<'static, AppModel>, full: &mut Vec<sdc_gui::worker::WorkerMsg>) {
+    use sdc_gui::worker::WorkerMsg;
+    let m = h.state_mut();
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let mut partial = None;
+    while partial.is_none() {
+        assert!(
+            std::time::Instant::now() < end,
+            "the partial did not arrive"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+        for x in m.take_held() {
+            match x {
+                WorkerMsg::Partial { seq, .. } if seq == m.edit_seq => partial = Some(x),
+                WorkerMsg::Partial { .. } => {}
+                x => full.push(x),
+            }
+        }
+    }
+    m.handle_held(partial.unwrap());
+    assert!(m.busy(), "the full plan is still out");
+}
+
+/// CODING_STANDARDS, "The fast re-plan keeps what the full plan keeps": the panel's cache follows the fast re-plan
+/// (`apply_partial`) with the full plan still out, and the full plan (`apply_plan`) on its own moves the inputs too.
+#[test]
+fn a_closed_header_follows_the_fast_plan_and_the_full_plan_each_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.hold_plan_results = true;
+    let mut h = harness(m, 1280.0, 800.0);
+    let name = |h: &Harness<'static, AppModel>| {
+        h.get_by_label_contains("Mipmaps, ")
+            .accesskit_node()
+            .label()
+            .unwrap()
+            .to_string()
+    };
+    // Box is rock01's own default, so the edit changes the mark (the row's provenance), not the summary text.
+    assert!(!name(&h).contains(", changed"), "{}", name(&h));
+    h.state_mut().set_field(KEY, "mips.filter", json!("box"));
+    h.run();
+    assert!(
+        !name(&h).contains(", changed"),
+        "the panel shows the last plan until one lands: {}",
+        name(&h)
+    );
+    let mut full = vec![];
+    land_partial(&mut h, &mut full);
+    h.run();
+    assert_eq!(
+        name(&h),
+        "Mipmaps, collapsed, changed: Box, full chain",
+        "the fast plan alone"
+    );
+    let rev = h.state().items_rev();
+    let m = h.state_mut();
+    m.hold_plan_results = false;
+    for x in full {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    h.run();
+    assert!(
+        h.state().items_rev() > rev,
+        "the full plan alone moves the cache's inputs too"
+    );
+    assert!(
+        name(&h).starts_with("Mipmaps, collapsed, changed: Box"),
+        "after the full plan: {}",
+        name(&h)
+    );
+}
+
+/// "+n more" opens Problems on the selected item's set view (a key-less set by its id), or on the set key of another
+/// drawn item (the strip or the 3D window), and on no set when the texture is in none.
+#[test]
+fn the_more_button_names_the_selected_items_set_or_the_drawn_items_set_key() {
+    use sdc_gui::ui::settings_panel::problems_target;
+    let d = tempfile::tempdir().unwrap();
+    let m = rock(d.path()); // rock01 is selected
+    let active = m.resolved_selection();
+    let view = active.view().expect("rock01 is in a set");
+    assert_eq!(
+        problems_target(&m, KEY),
+        Some(SetTarget::of(&view.key, &view.id))
+    );
+    let leaf = "landscape/leaf.png";
+    let leaf_set = m
+        .item(leaf)
+        .and_then(|i| i.set_key.clone())
+        .expect("leaf is in a set");
+    assert_ne!(leaf_set, view.key, "premise: another set");
+    assert_eq!(problems_target(&m, leaf), Some(SetTarget::Key(leaf_set)));
+    assert_eq!(problems_target(&m, "no/such.png"), None);
+}

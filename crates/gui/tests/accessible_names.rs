@@ -252,18 +252,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         CHIP,
     ),
     (
-        "textures view with filters",
-        "Alpha",
-        &["ComboBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
-    (
-        "textures view with filters",
-        "Mipmaps",
-        &["CheckBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
-    (
         "settings tab",
         "D",
         &["Button", "Button", "Button"],
@@ -367,18 +355,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
     ),
     ("rename dialog", "D", &["Button", "Button", "Button"], CHIP),
-    (
-        "rename dialog",
-        "Alpha",
-        &["ComboBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
-    (
-        "rename dialog",
-        "Mipmaps",
-        &["CheckBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
     // The copy dialog's own rows are named apart; these three are the Sets column behind it, as for the rename dialog.
     (
         "copy json dialog",

@@ -544,7 +544,12 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
         .scroll([false, true])
         .show(ctx, |ui| {
             if let Some(k) = item {
-                crate::ui::settings_panel::draw(ui, m, k, false);
+                crate::ui::settings_panel::draw(
+                    ui,
+                    m,
+                    k,
+                    crate::ui::settings_panel::Surface::Window,
+                );
             }
             let current = m.resolved_selection();
             if let Some(v) = current.view() {

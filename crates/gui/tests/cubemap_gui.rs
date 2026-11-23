@@ -141,7 +141,8 @@ fn settle(h: &mut Harness<'static, AppModel>) {
 }
 
 fn headers(h: &Harness<'static, AppModel>) -> usize {
-    h.query_all_by_label("Cubemap").count()
+    // Only a group header's name has the ", " after the title.
+    h.query_all_by_label_contains("Cubemap, ").count()
 }
 
 #[test]
@@ -191,8 +192,16 @@ fn the_section_guard_hides_a_mixed_selection() {
         .with_size(eframe::egui::vec2(800.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
-                let edits = sdc_gui::ui::cube_section::cube_section(ui, m, CUBE);
-                assert!(edits.is_empty());
+                let head = sdc_gui::ui::group::GroupHead {
+                    title: "Cubemap",
+                    summary: "",
+                    summary_hover: None,
+                    changed: false,
+                    problem: None,
+                };
+                let (edits, toggled) =
+                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true);
+                assert!(edits.is_empty() && !toggled);
             },
             m,
         );

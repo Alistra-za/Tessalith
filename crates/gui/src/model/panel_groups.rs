@@ -1,5 +1,7 @@
 //! The texture panel's collapsible groups, which group each field sits in, and the open state kept in `gui.toml`
 //! (texture-panel-compact plan, Task 1). No egui types.
+use super::bottom::Problem;
+use super::code_text::{row_class, RowClass};
 use super::fields::{
     cube_views, edge_view, exr_straight_view, field_hidden, field_views, filter_view, levels_view,
     mips_on, no_effect_reason, FieldView, BC3_SEARCH, CUBE_FIELDS, EDGE_FIELD, EFFORT_FIELDS,
@@ -10,6 +12,7 @@ use crate::ui::settings_panel::option_label;
 use engine::config::{Profile, Subtype, Target};
 use engine::policy::ResolvedJob;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PanelGroup {
@@ -144,6 +147,9 @@ pub fn panel_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
 
 const NOT_USED: &str = "not used for this texture";
 
+/// The Sources header's fixed summary, also drawn for a texture with no job (so no `summary` call).
+pub const SOURCES_SUMMARY: &str = "How each value was chosen";
+
 fn shown(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -167,7 +173,7 @@ pub fn summary(
         all_locked: false,
     };
     match g {
-        PanelGroup::Sources => return fixed("How each value was chosen".into()),
+        PanelGroup::Sources => return fixed(SOURCES_SUMMARY.into()),
         PanelGroup::Channels => {
             return fixed(extra.channels.map_or_else(String::new, |[r, g, b, a]| {
                 format!("R {r}, G {g}, B {b}, A {a}")
@@ -270,11 +276,21 @@ pub fn summary(
 }
 
 pub fn is_open(settings: &GuiSettings, g: PanelGroup) -> bool {
-    settings
-        .texture_groups
+    is_open_in(&settings.texture_groups, g)
+}
+
+/// [`is_open`] over the `[texture_groups]` table itself, which a draw's `Ctx` holds.
+pub fn is_open_in(groups: &BTreeMap<String, bool>, g: PanelGroup) -> bool {
+    groups
         .get(g.id())
         .copied()
         .unwrap_or_else(|| default_open(g))
+}
+
+/// A row of the problem list that the texture panel's first screen shows: not a note (`Problem::is_note`: Info, queued
+/// or marked as intended) and not a code Plan 3a classes as a Note.
+pub fn is_panel_problem(p: &Problem) -> bool {
+    !p.is_note() && p.code.is_none_or(|c| row_class(c) == RowClass::Problem)
 }
 
 pub fn set_open(settings: &mut GuiSettings, g: PanelGroup, open: bool) {

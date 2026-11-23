@@ -42,6 +42,10 @@ pub struct BulkState {
     cache: Option<BulkCache>,
 }
 
+/// `AppModel::panel_cache_inputs`: items, inputs and sets-document revisions, the target, the project revision and
+/// whether a plan is in flight.
+pub(crate) type PanelInputs = (u64, u64, u64, engine::config::Target, u64, bool);
+
 type CacheInputs = (
     MultiSelection,
     Selection,
@@ -1396,6 +1400,20 @@ impl AppModel {
             self.sets_doc.as_ref().map_or(0, |d| d.rev()),
             format!("{:?}", self.target),
             // Note FB3: an edit changes the document before the plan lands, and the view reads the document then.
+            self.project.as_ref().map_or(0, |p| p.rev()),
+            self.planning.is_some(),
+        )
+    }
+
+    /// The model-wide inputs the single panel's cache reads (`settings_panel::panel_cache`), beside the drawn key: the
+    /// same as `bulk_cache_inputs` less the selection, with the target itself so the per-frame compare allocates
+    /// nothing. An edit moves `project.rev()` before its plan lands; every job replacement bumps `items_rev`.
+    pub(crate) fn panel_cache_inputs(&self) -> PanelInputs {
+        (
+            self.items_rev,
+            self.inputs_rev,
+            self.sets_doc.as_ref().map_or(0, |d| d.rev()),
+            self.target,
             self.project.as_ref().map_or(0, |p| p.rev()),
             self.planning.is_some(),
         )

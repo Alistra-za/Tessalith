@@ -206,9 +206,11 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
     // egui 0.37 also names the tile with its hover text, which holds the message; the Info line is the shown one.
     assert_eq!(shown_containing(&h, unstated.as_str()).len(), 1);
     // Exact labels: "Input content" and "DDS tag" also name their `?` ("Help: Input content", Note HI9).
-    for label in ["Input content", "DDS tag", "Compression"] {
+    for label in ["Input content", "DDS tag"] {
         h.get_by_label(label);
     }
+    // Only a group header's name has the ", " after its title.
+    h.get_by_label_contains("Compression, ");
     // One frame with a Kaiser profile selected: the live Filter combo and the Edge row draw.
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
@@ -556,6 +558,12 @@ fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
         .unwrap()
         .set_error("broken on purpose");
     assert!(model.fix_off().is_some_and(|w| w.contains("read-only")));
+    // The state this test needs is set here, not left to the default (R3-2).
+    sdc_gui::model::panel_groups::set_open(
+        &mut model.settings,
+        sdc_gui::model::panel_groups::PanelGroup::Compression,
+        true,
+    );
     let mut h = harness(model);
     h.run();
     // The answers and rows are off …
@@ -563,21 +571,22 @@ fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
         .get_by_label("Alpha type: Cutout")
         .accesskit_node()
         .is_disabled());
-    let format_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("Format").count();
-    assert!(format_rows(&h) >= 1, "the Compression group starts open");
-    // … the group header is not: it collapses the group.
+    // A Compression row: "DDS tag" (Format is on the first screen, outside every group).
+    let tag_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("DDS tag").count();
+    assert!(tag_rows(&h) >= 1, "the Compression group starts open");
+    // … the group header is not: it collapses the group. Only the header's name has the ", " after its title.
     let header = h
-        .query_all_by_label("Compression")
+        .query_all_by_label_contains("Compression, ")
         .find(|n| !n.accesskit_node().is_disabled())
         .expect("an enabled Compression header");
     header.hover();
     h.run();
-    h.query_all_by_label("Compression")
+    h.query_all_by_label_contains("Compression, ")
         .find(|n| !n.accesskit_node().is_disabled())
         .unwrap()
         .click();
     h.run();
-    assert_eq!(format_rows(&h), 0, "the Compression group did not collapse");
+    assert_eq!(tag_rows(&h), 0, "the Compression group did not collapse");
 }
 
 #[test]
@@ -668,7 +677,7 @@ fn a_packed_item_lists_its_channels_and_a_raw_map_points_to_the_output() {
     model.select_item(&packed);
     let mut h = harness(model);
     h.run();
-    h.get_by_label("Channels");
+    h.get_by_label_contains("Channels, ");
     h.get_by_label_contains("R: from ");
     h.get_by_label_contains("B: from rock01_ao.png");
     h.get_by_label("A: default value 1");

@@ -372,7 +372,8 @@ fn named<'a>(h: &'a Harness<'static, AppModel>, name: &'a str) -> egui_kittest::
 }
 
 fn open_header(h: &mut Harness<'static, AppModel>, header: &str) {
-    h.get_by_label(header).click();
+    // The header's name is "{header}, collapsed" (a group header); its title label is named by the bare text.
+    h.get_by_label_contains(&format!("{header}, ")).click();
     h.run();
 }
 
@@ -835,7 +836,11 @@ fn used_by_sits_under_the_heading() {
         &item.job_key
     };
     let job = rect(key.as_str()).expect("displayed job key");
-    let head = rect("Used by 2 meshes").expect("loaded two-copy header");
+    let head = h
+        .query_all_by_label_contains("Used by 2 meshes, ")
+        .map(|n| n.rect())
+        .find(|r| centre.x_range().contains(r.center().x))
+        .expect("loaded two-copy header");
     let row = rect("Texture type").expect("type field row");
     assert!(
         job.bottom() <= head.top() && head.top() < row.top(),
@@ -850,7 +855,7 @@ fn used_by_sits_under_the_heading() {
 #[test]
 fn a_shape_link_click_asks_for_that_mesh() {
     let (_d, _db, mut h) = panel(&[("meshes/tree.nif", "Trees", 1, 7, None, None)]); // copy id 2, block 0, no name
-    h.query_by_label("Used by 1 mesh")
+    h.query_by_label_contains("Used by 1 mesh, ")
         .expect("loaded one-copy header")
         .click();
     h.run();
@@ -904,9 +909,9 @@ fn no_scan_database_hides_the_list_and_a_database_reads_it_off_the_ui_thread() {
     h.run();
     // The card's likely-type buttons (Task 11) take a row, so the header sits under the clip: scroll to it as a user
     // would before the click.
-    h.get_by_label_contains("Used by 1 mesh").scroll_to_me();
+    h.get_by_label_contains("Used by 1 mesh, ").scroll_to_me();
     h.run();
-    h.get_by_label_contains("Used by 1 mesh").click();
+    h.get_by_label_contains("Used by 1 mesh, ").click();
     h.run();
     h.get_by_label("meshes/tree.nif");
     h.get_by_label_contains("Trees · MO2 priority 7");

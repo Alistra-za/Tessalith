@@ -594,7 +594,9 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             if take_scroll_reset(ui.ctx()) {
                 area = area.vertical_scroll_offset(0.0);
             }
-            area.show(ui, |ui| settings_panel::draw(ui, model, key, false));
+            area.show(ui, |ui| {
+                settings_panel::draw(ui, model, key, settings_panel::Surface::Centre)
+            });
         }
         Selection::Set(_) | Selection::SetId(_) => {
             let view = set_editor::View {
