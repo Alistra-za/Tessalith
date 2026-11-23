@@ -429,7 +429,13 @@ fn a_bulk_row_has_a_question_mark() {
     let mut m = opened(d.path());
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
-    let mut h = harness(m);
+    // Tall enough that the Compression group (after the Normal map group) is on screen.
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1280.0, 1600.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h.run();
     h.get_by_label("2 textures selected");
     let text = sdc_gui::model::fields::field_help("encoder.effort").unwrap();

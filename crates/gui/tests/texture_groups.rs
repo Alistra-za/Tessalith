@@ -2609,3 +2609,244 @@ fn go_to_a_first_screen_field_opens_nothing() {
     assert!(m.panel_forced.groups.is_empty());
     assert!(m.nav.reveal_field.is_some(), "the focus is still asked for");
 }
+
+// Task 7: the bulk panel uses the same groups.
+
+const ROCK: &str = "landscape/rock01.png";
+const LEAF: &str = "landscape/leaf.png";
+
+/// `bulk_ui.rs::harness`, copied under a name of its own: Task 4's `harness(m, w, h)` lives in this module.
+fn bulk_harness(m: AppModel) -> Harness<'static, AppModel> {
+    harness(m, 1280.0, 800.0)
+}
+
+/// `bulk_apply.rs::many`, copied: `n` small colour textures under `textures/many`, each its own set.
+fn many(dir: &std::path::Path, n: usize) -> std::path::PathBuf {
+    let r = dir.join("textures/many");
+    std::fs::create_dir_all(&r).unwrap();
+    for i in 0..n {
+        image::ImageBuffer::from_fn(8, 8, |x, y| {
+            image::Rgb([(x * 30) as u8, (y * 30) as u8, i as u8])
+        })
+        .save(r.join(format!("t{i:03}.png")))
+        .unwrap();
+    }
+    dir.join("textures")
+}
+
+fn two_alike(dir: &std::path::Path) -> AppModel {
+    let r = dir.join("textures/a");
+    std::fs::create_dir_all(&r).unwrap();
+    for n in ["one.png", "two.png"] {
+        image::RgbImage::from_fn(64, 64, |x, y| image::Rgb([x as u8, y as u8, 90]))
+            .save(r.join(n))
+            .unwrap();
+    }
+    let mut m = support::opened_as_the_app(dir.join("textures"), dir.join("export"));
+    for k in ["a/one.png", "a/two.png"] {
+        m.decide(k, Answer::Subtype(engine::config::Subtype::Diffuse));
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+#[test]
+fn two_selected_alike_read_like_the_single_panel() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_alike(d.path());
+    // TPC-R1: only a closed header carries a summary, so close the three groups this test compares.
+    for g in [
+        PanelGroup::Alpha,
+        PanelGroup::Mipmaps,
+        PanelGroup::Compression,
+    ] {
+        panel_groups::set_open(&mut m.settings, g, false);
+    }
+    m.select_item("a/one.png");
+    let mut h = bulk_harness(m);
+    h.run();
+    let single: Vec<String> = ["Alpha, ", "Mipmaps, ", "Compression, "]
+        .iter()
+        .map(|t| {
+            h.get_by_label_contains(t)
+                .accesskit_node()
+                .label()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    h.state_mut().click_item("a/two.png", true, false);
+    h.run();
+    assert!(
+        single
+            .iter()
+            .all(|s| s.contains(", collapsed") && s.contains(": ")),
+        "premise: closed, with summaries: {single:?}"
+    );
+    for (t, s) in ["Alpha, ", "Mipmaps, ", "Compression, "]
+        .iter()
+        .zip(&single)
+    {
+        assert_eq!(
+            &h.get_by_label_contains(t)
+                .accesskit_node()
+                .label()
+                .unwrap()
+                .to_string(),
+            s
+        );
+    }
+}
+
+#[test]
+fn four_selected_with_two_filters_say_mixed_while_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_as_the_app(many(d.path(), 4), d.path().join("export"));
+    // Two different filters, neither the default, so the four textures are mixed whatever the default is.
+    m.set_field("many/t000.png", "mips.filter", json!("kaiser"));
+    m.set_field("many/t001.png", "mips.filter", json!("tent"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.select_all_visible();
+    let mut h = bulk_harness(m);
+    h.run();
+    let label = h
+        .get_by_label_contains("Mipmaps, ")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_string();
+    assert!(
+        label.starts_with("Mipmaps, collapsed, changed: "),
+        "{label}"
+    );
+    assert!(label.contains("Filter: mixed"), "{label}");
+    // TPC-R1: open, the rows show the values; the header keeps "changed" and drops the summary.
+    h.get_by_label_contains("Mipmaps, ").click();
+    h.run();
+    assert!(h.query_by_label("Mipmaps, expanded, changed").is_some());
+}
+
+#[test]
+fn many_selected_build_the_summaries_once() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_as_the_app(many(d.path(), 300), d.path().join("export"));
+    m.select_all_visible();
+    let mut h = bulk_harness(m);
+    h.run();
+    let n = panel_groups::bulk_summary_builds();
+    assert!(n >= 1, "the bulk view built its summaries");
+    h.get_by_label_contains("Size, ").hover();
+    h.run();
+    h.get_by_label_contains("Alpha, ").click();
+    h.run();
+    h.run_steps(3);
+    assert_eq!(
+        panel_groups::bulk_summary_builds(),
+        n,
+        "no bulk summary is built per frame, per hover or per toggle"
+    );
+}
+
+#[test]
+fn cube_and_channels_never_appear_in_bulk() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    let mut h = bulk_harness(m);
+    h.run();
+    for t in [
+        "Cubemap, ",
+        "Channels, ",
+        "Where these settings come from, ",
+        "Used by ",
+    ] {
+        assert!(h.query_by_label_contains(t).is_none(), "{t}");
+    }
+}
+
+#[test]
+fn a_group_with_no_applying_field_reads_not_used_for_these_textures_while_closed() {
+    // two colour textures: every Normal map row has applies == 0
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_alike(d.path());
+    m.select_item("a/one.png");
+    m.click_item("a/two.png", true, false);
+    panel_groups::set_open(&mut m.settings, PanelGroup::NormalMap, false);
+    let mut h = bulk_harness(m);
+    h.run();
+    let n = h.get_by_label_contains("Normal map, collapsed");
+    assert!(n
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .contains("not used for these textures"));
+    assert!(
+        !n.accesskit_node().is_disabled(),
+        "a header is never disabled"
+    );
+    n.click();
+    h.run();
+    assert!(
+        h.query_by_label("Normal map, expanded").is_some(),
+        "open, with no summary (TPC-R1)"
+    );
+}
+
+#[test]
+fn a_read_only_sdc_toml_keeps_the_bulk_headers_working() {
+    // R1-1 and LM11: a read-only sdc.toml greys every bulk row, never a header
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
+    assert!(m.toml_read_only_reason().is_some(), "premise: read-only");
+    let mut h = bulk_harness(m);
+    h.run();
+    let head = h.get_by_label_contains("Size, collapsed");
+    assert!(
+        !head.accesskit_node().is_disabled(),
+        "the header is not greyed"
+    );
+    head.click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Size, expanded").is_some(),
+        "it still opens"
+    );
+    assert!(
+        h.get_by_role_and_label(Role::ComboBox, "Resize")
+            .accesskit_node()
+            .is_disabled(),
+        "the rows are greyed"
+    );
+    // LM11 "greys every bulk row": the first-screen rows outside the groups stay greyed too
+    assert!(
+        h.get_by_role_and_label(Role::ComboBox, "Format")
+            .accesskit_node()
+            .is_disabled(),
+        "the first-screen Format row is greyed"
+    );
+}
+
+#[test]
+fn the_bulk_and_single_panels_share_the_open_state() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, true);
+    let mut h = bulk_harness(m);
+    h.run();
+    h.get_by_label_contains("Size, expanded").click();
+    h.run();
+    h.state_mut().select_item(ROCK);
+    h.run();
+    assert!(h.query_by_label_contains("Size, collapsed").is_some());
+}

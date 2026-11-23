@@ -8,6 +8,7 @@ use super::fields::{
 };
 use super::items::TextureItem;
 use super::labels::UNORM_LABEL;
+use super::panel_groups::{bulk_summary, panel_group, GroupSummary, PanelGroup};
 use super::set_groups::GroupTarget;
 use super::sets::{
     locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
@@ -68,6 +69,16 @@ struct BulkCache {
     computes: usize,
 }
 
+/// The groups the bulk panel draws, in panel order: Cubemap and Channels have no bulk rows, and "Where these settings
+/// come from" and "Used by" describe one texture.
+pub const BULK_GROUPS: [PanelGroup; 5] = [
+    PanelGroup::Alpha,
+    PanelGroup::Mipmaps,
+    PanelGroup::NormalMap,
+    PanelGroup::Size,
+    PanelGroup::Compression,
+];
+
 /// The bulk panel's targets and rows.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BulkView {
@@ -81,6 +92,9 @@ pub struct BulkView {
     pub undecided: (Vec<String>, usize),
     /// `likely::likely_types` over the textures the type card asks about (Task 11).
     pub likely: Vec<(Subtype, String)>,
+    /// The header summaries and marks of the groups the panel draws, in panel order (`bulk_summary`); empty when no
+    /// selected texture has a job.
+    pub groups: Vec<(PanelGroup, GroupSummary)>,
 }
 
 impl AppModel {
@@ -1438,6 +1452,22 @@ impl AppModel {
         let reencode = self.reencode_split(&keys);
         let undecided = self.type_card_split();
         let likely = super::likely::likely_types(self, &undecided.0);
+        // The panel's representative job: the active texture's, else the first selected one with a job.
+        let active = match &self.selection {
+            Selection::Item(k) => self.item(k).and_then(|i| i.job.as_ref()),
+            _ => None,
+        };
+        let job = active.or_else(|| {
+            keys.iter()
+                .find_map(|k| self.item(k).and_then(|i| i.job.as_ref()))
+        });
+        let groups = job.map_or_else(Vec::new, |j| {
+            BULK_GROUPS
+                .into_iter()
+                .filter(|&g| rows.iter().any(|r| panel_group(r.field) == Some(g)))
+                .map(|g| (g, bulk_summary(g, &rows, self.target, &j.profile)))
+                .collect()
+        });
         let view = std::sync::Arc::new(BulkView {
             keys,
             rows,
@@ -1445,6 +1475,7 @@ impl AppModel {
             reencode,
             undecided,
             likely,
+            groups,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;

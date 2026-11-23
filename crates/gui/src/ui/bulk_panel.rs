@@ -1,14 +1,16 @@
 //! The centre panel for two or more textures or sets (M6 Track F3a, design §3-4). Drawing only: every edit is a
 //! model call, made after drawing.
 use super::columns::AMBER;
+use super::group::{collapsing_group, GroupHead};
 use super::settings_panel::{
     editor, field_label, likely_buttons, offered_groups, own_name_after_link, reach_combo,
-    subtype_label, RowEdit, GROUPS,
+    subtype_label, RowEdit,
 };
 use crate::look::Combo036 as _;
 use crate::model::bulk::{is_value_dependent, BulkField, BulkOp};
-use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
+use crate::model::fields::{effort_field, field_help, FieldView, EFFORT_FIELDS};
 use crate::model::labels::type_hover;
+use crate::model::panel_groups::{self, PanelGroup};
 use crate::model::sets::SlotKind;
 use crate::model::{AppModel, Selection};
 use eframe::egui;
@@ -24,6 +26,7 @@ enum Act {
     Edit(&'static str, RowEdit),
     Reencode(Vec<String>),
     Decide(Vec<String>, Subtype),
+    SetGroupOpen(PanelGroup, bool),
 }
 
 /// "{m} other selected textures already have a type." (the card's line under Apply).
@@ -232,42 +235,69 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             if to_top {
                 area = area.vertical_scroll_offset(0.0);
             }
+            // One row of the grid. Note JI4: the Effort row's choices are those of a texture that reads its field
+            // (the BC3 row's Custom entry is that texture's pair).
+            let draw_row = |ui: &mut egui::Ui, r: &BulkField, acts: &mut Vec<Act>| {
+                let reader = EFFORT_FIELDS
+                    .contains(&r.field)
+                    .then(|| {
+                        keys.iter().find_map(|k| {
+                            model
+                                .item(k)
+                                .and_then(|i| i.job.as_ref())
+                                .filter(|j| effort_field(&j.profile) == Some(r.field))
+                        })
+                    })
+                    .flatten();
+                let job = reader.unwrap_or(&job);
+                if let Some(e) = row(ui, &id, job, target, busy, r) {
+                    acts.push(Act::Edit(r.field, e));
+                }
+            };
+            let read_only = read_only.is_some();
             area.show(ui, |ui| {
-                ui.add_enabled_ui(read_only.is_none(), |ui| {
-                    for g in GROUPS {
-                        egui::CollapsingHeader::new(g)
-                            .id_salt(("bulk", g))
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                egui::Grid::new(("bulk-grid", g))
-                                    .num_columns(4)
-                                    .show(ui, |ui| {
-                                        for r in rows.iter().filter(|r| group_of(r.field) == g) {
-                                            // Note JI4: the Effort row's choices are those of a texture that
-                                            // reads its field (the BC3 row's Custom entry is that texture's pair).
-                                            let reader = EFFORT_FIELDS
-                                                .contains(&r.field)
-                                                .then(|| {
-                                                    keys.iter().find_map(|k| {
-                                                        model
-                                                            .item(k)
-                                                            .and_then(|i| i.job.as_ref())
-                                                            .filter(|j| {
-                                                                effort_field(&j.profile)
-                                                                    == Some(r.field)
-                                                            })
-                                                    })
-                                                })
-                                                .flatten();
-                                            let job = reader.unwrap_or(&job);
-                                            if let Some(e) = row(ui, &id, job, target, busy, r) {
-                                                acts.push(Act::Edit(r.field, e));
-                                            }
-                                        }
-                                    });
-                            });
-                    }
+                // The first screen: rows in no group, greyed by a read-only `sdc.toml` (LM11).
+                ui.add_enabled_ui(!read_only, |ui| {
+                    egui::Grid::new("bulk-first-screen")
+                        .num_columns(4)
+                        .show(ui, |ui| {
+                            for f in panel_groups::FIRST_SCREEN {
+                                for r in rows.iter().filter(|r| r.field == f) {
+                                    draw_row(ui, r, &mut acts);
+                                }
+                            }
+                        });
                 });
+                // Each header sits outside the disabled scope (R1-1, FK3): only its rows are greyed.
+                for (g, summary) in &view.groups {
+                    let g = *g;
+                    let open = panel_groups::is_open(&model.settings, g);
+                    let head = GroupHead {
+                        title: g.title(),
+                        summary: &summary.text,
+                        summary_hover: summary.hover.as_deref(),
+                        changed: summary.changed,
+                        problem: None,
+                    };
+                    let r = collapsing_group(ui, g.id(), &head, open, false, |ui| {
+                        if read_only {
+                            ui.disable();
+                        }
+                        egui::Grid::new(("bulk-grid", g.id()))
+                            .num_columns(4)
+                            .show(ui, |ui| {
+                                for r in rows
+                                    .iter()
+                                    .filter(|r| panel_groups::panel_group(r.field) == Some(g))
+                                {
+                                    draw_row(ui, r, &mut acts);
+                                }
+                            });
+                    });
+                    if r.toggled {
+                        acts.push(Act::SetGroupOpen(g, !open));
+                    }
+                }
             });
         }
     }
@@ -276,6 +306,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             Act::Kind(k) => model.bulk.kind = k,
             Act::Reencode(ks) => model.set_reencode(&ks, true),
             Act::Decide(ks, st) => model.decide_many(&ks, st),
+            Act::SetGroupOpen(g, open) => {
+                panel_groups::set_open(&mut model.settings, g, open);
+                model.save_settings();
+            }
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
         }

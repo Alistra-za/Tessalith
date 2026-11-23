@@ -5,7 +5,7 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields, with the label each row shows (Note JI3: the drawer's DDS header and Size rows included). The
-/// panel draws them by group (`group_of`, in `settings_panel::GROUPS` order), in this order within a group.
+/// panel draws them by group (`panel_groups::panel_group`, in `PanelGroup::ALL` order), in this order within a group.
 pub const FIELDS: [(&str, &str); 21] = [
     ("subtype", "Texture type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
@@ -29,7 +29,7 @@ pub const FIELDS: [(&str, &str); 21] = [
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
     ("encoder.perceptual", "Perceptual"),
     ("header", "DDS header"),
-    // Note JI3: the Size group (`group_of`).
+    // Note JI3: the Size group (`panel_groups::panel_group`).
     ("resize", "Resize"),
     ("resize_relative_to", "Relative to"),
     ("resize_floor", "Size floor"),
@@ -276,25 +276,6 @@ pub const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
     (MipFilter::Kaiser, "Kaiser"),
 ];
 pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
-
-pub fn group_of(field: &str) -> &'static str {
-    // Coverage only ever applies to the alpha-tested policies, and BC1 1-bit alpha is an alpha setting, so both sit
-    // with the alpha settings.
-    if matches!(field, "mips.coverage" | "encoder.bc1_alpha") {
-        return "Alpha";
-    }
-    if field == MSN_SOURCE {
-        return "Type";
-    }
-    match field.split('.').next().unwrap_or("") {
-        // Note JI3: the Size group; `header` stays in Compression.
-        "resize" | "resize_relative_to" | "resize_floor" => "Size",
-        "subtype" => "Type",
-        "alpha" => "Alpha",
-        "mips" => "Mipmaps",
-        _ => "Compression",
-    }
-}
 
 /// "BC7": the one format-name table (AG130); `format_label` and the output size line read it.
 pub fn format_name(format: Format) -> &'static str {

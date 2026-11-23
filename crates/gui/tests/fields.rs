@@ -2,6 +2,7 @@ mod support;
 use engine::config::*;
 use engine::presets::PresetRegistry;
 use sdc_gui::model::fields::*;
+use sdc_gui::model::panel_groups::{panel_group, PanelGroup};
 use support::*;
 
 #[test]
@@ -72,15 +73,19 @@ fn field_views_mark_edited_fields() {
     assert!(t.edited);
     assert_eq!(t.value, serde_json::json!(90));
     assert!(!views.iter().find(|v| v.field == "format").unwrap().edited);
-    let mut groups: Vec<&str> = views.iter().map(|v| group_of(v.field)).collect();
+    let mut groups: Vec<&str> = views
+        .iter()
+        .filter_map(|v| panel_group(v.field))
+        .map(PanelGroup::title)
+        .collect();
     groups.dedup();
-    // Note JI3: the Size rows follow DDS header in `FIELDS`; the panel draws its groups in `GROUPS` order.
+    // Note JI3: the Size rows follow DDS header in `FIELDS`; the panel draws its groups in `PanelGroup::ALL` order.
     assert_eq!(
         groups,
-        vec!["Type", "Alpha", "Mipmaps", "Compression", "Size"]
+        vec!["Normal map", "Alpha", "Normal map", "Compression", "Size"]
     );
-    assert_eq!(group_of("color.content"), "Compression");
-    assert_eq!(group_of("color.tag"), "Compression");
+    assert_eq!(panel_group("color.content").unwrap().title(), "Compression");
+    assert_eq!(panel_group("color.tag").unwrap().title(), "Compression");
 }
 
 #[test]
@@ -205,12 +210,12 @@ fn provenance_reads_as_prose() {
 #[test]
 fn size_is_a_group_and_header_stays_in_compression() {
     for f in ["resize", "resize_relative_to", "resize_floor"] {
-        assert_eq!(group_of(f), "Size", "{f}");
+        assert_eq!(panel_group(f), Some(PanelGroup::Size), "{f}");
     }
-    assert_eq!(group_of("header"), "Compression");
-    assert_eq!(group_of("mips.levels"), "Mipmaps");
-    assert_eq!(group_of("mips.coverage"), "Alpha");
-    assert_eq!(group_of("mips.normal"), "Mipmaps");
+    assert_eq!(panel_group("header"), Some(PanelGroup::Compression));
+    assert_eq!(panel_group("mips.levels"), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.coverage"), Some(PanelGroup::Alpha));
+    assert_eq!(panel_group("mips.normal"), Some(PanelGroup::NormalMap));
     let all = all_fields();
     for f in [
         "header",
@@ -373,10 +378,10 @@ fn uncompressed_locks_explain_themselves() {
 
 #[test]
 fn filter_and_edge_stay_in_the_basic_mipmaps_group() {
-    assert_eq!(group_of(FILTER_FIELD.0), "Mipmaps");
-    assert_eq!(group_of(EDGE_FIELD.0), "Mipmaps");
-    assert_eq!(group_of("mips.filter"), "Mipmaps");
-    assert_eq!(group_of("mips.edge"), "Mipmaps");
+    assert_eq!(panel_group(FILTER_FIELD.0), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group(EDGE_FIELD.0), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.filter"), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.edge"), Some(PanelGroup::Mipmaps));
     assert!(!FIELDS.iter().any(|f| f.0 == "mips.filter"));
     assert!(FIELDS.iter().any(|f| f.0 == "resize"));
     for f in ["mips.filter", "mips.edge", "resize"] {
@@ -616,7 +621,7 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     use egui_kittest::kittest::Queryable;
     const F: &str = "encoder.bc1_alpha";
     assert!(FIELDS.contains(&(F, "1-bit alpha")));
-    assert_eq!(group_of(F), "Alpha");
+    assert_eq!(panel_group(F), Some(PanelGroup::Alpha));
     let reg = PresetRegistry::builtin().unwrap();
     let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
     p.format = Format::Bc7;

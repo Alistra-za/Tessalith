@@ -238,8 +238,7 @@ const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
 
 const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
-const GROUP_ROW: &str =
-    "a group header named after its main row, whose control carries the same name";
+
 const SUBTYPE_ROWS: &str = "two open type rows draw the same tree with fixed labels";
 
 /// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
@@ -362,12 +361,7 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["Button", "Button", "Button"],
         CHIP,
     ),
-    (
-        "copy json dialog",
-        "Alpha",
-        &["ComboBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
+
     (
         "meshes skin browse popup",
         "textures/white.dds",

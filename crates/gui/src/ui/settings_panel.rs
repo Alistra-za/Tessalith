@@ -92,8 +92,6 @@ const STRIP_GROUPS: [PanelGroup; 3] = [
     PanelGroup::Mipmaps,
     PanelGroup::Compression,
 ];
-/// Also the bulk panel's groups. Note JI3: Size (Resize, Relative to, Size floor) after Mipmaps.
-pub(super) const GROUPS: [&str; 5] = ["Type", "Alpha", "Mipmaps", "Size", "Compression"];
 /// Note HI1: the label column's width, on the texture, helper and cubemap rows.
 pub(super) const LABEL_W: f32 = 150.0;
 /// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).

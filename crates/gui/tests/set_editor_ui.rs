@@ -2003,13 +2003,17 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     assert!(m.in_bulk());
     let mut h = short_harness(m);
     h.run();
-    // The bulk panel's first group header (Note HI2: the Colour group is gone). egui 0.37 reports the header as a
-    // `DisclosureTriangle` named for the title (0.36.2: a `Button`).
+    // The bulk panel's first group header (Alpha, open by default, since the Type group moved to the first screen).
+    // egui 0.37 reports the header as a `DisclosureTriangle` named for the title and state (0.36.2: a `Button`).
     let type_header_y = |h: &Harness<'static, AppModel>| {
-        widget(h, eframe::egui::accesskit::Role::DisclosureTriangle, "Type")
-            .rect()
-            .min
-            .y
+        widget(
+            h,
+            eframe::egui::accesskit::Role::DisclosureTriangle,
+            "Alpha, expanded",
+        )
+        .rect()
+        .min
+        .y
     };
     // The set editor is scrolled first; the bulk panel then opens at its top, not at that offset.
     rock_selected(h.state_mut());

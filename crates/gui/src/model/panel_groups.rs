@@ -1,6 +1,7 @@
 //! The texture panel's collapsible groups, which group each field sits in, and the open state kept in `gui.toml`
 //! (texture-panel-compact plan, Task 1). No egui types.
 use super::bottom::{Level, Problem};
+use super::bulk::BulkField;
 use super::code_text::{row_class, RowClass};
 use super::fields::{
     cube_views, edge_view, exr_straight_view, field_hidden, field_views, filter_view, levels_view,
@@ -146,6 +147,7 @@ pub fn panel_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
 }
 
 const NOT_USED: &str = "not used for this texture";
+const NOT_USED_BULK: &str = "not used for these textures";
 
 /// The Sources header's fixed summary, also drawn for a texture with no job (so no `summary` call).
 pub const SOURCES_SUMMARY: &str = "How each value was chosen";
@@ -200,20 +202,55 @@ pub fn summary(
             all_locked: true,
         };
     }
-    // The row of `field` unless it is locked; its option label, else the value as written.
-    let row = |field: &str| rows.iter().find(|v| v.field == field && v.lock.is_none());
-    let label = |v: &FieldView| {
-        option_label(v.field, target, p, &v.value).unwrap_or_else(|| shown(&v.value))
+    let usable: Vec<SumRow<'_>> = rows
+        .iter()
+        .filter(|v| v.lock.is_none())
+        .map(|v| SumRow {
+            field: v.field,
+            title: v.label,
+            value: &v.value,
+            mixed: false,
+        })
+        .collect();
+    GroupSummary {
+        text: summary_text(g, &usable, target, p),
+        hover: None,
+        changed,
+        all_locked: false,
+    }
+}
+
+/// One unlocked row as a header summary reads it. `mixed` is a bulk row whose textures hold different values: it reads
+/// "{title}: mixed" and `value` is not looked at.
+struct SumRow<'a> {
+    field: &'a str,
+    title: &'a str,
+    value: &'a Value,
+    mixed: bool,
+}
+
+/// The summary text of `g` over its unlocked `rows`, shared by the single panel (`summary`) and the bulk panel
+/// (`bulk_summary`) so the two read alike. `p` is the texture's profile (the bulk panel's representative one).
+fn summary_text(g: PanelGroup, rows: &[SumRow<'_>], target: Target, p: &Profile) -> String {
+    let row = |field: &str| rows.iter().find(|v| v.field == field);
+    // A row's option label, else its value as written; a mixed row says so.
+    let label = |v: &SumRow<'_>| {
+        if v.mixed {
+            return format!("{}: mixed", v.title);
+        }
+        option_label(v.field, target, p, v.value).unwrap_or_else(|| shown(v.value))
     };
-    let named = |field: &str| row(field).map(|v| label(v));
+    let named = |field: &str| row(field).map(label);
     let join =
         |parts: Vec<Option<String>>| parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
-    let text = match g {
+    match g {
         PanelGroup::Alpha => {
             let policy = row("alpha.policy").map(|v| {
-                let cut = matches!(v.value.as_str(), Some("cutout" | "cutout_blend"));
+                let cut = !v.mixed && matches!(v.value.as_str(), Some("cutout" | "cutout_blend"));
                 match (cut, row("alpha.threshold")) {
-                    (true, Some(t)) => format!("{} at {}", label(v), shown(&t.value)),
+                    (true, Some(t)) if !t.mixed => {
+                        format!("{} at {}", label(v), shown(t.value))
+                    }
                     _ => label(v),
                 }
             });
@@ -221,10 +258,16 @@ pub fn summary(
         }
         PanelGroup::Mipmaps => match row(LEVELS_FIELD.0) {
             // The tick off writes "none": that option's own label, with no filter.
-            Some(l) if !mips_on(&l.value) => label(l),
+            Some(l) if !l.mixed && !mips_on(l.value) => label(l),
             levels => join(vec![
                 named(FILTER_FIELD.0),
-                levels.map(|l| label(l).to_lowercase()),
+                levels.map(|l| {
+                    if l.mixed {
+                        label(l)
+                    } else {
+                        label(l).to_lowercase()
+                    }
+                }),
             ]),
         },
         PanelGroup::NormalMap => join(vec![
@@ -234,10 +277,10 @@ pub fn summary(
         PanelGroup::Size => match no_effect_reason(p, "resize") {
             Some(why) => why.to_string(),
             None => match row("resize") {
-                Some(r) if r.value.as_str() == Some("none") => label(r),
+                Some(r) if !r.mixed && r.value.as_str() == Some("none") => label(r),
                 Some(r) => {
                     let of = row("resize_relative_to")
-                        .filter(|v| v.value.as_str() != Some("self"))
+                        .filter(|v| v.mixed || v.value.as_str() != Some("self"))
                         .map(|v| format!(" of {}", label(v)))
                         .unwrap_or_default();
                     let floor = row("resize_floor")
@@ -255,8 +298,8 @@ pub fn summary(
                 .find_map(|f| row(f))
                 .map(|v| format!("Effort {}", label(v))),
             row("header")
-                .filter(|v| v.value.as_str() != Some("auto"))
-                .map(|v| label(v)),
+                .filter(|v| v.mixed || v.value.as_str() != Some("auto"))
+                .map(label),
         ]),
         PanelGroup::Cubemap => join(vec![
             named("cubemap.layout"),
@@ -266,9 +309,85 @@ pub fn summary(
             }),
         ]),
         PanelGroup::Channels | PanelGroup::Sources => String::new(),
-    };
-    GroupSummary {
+    }
+}
+
+thread_local! {
+    static BULK_SUMMARY_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times `bulk_summary` has run on this thread (tests: a bulk summary is built once per input change, never
+/// per frame). The single panel's `summary` is not counted.
+pub fn bulk_summary_builds() -> usize {
+    BULK_SUMMARY_BUILDS.with(std::cell::Cell::get)
+}
+
+/// The header summary of `g` over the bulk panel's rows (`fields`: every row of the selection, any group). A row no
+/// selected texture can use (`applies == 0`) is a locked part: left out, and a group of only such rows reads "not
+/// used for these textures" (R1-9). A row whose textures hold different values reads "{Label}: mixed". `changed` is
+/// any applying row with an edited texture. `p` is the profile the panel's rows read their option labels from.
+// shortcut: option labels (the Relative to slot names, the DDS tag list) and the cubemap Resize note come from one
+// representative texture's profile, as the bulk rows' editors do; upgrade if a selection mixing PBR and other maps
+// must name slots per texture.
+pub fn bulk_summary(
+    g: PanelGroup,
+    fields: &[BulkField],
+    target: Target,
+    p: &Profile,
+) -> GroupSummary {
+    BULK_SUMMARY_BUILDS.with(|c| c.set(c.get() + 1));
+    let fixed = |text: String| GroupSummary {
         text,
+        hover: None,
+        changed: false,
+        all_locked: false,
+    };
+    match g {
+        PanelGroup::Sources => return fixed(SOURCES_SUMMARY.into()),
+        // Cubemap and Channels never appear in bulk.
+        PanelGroup::Channels | PanelGroup::Cubemap => return fixed(String::new()),
+        _ => {}
+    }
+    let rows: Vec<&BulkField> = fields
+        .iter()
+        .filter(|f| panel_group(f.field) == Some(g))
+        .collect();
+    let changed = rows.iter().any(|f| f.applies > 0 && f.edited > 0);
+    let usable: Vec<SumRow<'_>> = rows
+        .iter()
+        .filter(|f| f.applies > 0)
+        .map(|f| SumRow {
+            field: f.field,
+            title: f.label,
+            value: f.value.as_ref().unwrap_or(&Value::Null),
+            mixed: f.value.is_none(),
+        })
+        .collect();
+    if usable.is_empty() {
+        // The shared reason, when every row is locked for one and the same reason.
+        let first = rows.first().and_then(|f| match f.skipped.as_slice() {
+            [(why, _)] => Some(why.as_str()),
+            _ => None,
+        });
+        let hover = match first {
+            Some(why)
+                if rows
+                    .iter()
+                    .all(|f| matches!(f.skipped.as_slice(), [(r, _)] if r == why)) =>
+            {
+                format!("Every row here: {why}.")
+            }
+            _ => "Each row below says why it is not used.".to_string(),
+        };
+        return GroupSummary {
+            text: NOT_USED_BULK.into(),
+            hover: Some(hover),
+            changed,
+            all_locked: true,
+        };
+    }
+    GroupSummary {
+        text: summary_text(g, &usable, target, p),
         hover: None,
         changed,
         all_locked: false,
@@ -300,7 +419,8 @@ pub fn is_panel_problem(p: &Problem) -> bool {
 /// row, the cube rows), and Go to focuses it. Where no control can take the focus the group still opens: a locked or
 /// disabled row (a plan pending) and `cubemap.layout` of a six-file cube (a plain label, "Six face files") scroll into
 /// view and take the request with nothing focused; a row the panel leaves out (`fields::hidden_reason`, for example
-/// `alpha.exact_opaque` outside `_msn`) has nothing to scroll to, and the request expires after `REVEAL_FIELD_PASSES`.
+/// `alpha.parallax` outside a complex material) has nothing to scroll to, and the request expires after
+/// `REVEAL_FIELD_PASSES`.
 pub const FIX_FIELDS: &[(&str, &str)] = &[
     ("LOSS-ALPHA-DATA", "format"),
     ("FMT-BC1-ALPHA", "format"),
