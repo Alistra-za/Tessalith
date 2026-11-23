@@ -1,0 +1,45 @@
+diff --git a/crates/encoders-sys/vendor/bc7e/bc7e.ispc b/crates/encoders-sys/vendor/bc7e/bc7e.ispc
+index 9484a443..36454798 100644
+--- a/crates/encoders-sys/vendor/bc7e/bc7e.ispc
++++ b/crates/encoders-sys/vendor/bc7e/bc7e.ispc
+@@ -7,6 +7,9 @@
+ // least-squares and uber stages) and m_refine_partitions (full refinement while ranking partitions), plus the level
+ // bc7e_compress_block_params_init_sdc_max that turns them on. With both flags false every level is bit-identical to
+ // the patch-0001 source.
++// MODIFIED by the sdc project (patch 0005-bc7e-fixes, 2026-11-23), per Apache-2.0 section 4(b): fixes from an audit of
++// this file and a speed shortcut. Changes are marked "sdc patch 0005":
++// - S1: handle_alpha_block_mode4 writes the end state of an alpha slot that is 255 on every texel.
+ // bc7e.ispc - Fast high quality SIMD BC7 encoder
+ // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
+ // Typically compiled as: ispc -g -O2 "%(Filename).ispc" -o "$(TargetDir)%(Filename).obj" -h "$(ProjectDir)%(Filename)_ispc.h" --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions
+@@ -3296,7 +3299,21 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
+ 		uint64_t best_alpha_err = UINT64_MAX;
+ 		uint32_t best_la = 0, best_ha = 0;
+ 		int best_alpha_selectors[16];
+-						
++
++		// sdc patch 0005 (S1): a slot that is 255 on every texel (every opaque block's rotation 0) ends where pass 0
++		// starts - (63, 63), every selector 0, error 0 - and no later trial beats an error of 0 under the strict <.
++		// Every caller passes the lane's true slot minimum and maximum, so this writes the passes' own end state.
++		cif ((lo_a == 255) && (hi_a == 255))
++		{
++			best_alpha_err = 0;
++			best_la = 63;
++			best_ha = 63;
++			for (uniform uint32_t i = 0; i < 16; i++)
++				best_alpha_selectors[i] = 0;
++		}
++		else
++		{
++
+ 		for (uniform int32_t pass = 0; pass < 2; pass++)
+ 		{
+ 			int32_t vals[8];
+@@ -3437,6 +3454,7 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
+ 
+ 			} // ld
+ 		}
++		} // sdc patch 0005 (S1)
+ 
+ 		trial_err += best_alpha_err;
+ 
