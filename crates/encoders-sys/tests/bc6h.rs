@@ -553,14 +553,14 @@ fn random_blocks_encode_at_every_level_on_every_path() {
 /// Bounds (E_lo, E_hi) on the encoder's own error for one encoded block, read from the output bytes alone, in half-code
 /// units (the encoder's UF16 error over the common factor (64/31)^2). The encoder scores the squared error of the
 /// decoded UF16 interpolant u against `h_src * 64 / 31`, unweighted over R, G and B. The decoder writes
-/// `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1): with d = h - h_src a channel's error lies between d^2
-/// and (d + 1)^2 (survey #3).
+/// `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1): with e = h - h_src a channel's error lies between e^2
+/// and (e + 1)^2 (survey #3).
 fn err_bounds(src: &[[u16; 4]; 16], dec: &[[u16; 3]; 16]) -> (f64, f64) {
     let (mut lo, mut hi) = (0i64, 0i64);
     for (s, d) in src.iter().zip(dec) {
         for c in 0..3 {
-            let d = d[c] as i64 - s[c] as i64;
-            let (a, b) = (d * d, (d + 1) * (d + 1));
+            let e = d[c] as i64 - s[c] as i64;
+            let (a, b) = (e * e, (e + 1) * (e + 1));
             lo += a.min(b);
             hi += a.max(b);
         }
@@ -568,10 +568,16 @@ fn err_bounds(src: &[[u16; 4]; 16], dec: &[[u16; 3]; 16]) -> (f64, f64) {
     (lo as f64, hi as f64)
 }
 
+/// `err_bounds` of one block encoded at `level` on `target`.
+fn level_bounds(px: &[[u16; 4]; 16], level: Bc6hLevel, target: IspcTarget) -> (f64, f64) {
+    err_bounds(px, &decode_halves(&encode_block(px, level, target)))
+}
+
 /// A deterministic HDR block from index `i` (half codes in 0x2000..=0x7000, alpha 1.0), for the refinement search.
 /// Half the blocks are a gradient along a random direction across the block, with a random colour direction and up
 /// to 64 half codes of noise; the other half draw each channel from a random range. One block in eight gets one
-/// outlier texel. The widest channel spans 600..=12288 half codes, so the one-region modes in play are 10 to 12.
+/// outlier texel. The drawn span of the widest channel is 600..=12288 half codes (an outlier can widen a block to
+/// 20480), so the one-region modes in play are 10 to 12.
 /// Integer arithmetic only, so the blocks are the same on every machine.
 fn candidate(i: u32) -> [[u16; 4]; 16] {
     const LO: i64 = 0x2000;
@@ -683,6 +689,10 @@ fn search_refine_witnesses() {
     const END: u32 = 1 << 20;
     const CHUNK: u32 = STRIP_BLOCKS as u32;
     let target = IspcTarget::Avx2;
+    if !target.supported() {
+        eprintln!("skipped: the AVX2 path is not supported on this CPU");
+        return;
+    }
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
     let start = std::time::Instant::now();
     let mut hits = Vec::new();
@@ -703,9 +713,8 @@ fn search_refine_witnesses() {
                 break;
             }
             let px = candidate(i);
-            let one = |l| err_bounds(&px, &decode_halves(&encode_block(&px, l, target)));
-            let (lo1, _) = one(level);
-            let (_, hi1) = one(Bc6hLevel::Veryfast);
+            let (lo1, _) = level_bounds(&px, level, target);
+            let (_, hi1) = level_bounds(&px, Bc6hLevel::Veryfast, target);
             if lo1 > hi1 {
                 println!("witness {i} {level:?}: E_lo {e_lo} > Veryfast E_hi {vf_hi}");
                 if !hits.contains(&i) {
@@ -734,10 +743,9 @@ fn refinement_never_ends_worse_than_veryfast() {
     for target in paths() {
         for &i in REFINE_WITNESSES {
             let px = candidate(i);
-            let bounds = |l| err_bounds(&px, &decode_halves(&encode_block(&px, l, target)));
-            let (vf_lo, vf_hi) = bounds(Bc6hLevel::Veryfast);
+            let (vf_lo, vf_hi) = level_bounds(&px, Bc6hLevel::Veryfast, target);
             for level in [Bc6hLevel::Basic, Bc6hLevel::Veryslow] {
-                let (lo, hi) = bounds(level);
+                let (lo, hi) = level_bounds(&px, level, target);
                 if lo > vf_hi {
                     failures.push(format!(
                         "witness {i} {target:?} {level:?}: E_lo {lo} > Veryfast E_hi {vf_hi} \
@@ -768,18 +776,80 @@ fn unpack_to_uf16(q: u32, bits: u32) -> u32 {
     }
 }
 
-/// The 10-bit code whose rebuilt value is nearest to `v` (the lower one on a tie).
-fn nearest10(v: f64) -> u32 {
-    let dist = |q: u32| (unpack_to_uf16(q, 10) as f64 - v).abs();
-    (0..1024u32)
-        .min_by(|&a, &b| dist(a).total_cmp(&dist(b)))
-        .unwrap()
+/// The `bits`-bit code whose rebuilt value is nearest to `v` (the lower one on a tie), in constant time: the code
+/// whose cell holds `v` and its two neighbours are the only candidates (`nearest_code_equals_the_exhaustive_search`
+/// checks it against every code).
+fn nearest_code(v: f64, bits: u32) -> u32 {
+    let levels = 1i64 << bits;
+    let q0 = ((v * levels as f64 / 65536.0).floor() as i64).clamp(0, levels - 1);
+    let mut best = (f64::MAX, 0u32);
+    for q in (q0 - 1).max(0)..=(q0 + 1).min(levels - 1) {
+        let dist = (unpack_to_uf16(q as u32, bits) as f64 - v).abs();
+        if dist < best.0 {
+            best = (dist, q as u32);
+        }
+    }
+    best.1
 }
 
-/// The 10-bit rounding the kernel shipped (in f32), used only to pick the inputs of
-/// `one_region_endpoints_take_the_nearest_code`.
-fn shipped10(v: f32) -> u32 {
-    ((v / 65535.0 * 1023.0 + 0.5) as i32).clamp(0, 1023) as u32
+/// The `bits`-bit rounding the kernel shipped (in f32), used only to pick inputs where it missed the nearest code.
+fn shipped_code(v: f32, bits: u32) -> u32 {
+    let top = (1i32 << bits) - 1;
+    ((v / 65535.0 * top as f32 + 0.5) as i32).clamp(0, top) as u32
+}
+
+/// The UF16 value `h` (a half code) becomes in the kernel's `bc6h_setup`, in f32 and in f64.
+fn uf16_of_half(h: u16) -> (f32, f64) {
+    ((h as f32 / 31.0) * 64.0, h as f64 * 64.0 / 31.0)
+}
+
+/// The half codes whose `bits`-bit code under the shipped rule is not the nearest code, as `(h, nearest, shipped)`.
+/// Only codes `margin` UF16 units clear of every edge between two codes under both rules (both are monotone step
+/// functions, so equal codes `margin` either side mean no edge in between), so the nearest code is strict.
+fn mismatch_inputs(bits: u32, margin: f32) -> Vec<(u16, u32, u32)> {
+    let mut found = Vec::new();
+    for h in 0..=MAX_UF16 as u16 {
+        let (v32, v64) = uf16_of_half(h);
+        let (s, n) = (shipped_code(v32, bits), nearest_code(v64, bits));
+        let m = margin as f64;
+        let clear = shipped_code(v32 - margin, bits) == s
+            && shipped_code(v32 + margin, bits) == s
+            && nearest_code(v64 - m, bits) == n
+            && nearest_code(v64 + m, bits) == n;
+        if clear && s != n {
+            found.push((h, n, s));
+        }
+    }
+    found
+}
+
+#[test]
+fn nearest_code_equals_the_exhaustive_search() {
+    // Pure check of the test helper: every code, at the values where two codes meet and a few around them.
+    for bits in [10, 11, 12] {
+        let levels = 1u32 << bits;
+        let rebuilt: Vec<f64> = (0..levels)
+            .map(|q| unpack_to_uf16(q, bits) as f64)
+            .collect();
+        let exhaustive = |v: f64| {
+            let mut best = (f64::MAX, 0u32);
+            for (q, r) in rebuilt.iter().enumerate() {
+                if (r - v).abs() < best.0 {
+                    best = ((r - v).abs(), q as u32);
+                }
+            }
+            best.1
+        };
+        let mut values: Vec<f64> = (0..=65535).step_by(97).map(f64::from).collect();
+        for pair in rebuilt.windows(2) {
+            let mid = (pair[0] + pair[1]) / 2.0;
+            values.extend([mid - 0.25, mid, mid + 0.25]);
+        }
+        values.extend([0.0, 1.0, 65534.0, 65535.0]);
+        for v in values {
+            assert_eq!(nearest_code(v, bits), exhaustive(v), "{bits} bits, v {v}");
+        }
+    }
 }
 
 /// Survey #2. The decoder rebuilds an interior code q of a `bits`-bit endpoint at (q + 0.5) * 65536 / 2^bits
@@ -793,41 +863,46 @@ fn shipped10(v: f32) -> u32 {
 ///
 /// The inputs are half codes h (UF16 value v = h * 64 / 31) where the shipped rule and the nearest code differ, the
 /// nearest code is strict, and v is at least 4 UF16 units from both edges of that mismatch window: G from nearest codes
-/// 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too low).
+/// 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too low). Four more blocks take the end
+/// codes: G with nearest code 0 (shipped 1) and B with nearest 1023 (shipped 1022).
+///
+/// Not covered here, on purpose: a value midway between two codes (the kernel takes the lower, as `nearest_code`, but a
+/// tie is a knife edge that the encoder's float endpoint can fall either side of) and the delta modes 11 and 12 (an
+/// endpoint pair can carry different codes for a channel that is constant over the block).
 #[test]
 fn one_region_endpoints_take_the_nearest_code() {
     let (mut g_list, mut b_list) = (Vec::new(), Vec::new());
-    for h in 0..=MAX_UF16 as u16 {
-        let v32 = (h as f32 / 31.0) * 64.0; // as the kernel's bc6h_setup
-        let v64 = h as f64 * 64.0 / 31.0;
-        let (s, n) = (shipped10(v32), nearest10(v64));
-        // Both rules are monotone step functions, so equal codes 4 units either side mean no edge within 4 units
-        // (which also makes the nearest code strict).
-        let clear = shipped10(v32 - 4.0) == s
-            && shipped10(v32 + 4.0) == s
-            && nearest10(v64 - 4.0) == n
-            && nearest10(v64 + 4.0) == n;
-        if !clear {
-            continue;
-        }
+    let (mut g_end, mut b_end) = (Vec::new(), Vec::new());
+    for (h, n, s) in mismatch_inputs(10, 4.0) {
         if (8..=150).contains(&n) && s == n + 1 {
             g_list.push(h);
         } else if (870..=1015).contains(&n) && s + 1 == n {
             b_list.push(h);
+        } else if n == 0 && s == 1 {
+            g_end.push(h);
+        } else if n == 1023 && s == 1022 {
+            b_end.push(h);
         }
     }
     assert!(
-        !g_list.is_empty() && !b_list.is_empty(),
-        "no inputs: G {g_list:?} B {b_list:?}"
+        !g_list.is_empty() && !b_list.is_empty() && !g_end.is_empty() && !b_end.is_empty(),
+        "no inputs: G {g_list:?} B {b_list:?} G end {g_end:?} B end {b_end:?}"
     );
     let mut r = Lcg(0x5678_9abc);
-    let blocks: Vec<(u16, u16)> = (0..16)
+    let mut blocks: Vec<(u16, u16)> = (0..16)
         .map(|_| {
             let g = g_list[r.next() as usize % g_list.len()];
             let b = b_list[r.next() as usize % b_list.len()];
             (g, b)
         })
         .collect();
+    // The end codes, which the candidate window clamps: G where code 0 is nearest (shipped: 1), B where code 1023 is
+    // (shipped: 1022).
+    blocks.extend((0..4).map(|_| {
+        let g = g_end[r.next() as usize % g_end.len()];
+        let b = b_end[r.next() as usize % b_end.len()];
+        (g, b)
+    }));
     let one = f16::ONE.to_bits();
     let mut failures = Vec::new();
     for target in paths() {
@@ -846,12 +921,12 @@ fn one_region_endpoints_take_the_nearest_code() {
                 field(&out, 25, 10),
                 field(&out, 55, 10),
             ];
-            let (vg, vb) = (g as f64 * 64.0 / 31.0, b as f64 * 64.0 / 31.0);
-            let (ng, nb) = (nearest10(vg), nearest10(vb));
+            let (vg, vb) = (uf16_of_half(g).1, uf16_of_half(b).1);
+            let (ng, nb) = (nearest_code(vg, 10), nearest_code(vb, 10));
             if codes != [ng, ng, nb, nb] {
                 let (sg, sb) = (
-                    shipped10((g as f32 / 31.0) * 64.0),
-                    shipped10((b as f32 / 31.0) * 64.0),
+                    shipped_code(uf16_of_half(g).0, 10),
+                    shipped_code(uf16_of_half(b).0, 10),
                 );
                 failures.push(format!(
                     "block {k} {target:?} (G half {g:#06x}, B half {b:#06x}): G codes {} {}, B codes {} {}; \

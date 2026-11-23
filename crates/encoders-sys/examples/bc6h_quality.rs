@@ -9,8 +9,8 @@
 //! `<root>\images2\hdr_grad` (set `hdr_grad`, 4 images), `.f16` files sorted by path. Each channel goes through the
 //! engine's `clamp_half` and back to half bits (alpha 1.0); the CSV column `clamped` counts channels that changed.
 //! Every level is encoded one 4-row strip per call (`bc6h_compress_rows_on`) with the strips spread over `--threads`
-//! threads (default: every available thread; later runs of a measurement chain pass the same N), decoded with `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak
-//! ratio. The metrics are ported from branch `bench` 87c5539f (`crates/bench/src/metrics.rs`, `s7b.rs`
+//! threads (default: every available thread; later runs of a measurement chain pass the same N), decoded with
+//! `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak ratio. The metrics are ported from branch `bench` 87c5539f (`crates/bench/src/metrics.rs`, `s7b.rs`
 //! `peak`, `bc6peak.rs` `mean_ci`, `corpus.rs` `load_f16`).
 //!
 //! `compare` joins the rows of two CSVs on (set, image) and prints, per level pair (each level with itself, or
@@ -255,7 +255,9 @@ fn run(args: &[String]) -> Res<()> {
             "--root" => root = Some(PathBuf::from(val()?)),
             "--out" => out = Some(PathBuf::from(val()?)),
             "--threads" => {
-                let n: usize = val()?.parse()?;
+                let n: usize = val()?
+                    .parse()
+                    .map_err(|e| format!("--threads needs a number of 1 or more: {e}"))?;
                 if n == 0 || THREADS.set(n).is_err() {
                     return Err("--threads needs a number of 1 or more, given once".into());
                 }
@@ -551,7 +553,7 @@ fn main() {
     let res = match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("compare") => compare(&args[1..]),
-        _ => Err("usage: bc6h_quality run --root <dir> --out <csv> [--target t] | compare <a.csv> <b.csv> [--pair a:b]".into()),
+        _ => Err("usage: bc6h_quality run --root <dir> --out <csv> [--target t] [--threads N] | compare <a.csv> <b.csv> [--pair a:b]".into()),
     };
     if let Err(e) = res {
         eprintln!("error: {e}");
