@@ -4,7 +4,7 @@ For anyone with one texture selected who wants to change how it encodes, or to a
 
 ## Reading the panel
 
-Each texture opens on what you check first: its name, its type, the output format and size, the meshes that use it, and its problems. Every other setting sits in a group below: **Alpha**, **Mipmaps**, **Normal map**, **Size**, **Compression**, then **Cubemap** or **Channels** where they apply. A closed group says what it holds (**Mipmaps** reads "Kaiser, full chain") and shows **● changed** when you set a value in it; open, its rows show the values. When you select a texture with a problem, the group that holds it opens, and **Go to** in Problems opens it at the setting. Tessalith remembers which groups you keep open, for every texture and project. <!-- D:JI3,LQ -->
+Each texture opens on what you check first: its name, its type, the output format and size, the meshes that use it, and its problems. Every other setting sits in a group below: **Alpha**, **Mipmaps**, **Normal map**, **Size**, **Compression**, then **Cubemap** or **Channels** where they apply. A closed group says what it holds (**Mipmaps** reads "Box, full chain"); open, its rows show the values. A group shows **● changed** when you set a value in it, open or closed. When you select a texture with a problem, the group that holds it opens, and **Go to** in Problems opens it at the setting. Tessalith remembers which groups you keep open, for every texture and project. <!-- D:JI3,LQ -->
 
 Each value says where it came from, for example "from sdc.toml", "suggested" or "from the meshes that use this texture". A line under Format gives the output format, size, mip count and VRAM; greyed options carry their reason on hover.
 
@@ -114,7 +114,7 @@ The Alpha row then reads *from the meshes that use this texture*. Your own choic
 
 ## Used by meshes
 
-After a [scan](Mod-Scanning.md), the list under the texture's heading, closed until you open it, reads **Used by {n} meshes** (**Used by 1 mesh**). It counts the NIF copies in the scan database that use the texture, so the number matches what a click can open. <!-- D:LM13 -->
+After a [scan](Mod-Scanning.md), the list under the texture's heading, above the **Texture type** row and closed until you open it, reads **Used by {n} meshes** (**Used by 1 mesh**). It counts the NIF copies in the scan database that use the texture, so the number matches what a click can open. <!-- D:LM13 -->
 
 - **A row** is one NIF in one mod: its path (the whole path on hover), then one line per copy, such as "{mod} · MO2 priority {p}" or "{mod} · BSA load rank {p}". A copy that loses to another mod's reads "(overridden by {mod})", with "at {root}" added when the winner has the same mod name in another root. <!-- D:LM13 -->
 - **An amber "decided the alpha" tag** marks a copy whose alpha settings decided what this texture's alpha means ([Alpha from the meshes](#alpha-from-the-meshes)). It looks at every copy, not only the listed ones. <!-- D:LM13 -->
@@ -142,7 +142,7 @@ A DDS input is left as it is and not written. **Re-encode this file** writes `re
 
 ## Where these settings come from
 
-To see what set a value (a built-in default, a preset, a rule, `sdc.toml`, the image analysis), open **Where these settings come from**, the folded section at the bottom of the panel. It lists every field of the texture with its value and its source, and puts the values that differ from the `sdc-base` preset in bold. Tick **Show only what differs from sdc-base** to hide the rest; the tick stays as you move between textures. The section is read-only; to change a value, use the rows above. <!-- D:JI3 --> How presets and rules stack: [Presets and targets](Presets-and-Targets.md).
+To see what set a value (a built-in default, a preset, a rule, `sdc.toml`, the image analysis), open **Where these settings come from**, the last group of the panel, below the other groups and closed until you open it. It lists every field of the texture with its value and its source, and puts the values that differ from the `sdc-base` preset in bold. Tick **Show only what differs from sdc-base** to hide the rest; the tick stays as you move between textures. The section is read-only; to change a value, use the rows above. <!-- D:JI3 --> How presets and rules stack: [Presets and targets](Presets-and-Targets.md).
 
 ## How edits are saved
 

@@ -453,6 +453,9 @@ fn cube_panel(dir: &Path) -> Frame {
             m.decide(f, Answer::Subtype(engine::config::Subtype::Cubemap));
             assert!(m.wait_idle(Duration::from_secs(60)));
         }
+        // A full chain, so no CUBE-NO-MIPS problem forces Mipmaps open beside the Cubemap group.
+        m.set_field("sky/env_px.png", "mips.levels", serde_json::json!("full"));
+        assert!(m.wait_idle(Duration::from_secs(60)));
         panel_groups::set_open(&mut m.settings, PanelGroup::Cubemap, true);
     });
     let r = reveal(&mut h, |h| {
