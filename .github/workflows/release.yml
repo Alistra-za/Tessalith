@@ -36,8 +36,9 @@ jobs:
 
   # Owner 2026-11-20: every v* tag uploads the zip to Nexus as a new version of file 8217615 on
   # skyrimspecialedition mod 196495 (v3 mod id 7318624468879 = game 1704 << 32 | 196495), archives the old
-  # version, sets the mod version and posts that version's CHANGELOG.md section. The API key is the secret
-  # NEXUSMODS_API_KEY of the "nexus" deployment environment; the owner sets it, never the workflow.
+  # version, sets the mod version and posts RELEASE-NOTES.md as its changelog (owner 2026-11-23; the long
+  # CHANGELOG.md is linked from the notes' last line). The API key is the secret NEXUSMODS_API_KEY of the "nexus"
+  # deployment environment; the owner sets it, never the workflow.
   nexus:
     needs: package
     if: startsWith(github.ref, 'refs/tags/v')
@@ -48,26 +49,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: CHANGELOG.md
+          sparse-checkout: |
+            RELEASE-NOTES.md
+            tools/release-notes.ps1
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           name: tessalith-win-x64
           path: dist
-      - name: Version, zip and changelog
+      - name: Version, zip and release notes
         id: rel
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
           $zip = Get-ChildItem dist -Filter "Tessalith-$version-win-x64.zip" | Select-Object -First 1
           if (-not $zip) { throw "dist/Tessalith-$version-win-x64.zip is missing: the tag and the workspace version differ" }
-          # The section under "## <version>" up to the next "## " heading.
-          $lines = Get-Content CHANGELOG.md
-          $start = [array]::IndexOf($lines, "## $version")
-          if ($start -lt 0) { throw "CHANGELOG.md has no '## $version' section" }
-          $end = $start + 1
-          while ($end -lt $lines.Count -and -not $lines[$end].StartsWith('## ')) { $end++ }
-          $notes = ($lines[($start + 1)..($end - 1)] -join "`n").Trim()
+          # Fails unless RELEASE-NOTES.md is headed "## <version>".
+          ./tools/release-notes.ps1 -Version $version -Out notes.md
+          $notes = (Get-Content notes.md -Raw -Encoding utf8).Trim()
           $eof = "EOF$([guid]::NewGuid().ToString('N'))"
           "version=$version" >> $env:GITHUB_OUTPUT
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
@@ -86,3 +85,42 @@ jobs:
           archive_existing_version: true
           update_mod_version: true
           changelog: ${{ steps.rel.outputs.changelog }}
+
+  # Owner 2026-11-23: every v* tag also drafts the GitHub release, with RELEASE-NOTES.md as its body and the zip and
+  # SHA256SUMS.txt attached. It stays a draft: the owner reads it and presses Publish. A release that already exists
+  # for the tag is left as it is.
+  github:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            RELEASE-NOTES.md
+            tools/release-notes.ps1
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: tessalith-win-x64
+          path: dist
+      - name: Draft the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $version = $tag.TrimStart('v')
+          $zip = "dist/Tessalith-$version-win-x64.zip"
+          if (-not (Test-Path $zip)) { throw "$zip is missing: the tag and the workspace version differ" }
+          ./tools/release-notes.ps1 -Version $version -Out notes.md
+          gh release view $tag -R '${{ github.repository }}' *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "::notice::A GitHub release for $tag already exists; it was left as it is."
+            exit 0
+          }
+          gh release create $tag -R '${{ github.repository }}' --draft --verify-tag --title "Tessalith $version" `
+            --notes-file notes.md $zip dist/SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)" }

@@ -15,6 +15,8 @@ Fail rules:
   budget       docs/wiki/*.md: size limits of section 4. Every page not starting with "_" is linked from _Sidebar.md.
   callout      docs/wiki/*.md: at most two IMPORTANT lines per page. README.md, docs/gui.md and docs/wiki/*.md: no
                BOM, no image with empty alt text.
+  release-notes RELEASE-NOTES.md: no BOM; one "## " heading, "Unreleased" or a version, as the first line; one to
+               twelve top-level bullets; the last line links CHANGELOG.md (section 6).
 Warning rule: six or more top-level bullets in a row on a wiki page (_Sidebar.md excluded).
 """
 # shortcut: the scans read text line by line, so a phrase split across two lines is missed and a phrase inside a
@@ -49,6 +51,8 @@ BULLET = re.compile(r"^[-*+] ")
 HEADINGS = ["Main", "Engine", "GUI", "CLI", "Common"]
 CHANGELOG_ALLOW = {"0.8.0-alpha.1"}
 BULLET_RUN = 6
+RELEASE_HEAD = re.compile(r"^## (?:Unreleased|\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$")
+RELEASE_BULLETS = 12
 
 
 def read(path):
@@ -157,6 +161,27 @@ def lint(root):
             elif line.startswith("### ") and version is not None:
                 seen.append((n, line[4:].strip()))
         check()
+
+    notes = root / "RELEASE-NOTES.md"
+    if notes.exists():
+        raw, text = read(notes)
+        lines = text.rstrip("\n").split("\n")
+
+        def bad(n, what):
+            fails.append(f"RELEASE-NOTES.md:{n}: release-notes: {what} (docs/DOCUMENTATION.md section 6).")
+
+        if raw.startswith(b"\xef\xbb\xbf"):
+            bad(1, "the file starts with a byte-order mark. Save it as UTF-8 without BOM")
+        heads = [n for n, line in enumerate(lines, 1) if line.startswith("## ")]
+        if heads != [1] or not RELEASE_HEAD.match(lines[0]):
+            bad(heads[0] if heads else 1, "the file holds one version: its first line, and its only \"## \" line, "
+                                          "is \"## Unreleased\" or \"## <version>\"")
+        bullets = sum(1 for line in lines if BULLET.match(line))
+        if not 1 <= bullets <= RELEASE_BULLETS:
+            bad(1, f"{bullets} top-level bullets; release notes have one to {RELEASE_BULLETS}")
+        if "CHANGELOG.md" not in lines[-1]:
+            bad(len(lines), "the last line links the full changelog: \"Full changelog: "
+                            "https://github.com/Alistra-za/Tessalith/blob/main/CHANGELOG.md\"")
     return fails, warns, len(wiki)
 
 
