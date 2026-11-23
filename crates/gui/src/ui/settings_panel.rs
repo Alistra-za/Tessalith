@@ -2418,8 +2418,12 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             // `size_of` needs `&mut model`, which `cx` below keeps shared: ask now, draw the line in its place.
             let size = (!compact).then(|| model.size_of(key));
             let (rows, notes, problem_groups) = texture_problems(ui.ctx(), surface, model, key);
-            // Rule 2: the selected item's first draw with a job adds its problems' groups, once.
-            if forced_here && !model.panel_forced.filled {
+            // Rule 2 (LQ5): the selected item's first draw after its job resolves (no type or alpha question open) on a
+            // settled plan adds its problems' groups, once, so a problem the answer or the plan raises opens its group.
+            // Settled is `plan_wait`, not `fix_off`: a read-only `sdc.toml` keeps edits off, never navigation (LQ2).
+            let settled = !model.plan_wait()
+                && !matches!(job.status, engine::policy::JobStatus::Unresolved { .. });
+            if forced_here && !model.panel_forced.filled && settled {
                 model
                     .panel_forced
                     .groups

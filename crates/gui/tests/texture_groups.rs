@@ -3847,3 +3847,84 @@ fn an_hdr_source_line_is_a_note_and_hides_no_problem_row() {
     assert_eq!(rows, vec![also], "listed as any problem row");
     assert_eq!(notes, 1, "the Info row is counted as a note");
 }
+
+/// LQ5 and TPC-F-1 (Minor 6): the latch fills once the job resolves, so a problem the alpha answer raises opens its
+/// group. leaf's alpha question is open (proposal Cutout); BC3 with Perceptual is fine for Cutout, and Data raises
+/// FMT-PERCEPTUAL-DATA, whose field is in Compression.
+#[test]
+fn a_problem_the_alpha_answer_raises_opens_its_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for (f, v) in [
+        ("format", json!("bc3")),
+        ("encoder.perceptual", json!(true)),
+    ] {
+        m.set_field(LEAF, f, v.clone());
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(LEAF, f),
+            Some(v),
+            "premise: {f} written"
+        );
+    }
+    panel_groups::set_open(&mut m.settings, PanelGroup::Compression, false);
+    m.select_item(LEAF);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.get_by_label("Confirm alpha"); // the question is open
+    assert!(h
+        .query_by_label_contains("Compression, collapsed")
+        .is_some());
+    h.state_mut()
+        .decide(LEAF, Answer::Alpha(engine::config::AlphaPolicy::Data));
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    let n = h.get_by_label_contains("Compression, expanded");
+    assert!(n
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .contains(", has a problem"));
+}
+
+/// LQ5: a texture selected while a plan is pending draws its last job, which may not have the plan's problems yet; the
+/// latch waits for the plan. Here the cube's `mips.levels = none` is still planning (CUBE-NO-MIPS is not on its job)
+/// when it is selected and drawn; once the plan lands, Mipmaps opens.
+#[test]
+fn a_selection_during_a_pending_plan_fills_after_the_plan_lands() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), FLAT);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.set_field(CUBE, "mips.levels", json!("none"));
+    assert!(m.plan_wait(), "premise: the plan is pending");
+    m.select_item(CUBE);
+    let mut h = harness(m, 1280.0, 800.0); // `ui::draw` polls no plan: it stays pending while this draws
+    h.run();
+    assert!(
+        h.state().plan_wait(),
+        "premise: still pending after the draw"
+    );
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    assert!(h.query_by_label_contains("Mipmaps, expanded").is_some());
+}
+
+/// The latch's gate is a settled plan (`plan_wait`), not `fix_off()`: a read-only `sdc.toml` keeps edits off, but a
+/// problem still opens its group (headers are navigation, LQ2). A pin of the forced open, guarding the gate's choice.
+#[test]
+fn a_read_only_sdc_toml_still_opens_a_problem_s_group() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
+    assert!(m.fix_off().is_some(), "premise: edits are off");
+    m.select_item(&key);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    assert!(h.query_by_label_contains("Mipmaps, expanded").is_some());
+}
