@@ -1554,14 +1554,22 @@ fn a_packed_tile_says_what_it_is_made_from() {
         .key
         .clone();
     // Rulings 3d-F-9 and 3d-F-9b: the tile's node carries its key, status and warnings, never the pack lines, which
-    // stay on hover (and on helper rows).
-    let node = h
+    // stay on hover (and on helper rows). The node is looked up in the Textures column, and exactly one must match,
+    // so the checks below can't pass on no node (ruling 3d-F-11).
+    let column =
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures").expect("the Textures column");
+    let nodes: Vec<_> = h
         .query_all(egui_kittest::kittest::by().predicate(|n| {
             n.description().is_some() && n.label().is_some_and(|l| l.starts_with(key.as_str()))
         }))
-        .next()
-        .unwrap_or_else(|| panic!("the {key} tile's node"));
-    let name = node.accesskit_node().label().unwrap_or_default();
+        .filter(|n| column.contains_rect(n.rect()))
+        .collect();
+    assert_eq!(
+        nodes.len(),
+        1,
+        "the {key} tile's node in the Textures column"
+    );
+    let name = nodes[0].accesskit_node().label().unwrap_or_default();
     assert!(!name.contains("Packed output, made from"), "{name:?}");
     assert!(!name.contains("Bulk edits"), "{name:?}");
     tile(&h, &key).hover();
