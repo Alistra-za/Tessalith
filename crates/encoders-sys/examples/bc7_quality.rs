@@ -23,10 +23,10 @@
 //! row sends the weights `[s, s, s, s * w]` (s = 16 for the `x16` values, else 1; `[1, 1, 1, 1]` is sent unset), its
 //! flat tolerance and its exact-constants mask; with perceptual on only its flat tolerance, so `default` and `x16` are
 //! the plain call there (Note LR). Such a perceptual `x16` row repeats `default`'s bytes, and `data_x16` and
-//! `data_exact_g_x16` repeat `data`'s: they are encoded again and kept, so every tuning has its rows for `compare`. `bc7_fixup::force_opaque_rotated` is
-//! applied to every block whose source alpha is 255 throughout (no zero fix), then the blocks are decoded with
-//! `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over the threads, so the output
-//! does not depend on `--threads`.
+//! `data_exact_g_x16` repeat `data`'s: they are encoded again and kept, so every tuning has its rows for `compare`.
+//! `bc7_fixup::force_opaque_rotated` is applied to every block whose source alpha is 255 throughout (no zero fix), then
+//! the blocks are decoded with `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over
+//! the threads, so the output does not depend on `--threads`.
 //!
 //! The CSV has one row per image and setting. `se_*` are integer sums of squared errors, `max_*` maximum absolute
 //! errors, `ge32_rgb` and `ge32_a` count blocks whose RGB or alpha maximum absolute error is at least 32, `angle` is
