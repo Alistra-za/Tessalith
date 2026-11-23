@@ -11,7 +11,7 @@ use crate::pgp::prefix::{
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
 use engine::codes::{Code, Warning};
-use engine::config::{Category, Subtype, Target};
+use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
 use engine::overrides::path_key_matches;
 use engine::pack::RecipeKind;
@@ -1697,16 +1697,11 @@ pub(crate) fn missing_map_slot(w: &Warning) -> Option<u8> {
         .flatten()
 }
 
-/// A tangent-space normal: the twin of the engine's private `policy::takes_green` (a normal-category sub-type that is
-/// not model-space).
-fn tangent_space_normal(st: Subtype) -> bool {
-    st.category() == Category::Normal && st != Subtype::Msn
-}
-
 /// Note HH8: whether a resolved borrow fills the slot of the missing map `w` names with a file whose sub-type answers
 /// the role the set's shader needs for it. B1-5: the engine's `MapRole::matches` decides (sub-type only, so a role
 /// matched by suffix, such as `_i`, is never answered by a borrow). B1-6: a role a tangent-space normal answers takes
-/// any tangent-space normal, since the borrower only names the lender's exported file.
+/// any tangent-space normal (`engine::policy::takes_green`: a normal-category sub-type that is not model-space), since
+/// the borrower only names the lender's exported file.
 fn borrow_answers(m: &AppModel, v: &SetView, w: &Warning) -> bool {
     let Some(n) = missing_map_slot(w) else {
         return false;
@@ -1724,8 +1719,9 @@ fn borrow_answers(m: &AppModel, v: &SetView, w: &Warning) -> bool {
     let takes_normal = [Subtype::Normal, Subtype::PbrNormal]
         .into_iter()
         .any(|st| role.matches(None, Some(st)));
-    let answers =
-        |st: Subtype| role.matches(None, Some(st)) || takes_normal && tangent_space_normal(st);
+    let answers = |st: Subtype| {
+        role.matches(None, Some(st)) || takes_normal && engine::policy::takes_green(st)
+    };
     v.slots.iter().any(|(k, f)| match f {
         SlotFill::Borrowed { item, .. } if k.slot_number() == Some(n) => m
             .item(item)
