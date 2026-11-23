@@ -102,8 +102,9 @@ pub fn radius(r: SearchRadius) -> u32 {
 ///
 /// BC7 blocks whose input alpha is 255 throughout (spec §5.6, §5.8):
 /// - Rotated mode 4/5 blocks always get the lossless rotated-slot fix, whatever `alpha.exact_opaque`
-///   and the alpha policy (fix batch 41). Without it bc7e can decode such a block's alpha well below
-///   254 (239 on white noise), which would break the `remove` guarantee.
+///   and the alpha policy (fix batch 41), as the guarantee behind `remove`. Before bc7e patch 0005 bc7e could decode
+///   such a block's alpha well below 254 (239 on white noise); since 0005 (Q2t) the four probe inputs give none (0 of
+///   1210 to 2310 rotated blocks at veryslow, basic, slowest and max on SSE2, AVX2 and AVX-512; Note LR6).
 /// - `alpha.exact_opaque` controls only mode 6, the part that costs RGB: it is bc7e's native flag. With the flag
 ///   off, mode 6 is the only source of alpha 254.
 fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
@@ -130,6 +131,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         params,
                         Bc7Tune {
                             weights: Some(w.weights()),
+                            ..Bc7Tune::default()
                         },
                     ),
                     None => bc7e_compress_blocks(bc, oc, params),

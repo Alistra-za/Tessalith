@@ -1,4 +1,7 @@
-use encoders_sys::{bc7e_compress_blocks, gather_blocks, Bc7Level, Bc7Params};
+use encoders_sys::{
+    bc7e_compress_blocks, bc7e_compress_blocks_on, gather_blocks, ispc_target, Bc7Level, Bc7Params,
+    IspcTarget,
+};
 
 const U5: Bc7Params = Bc7Params {
     level: Bc7Level::Veryslow,
@@ -10,6 +13,76 @@ fn decode(block: &[u8]) -> Vec<[u8; 4]> {
     let mut out = [0u8; 64];
     bcdec_rs::bc7(block, &mut out, 16);
     out.chunks(4).map(|c| [c[0], c[1], c[2], c[3]]).collect()
+}
+
+/// Every ISPC path this CPU runs up to `ispc_target()` (Note HZ3): SSE2 and AVX2 in a test build, AVX-512 too with
+/// `SDC_TEST_AVX512=1`.
+fn paths() -> Vec<IspcTarget> {
+    IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+        .collect()
+}
+
+/// 128x128 opaque white noise: `bc7_fixup.rs`'s xorshift seeded 0x1234_5678_9ABC_DEF1, alpha 255.
+fn opaque_white_noise() -> Vec<[u8; 4]> {
+    let mut s = 0x1234_5678_9ABC_DEF1u64;
+    let px: Vec<[u8; 4]> = (0..128 * 128)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            [s as u8, (s >> 8) as u8, (s >> 16) as u8, 255]
+        })
+        .collect();
+    gather_blocks(&px, 128, 128)
+}
+
+/// Raw bc7e bytes (no post-fix), in 64-block calls as the engine makes them.
+fn raw_on(blocks: &[[u8; 4]], p: Bc7Params, target: IspcTarget) -> Vec<u8> {
+    let mut out = vec![0u8; blocks.len()];
+    for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
+        bc7e_compress_blocks_on(b, o, p, target);
+    }
+    out
+}
+
+/// `fixDegenerateEndpoints` spread a constant channel when the refit's float endpoints differed by noise. In a
+/// rotated mode-4 block of an opaque block that channel holds the alpha, and mode 4's double nudge took 31 to 29,
+/// which decodes 239 (Note LR; DECISIONS-1.x line 52's fingerprint). With the flat tolerance no such block is written.
+#[test]
+fn opaque_noise_never_double_nudges_the_rotated_slot() {
+    let blocks = opaque_white_noise();
+    let mut found = vec![];
+    let mut total = 0;
+    for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
+        for exact_opaque in [false, true] {
+            let p = Bc7Params {
+                level,
+                perceptual: false,
+                exact_opaque,
+            };
+            for target in paths() {
+                let n = raw_on(&blocks, p, target)
+                    .chunks(16)
+                    .filter(|b| {
+                        let v = u128::from_le_bytes((*b).try_into().unwrap());
+                        b[0] & 0x1f == 0x10
+                            && (v >> 5) & 3 != 0
+                            && decode(b).iter().any(|t| t[3] <= 239)
+                    })
+                    .count();
+                total += n;
+                found.push(format!("{level:?} exact={exact_opaque} {target:?}: {n}"));
+            }
+        }
+    }
+    assert_eq!(
+        total,
+        0,
+        "rotated mode-4 blocks decoding alpha 239 or below:\n{}",
+        found.join("\n")
+    );
 }
 
 #[test]
@@ -78,6 +151,95 @@ fn exact_opaque_decodes_alpha_exactly_255_where_upstream_gives_254() {
     );
 }
 
+/// Patch 0005 (Q2t): the Rust constants are the kernel's. Every level's default is `BC7_FLAT_TOLERANCE_DEFAULT` bit for
+/// bit; T_data has no C default, so its constant is pinned against the literal the measured arms compared with
+/// (`2.0f / 255.0f`), and its kernel-side proof is the measurement match (Note LR, LR3).
+#[test]
+fn flat_tolerance_constants_match_the_kernel() {
+    use encoders_sys::{
+        bc7e_level_flat_tolerance, BC7_FLAT_TOLERANCE_DATA, BC7_FLAT_TOLERANCE_DEFAULT,
+    };
+    for level in LEVELS {
+        for perceptual in [false, true] {
+            for exact_opaque in [false, true] {
+                let p = Bc7Params {
+                    level,
+                    perceptual,
+                    exact_opaque,
+                };
+                assert_eq!(
+                    bc7e_level_flat_tolerance(p).to_bits(),
+                    BC7_FLAT_TOLERANCE_DEFAULT.to_bits(),
+                    "{p:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        BC7_FLAT_TOLERANCE_DATA.to_bits(),
+        (2.0f32 / 255.0).to_bits()
+    );
+}
+
+/// Patch 0005 (Q2t): `Bc7Tune::flat_tolerance` reaches the kernel. `Default` is the level's own value, so it writes the
+/// plain call's bytes; `Data` writes other bytes on some blocks of step A's noise (3 of 1024 on each path when
+/// written, Note LR).
+#[test]
+fn flat_tolerance_slot_reaches_the_kernel() {
+    use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Tune};
+    let blocks = opaque_white_noise();
+    let tuned = |t, target| {
+        let mut out = vec![0u8; blocks.len()];
+        for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
+            let tune = Bc7Tune {
+                flat_tolerance: Some(t),
+                ..Bc7Tune::default()
+            };
+            bc7e_compress_blocks_tuned_on(b, o, U5, tune, target);
+        }
+        out
+    };
+    for target in paths() {
+        let plain = raw_on(&blocks, U5, target);
+        assert!(
+            tuned(Bc7FlatTolerance::Default, target) == plain,
+            "{target:?}: Default is the level's tolerance"
+        );
+        let data = tuned(Bc7FlatTolerance::Data, target);
+        let changed = plain
+            .chunks(16)
+            .zip(data.chunks(16))
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(changed > 0, "{target:?}: Data wrote the plain call's bytes");
+    }
+}
+
+/// Exact constants cover R, G and B only: alpha keeps bc7e's exact-opaque flag (BC7-O14), so an alpha bit is refused
+/// rather than dropped.
+#[test]
+#[should_panic(expected = "R, G and B only")]
+fn exact_constants_refuse_an_alpha_bit() {
+    use encoders_sys::{bc7e_compress_blocks_tuned, Bc7Tune};
+    let px = vec![[200u8, 100, 50, 255]; 16];
+    let tune = Bc7Tune {
+        exact_constants: Some(0b1000),
+        ..Bc7Tune::default()
+    };
+    bc7e_compress_blocks_tuned(&px, &mut [0u8; 16], U5, tune);
+}
+
+const LEVELS: [Bc7Level; 8] = [
+    Bc7Level::Ultrafast,
+    Bc7Level::Veryfast,
+    Bc7Level::Fast,
+    Bc7Level::Basic,
+    Bc7Level::Slow,
+    Bc7Level::Veryslow,
+    Bc7Level::Slowest,
+    Bc7Level::Max,
+];
+
 /// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights give the plain
 /// call's bytes at each level, and other weights reach bc7e.
 #[test]
@@ -95,6 +257,7 @@ fn tuned_with_unit_weights_matches_the_plain_call() {
         .collect();
     let tune = |weights| Bc7Tune {
         weights: Some(weights),
+        ..Bc7Tune::default()
     };
     let levels = [
         Bc7Level::Ultrafast,

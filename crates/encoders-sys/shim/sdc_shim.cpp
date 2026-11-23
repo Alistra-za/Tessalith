@@ -83,9 +83,11 @@ void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int lev
 }
 
 // For the BC7 tuning study (docs/research/bc7e-tuning.md) and the engine's `encoder.bc7_weights` call: the level's parameters with some fields overridden. A negative
-// override keeps the level's value. `t` is 14 ints: partitions_to_try (modes 0/1/3, 2 and 7 together),
+// override keeps the level's value. `t` is 16 ints: partitions_to_try (modes 0/1/3, 2 and 7 together),
 // uber_level, refinement_passes, pbit_search, weights r g b a, max_partitions for modes 1/3/7, mode 0, mode 2,
-// then the patch-0002 flags endpoint_search and refine_partitions, and one spare.
+// then the patch-0002 flags endpoint_search and refine_partitions, a spare (13), the flat tolerance as f32 bits (14)
+// and the exact-constants channel mask (15) (patch 0005, Note LR). Every finite tolerance at or above 0 has a
+// non-negative bit pattern, so -1 still keeps the level's value.
 void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, int level, int perceptual, int exact,
                              const int32_t* t, int target) {
     ispc::bc7e_compress_block_params p = g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0];
@@ -109,7 +111,14 @@ void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, i
     if (t[10] >= 0) p.m_max_partitions_mode[2] = t[10];
     if (t[11] >= 0) p.m_endpoint_search = t[11] != 0;
     if (t[12] >= 0) p.m_refine_partitions = t[12] != 0;
+    if (t[14] >= 0) std::memcpy(&p.m_flat_tolerance, &t[14], 4);
+    if (t[15] >= 0) p.m_exact_mask = static_cast<uint32_t>(t[15]);
     bc7e_blocks_on(target, n, blocks, px, &p);
+}
+
+// The level's flat tolerance (patch 0005 Q2t), so a test can pin the Rust constants against the kernel's default.
+float sdc_bc7e_level_flat_tolerance(int level, int perceptual, int exact) {
+    return g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0].m_flat_tolerance;
 }
 
 // `perceptual` != 0 weights the BC1 colour error by Rec.709 luma for this one call (rgbcx's per-thread weights).

@@ -75,10 +75,15 @@ pub const fn encode_version(st: Subtype) -> &'static str {
 /// (see [`ManifestEntry::is_newer_schema`]) instead of interpreting them.
 pub const MANIFEST_SCHEMA: u32 = 2;
 
-/// The vendored bc7e patch as built into `encoders-sys`; hashed for the manifest (it is the only change to a
-/// vendored encoder). `vendor/**` is `-text` in `.gitattributes`, so the bytes do not depend on the checkout.
+/// The vendored bc7e patch 0001 as built into `encoders-sys`; hashed for the manifest's `bc7e_patch` tag on every
+/// format. `vendor/**` is `-text` in `.gitattributes`, so the bytes do not depend on the checkout.
 const BC7E_PATCH: &[u8] =
     include_bytes!("../../encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch");
+
+/// bc7e patch 0005, which changes BC7 bytes; hashed whole (its `index` line included) into the BC7-only tag
+/// `bc7e_fixes` (Note LR).
+const BC7E_FIXES: &[u8] =
+    include_bytes!("../../encoders-sys/vendor/bc7e/patches/0005-bc7e-fixes.patch");
 
 /// The patched vendored `rgbcx.h` and `rgbcx.cpp` (the patches are applied in place, so both files are hashed,
 /// header first; DECISIONS T13).
@@ -107,6 +112,10 @@ pub struct EncoderVersions {
     /// `<patch name>@sha256:<hash of the patched rgbcx.h and rgbcx.cpp>`; `None` before the patch, so BC3/BC4/BC5 re-encode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rgbcx_patch: Option<String>,
+    /// `<patch name>@sha256:<hash of the patch file>`; `None` before patch 0005, so BC7 outputs written before it
+    /// re-encode under `--ev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bc7e_fixes: Option<String>,
 }
 
 impl EncoderVersions {
@@ -130,6 +139,9 @@ impl EncoderVersions {
             bc7e_patch: v
                 .bc7e_patch
                 .map(|name| format!("{name}@sha256:{}", hex::encode(Sha256::digest(BC7E_PATCH)))),
+            bc7e_fixes: v
+                .bc7e_fixes
+                .map(|name| format!("{name}@sha256:{}", hex::encode(Sha256::digest(BC7E_FIXES)))),
         }
     }
 }

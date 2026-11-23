@@ -29,8 +29,8 @@ the end of this file).
 Patch 0001 "exact opaque alpha" (`bc7e/patches/0001-exact-opaque-alpha.patch`) changes bc7e. `bc7e/bc7e.ispc` is the pristine `bc7enc_rdo/bc7e.ispc` with that patch applied:
 it renames the unused `bc7e_compress_block_params::m_unused0` to `m_exact_opaque_alpha` (same struct
 layout) and, when that flag is set, restricts the mode-6 encodes of opaque blocks to p-bits = 1 so bc7e
-optimises RGB under the constraint and alpha decodes to exactly 255. With the flag false the output is
-bit-identical to upstream (the `exact-opaque-native` gate of the bench tool, which lives on branch `bench`). The patch file is produced with
+optimises RGB under the constraint and alpha decodes to exactly 255. With the flag false the output was
+bit-identical to upstream until patch 0005 (the `exact-opaque-native` gate of the bench tool, which lives on branch `bench`). The patch file is produced with
 `git diff --no-index --text crates/encoders-sys/vendor/bc7enc_rdo/bc7e.ispc crates/encoders-sys/vendor/bc7e/bc7e.ispc`.
 Since patch 0001 the bc7e objects are built from the patched source and no longer match the bench's.
 
@@ -41,16 +41,16 @@ a greedy +-1 search over the quantised endpoints (one channel of one endpoint at
 of `color_cell_compression`; `m_refine_partitions` makes the mode 1/3/7 partition ranking refine every candidate instead of
 only the winner once more than two are tried. The new export `bc7e_compress_block_params_init_sdc_max` is veryslow plus
 4 partitions tried, uber 4, 2 least-squares passes and both flags; sdc maps `encoder.effort = "max"` to it. With both flags
-false every existing level is bit-identical to the patch-0001 source: `encoders-sys` `tests/level_identity.rs` pins the
-output of every shipped level for both perceptual and both exact-opaque settings, and passed against Linux objects built
-from the patched source. The patch file is `git diff --no-index --text <patch-0001 bc7e.ispc> crates/encoders-sys/vendor/bc7e/bc7e.ispc`.
+false every existing level was bit-identical to the patch-0001 source until patch 0005: `encoders-sys`
+`tests/level_identity.rs` pinned the output of every shipped level for both perceptual and both exact-opaque settings,
+and passed against Linux objects built from the patched source. The patch file is `git diff --no-index --text <patch-0001 bc7e.ispc> crates/encoders-sys/vendor/bc7e/bc7e.ispc`.
 Measurements: docs/research/bc7e-tuning.md.
 
 **Objects.** The vendored `ispc-objs/bc7e/*.obj` and `bc7e_ispc.h` were rebuilt from the patch-0002 source on Windows
 (2026-10-18) and again from the patch-0005 source (2026-11-23) with `tools/regen-ispc.ps1 -Update -Bc7eOnly` and `tools/hash-vendor.ps1`; a second `regen-ispc.ps1` run
-matches 12/12. `build.rs` requires both `m_exact_opaque_alpha` (patch 0001) and `m_endpoint_search` in the header and stops the
-build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encode byte-identically to the patch-0001 objects on each of the four ISPC
-targets of the time (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2 path (and the sse4 and avx paths of the time),
+matches every file it writes (10/10 since SSE4 and AVX were dropped). `build.rs` requires both `m_exact_opaque_alpha` (patch 0001) and `m_endpoint_search` in the header and stops the
+build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encoded byte-identically to the patch-0001 objects on each of the four ISPC
+targets of the time until patch 0005 (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2 path (and the sse4 and avx paths of the time),
 its avx2 path and its avx512skx path encode differently; engine goldens 95/95). The fifth target's row was recorded
 when it was added; a test build reads it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 
@@ -59,7 +59,15 @@ file is produced with `git diff --output=<patch file> <base> -- crates/encoders-
 is the commit the fixes branch was cut from, and the objects are built with both compilers as above. One sentence per
 change follows. S1: `handle_alpha_block_mode4` writes the end state of an alpha slot that is 255 on every texel (the
 state its passes reach) without running them; BC7 bytes unchanged: every `level_identity` hash, `identity.json` and every
-measured image's hash on three paths equal.
+measured image's hash on three paths equal; `tests/level_identity.rs` `s1_fixture_is_pinned` pins it on blocks that reach
+it. Q2t: `fixDegenerateEndpoints` spreads a channel only when its float endpoints differ by more than the new trailing
+params field `m_flat_tolerance` (0.5/255 at every level, set per call through the shim's tuning slot 14), not by any
+amount, so the refit's float noise no longer spreads a constant channel (an opaque block's rotated alpha slot decoded
+239); proof test `tests/bc7.rs` `opaque_noise_never_double_nudges_the_rotated_slot`; changes bytes. XC: the trailing
+field `m_exact_mask` (slot 15) is reserved for exact constants and read by nothing yet; no byte change. The two fields
+change the generated header (Note LR). These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
+`identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
+file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
@@ -76,7 +84,7 @@ byte-identically to the pre-patch objects until patch 0004: `encoders-sys` `test
 path, in three lists, all re-recorded from the patch 0004 objects: `RECORDED` the AVX2 path, `RECORDED_PRE_AVX2` the
 SSE2 path (the SSE4 and AVX paths of the time wrote the same bytes before patch 0004), and `RECORDED_AVX512` the
 AVX-512 path, read only with the test builds' AVX2 cap lifted (`SDC_TEST_AVX512=1`). Rebuilt with
-`tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not change and a second `regen-ispc.ps1` run matches 12/12. Why and
+`tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not change and a second `regen-ispc.ps1` run matched every file (12 then; 10 since SSE4 and AVX were dropped). Why and
 measurements: .claude/DECISIONS.md (Note FE, "BC6H peak-preserving mode") and docs/research/encoder-benchmark.md
 ("BC6H (HDR)").
 

@@ -182,7 +182,8 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
         perceptual: false,
         exact_opaque: true,
     };
-    let mut fixed_blocks = 0;
+    // Since bc7e patch 0005 (Q2t) raw bc7e writes no broken rotated block on these inputs (Note LR6), so no block may
+    // need the fix; the checks below hold for any block that does.
     for seed in 1..=6 {
         let px = opaque_noise(seed, 64 * 64);
         let out = encode(&EncoderInput::Ldr(px.clone()), 64, 64, &p);
@@ -209,10 +210,8 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
                 assert_eq!(tf[..3], tr[..3], "RGB must stay bit-identical");
             }
             assert!(dr.chunks(4).any(|t| t[3] != 255), "a fix must be needed");
-            fixed_blocks += 1;
         }
     }
-    assert!(fixed_blocks > 0, "no rotated mode 4/5 block needed a fix");
 }
 
 /// Raw bc7e output for a row-major image: the same calls as the encode stage, without any post-encode fix.
@@ -237,11 +236,9 @@ fn min_decoded_alpha(bc7: &[u8]) -> u8 {
 }
 
 /// Checks `out` against the raw bc7e bytes of the same opaque input: every block that differs is a rotated
-/// mode 4/5 block that decodes alpha 255 throughout and RGB bit-identical to the raw block. Returns the number
-/// of changed blocks whose raw version decoded some alpha below 255 (the ones the fix was needed for).
-fn only_rotated_blocks_fixed(out: &[u8], raw: &[u8], what: &str) -> usize {
+/// mode 4/5 block that decodes alpha 255 throughout and RGB bit-identical to the raw block.
+fn only_rotated_blocks_fixed(out: &[u8], raw: &[u8], what: &str) {
     assert_eq!(out.len(), raw.len(), "{what}");
-    let mut needed = 0;
     for (i, (f, r)) in out.chunks(16).zip(raw.chunks(16)).enumerate() {
         if f == r {
             continue;
@@ -261,20 +258,19 @@ fn only_rotated_blocks_fixed(out: &[u8], raw: &[u8], what: &str) -> usize {
             );
             assert_eq!(tf[3], 255, "{what} block {i}: alpha after the fix");
         }
-        needed += dr.chunks(4).any(|t| t[3] != 255) as usize;
     }
-    needed
 }
 
 /// With `exact_opaque` off, rotated mode 4/5 blocks of all-255 input are still fixed (the fix is lossless, so it is
-/// unconditional; fix batch 41), whatever the alpha policy; every other block keeps bc7e's bytes.
+/// unconditional; fix batch 41), whatever the alpha policy; every other block keeps bc7e's bytes. Since bc7e patch 0005
+/// (Q2t) raw bc7e writes no broken rotated block on this input (Note LR6), so the fix has nothing to change here.
 #[test]
 fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
     if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
         eprintln!("skipped: AVX2-path probe");
         return;
     }
-    // The probe image has a broken rotated block in an AMD CPU's bc7e bytes and none on an Intel CPU (Note JC), so there
+    // AMD's bc7e bytes are checked to decode alpha 255 throughout; an Intel CPU writes other bytes (Note JC), so there
     // only the "nothing else" half is checked.
     let probe = !encoders_sys::intel_cpu();
     for policy in [AlphaPolicy::Remove, AlphaPolicy::Data] {
@@ -295,10 +291,6 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
                 exact_opaque: false,
             },
         );
-        assert!(
-            !probe || min_decoded_alpha(&raw) < 254,
-            "probe needs a broken rotated block"
-        );
         let mut want = raw.clone();
         for b in want.chunks_mut(16) {
             encoders_sys::bc7_fixup::force_opaque_rotated(b.try_into().unwrap());
@@ -307,9 +299,8 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
             out == want,
             "{policy:?}: output != bc7e bytes with the rotated fix applied"
         );
-        let fixed = only_rotated_blocks_fixed(&out, &raw, &format!("{policy:?}"));
+        only_rotated_blocks_fixed(&out, &raw, &format!("{policy:?}"));
         if probe {
-            assert!(fixed > 0);
             assert_eq!(min_decoded_alpha(&out), 255, "{policy:?}");
         }
     }
@@ -338,7 +329,8 @@ fn task41_noise() -> Rgba32F {
 
 /// Task 41 / fix batch 41: a diffuse with the defaults (`remove`, `exact_opaque` off) decoded alpha 239 on white
 /// noise. Through the pipeline's own stages every mip now decodes alpha >= 254 (spec §5.8), and the only
-/// difference from the unfixed bc7e encode is the lossless rotated-block fix.
+/// difference from the unfixed bc7e encode is the lossless rotated-block fix. Since bc7e patch 0005 (Q2t) the unfixed
+/// encode no longer breaks the guarantee on this input (Note LR6).
 #[test]
 fn remove_guarantee_holds_on_task41_noise_with_exact_opaque_off() {
     let p = profile(Subtype::Diffuse);
@@ -354,7 +346,6 @@ fn remove_guarantee_holds_on_task41_noise_with_exact_opaque_off() {
         perceptual: p.encoder.perceptual,
         exact_opaque: false,
     };
-    let (mut raw_broken, mut needed) = (0, 0);
     for (l, level) in chain.iter().enumerate() {
         let EncoderInput::Ldr(px) = to_encoder_input(level, &work, &p) else {
             panic!("LDR input expected");
@@ -368,14 +359,8 @@ fn remove_guarantee_holds_on_task41_noise_with_exact_opaque_off() {
         let min = min_decoded_alpha(&out);
         assert!(min >= 254, "mip {l}: decoded alpha {min} below 254");
         let raw = raw_bc7e(&px, w, h, raw_params);
-        raw_broken += (min_decoded_alpha(&raw) < 254) as usize;
-        needed += only_rotated_blocks_fixed(&out, &raw, &format!("mip {l}"));
+        only_rotated_blocks_fixed(&out, &raw, &format!("mip {l}"));
     }
-    assert!(
-        raw_broken > 0,
-        "the unfixed encode must break the guarantee here (Task 41 saw alpha 239)"
-    );
-    assert!(needed > 0);
 }
 
 #[test]

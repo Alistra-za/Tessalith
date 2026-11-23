@@ -325,6 +325,14 @@ fn encoder_versions_come_from_the_encoders_crate() {
     )))
     .unwrap();
     assert_eq!(patch, format!("{}@sha256:{hash}", v.bc7e_patch.unwrap()));
+    // The BC7-only tag hashes the whole patch 0005 file (Note LR).
+    let fixes = e.bc7e_fixes.expect("the vendored bc7e carries patch 0005");
+    let hash = sha256_file(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../encoders-sys/vendor/bc7e/patches/0005-bc7e-fixes.patch"
+    )))
+    .unwrap();
+    assert_eq!(fixes, format!("{}@sha256:{hash}", v.bc7e_fixes.unwrap()));
     // A manifest from before the rgbcx BC4 round-to-nearest patch must not match, so its BC3/BC4/BC5 re-encode.
     // The tag hashes the patched rgbcx.h, so an in-place change to the rounding code also re-encodes (T13).
     let mut both = std::fs::read(concat!(

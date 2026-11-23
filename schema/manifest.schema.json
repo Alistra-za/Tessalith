@@ -397,6 +397,13 @@
     },
     "EncoderVersions": {
       "properties": {
+        "bc7e_fixes": {
+          "description": "`<patch name>@sha256:<hash of the patch file>`; `None` before patch 0005, so BC7 outputs written before it\nre-encode under `--ev`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "bc7e_patch": {
           "description": "`<patch name>@sha256:<hash of the patch file>`; `None` when the vendored bc7e is unpatched.",
           "type": [

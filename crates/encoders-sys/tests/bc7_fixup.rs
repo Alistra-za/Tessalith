@@ -165,8 +165,9 @@ fn random_rotated_blocks_decode_opaque_with_rgb_unchanged() {
     }
 }
 
-/// The review's probe: bc7e (perceptual off, exact-opaque flag as built) on opaque noise emits rotated mode
-/// 4/5 blocks whose alpha decodes below 255; the fix makes every texel 255 with RGB bit-identical.
+/// The review's probe: bc7e (perceptual off, exact-opaque flag as built) on opaque noise emitted rotated mode 4/5
+/// blocks whose alpha decoded below 255 until bc7e patch 0005 (Q2t), which leaves none on this input at any level
+/// (Note LR6). The fix still makes every rotated block it touches decode 255 with RGB bit-identical.
 #[test]
 fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
     if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
@@ -190,7 +191,6 @@ fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
     for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
         bc7e_compress_blocks(b, o, params);
     }
-    let mut needed = 0;
     for blk in out.chunks(16) {
         let orig: [u8; 16] = blk.try_into().unwrap();
         let mut b = orig;
@@ -198,16 +198,11 @@ fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
             continue;
         }
         let (before, after) = (decode(&orig), decode(&b));
-        needed += before.chunks(4).any(|t| t[3] != 255) as usize;
         for (p, q) in before.chunks(4).zip(after.chunks(4)) {
             assert_eq!(q[3], 255);
             assert_eq!(p[..3], q[..3]);
         }
     }
-    assert!(
-        needed > 0,
-        "no rotated mode 4/5 block decoded alpha below 255"
-    );
 }
 
 /// DECISIONS AH1: a mode-6 block with alpha endpoints 0 but p-bit 1 decodes alpha 1; the fix makes it exactly 0.

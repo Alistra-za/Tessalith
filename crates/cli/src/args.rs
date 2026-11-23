@@ -21,6 +21,7 @@ fn long_version() -> &'static str {
             format!("ispc {}", v.ispc),
         ];
         lines.extend(v.bc7e_patch.map(|p| format!("bc7e patch {p}")));
+        lines.extend(v.bc7e_fixes.map(|p| format!("bc7e fixes {p}")));
         lines.extend(v.rgbcx_patch.map(|p| format!("rgbcx patch {p}")));
         lines.join("\n")
     })

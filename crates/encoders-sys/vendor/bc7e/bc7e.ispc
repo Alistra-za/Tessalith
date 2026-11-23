@@ -10,6 +10,11 @@
 // MODIFIED by the sdc project (patch 0005-bc7e-fixes, 2026-11-23), per Apache-2.0 section 4(b): fixes from an audit of
 // this file and a speed shortcut. Changes are marked "sdc patch 0005":
 // - S1: handle_alpha_block_mode4 writes the end state of an alpha slot that is 255 on every texel.
+// - Q2t: fixDegenerateEndpoints spreads a channel only when its float endpoints differ by more than the params'
+//   m_flat_tolerance (0.5/255 by default, set per call), not by any amount, so the refit's float noise no longer
+//   spreads a constant channel.
+// - XC: bc7e_compress_block_params::m_exact_mask is reserved for exact constants, read from patch 0005 XC on.
+// Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
 // Typically compiled as: ispc -g -O2 "%(Filename).ispc" -o "$(TargetDir)%(Filename).obj" -h "$(ProjectDir)%(Filename)_ispc.h" --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions
@@ -99,6 +104,12 @@ struct bc7e_compress_block_params
 	bool m_refine_partitions;
 	bool m_unused4;
 	bool m_unused5;
+
+	// sdc patch 0005 (Q2t): fixDegenerateEndpoints spreads a channel only when its float endpoints differ by more than
+	// this, already divided by 255 (the 0..1 domain); 0.5/255 by default, set per texture type (Note LR).
+	float m_flat_tolerance;
+	// sdc patch 0005 (XC): reserved for exact constants (bit c = channel c, RGB only), read from patch 0005 XC on; 0 by default.
+	uint32_t m_exact_mask;
 };
 
 static inline uniform int32_t clampi(uniform int32_t value, uniform int32_t low, uniform int32_t high) { return clamp(value, low, high); }
@@ -828,6 +839,7 @@ struct color_cell_compressor_params
 	uniform bool m_endpoints_share_pbit;
 	uniform bool m_perceptual;
 	uniform bool m_force_pbit1;
+	uniform float m_flat_tolerance; // sdc patch 0005 (Q2t): bc7e_compress_block_params::m_flat_tolerance
 };
 
 static inline void color_cell_compressor_params_clear(uniform color_cell_compressor_params *uniform p)
@@ -845,6 +857,7 @@ static inline void color_cell_compressor_params_clear(uniform color_cell_compres
 	p->m_has_pbits = false;
 	p->m_endpoints_share_pbit = false;
 	p->m_force_pbit1 = false;
+	p->m_flat_tolerance = 0.0f; // sdc patch 0005 (Q2t)
 }
 
 struct color_cell_compressor_results
@@ -1746,7 +1759,8 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 	return total_err;
 }
 
-static void fixDegenerateEndpoints(uniform uint32_t mode, varying color_quad_i *uniform pTrialMinColor, varying color_quad_i *uniform pTrialMaxColor, const varying vec4F *uniform pXl, const varying vec4F *uniform pXh, uniform uint32_t iscale)
+// sdc patch 0005 (Q2t): `tol` is the params' m_flat_tolerance.
+static void fixDegenerateEndpoints(uniform uint32_t mode, varying color_quad_i *uniform pTrialMinColor, varying color_quad_i *uniform pTrialMaxColor, const varying vec4F *uniform pXl, const varying vec4F *uniform pXh, uniform uint32_t iscale, uniform float tol)
 {
 	if ((mode == 1) || (mode == 4)) // also mode 2
 	{
@@ -1755,7 +1769,7 @@ static void fixDegenerateEndpoints(uniform uint32_t mode, varying color_quad_i *
 		{
 			if (pTrialMinColor->m_c[i] == pTrialMaxColor->m_c[i])
 			{
-				if (abs(pXl->m_c[i] - pXh->m_c[i]) > 0.0f)
+				if (abs(pXl->m_c[i] - pXh->m_c[i]) > tol) // sdc patch 0005 (Q2t): was > 0.0f, which fired on the refit's float noise; tol is the params' m_flat_tolerance, 0.5/255 by default and set per texture type (Note LR)
 				{
 					if (pTrialMinColor->m_c[i] > (iscale >> 1))
 					{
@@ -1847,8 +1861,8 @@ static uint64_t find_optimal_solution(uniform uint32_t mode, varying vec4F *unif
 					}
 				}
 
-				fixDegenerateEndpoints(mode, &lo[0], &hi[0], &xl, &xh, iscalep >> 1);
-				fixDegenerateEndpoints(mode, &lo[1], &hi[1], &xl, &xh, iscalep >> 1);
+				fixDegenerateEndpoints(mode, &lo[0], &hi[0], &xl, &xh, iscalep >> 1, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
+				fixDegenerateEndpoints(mode, &lo[1], &hi[1], &xl, &xh, iscalep >> 1, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
 
 				uint32_t pbits[2];
 				
@@ -1895,8 +1909,8 @@ static uint64_t find_optimal_solution(uniform uint32_t mode, varying vec4F *unif
 					}
 				}
 
-				fixDegenerateEndpoints(mode, &lo[0], &hi[0], &xl, &xh, iscalep >> 1);
-				fixDegenerateEndpoints(mode, &lo[1], &hi[1], &xl, &xh, iscalep >> 1);
+				fixDegenerateEndpoints(mode, &lo[0], &hi[0], &xl, &xh, iscalep >> 1, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
+				fixDegenerateEndpoints(mode, &lo[1], &hi[1], &xl, &xh, iscalep >> 1, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
 				
 				uint32_t pbits[2];
 				
@@ -2019,7 +2033,7 @@ static uint64_t find_optimal_solution(uniform uint32_t mode, varying vec4F *unif
 				}
 			}
 
-			fixDegenerateEndpoints(mode, &bestMinColor, &bestMaxColor, &xl, &xh, iscalep >> 1);
+			fixDegenerateEndpoints(mode, &bestMinColor, &bestMaxColor, &xl, &xh, iscalep >> 1, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
 
 			if ((pResults->m_best_overall_err == UINT64_MAX) || color_quad_i_notequals(&bestMinColor, &pResults->m_low_endpoint) || color_quad_i_notequals(&bestMaxColor, &pResults->m_high_endpoint) || (best_pbits[0] != pResults->m_pbits[0]) || (best_pbits[1] != pResults->m_pbits[1]))
 			{
@@ -2036,7 +2050,7 @@ static uint64_t find_optimal_solution(uniform uint32_t mode, varying vec4F *unif
 		color_quad_i_set_clamped(&trialMinColor, (int)(xl.m_c[0] * scale + .5f), (int)(xl.m_c[1] * scale + .5f), (int)(xl.m_c[2] * scale + .5f), (int)(xl.m_c[3] * scale + .5f));
 		color_quad_i_set_clamped(&trialMaxColor, (int)(xh.m_c[0] * scale + .5f), (int)(xh.m_c[1] * scale + .5f), (int)(xh.m_c[2] * scale + .5f), (int)(xh.m_c[3] * scale + .5f));
 
-		fixDegenerateEndpoints(mode, &trialMinColor, &trialMaxColor, &xl, &xh, iscale);
+		fixDegenerateEndpoints(mode, &trialMinColor, &trialMaxColor, &xl, &xh, iscale, pParams->m_flat_tolerance); // sdc patch 0005 (Q2t)
 
 		if ((pResults->m_best_overall_err == UINT64_MAX) || color_quad_i_notequals(&trialMinColor, &pResults->m_low_endpoint) || color_quad_i_notequals(&trialMaxColor, &pResults->m_high_endpoint))
 		{
@@ -2728,6 +2742,7 @@ static uint32_t estimate_partition(uniform uint32_t mode, const varying color_qu
 	}
 
 	params.m_perceptual = pComp_params->m_perceptual;
+	params.m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 	for (uniform uint32_t partition = 0; partition < total_partitions; partition++)
 	{
@@ -2834,6 +2849,7 @@ static uniform uint32_t estimate_partition_list(uniform uint32_t mode, const var
 	}
 
 	params.m_perceptual = pComp_params->m_perceptual;
+	params.m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 	uniform int32_t num_solutions = 0;
 
@@ -3252,6 +3268,7 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 	pParams->m_has_pbits = false;
 	pParams->m_endpoints_share_pbit = false;				
 	pParams->m_perceptual = pComp_params->m_perceptual;
+	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 	for (uniform uint32_t index_selector = 0; index_selector < 2; index_selector++)
 	{
@@ -3495,6 +3512,7 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 	pParams->m_endpoints_share_pbit = false;				
 	
 	pParams->m_perceptual = pComp_params->m_perceptual;
+	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 		
 	color_cell_compressor_results results5;
 	results5.m_pSelectors = pOpt_results5->m_selectors;
@@ -3636,6 +3654,7 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 static void handle_alpha_block(void *varying pBlock, const varying color_quad_i *uniform pPixels, const uniform bc7e_compress_block_params *uniform pComp_params, uniform color_cell_compressor_params *uniform pParams, uint32_t lo_a, uint32_t hi_a)
 {
 	pParams->m_perceptual = pComp_params->m_perceptual;
+	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 	bc7_optimization_results opt_results;
 	
@@ -4003,6 +4022,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 		pParams->m_endpoints_share_pbit = false;
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
+		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 		pParams->m_force_pbit1 = pComp_params->m_exact_opaque_alpha;
 				
 		color_cell_compressor_results results6;						
@@ -4053,6 +4073,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 		pParams->m_endpoints_share_pbit = true;
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
+		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions2; solution_index++)
 		{
@@ -4223,6 +4244,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 		pParams->m_endpoints_share_pbit = false;
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
+		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 				
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions3; solution_index++)
 		{
@@ -4312,6 +4334,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 		pParams->m_endpoints_share_pbit = false;
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
+		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions2; solution_index++)
 		{
@@ -4539,6 +4562,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 		pParams->m_endpoints_share_pbit = false;
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
+		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions3; solution_index++)
 		{
@@ -4727,6 +4751,7 @@ static void handle_opaque_block_mode6(void *varying pBlock, const varying color_
 	pParams->m_endpoints_share_pbit = false;
 
 	pParams->m_perceptual = pComp_params->m_perceptual;
+	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
 	pParams->m_force_pbit1 = pComp_params->m_exact_opaque_alpha;
 				
 	color_cell_compressor_results results6;						
@@ -4887,6 +4912,9 @@ export void bc7e_compress_block_params_init(bc7e_compress_block_params * uniform
 	p->m_refine_partitions = false;
 	p->m_unused4 = false;
 	p->m_unused5 = false;
+
+	p->m_flat_tolerance = 0.5f / 255.0f; // sdc patch 0005 (Q2t): the default tolerance, T_d (Note LR)
+	p->m_exact_mask = 0; // sdc patch 0005 (XC): no exact constants
 }
 
 // sdc patch 0002: the sdc_max level. veryslow's search, a wider partition ranking with full refinement, uber 4, two

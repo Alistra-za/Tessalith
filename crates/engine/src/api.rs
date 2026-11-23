@@ -1112,7 +1112,7 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 /// - `Stale`: another output stamp (Note Y1), a failed or missing validation (ruling O2), other sources or pack
 ///   roles, or another source SHA-256.
 /// - The encode version: another `encode_version` for the sub-type, another encoder tag (the rgbcx patch only for
-///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
+///   BC1/BC3/BC4/BC5, the bc7e fixes only for BC7), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
 /// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
 ///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile
@@ -1182,6 +1182,8 @@ pub(crate) fn currency(
                 &encoders.bc7e_patch,
             )
         || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
+        // bc7e patch 0005 changes only BC7 bytes, so other formats ignore the tag (Note LR).
+        || (format == Format::Bc7 && rec.bc7e_fixes != encoders.bc7e_fixes)
         || (matches!(format, Format::Bc1 | Format::Bc3)
             && e.bc1_model.as_deref() != Some(BC1_ENCODE_ID));
     if older_encode && ev {
@@ -5431,6 +5433,39 @@ mod tests {
                 &|e| {
                     e.encoders.as_mut().unwrap().rgbcx_patch =
                         Some("bc4-round-to-nearest@sha256:00".into())
+                },
+                want,
+            );
+        }
+        // bc7e patch 0005 only changes BC7 output; a record from before it is current for the rest (Note LR).
+        for f in [
+            Format::Bc1,
+            Format::Bc3,
+            Format::Bc4,
+            Format::Bc5,
+            Format::Bc6hUf16,
+            Format::Bc7,
+            Format::Rgba8,
+        ] {
+            let want = match f {
+                Format::Bc7 => [ENC, Stale],
+                _ => [Current, Current],
+            };
+            row(
+                &format!("{f:?} without bc7e_fixes"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().bc7e_fixes = None,
+                want,
+            );
+            // The fake hash only proves that any other tag string counts.
+            row(
+                &format!("{f:?} old bc7e_fixes"),
+                &fmt(f),
+                same,
+                &|e| {
+                    e.encoders.as_mut().unwrap().bc7e_fixes =
+                        Some("0005-bc7e-fixes@sha256:00".into())
                 },
                 want,
             );

@@ -74,12 +74,58 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     }
 }
 
+/// The default flat tolerance of bc7e patch 0005 (Q2t, T_d), in the kernel's 0..1 domain: every level's
+/// `m_flat_tolerance` (DECISIONS Note LR).
+pub const BC7_FLAT_TOLERANCE_DEFAULT: f32 = 0.5 / 255.0;
+/// The flat tolerance for data maps guarded on G (T_data, Note LR).
+pub const BC7_FLAT_TOLERANCE_DATA: f32 = 2.0 / 255.0;
+
+/// The flat tolerance a call sets (patch 0005 Q2t): `fixDegenerateEndpoints` spreads a channel only when its float
+/// endpoints differ by more than it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Bc7FlatTolerance {
+    /// [`BC7_FLAT_TOLERANCE_DEFAULT`], the levels' own value.
+    Default,
+    /// [`BC7_FLAT_TOLERANCE_DATA`].
+    Data,
+}
+
+impl Bc7FlatTolerance {
+    pub fn value(self) -> f32 {
+        match self {
+            Bc7FlatTolerance::Default => BC7_FLAT_TOLERANCE_DEFAULT,
+            Bc7FlatTolerance::Data => BC7_FLAT_TOLERANCE_DATA,
+        }
+    }
+}
+
+/// The flat tolerance bc7e's level holds (the shim's copy of the level's params), for the test that pins
+/// [`BC7_FLAT_TOLERANCE_DEFAULT`] against the kernel.
+pub fn bc7e_level_flat_tolerance(p: Bc7Params) -> f32 {
+    init();
+    // SAFETY: `level` comes from the closed `Bc7Level` enum (0..=7), which the shim indexes without a range check.
+    unsafe {
+        ffi::sdc_bc7e_level_flat_tolerance(
+            p.level as i32,
+            p.perceptual as i32,
+            p.exact_opaque as i32,
+        )
+    }
+}
+
 /// An override of a level's bc7e parameters (`encoder.bc7_weights`, DECISIONS Note CP). `None` keeps the level's
 /// value. The shim's other tuning slots (the BC7 tuning study's) are always sent unset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Bc7Tune {
     /// Linear per-channel error weights (used with `perceptual = false`).
     pub weights: Option<[u32; 4]>,
+    /// The flat tolerance of patch 0005 (Q2t); `None` keeps the level's value, [`BC7_FLAT_TOLERANCE_DEFAULT`]
+    /// (Note LR).
+    pub flat_tolerance: Option<Bc7FlatTolerance>,
+    /// Exact constants (patch 0005 XC): bit 0 R, bit 1 G, bit 2 B; the kernel does not read it yet, so it changes no
+    /// byte. `None` keeps the level's value, 0 (Note LR). Alpha keeps bc7e's exact-opaque flag, so an alpha bit is
+    /// refused.
+    pub exact_constants: Option<u8>,
 }
 
 /// `bc7e_compress_blocks` with `tune` applied over the level's parameters.
@@ -108,15 +154,26 @@ pub fn bc7e_compress_blocks_tuned_on(
     }
     init();
     // -1 leaves a slot at the level's value (sdc_shim.cpp).
-    let mut t = [-1i32; 14];
+    let mut t = [-1i32; 16];
     if let Some(w) = tune.weights {
         for (slot, x) in t[4..8].iter_mut().zip(w) {
             *slot = x as i32;
         }
     }
+    if let Some(v) = tune.flat_tolerance {
+        // A finite tolerance at or above 0 has a non-negative bit pattern, so it never reads as "unset".
+        t[14] = v.value().to_bits() as i32;
+    }
+    if let Some(m) = tune.exact_constants {
+        assert!(
+            m & !0b111 == 0,
+            "Bc7Tune::exact_constants is R, G and B only (alpha keeps exact opaque, BC7-O14)"
+        );
+        t[15] = m as i32;
+    }
     let src: Vec<u32> = pixels.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let mut dst = vec![0u64; n * 2];
-    // SAFETY: as in `bc7e_compress_blocks`; `t` is 14 ints, which is what the shim reads; `target` was checked above.
+    // SAFETY: as in `bc7e_compress_blocks`; `t` is 16 ints, which is what the shim reads; `target` was checked above.
     unsafe {
         ffi::sdc_bc7e_compress_tuned(
             n as u32,

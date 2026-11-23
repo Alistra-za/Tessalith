@@ -87,6 +87,8 @@ struct bc7e_compress_block_params {
     bool m_refine_partitions;
     bool m_unused4;
     bool m_unused5;
+    float m_flat_tolerance;
+    uint32_t m_exact_mask;
 };
 #endif
 

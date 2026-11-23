@@ -2,11 +2,13 @@
 //!
 //!   cargo run --offline --release -p encoders-sys --example bc7_quality -- run
 //!       --class <name>=<path>[:<flags>] ... --out <csv> [--levels basic,veryslow,max] [--weights 1,16]
-//!       [--perceptual off|on|both] [--exact off|on] [--target sse2|avx2|avx512] [--threads N]
+//!       [--perceptual off|on|both] [--exact off|on] [--tuning default,data,x16,data_x16]
+//!       [--target sse2|avx2|avx512] [--threads N]
 //!   cargo run --offline --release -p encoders-sys --example bc7_quality -- compare <before.csv> <after.csv>
 //!       [--class <name>]
 //!
-//! Defaults: level veryslow, weights 1, perceptual off, exact off (`exact_opaque`), target avx2, every available thread.
+//! Defaults: level veryslow, weights 1, perceptual off, exact off (`exact_opaque`), tuning default, target avx2, every
+//! available thread.
 //!
 //! A class `<path>` is a folder (its `*.png`, sorted) or a `.tsv` list. The list's first column is a path and its
 //! optional second column a SHA-256, which is checked: a mismatch is an error. The flags are a comma list:
@@ -14,8 +16,12 @@
 //! A missing folder or file is an error, as is a size that is not a multiple of 4.
 //!
 //! `run` encodes as the engine's `encode_band` does: RGBA8 through `image`, 4x4 blocks from `gather_blocks`, 64 blocks
-//! per call through `bc7e_compress_blocks_on`, or through the tuned call with `Bc7Tune { weights: [1, 1, 1, w] }` when
-//! w is not 1 and perceptual is off (Note CP; a perceptual row runs once, at w 1). `bc7_fixup::force_opaque_rotated` is
+//! per call through `bc7e_compress_blocks_on`, or through the tuned call when the row overrides something (Note CP; a
+//! perceptual row runs once, at w 1). Each `--tuning` value is a row: `default` (the level as it is), `data` (flat
+//! tolerance `Bc7FlatTolerance::Data`), `x16` (weights scaled by 16 at the level's tolerance) and `data_x16`. With
+//! perceptual off a row sends the weights `[s, s, s, s * w]` (s = 16 for the `x16` values, else 1; `[1, 1, 1, 1]` is
+//! sent unset) and its flat tolerance; with perceptual on only its flat tolerance, so `default` and `x16` are the plain
+//! call there (Note LR). `bc7_fixup::force_opaque_rotated` is
 //! applied to every block whose source alpha is 255 throughout (no zero fix), then the blocks are decoded with
 //! `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over the threads, so the output
 //! does not depend on `--threads`.
@@ -24,7 +30,7 @@
 //! errors, `ge32_rgb` and `ge32_a` count blocks whose RGB or alpha maximum absolute error is at least 32, `angle` is
 //! the mean per-texel angle in degrees between the source and decoded vectors (empty without `normal`), `m0..m7`
 //! count blocks by mode, `seconds` is the wall time of encode, fix, decode and scoring, and `fnv` is FNV-1a 64 of the
-//! image's bytes after the post-fix. `tuning` is `default`.
+//! image's bytes after the post-fix. `tuning` names the row's `--tuning` value.
 //!
 //! `compare` joins rows on (class, image, level, w, perceptual, exact, tuning) and prints, per class and setting, the
 //! paired mean dB delta (after minus before, + is better) of R, G, B, A, RGB pooled and the objective (squared error
@@ -33,8 +39,8 @@
 //! mix; the count of byte-identical outputs and the seconds.
 use encoders_sys::bc7_fixup::force_opaque_rotated;
 use encoders_sys::{
-    bc7e_compress_blocks_on, bc7e_compress_blocks_tuned_on, gather_blocks, Bc7Level, Bc7Params,
-    Bc7Tune, IspcTarget,
+    bc7e_compress_blocks_on, bc7e_compress_blocks_tuned_on, gather_blocks, Bc7FlatTolerance,
+    Bc7Level, Bc7Params, Bc7Tune, IspcTarget,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,6 +69,22 @@ const LEVELS: [(&str, Bc7Level); 8] = [
     ("slowest", Bc7Level::Slowest),
     ("max", Bc7Level::Max),
 ];
+
+/// The `--tuning` values: name, weight scale and flat tolerance (`None` keeps the level's).
+const TUNINGS: [(&str, u32, Option<Bc7FlatTolerance>); 4] = [
+    ("default", 1, None),
+    ("data", 1, Some(Bc7FlatTolerance::Data)),
+    ("x16", 16, None),
+    ("data_x16", 16, Some(Bc7FlatTolerance::Data)),
+];
+
+fn parse_tuning(s: &str) -> Res<(&'static str, u32, Option<Bc7FlatTolerance>)> {
+    TUNINGS
+        .iter()
+        .find(|(n, _, _)| *n == s)
+        .copied()
+        .ok_or_else(|| format!("unknown tuning {s}").into())
+}
 
 fn parse_level(s: &str) -> Res<(&'static str, Bc7Level)> {
     LEVELS
@@ -287,6 +309,28 @@ struct Setting {
     lv: Bc7Level,
     w: u32,
     perceptual: bool,
+    tuning: &'static str,
+    /// The weight scale s of `[s, s, s, s * w]`.
+    scale: u32,
+    flat: Option<Bc7FlatTolerance>,
+}
+
+/// The tuned call's overrides for a row, or `None` for the plain call. With perceptual off: the weights
+/// `[s, s, s, s * w]` (`[1, 1, 1, 1]` sent unset) and the flat tolerance; with perceptual on only the flat tolerance,
+/// so the level's perceptual weights stay (Note LR).
+fn tune_of(s: &Setting) -> Option<Bc7Tune> {
+    let weights = if s.perceptual {
+        None
+    } else {
+        let w = [s.scale, s.scale, s.scale, s.scale * s.w];
+        (w != [1, 1, 1, 1]).then_some(w)
+    };
+    let t = Bc7Tune {
+        weights,
+        flat_tolerance: s.flat,
+        exact_constants: None,
+    };
+    (t != Bc7Tune::default()).then_some(t)
 }
 
 struct Job<'a> {
@@ -308,13 +352,9 @@ fn process_chunk(
         perceptual: s.perceptual,
         exact_opaque: exact,
     };
-    if s.w != 1 && !s.perceptual {
-        let tune = Bc7Tune {
-            weights: Some([1, 1, 1, s.w]),
-        };
-        bc7e_compress_blocks_tuned_on(src, out, p, tune, target);
-    } else {
-        bc7e_compress_blocks_on(src, out, p, target);
+    match tune_of(&s) {
+        Some(tune) => bc7e_compress_blocks_tuned_on(src, out, p, tune, target),
+        None => bc7e_compress_blocks_on(src, out, p, target),
     }
     let mut st = Stats::default();
     for (texels, blk) in src.chunks(16).zip(out.chunks_mut(16)) {
@@ -381,27 +421,34 @@ fn fnv(b: &[u8]) -> u64 {
     })
 }
 
-fn settings(levels: &[&str], weights: &[u32], perceptual: &str) -> Res<Vec<Setting>> {
+fn settings(
+    levels: &[&str],
+    weights: &[u32],
+    perceptual: &str,
+    tunings: &[&str],
+) -> Res<Vec<Setting>> {
     let mut v = Vec::new();
     for l in levels {
         let (level, lv) = parse_level(l)?;
-        if perceptual != "on" {
-            for &w in weights {
-                v.push(Setting {
-                    level,
-                    lv,
-                    w,
-                    perceptual: false,
-                });
-            }
-        }
-        if perceptual != "off" {
-            v.push(Setting {
+        for t in tunings {
+            let (tuning, scale, flat) = parse_tuning(t)?;
+            let row = |w, perceptual| Setting {
                 level,
                 lv,
-                w: 1,
-                perceptual: true,
-            });
+                w,
+                perceptual,
+                tuning,
+                scale,
+                flat,
+            };
+            if perceptual != "on" {
+                for &w in weights {
+                    v.push(row(w, false));
+                }
+            }
+            if perceptual != "off" {
+                v.push(row(1, true));
+            }
         }
     }
     Ok(v)
@@ -413,6 +460,7 @@ fn run(args: &[String]) -> Res<()> {
     let mut levels = "veryslow".to_string();
     let mut weights = "1".to_string();
     let mut perceptual = "off".to_string();
+    let mut tunings = "default".to_string();
     let mut exact = false;
     let mut target = IspcTarget::Avx2;
     let mut it = args.iter();
@@ -423,6 +471,7 @@ fn run(args: &[String]) -> Res<()> {
             "--out" => out = Some(PathBuf::from(val()?)),
             "--levels" => levels.clone_from(val()?),
             "--weights" => weights.clone_from(val()?),
+            "--tuning" => tunings.clone_from(val()?),
             "--perceptual" => {
                 perceptual.clone_from(val()?);
                 if !["off", "on", "both"].contains(&perceptual.as_str()) {
@@ -470,6 +519,7 @@ fn run(args: &[String]) -> Res<()> {
         &levels.split(',').collect::<Vec<_>>(),
         &weights,
         &perceptual,
+        &tunings.split(',').collect::<Vec<_>>(),
     )?;
     let classes: Vec<Class> = specs.iter().map(|s| parse_class(s)).collect::<Res<_>>()?;
     let mut names = BTreeSet::new();
@@ -495,12 +545,13 @@ fn run(args: &[String]) -> Res<()> {
                 };
                 writeln!(
                     csv,
-                    "{},{name},{},{},{},{},default,{target_name},{n_blocks},{},{},{},{},{},{},{},{},{},{},{angle},{},{},{},{},{},{},{},{},{seconds:.3},{:016x}",
+                    "{},{name},{},{},{},{},{},{target_name},{n_blocks},{},{},{},{},{},{},{},{},{},{},{angle},{},{},{},{},{},{},{},{},{seconds:.3},{:016x}",
                     class.name,
                     s.level,
                     s.w,
                     u8::from(s.perceptual),
                     u8::from(exact),
+                    s.tuning,
                     st.se[0],
                     st.se[1],
                     st.se[2],
@@ -522,11 +573,12 @@ fn run(args: &[String]) -> Res<()> {
                     fnv(&bytes)
                 )?;
                 eprintln!(
-                    "{} {name} {} w{} perc {} {seconds:.2}s",
+                    "{} {name} {} w{} perc {} {} {seconds:.2}s",
                     class.name,
                     s.level,
                     s.w,
-                    u8::from(s.perceptual)
+                    u8::from(s.perceptual),
+                    s.tuning
                 );
             }
         }
@@ -895,7 +947,7 @@ fn main() {
     let res = match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("compare") => compare(&args[1..]),
-        _ => Err("usage: bc7_quality run --class <name>=<path>[:<flags>] ... --out <csv> [--levels l,..] [--weights w,..] [--perceptual off|on|both] [--exact off|on] [--target sse2|avx2|avx512] [--threads N] | compare <before.csv> <after.csv> [--class <name>]".into()),
+        _ => Err("usage: bc7_quality run --class <name>=<path>[:<flags>] ... --out <csv> [--levels l,..] [--weights w,..] [--perceptual off|on|both] [--exact off|on] [--tuning default,data,x16,data_x16] [--target sse2|avx2|avx512] [--threads N] | compare <before.csv> <after.csv> [--class <name>]".into()),
     };
     if let Err(e) = res {
         eprintln!("error: {e}");
@@ -989,6 +1041,9 @@ mod tests {
             lv: Bc7Level::Basic,
             w: 16,
             perceptual: false,
+            tuning: "default",
+            scale: 1,
+            flat: None,
         };
         let (st, bytes) = encode_image(&blocks, s, false, IspcTarget::Sse2, true);
         let (mut serial, mut serial_bytes) = (Stats::default(), vec![0u8; blocks.len()]);
@@ -1005,6 +1060,48 @@ mod tests {
         assert_eq!(st.angle, serial.angle);
         assert_eq!(st.modes, serial.modes);
         assert_eq!(st.modes.iter().sum::<u64>(), 256);
+    }
+
+    /// Task 6's rule: weights `[s, s, s, s * w]` and the tolerance with perceptual off, the tolerance alone with it on.
+    #[test]
+    fn a_tuning_row_sends_what_the_rule_says() {
+        let rows = settings(
+            &["veryslow"],
+            &[1, 16],
+            "both",
+            &["default", "data", "x16", "data_x16"],
+        )
+        .unwrap();
+        let got: Vec<(&str, u32, bool, Option<Bc7Tune>)> = rows
+            .iter()
+            .map(|s| (s.tuning, s.w, s.perceptual, tune_of(s)))
+            .collect();
+        let tune = |weights, flat| {
+            Some(Bc7Tune {
+                weights,
+                flat_tolerance: flat,
+                exact_constants: None,
+            })
+        };
+        let data = Some(Bc7FlatTolerance::Data);
+        assert_eq!(
+            got,
+            vec![
+                ("default", 1, false, None),
+                ("default", 16, false, tune(Some([1, 1, 1, 16]), None)),
+                ("default", 1, true, None),
+                ("data", 1, false, tune(None, data)),
+                ("data", 16, false, tune(Some([1, 1, 1, 16]), data)),
+                ("data", 1, true, tune(None, data)),
+                ("x16", 1, false, tune(Some([16, 16, 16, 16]), None)),
+                ("x16", 16, false, tune(Some([16, 16, 16, 256]), None)),
+                ("x16", 1, true, None),
+                ("data_x16", 1, false, tune(Some([16, 16, 16, 16]), data)),
+                ("data_x16", 16, false, tune(Some([16, 16, 16, 256]), data)),
+                ("data_x16", 1, true, tune(None, data)),
+            ]
+        );
+        assert!(parse_tuning("exact").is_err());
     }
 
     #[test]
