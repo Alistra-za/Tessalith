@@ -510,6 +510,10 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK, LL
 
+ARCHIVED (wording before the edit; superseded in part by Note LO, 2026-11-22)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI, LN
+- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS, JZ, JY, LA, LG, LI
+
 ## Digest
 
 ARCHIVED (wording before the edit; superseded in part by Note JW6, 2026-11-20)
@@ -931,6 +935,10 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - Sort: Name (default), Source size (largest first) or Status (errors, warnings, undecided, ok); ties by name. Filters, sort and tile size live in `gui.toml`; a bad value falls back to its default. [AG4, AG47, AG50]
+
+ARCHIVED (wording before the edit; superseded in part by Note LO, 2026-11-22)
+- The BC6H peak mode is a field value: on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` (no upstream profile does), so no struct or ISPC header changes; the shim's `g_bc6[5]` is veryslow plus `fast_mode` (`Bc6hLevel::VeryslowPeak = 5`). `encoders-sys` `tests/bc6h.rs` pins the output of the five upstream levels and of the peak mode per ISPC path (AVX2; SSE2; AVX-512 only with the test cap lifted); the owner accepted the peak mode's +0.6 % RMSLE miss. [FE2, FE4, FE7, HZ5, JB4, JB6]
+- OPEN: `tests/bc6h.rs` hash-checks the five upstream levels and the peak mode on every path the CPU supports up to the test cap (forced SSE2 on an AVX2 CPU). Nothing has run on a CPU without AVX2. [FF7, HZ5, JB4, JB6]
 
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
@@ -1880,11 +1888,3 @@ ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - **GU2 A cube source is six faces, a cross or a strip.** A cube source is six faces, a cross or a strip (exact 4:3, 3:4, 6:1, 1:6 proportions), or a cube DDS; a square or 2:1 image typed as a cube is Unresolved with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type.", and the GUI shows that sentence with the cube section's Layout combo disabled (the sentence on hover), no **Set layout** menu, and **Set type…** on its Problems and Review row. `cubemap.layout` = `equirect`, `mirror_ball`, `angular` or `photo` is refused in config, presets and `--set` with "removed in 3.0; convert it to six faces, a cross or a strip first".
-
-## Note LO - BC6H kernel fixes (main team, 2026-11-22)
-
-ARCHIVED (wording before the edit; superseded in part by Note LO, 2026-11-22)
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI, LN
-- Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC, JQ, JR, JT, JS, JZ, JY, LA, LG, LI
-- The BC6H peak mode is a field value: on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` (no upstream profile does), so no struct or ISPC header changes; the shim's `g_bc6[5]` is veryslow plus `fast_mode` (`Bc6hLevel::VeryslowPeak = 5`). `encoders-sys` `tests/bc6h.rs` pins the output of the five upstream levels and of the peak mode per ISPC path (AVX2; SSE2; AVX-512 only with the test cap lifted); the owner accepted the peak mode's +0.6 % RMSLE miss. [FE2, FE4, FE7, HZ5, JB4, JB6]
-- OPEN: `tests/bc6h.rs` hash-checks the five upstream levels and the peak mode on every path the CPU supports up to the test cap (forced SSE2 on an AVX2 CPU). Nothing has run on a CPU without AVX2. [FF7, HZ5, JB4, JB6]
