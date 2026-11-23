@@ -852,6 +852,48 @@ fn nearest_code_equals_the_exhaustive_search() {
     }
 }
 
+/// The kernel's `ep_quant_bc6h` for one endpoint, mirrored line by line in f32: below 15 bits the interior code from one
+/// multiply (`ceil(e * levels / 65536) - 1`, clamped to 1..levels-2), then one compare with an end code when the
+/// interior code is next to it; 15 bits and more keep upstream's rounding.
+fn kernel_ep_quant(ep: f32, bits: u32) -> u32 {
+    let levels = 1i32 << bits;
+    let v = if bits >= 15 {
+        (ep / (256.0 * 256.0 - 1.0) * (levels - 1) as f32 + 0.5) as i32
+    } else {
+        let e = ep.clamp(0.0, 65535.0);
+        let mut v = ((e * levels as f32 / 65536.0).ceil() as i32 - 1).clamp(1, levels - 2);
+        if v == 1 {
+            if e <= (unpack_to_uf16(1, bits) as f32 - e).abs() {
+                v = 0;
+            }
+        } else if v == levels - 2 {
+            let d_top = (unpack_to_uf16((levels - 1) as u32, bits) as f32 - e).abs();
+            if d_top < (unpack_to_uf16(v as u32, bits) as f32 - e).abs() {
+                v = levels - 1;
+            }
+        }
+        v
+    };
+    v.clamp(0, levels - 1) as u32
+}
+
+/// The kernel's one-multiply endpoint rule (`kernel_ep_quant`) picks the nearest code, the lower on a tie, for every
+/// integer UF16 value at every precision a BC6H mode uses (6 bits in mode 9 to 16 in mode 13). The integer values
+/// include every tie between two interior codes (multiples of 65536 / 2^bits), where truncating instead of `ceil - 1`
+/// would take the higher code.
+#[test]
+fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
+    for bits in [6, 7, 8, 9, 10, 11, 12, 16] {
+        for e in 0..=65535u32 {
+            assert_eq!(
+                kernel_ep_quant(e as f32, bits),
+                nearest_code(e as f64, bits),
+                "{bits} bits, e {e}"
+            );
+        }
+    }
+}
+
 /// Survey #2. The decoder rebuilds an interior code q of a `bits`-bit endpoint at (q + 0.5) * 65536 / 2^bits
 /// (`unpack_to_uf16`, the D3D formula), but `ep_quant_bc6h` rounded by `ep * (2^bits - 1) / 65535`. That misses the
 /// nearest code near both ends of the range: one too high near 0, one too low near the top.

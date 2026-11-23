@@ -2285,9 +2285,16 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
 
     for (uniform int i = 0; i < 8 * pairs; i++)
     {
-        // sdc patch 0004: take the code the decoder rebuilds nearest to ep. unpack_to_uf16 reconstructs an interior code
-        // q at (q + 0.5) * 65536 / levels, so round(ep * (levels - 1) / 65535) missed it by up to one code near both
-        // ends of the range. Clamping ep first keeps out-of-range endpoints at 0 and levels - 1 and keeps (int) in range.
+        // sdc patch 0004: take the code the decoder rebuilds nearest to ep, the lower one on a tie (upstream's
+        // round(ep * (levels - 1) / 65535) missed it by up to one code near both ends of the range).
+        // With s = 65536 / levels, unpack_to_uf16 rebuilds an interior code q (1..levels-2) at (q + 0.5) * s, so the
+        // interior code nearest to e is the q with q * s < e <= (q + 1) * s: ceil(e / s) - 1, clamped to 1..levels-2.
+        // At e = (q + 1) * s the codes q and q + 1 tie and ceil keeps the lower. e / s = e * levels / 65536 is exact in
+        // float (both are powers of two), so this is one multiply.
+        // The end codes are not centred: 0 rebuilds 0 and levels - 1 rebuilds 65535. Code 0 can be nearer than the
+        // interior code only when that is 1 (e <= 0.75 * s), and levels - 1 only when it is levels - 2, so one compare
+        // there decides, with the same distances and tie rule as a search of every code.
+        // Clamping ep first keeps out-of-range endpoints at the end codes and keeps (int) in range.
         // bits >= 15 (mode 13) keeps upstream's rule, which is already nearest there.
         int v;
         if (bits >= 15)
@@ -2297,14 +2304,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
         else
         {
             float e = clamp(ep[i], 0.0f, 65535.0f);
-            int v0 = (int)(e * levels / 65536.0f);
-            v = clamp(v0 - 1, 0, levels - 1);
-            float best_d = abs((float)unpack_to_uf16((uint32)v, bits) - e);
-            for (uniform int d = 0; d <= 1; d++)
+            v = clamp((int)ceil(e * levels / 65536.0f) - 1, 1, levels - 2);
+            if (v == 1)
             {
-                int c = clamp(v0 + d, 0, levels - 1);
-                float cd = abs((float)unpack_to_uf16((uint32)c, bits) - e);
-                if (cd < best_d) { v = c; best_d = cd; }
+                if (e <= abs((float)unpack_to_uf16(1, bits) - e)) v = 0; // e is code 0's distance; a tie keeps 0
+            }
+            else if (v == levels - 2)
+            {
+                float d_top = abs((float)unpack_to_uf16((uint32)(levels - 1), bits) - e);
+                if (d_top < abs((float)unpack_to_uf16((uint32)v, bits) - e)) v = levels - 1; // a tie keeps levels - 2
             }
         }
         qep[i] = clamp(v, 0, levels - 1);

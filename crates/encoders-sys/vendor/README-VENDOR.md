@@ -111,7 +111,10 @@ Fix #2: `ep_quant_bc6h` rounded an endpoint by `ep * (2^bits - 1) / 65535`, but 
 at (q + 0.5) * 65536 / 2^bits, so the code could be one too high near 0 and one too low near the top; below 15 bits it
 now takes the code the decoder rebuilds nearest to the endpoint (16-bit mode 13 keeps upstream's rule, already nearest).
 Proof test: `one_region_endpoints_take_the_nearest_code` (mode 10 at Veryfast; on the pre-fix objects every block's G
-and B fields missed the nearest code). Finding #4 (negative and non-finite halves read as large values) is not fixed:
+and B fields missed the nearest code). The code comes from one multiply (the interior code
+`ceil(ep * 2^bits / 65536) - 1`, plus one compare with an end code beside it) in place of a first three-candidate
+search, with the same bytes, because an interior code rebuilds at the centre of its cell and only the uncentred end
+codes need a compare (Note LO9). Finding #4 (negative and non-finite halves read as large values) is not fixed:
 `quantize.rs` `clamp_half` clamps every BC6H input first, so the kernel never receives them (Note LO). Fixes #5, #1, #3
 and #2 change BC6H bytes (Note LO4, LO7, LO8, LO9); #6 and #7 change none. Base against final, on AVX2, each of the six
 levels changed all 22 measured images (18 `hdr_real` and 4 `hdr_grad`: 0 identical at every level), and the pins of
