@@ -7,6 +7,7 @@ use eframe::egui::{self, accesskit::Role, Pos2, Rect};
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use image::{ImageBuffer, Rgb, RgbaImage};
 use sdc_gui::model::bottom::BottomTab;
+use sdc_gui::model::panel_groups::{self, PanelGroup};
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
@@ -304,7 +305,10 @@ fn tile_menu(dir: &Path) -> Frame {
 
 /// GUI-Texture-Panel: the settings of a diffuse with cut-out alpha.
 fn texture_panel(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
+    // One open group (Mipmaps) shows what a group's rows look like beside the closed ones.
+    let mut h = opened_with(dir, |m| {
+        panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, true)
+    });
     let r = reveal(&mut h, |h| {
         h.state_mut().model.select_item("plants/fern.png")
     });
@@ -449,6 +453,7 @@ fn cube_panel(dir: &Path) -> Frame {
             m.decide(f, Answer::Subtype(engine::config::Subtype::Cubemap));
             assert!(m.wait_idle(Duration::from_secs(60)));
         }
+        panel_groups::set_open(&mut m.settings, PanelGroup::Cubemap, true);
     });
     let r = reveal(&mut h, |h| {
         h.state_mut().model.select_item("sky/env_px.png")
