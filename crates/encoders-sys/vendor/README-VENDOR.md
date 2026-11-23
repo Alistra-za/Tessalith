@@ -52,7 +52,8 @@ matches every file it writes (10/10 since SSE4 and AVX were dropped). `build.rs`
 build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encoded byte-identically to the patch-0001 objects on each of the four ISPC
 targets of the time until patch 0005 (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2 path (and the sse4 and avx paths of the time),
 its avx2 path and its avx512skx path encode differently; engine goldens 95/95). The fifth target's row was recorded
-when it was added; a test build reads it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+when it was added and re-recorded with every row from the patch 0005 objects; a test build reads it only with the AVX2
+cap lifted (`SDC_TEST_AVX512=1`).
 
 bc7e patch 0005 "bc7e fixes" (`bc7e/patches/0005-bc7e-fixes.patch`, 2026-11-23) applies on top of 0001 and 0002. The patch
 file is produced with `git diff --output=<patch file> <base> -- crates/encoders-sys/vendor/bc7e/bc7e.ispc`, where `<base>`

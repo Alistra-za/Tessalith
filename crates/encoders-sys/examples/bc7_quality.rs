@@ -21,7 +21,8 @@
 //! tolerance `Bc7FlatTolerance::Data`), `x16` (weights scaled by 16 at the level's tolerance) and `data_x16`. With
 //! perceptual off a row sends the weights `[s, s, s, s * w]` (s = 16 for the `x16` values, else 1; `[1, 1, 1, 1]` is
 //! sent unset) and its flat tolerance; with perceptual on only its flat tolerance, so `default` and `x16` are the plain
-//! call there (Note LR). `bc7_fixup::force_opaque_rotated` is
+//! call there (Note LR). Such a perceptual `x16` row repeats `default`'s bytes and `data_x16` repeats `data`'s: they are
+//! encoded again and kept, so every tuning has its rows for `compare`. `bc7_fixup::force_opaque_rotated` is
 //! applied to every block whose source alpha is 255 throughout (no zero fix), then the blocks are decoded with
 //! `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over the threads, so the output
 //! does not depend on `--threads`.

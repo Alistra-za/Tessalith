@@ -20,6 +20,7 @@ extern "C" {
         t: *const i32,
         target: i32,
     );
+    #[cfg(feature = "test-hooks")]
     pub fn sdc_bc7e_level_flat_tolerance(level: i32, perceptual: i32, exact: i32) -> f32;
     pub fn sdc_bc1_encode(
         dst: *mut u8,

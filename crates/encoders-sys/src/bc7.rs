@@ -100,7 +100,8 @@ impl Bc7FlatTolerance {
 }
 
 /// The flat tolerance bc7e's level holds (the shim's copy of the level's params), for the test that pins
-/// [`BC7_FLAT_TOLERANCE_DEFAULT`] against the kernel.
+/// [`BC7_FLAT_TOLERANCE_DEFAULT`] against the kernel. Test builds only (feature `test-hooks`).
+#[cfg(feature = "test-hooks")]
 pub fn bc7e_level_flat_tolerance(p: Bc7Params) -> f32 {
     init();
     // SAFETY: `level` comes from the closed `Bc7Level` enum (0..=7), which the shim indexes without a range check.
@@ -149,10 +150,7 @@ pub fn bc7e_compress_blocks_tuned_on(
     assert_eq!(pixels.len() % 16, 0, "pixels must hold whole 4x4 blocks");
     let n = pixels.len() / 16;
     assert_eq!(out.len(), n * 16, "out must hold 16 bytes per block");
-    if n == 0 {
-        return;
-    }
-    init();
+    // The tune is checked before the empty-input return, so a refused value is refused whatever the input size.
     // -1 leaves a slot at the level's value (sdc_shim.cpp).
     let mut t = [-1i32; 16];
     if let Some(w) = tune.weights {
@@ -171,6 +169,10 @@ pub fn bc7e_compress_blocks_tuned_on(
         );
         t[15] = m as i32;
     }
+    if n == 0 {
+        return;
+    }
+    init();
     let src: Vec<u32> = pixels.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let mut dst = vec![0u64; n * 2];
     // SAFETY: as in `bc7e_compress_blocks`; `t` is 16 ints, which is what the shim reads; `target` was checked above.

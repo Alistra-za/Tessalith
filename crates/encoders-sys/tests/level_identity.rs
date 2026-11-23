@@ -6,17 +6,16 @@
 //! and the paths do not encode bit-identically (fast-math, FMA). So the hashes are pinned per target: the test drives
 //! every target this CPU can run, up to `ispc_target()`, through `bc7e_compress_blocks_on` (the best one through the
 //! dispatcher itself). A CPU without some target skips only that target's rows; a test build caps `ispc_target()`
-//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. The SSE2 row is also what the SSE4 and AVX
-//! paths wrote until Note JB dropped them.
+//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. Before patch 0005, the SSE2 row was also what
+//! the SSE4 and AVX paths wrote until Note JB dropped them.
 //!
 //! The hashes are those of the patch 0005 objects (bc7enc_rdo b943862 + patches 0001, 0002 and 0005; ISPC 1.31.0, the
 //! AVX-512 row ISPC 1.32.0), recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-23 (Note LR), over four
 //! deterministic 64x64 images (opaque colour, cutout, smooth alpha, normal-like) at every level, with and without
 //! perceptual weighting and the exact-opaque flag. `RECORDED_S1` pins a fifth image built to reach patch 0005's S1
-//! shortcut. The first
-//! recording (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and never matched a Windows
-//! machine. Run with `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change is intended (needs
-//! a DECISIONS note).
+//! shortcut. The first recording (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and never
+//! matched a Windows machine. Run with `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change
+//! is intended (needs a DECISIONS note).
 
 use encoders_sys::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
@@ -297,6 +296,15 @@ fn row(target: IspcTarget) -> usize {
     }
 }
 
+/// Every ISPC path this CPU runs up to `ispc_target()` (Note HZ3): SSE2 and AVX2 in a test build, AVX-512 too with
+/// `SDC_TEST_AVX512=1`.
+fn paths() -> Vec<IspcTarget> {
+    IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+        .collect()
+}
+
 /// A small deterministic generator (xorshift) so the images never depend on a crate.
 struct Rng(u64);
 impl Rng {
@@ -497,10 +505,7 @@ fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
     }
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     let mut diffs = vec![];
-    for target in IspcTarget::ALL
-        .into_iter()
-        .filter(|t| t.supported() && *t <= ispc_target())
-    {
+    for target in paths() {
         for (li, level) in LEVELS.iter().enumerate() {
             for perceptual in [false, true] {
                 for exact in [false, true] {
@@ -644,10 +649,7 @@ fn s1_fixture_is_pinned() {
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     let blocks = gather_blocks(&s1_blocks(), W, W);
     let mut diffs = vec![];
-    for target in IspcTarget::ALL
-        .into_iter()
-        .filter(|t| t.supported() && *t <= ispc_target())
-    {
+    for target in paths() {
         for (li, level) in LEVELS.iter().enumerate() {
             for exact in [false, true] {
                 let p = Bc7Params {
@@ -686,10 +688,7 @@ fn tuning_with_no_overrides_matches_the_level_on_every_target() {
         exact_opaque: false,
     };
     let blocks = gather_blocks(&colour(), W, W);
-    for target in IspcTarget::ALL
-        .into_iter()
-        .filter(|t| t.supported() && *t <= ispc_target())
-    {
+    for target in paths() {
         let mut a = vec![0u8; blocks.len()];
         let mut b = vec![0u8; blocks.len()];
         bc7e_compress_blocks_on(&blocks, &mut a, p, target);

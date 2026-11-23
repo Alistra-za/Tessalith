@@ -15,6 +15,17 @@ fn decode(block: &[u8]) -> Vec<[u8; 4]> {
     out.chunks(4).map(|c| [c[0], c[1], c[2], c[3]]).collect()
 }
 
+const LEVELS: [Bc7Level; 8] = [
+    Bc7Level::Ultrafast,
+    Bc7Level::Veryfast,
+    Bc7Level::Fast,
+    Bc7Level::Basic,
+    Bc7Level::Slow,
+    Bc7Level::Veryslow,
+    Bc7Level::Slowest,
+    Bc7Level::Max,
+];
+
 /// Every ISPC path this CPU runs up to `ispc_target()` (Note HZ3): SSE2 and AVX2 in a test build, AVX-512 too with
 /// `SDC_TEST_AVX512=1`.
 fn paths() -> Vec<IspcTarget> {
@@ -216,29 +227,17 @@ fn flat_tolerance_slot_reaches_the_kernel() {
 }
 
 /// Exact constants cover R, G and B only: alpha keeps bc7e's exact-opaque flag (BC7-O14), so an alpha bit is refused
-/// rather than dropped.
+/// rather than dropped, even with no block to encode.
 #[test]
 #[should_panic(expected = "R, G and B only")]
 fn exact_constants_refuse_an_alpha_bit() {
     use encoders_sys::{bc7e_compress_blocks_tuned, Bc7Tune};
-    let px = vec![[200u8, 100, 50, 255]; 16];
     let tune = Bc7Tune {
         exact_constants: Some(0b1000),
         ..Bc7Tune::default()
     };
-    bc7e_compress_blocks_tuned(&px, &mut [0u8; 16], U5, tune);
+    bc7e_compress_blocks_tuned(&[], &mut [], U5, tune);
 }
-
-const LEVELS: [Bc7Level; 8] = [
-    Bc7Level::Ultrafast,
-    Bc7Level::Veryfast,
-    Bc7Level::Fast,
-    Bc7Level::Basic,
-    Bc7Level::Slow,
-    Bc7Level::Veryslow,
-    Bc7Level::Slowest,
-    Bc7Level::Max,
-];
 
 /// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights give the plain
 /// call's bytes at each level, and other weights reach bc7e.
@@ -259,18 +258,8 @@ fn tuned_with_unit_weights_matches_the_plain_call() {
         weights: Some(weights),
         ..Bc7Tune::default()
     };
-    let levels = [
-        Bc7Level::Ultrafast,
-        Bc7Level::Veryfast,
-        Bc7Level::Fast,
-        Bc7Level::Basic,
-        Bc7Level::Slow,
-        Bc7Level::Veryslow,
-        Bc7Level::Slowest,
-        Bc7Level::Max,
-    ];
     let mut checked = 0;
-    for level in levels {
+    for level in LEVELS {
         for exact_opaque in [false, true] {
             let p = Bc7Params {
                 level,

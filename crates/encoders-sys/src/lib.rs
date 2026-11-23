@@ -7,10 +7,12 @@ mod rgbcx;
 mod target;
 
 pub use bc6h::*;
+#[cfg(feature = "test-hooks")]
+pub use bc7::bc7e_level_flat_tolerance;
 pub use bc7::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
-    bc7e_compress_blocks_tuned_on, bc7e_level_flat_tolerance, Bc7FlatTolerance, Bc7Level,
-    Bc7Params, Bc7Tune, BC7_FLAT_TOLERANCE_DATA, BC7_FLAT_TOLERANCE_DEFAULT,
+    bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Level, Bc7Params, Bc7Tune,
+    BC7_FLAT_TOLERANCE_DATA, BC7_FLAT_TOLERANCE_DEFAULT,
 };
 pub use rgbcx::*;
 #[cfg(feature = "test-hooks")]
