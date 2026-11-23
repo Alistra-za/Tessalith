@@ -4350,33 +4350,47 @@ impl AppModel {
         )
     }
 
-    /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).
     /// `view_key() == *k`, compared field by field in place: no clone and, once `output_root` is remembered, no path
-    /// built. A frame's cached views and problems ask this on every hit.
+    /// built. A frame's cached views and problems ask this on every hit. `ViewKey` is destructured with no `..`, so a
+    /// field added to it does not compile until it is compared here.
     pub(crate) fn view_key_matches(&self, k: &ViewKey) -> bool {
-        k.items == self.items_rev
-            && k.inputs == self.inputs_rev
-            && k.doc
+        let ViewKey {
+            items,
+            inputs,
+            doc,
+            root,
+            export_root,
+            target,
+            scan_db,
+            scan,
+            known_rev,
+            target_mod_rev,
+            scope,
+        } = k;
+        *items == self.items_rev
+            && *inputs == self.inputs_rev
+            && *doc
                 == self
                     .sets_doc
                     .as_ref()
                     .map_or(0, crate::sets_doc::SetsDoc::rev)
-            && k.root == self.root
-            && k.target == self.target
-            && k.scan_db == self.scan_db
-            && k.scan == self.scan_stamp
-            && k.known_rev == self.known_rev
-            && k.target_mod_rev == self.target_mod_rev
-            && k.scope == self.view_scope_rev()
+            && *root == self.root
+            && *target == self.target
+            && *scan_db == self.scan_db
+            && *scan == self.scan_stamp
+            && *known_rev == self.known_rev
+            && *target_mod_rev == self.target_mod_rev
+            && *scope == self.view_scope_rev()
             && {
                 let mut memo = self.output_root_memo.borrow_mut();
                 if !memo.as_ref().is_some_and(|o| o.current(self)) {
                     *memo = Some(OutputMemo::new(self));
                 }
-                memo.as_ref().is_some_and(|o| o.path == k.export_root)
+                memo.as_ref().is_some_and(|o| o.path == *export_root)
             }
     }
 
+    /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).
     pub(crate) fn view_key(&self) -> ViewKey {
         ViewKey {
             items: self.items_rev,

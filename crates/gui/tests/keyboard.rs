@@ -653,9 +653,16 @@ fn esc_keeps_the_selection() {
     let mut h = app_harness(m);
     h.run();
     h.run();
+    // The type picker: "Type for this texture" on the Undecided card (an undecided texture, as here), else the
+    // "Texture type" row of a decided one (TPC-T4-1: the card owns the type question).
     let panel = |h: &Harness<'static, AppModel>| {
-        h.query_all_by_role_and_label(egui::accesskit::Role::ComboBox, "Texture type")
-            .count()
+        ["Type for this texture", "Texture type"]
+            .iter()
+            .map(|l| {
+                h.query_all_by_role_and_label(egui::accesskit::Role::ComboBox, l)
+                    .count()
+            })
+            .sum::<usize>()
     };
     assert_eq!(panel(&h), 1, "the settings panel shows the texture");
     h.key_press(Key::Escape);

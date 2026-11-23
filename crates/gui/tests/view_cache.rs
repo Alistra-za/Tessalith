@@ -102,6 +102,20 @@ fn the_problem_list_follows_every_input_of_the_view_key() {
     m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
     assert!(m.wait_idle(Duration::from_secs(60)));
     moved(&m, "also tick");
+    // The target: the Also tick only counts in cs mode, so `output_root` moves with it.
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    moved(&m, "target");
+    // A read-only `sdc.toml` (`export_project` is then none, so the Also folder is not the output root).
+    m.set_target(engine::config::Target::Cs);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    moved(&m, "target back");
+    // (`sdc.toml` is read-only to the GUI while it does not parse.)
+    m.save().unwrap();
+    std::fs::write(m.root.clone().unwrap().join("sdc.toml"), "= = [").unwrap();
+    m.project.as_mut().unwrap().reload();
+    assert!(m.project.as_ref().unwrap().read_only(), "premise");
+    moved(&m, "read-only flag");
     // The opened folder.
     let other = d.path().join("other");
     std::fs::create_dir_all(other.join("textures")).unwrap();
