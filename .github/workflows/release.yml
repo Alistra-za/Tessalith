@@ -16,6 +16,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # A tag whose RELEASE-NOTES.md is still a draft or another version's fails here, before the build.
+      - name: Release notes match the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: ./tools/release-notes.ps1 -Version ('${{ github.ref_name }}'.TrimStart('v')) -Out "$env:RUNNER_TEMP/notes.md"
       # Installs the channel, target and components pinned in rust-toolchain.toml.
       - name: Install toolchain
         run: rustup toolchain install
