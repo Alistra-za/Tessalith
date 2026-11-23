@@ -105,7 +105,7 @@ const FLAT: &str = "a/flat.png";
 /// A cube (a 6:1 strip decided as Cubemap) and a plain 2D texture, planned, with the panel drawn over `selected`.
 fn section(d: &std::path::Path, selected: &str) -> Harness<'static, AppModel> {
     let mut m = cube_model(d, selected);
-    support::open_texture_groups(&mut m); // the groups start closed (Task 8)
+    support::open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

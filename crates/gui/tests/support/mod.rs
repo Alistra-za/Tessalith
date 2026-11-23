@@ -1364,7 +1364,7 @@ pub fn bar_rects_in<S>(
     bar_like(&filled_rects(&h.output().shapes), c)
 }
 
-/// Every texture group open in `m.settings` (Task 8: the groups start closed, so a test that reads a row inside one
+/// Every texture group open in `m.settings` (the groups start closed, so a test that reads a row inside one
 /// opens them before its harness is built).
 pub fn open_texture_groups(m: &mut AppModel) {
     for g in sdc_gui::model::panel_groups::PanelGroup::ALL {
@@ -1405,7 +1405,7 @@ pub fn control_kinds<S>(
                     label = head.to_string();
                 }
             }
-            if label.starts_with("Use ") {
+            if role == Role::Button && label.starts_with("Use ") {
                 label = "Use {type}".to_string();
             }
             let mut folded = String::new();

@@ -2028,7 +2028,7 @@ fn no_card_label_is_nameless_and_the_card_lists_its_empty_slots() {
 fn the_texture_settings_checkboxes_have_their_row_names() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
-        // The groups start closed (Task 8); the row under test is in the Alpha group.
+        // The groups default to closed; the row under test is in the Alpha group.
         let (_d, h) = crate::replay_with(
             "demo",
             |h| crate::support::open_texture_groups(&mut h.state_mut().model),

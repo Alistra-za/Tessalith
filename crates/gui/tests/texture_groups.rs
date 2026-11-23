@@ -1015,7 +1015,7 @@ fn opened(d: &std::path::Path) -> AppModel {
     support::opened(d)
 }
 
-/// A 64x64 RGB PNG with a 116-character CJK name, decided Diffuse and selected. Task 8 reuses it.
+/// A 64x64 RGB PNG with a 116-character CJK name, decided Diffuse and selected. Reused by the first-screen tests.
 fn long_named(d: &std::path::Path) -> (AppModel, String) {
     let name = format!("{}.png", "皮".repeat(116));
     let dir = d.join("textures/landscape");
@@ -3500,7 +3500,7 @@ fn a_read_only_sdc_toml_keeps_the_notes_hover() {
     h.get_by_label_contains(&first);
 }
 
-// Task 8: the groups start closed, and the first screen fits.
+// The groups start closed, and the first screen fits.
 
 /// `support::opened` leaves rock01 undecided until `decide`; select it as is (64x64 RGB).
 fn undecided_rock(dir: &std::path::Path) -> AppModel {
@@ -3526,6 +3526,11 @@ fn a_closed_panel_has_at_most_twelve_control_kinds() {
         let d = tempfile::tempdir().unwrap();
         let h = harness(all_closed(make(d.path())), 1280.0, 800.0);
         let kinds = support::control_kinds(&h, sdc_gui::ui::centre_rect(&h.ctx).unwrap());
+        eprintln!("{name}: {} control kinds: {kinds:?}", kinds.len());
+        assert!(
+            kinds.contains(&("ComboBox".to_string(), "Format".to_string())),
+            "the helper sees the first screen: {name}: {kinds:#?}"
+        );
         assert!(kinds.len() <= 12, "{name}: {kinds:#?}");
     }
 }

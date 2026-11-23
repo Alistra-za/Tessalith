@@ -216,7 +216,7 @@ fn the_tab_strip_keeps_later_auto_ids() {
 /// A leaf with two edited fields (Note JI3: both in the texture panel): its rows carry a hint and a ↺ each.
 fn edited_leaf(dir: &std::path::Path) -> AppModel {
     let mut m = opened(dir);
-    open_texture_groups(&mut m); // the groups start closed (Task 8)
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     m.select_item("landscape/leaf.png");
     m.set_field(
         "landscape/leaf.png",

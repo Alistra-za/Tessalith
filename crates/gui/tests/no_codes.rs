@@ -219,7 +219,7 @@ fn the_alpha_combo_options_have_hovers() {
     );
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.select_item("landscape/leaf.png");
-    open_texture_groups(&mut m); // the groups start closed (Task 8)
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = harness(m);
     h.run();
     h.run();

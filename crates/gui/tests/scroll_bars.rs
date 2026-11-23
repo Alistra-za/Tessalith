@@ -72,7 +72,7 @@ fn the_texture_panel_shows_its_bar_at_rest() {
     let mut m = opened(d.path());
     m.select_item("landscape/leaf.png");
     assert!(m.wait_idle(Duration::from_secs(60)));
-    open_texture_groups(&mut m); // the test is about the bar, so the groups are open (Task 8)
+    open_texture_groups(&mut m); // the test is about the bar, so the groups are open
     let h = harness(m, egui::vec2(1100.0, 800.0));
     assert_bar_at_rest(&h, "texture panel");
 }

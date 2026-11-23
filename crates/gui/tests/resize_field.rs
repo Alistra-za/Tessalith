@@ -89,7 +89,7 @@ fn own(m: &AppModel, item: &str, field: &str) -> Option<serde_json::Value> {
 
 /// The whole app, polled every frame as the real app does.
 fn harness(mut model: AppModel) -> Harness<'static, AppModel> {
-    support::open_texture_groups(&mut model); // the groups start closed (Task 8)
+    support::open_texture_groups(&mut model); // groups default to closed; this test reads rows inside them
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

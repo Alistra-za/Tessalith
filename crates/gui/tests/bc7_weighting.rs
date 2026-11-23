@@ -82,7 +82,7 @@ fn ignored(m: &AppModel, key: &str) -> bool {
 }
 
 fn harness(mut m: AppModel) -> Harness<'static, AppModel> {
-    open_texture_groups(&mut m); // the groups start closed (Task 8)
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

@@ -790,7 +790,7 @@ fn a_mesh_remove_is_recorded_and_not_asked() {
     );
     assert!(item.decisions.is_empty(), "{:?}", item.decisions);
     m.select_item(LEAF);
-    open_texture_groups(&mut m); // the groups start closed (Task 8)
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = harness(m);
     h.run();
     h.run();
