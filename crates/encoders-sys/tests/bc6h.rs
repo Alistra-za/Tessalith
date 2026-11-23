@@ -880,7 +880,9 @@ fn kernel_ep_quant(ep: f32, bits: u32) -> u32 {
 /// The kernel's one-multiply endpoint rule (`kernel_ep_quant`) picks the nearest code, the lower on a tie, for every
 /// integer UF16 value at every precision a BC6H mode uses (6 bits in mode 9 to 16 in mode 13). The integer values
 /// include every tie between two interior codes (multiples of 65536 / 2^bits), where truncating instead of `ceil - 1`
-/// would take the higher code.
+/// would take the higher code, and the tie between code 0 and code 1 (0.75 * 65536 / 2^bits). The tie between the top
+/// code (65535) and the one below it, at 65535.5 - 0.75 * 65536 / 2^bits, is a half-integer, so it is checked on its
+/// own, with values a quarter either side of it and of every other tie.
 #[test]
 fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
     for bits in [6, 7, 8, 9, 10, 11, 12, 16] {
@@ -891,6 +893,31 @@ fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
                 "{bits} bits, e {e}"
             );
         }
+        if bits >= 15 {
+            continue;
+        }
+        let s = 65536.0 / (1u32 << bits) as f64;
+        let top_tie = 65535.5 - 0.75 * s;
+        let mut ties: Vec<f64> = (1..1u32 << bits).map(|k| k as f64 * s).collect();
+        ties.extend([0.75 * s, top_tie]);
+        for tie in ties {
+            for v in [tie - 0.25, tie, tie + 0.25] {
+                if !(0.0..=65535.0).contains(&v) {
+                    continue;
+                }
+                assert_eq!(
+                    kernel_ep_quant(v as f32, bits),
+                    nearest_code(v, bits),
+                    "{bits} bits, v {v}"
+                );
+            }
+        }
+        let below_top = (1u32 << bits) - 2;
+        assert_eq!(
+            kernel_ep_quant(top_tie as f32, bits),
+            below_top,
+            "{bits} bits: the top tie keeps the lower code"
+        );
     }
 }
 

@@ -740,7 +740,21 @@ Base to final, mean delta (+ is better) with its 95 % half-width, and images bet
 
 **SSE2 and AVX-512.** The same comparison on SSE2 and on AVX-512 agrees with AVX2 in direction at every level and metric, all means within 0.001 of AVX2 and the same single negative (Veryfast mPSNR, -0.003 ±0.002). The win and loss counts differ here and there.
 
-<!-- TIME-PLACEHOLDER: the follow-up writes the per-fix times here (Linux VM run, ruling BC6H-T8-1) -->
+**Time.** I timed each fix on a Linux VM: an Intel i9-13900K guest with 6 vCPUs, under Wine 11.0, on the AVX2 path with one thread. Each run encodes all 22 images, and each figure is the median of 3 rounds in alternating order, with no other process running. The VM's Intel CPU writes different BC6H bytes from the Ryzen behind the quality numbers, so these runs measure time only. Each ratio is after over before (1.10 = 10 % slower):
+
+| level | #5 / base | #1 / #5 | #3 / #1 | #2 search / #3 | #2 / #3 | final / base |
+|---|---|---|---|---|---|---|
+| veryfast | 1.024 | 0.988 | 1.000 | 1.226 | 1.036 | 1.024 |
+| fast | 1.011 | 0.994 | 1.006 | 1.139 | 1.027 | 1.037 |
+| basic | 1.008 | 0.983 | 0.994 | 1.135 | 1.044 | 1.029 |
+| slow | 1.000 | 0.997 | 0.999 | 1.150 | 1.045 | 1.039 |
+| veryslow | 0.995 | 0.995 | 0.999 | 1.192 | 1.059 | 1.051 |
+| veryslow_peak | 0.993 | 1.000 | 0.997 | 1.188 | 1.064 | 1.054 |
+| total | 0.997 | 0.996 | 0.998 | 1.180 | 1.058 | 1.049 |
+
+- #5, #1 and #3 cost nothing measurable: the rounds of one build differ by up to 1.4 %.
+- #2's first form searched three candidate codes per endpoint and was 18 % slower in total. A single multiply finds the same code and writes the same bytes, so it replaced the search; #2 now costs 3 to 6 % per level. The first four columns come from one VM run and the last two from a second one.
+- Veryfast takes 0.08 to 0.10 s for all 22 images, so its ratios move in coarse steps.
 
 ## Other findings
 
