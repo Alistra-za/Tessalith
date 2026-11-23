@@ -37,7 +37,7 @@ use crate::hits::{hit, Hit};
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 use crate::path::Avx2;
 use crate::path::{Base, Isa, Path};
-use bound::Bound;
+use bound::{Bound, EMPTY};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.
 #[inline(always)]
@@ -532,7 +532,7 @@ fn v0_pick(modes: &[Best; 2]) -> Best {
 /// error 0).
 #[inline(always)]
 pub(crate) fn v0(isa: impl Isa, v: &[u8; 16], rad: i32) -> Best {
-    v0_pick(&v0_modes(isa, v, &Bound::empty(), rad))
+    v0_pick(&v0_modes(isa, v, &EMPTY, rad))
 }
 
 /// Today's `v0`: both modes' candidates on one best. The reference for `v0_pick`.
@@ -855,14 +855,16 @@ fn search_avx2(t: Avx2, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8]
 #[inline(always)]
 fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let (mn, mx) = minmax(v);
-    // A solid block is coded exactly by its first candidate, so tables would prune nothing. Otherwise the window covers
-    // the radius plus `local`'s reach of 3; the clamp keeps the pad a byte for any radius.
-    let bound = if mn == mx {
-        Bound::empty()
+    // A solid block is coded exactly by its first candidate, so tables would prune nothing: it shares `EMPTY`. Otherwise
+    // the window covers the radius plus `local`'s reach of 3; the clamp keeps the pad a byte for any radius.
+    let built;
+    let bound: &Bound = if mn == mx {
+        &EMPTY
     } else {
-        Bound::new(v, radius.min(252) as u8 + 3)
+        built = Bound::new(v, radius.min(252) as u8 + 3);
+        &built
     };
-    let (base, b) = searched(isa, v, radius as i32, &bound);
+    let (base, b) = searched(isa, v, radius as i32, bound);
     keep_guard(v, &base, b, guard).bytes()
 }
 
@@ -948,15 +950,18 @@ fn search_max_avx2(t: Avx2, v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
 #[inline(always)]
 fn search_max_in(isa: impl Isa, v: &[u8; 16], guard: Option<u8>) -> [u8; 8] {
     let (mn, mx) = minmax(v);
-    // One bound over the window serves the radius-10 search too (its reach, 13, is inside the pad).
-    let bound = if mn == mx {
-        Bound::empty()
+    // One bound over the window serves the radius-10 search too (its reach, 13, is inside the pad). A solid block
+    // shares `EMPTY`.
+    let built;
+    let bound: &Bound = if mn == mx {
+        &EMPTY
     } else {
-        Bound::new(v, MAX_PAD as u8)
+        built = Bound::new(v, MAX_PAD as u8);
+        &built
     };
-    let (base, b4) = searched(isa, v, crate::MAX_SEARCH_RADIUS as i32, &bound);
+    let (base, b4) = searched(isa, v, crate::MAX_SEARCH_RADIUS as i32, bound);
     let mut b = b4;
-    window_pairs(isa, v, &bound, &mut b);
+    window_pairs(isa, v, bound, &mut b);
     match guard {
         None => {
             hit!(Hit::MaxNoGuard);
