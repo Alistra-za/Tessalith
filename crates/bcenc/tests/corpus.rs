@@ -7,7 +7,8 @@
 //!
 //! A corpus run keeps its per-file hashes (`CODING_STANDARDS.md`, the long-run results rule): with `SDC_BCENC_CORPUS`
 //! set, `SDC_BCENC_CORPUS_HASHES=<dir>` is required. If `<dir>\<test>.txt` is missing, the run is a baseline: every
-//! path is compared with rgbcx, and after a run with no mismatch and at least one readable file the file is written (first line `# commit <text>
+//! path is compared with rgbcx, and after a run with no mismatch and at least one readable file the file is published
+//! atomically and never over an existing one (a file that appeared during the run stays, and the run says so) (first line `# commit <text>
 //! input <folder> every <n>`, needs `SDC_BCENC_CORPUS_COMMIT=<text>`; then `<relative path> <blocks> <fnv1a64 of the
 //! first path's output bytes>` per image). If the file exists, the run is a check: no rgbcx encode, every path is
 //! compared with the first one, and each image's block count and digest must equal its line. The file is never
@@ -17,6 +18,7 @@ use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 #[path = "support/paths.rs"]
@@ -204,9 +206,12 @@ fn read_saved(file: &Path, input: &Path, every: usize) -> BTreeMap<String, (u64,
     let text = std::fs::read_to_string(file)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
     let header = text.lines().next().unwrap_or_default();
-    let parsed = header
-        .rsplit_once(" every ")
-        .and_then(|(rest, e)| Some((rest.split_once(" input ")?.1, e)));
+    // From the right, so a commit text holding " input " reads back; the commit text must not be empty.
+    let parsed = header.strip_prefix("# commit ").and_then(|h| {
+        let (rest, e) = h.rsplit_once(" every ")?;
+        let (commit, i) = rest.rsplit_once(" input ")?;
+        (!commit.trim().is_empty()).then_some((i, e))
+    });
     let Some((saved_input, saved_every)) = parsed else {
         panic!(
             "{}: the first line is not a header (# commit <text> input <folder> every <n>): {header:?}",
@@ -239,6 +244,29 @@ fn read_saved(file: &Path, input: &Path, every: usize) -> BTreeMap<String, (u64,
         );
     }
     out
+}
+
+/// Publish a baseline: the text goes to a unique sibling file first, which is then hard-linked to `dest`. The link
+/// fails when `dest` exists, so a file another run published meanwhile is never replaced, and a reader never sees a
+/// partial file. Says what happened.
+fn publish(dest: &Path, text: &str) -> String {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let tmp = dest.with_file_name(format!(
+        "{}.{}.{}.tmp",
+        dest.file_name().expect("file name").to_string_lossy(),
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&tmp, text).expect("hash file");
+    let linked = std::fs::hard_link(&tmp, dest);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => format!("wrote {}", dest.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            format!("baseline not written: {} already exists", dest.display())
+        }
+        Err(e) => panic!("cannot publish {}: {e}", dest.display()),
+    }
 }
 
 /// One corpus run over `dir`; the settings are arguments so a test touches no process-wide state. See the module doc
@@ -328,6 +356,7 @@ fn run_in(
         None => format!("paths {}", names.join(", ")),
     };
     let clean = mismatches == 0 && unreadable < files.len() as u64;
+    let mut note = String::new();
     if let (None, Some(file), Some(h), true) = (saved, &file, hashes, clean) {
         std::fs::create_dir_all(&h.dir).expect("hash dir");
         let head = format!(
@@ -335,11 +364,12 @@ fn run_in(
             h.commit.trim(),
             dir.display()
         );
-        std::fs::write(file, head + &lines).expect("hash file");
-        println!("wrote {}", file.display());
+        let said = publish(file, &(head + &lines));
+        println!("{said}");
+        note = format!(", {said}");
     }
     let line = format!(
-        "{name}: {how}, files compared {compared}, skipped {skipped}, unreadable {unreadable}, blocks compared {blocks}, mismatches {mismatches}, {:.1} s",
+        "{name}: {how}, files compared {compared}, skipped {skipped}, unreadable {unreadable}, blocks compared {blocks}, mismatches {mismatches}, {:.1} s{note}",
         started.elapsed().as_secs_f64()
     );
     Summary {
@@ -540,12 +570,42 @@ fn corpus_bc5_equals_rgbcx() {
     });
 }
 
+/// A scratch folder that removes itself when dropped, also while an expected panic unwinds.
+struct Scratch(PathBuf);
+
+impl std::ops::Deref for Scratch {
+    type Target = PathBuf;
+    fn deref(&self) -> &PathBuf {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A fresh empty folder under the temp dir for one test.
-fn scratch(tag: &str) -> PathBuf {
+fn scratch(tag: &str) -> Scratch {
     let d = std::env::temp_dir().join(format!("bcenc-corpus-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).expect("scratch folder");
-    d
+    Scratch(d)
+}
+
+/// A fresh hash folder and the `HashMode` over it (commit text `test`); keep the `Scratch` alive for the test.
+fn mode(tag: &str) -> (Scratch, HashMode) {
+    mode_with(tag, "test")
+}
+
+fn mode_with(tag: &str, commit: &str) -> (Scratch, HashMode) {
+    let dir = scratch(tag);
+    let hashes = HashMode {
+        dir: dir.to_path_buf(),
+        commit: commit.to_string(),
+    };
+    (dir, hashes)
 }
 
 /// A deterministic noisy RGBA image.
@@ -561,7 +621,7 @@ fn noisy(w: u32, h: u32, seed: u32) -> image::RgbaImage {
 }
 
 /// Two images, one in a sub-folder whose name has a space; returns the image folder.
-fn two_images(tag: &str) -> PathBuf {
+fn two_images(tag: &str) -> Scratch {
     let dir = scratch(tag);
     std::fs::create_dir_all(dir.join("sub dir")).expect("sub folder");
     noisy(8, 8, 1).save(dir.join("a.png")).expect("png a");
@@ -575,13 +635,18 @@ fn bc4_run(dir: &Path, hashes: &HashMode) -> Summary {
     run_in("bc4", dir, 1, Some(hashes), every_image, bc4_check)
 }
 
+/// The baseline's lines, replaced by `edit`, written back with LF.
+fn edit_baseline(file: &Path, edit: impl FnOnce(&mut Vec<String>)) {
+    let text = std::fs::read_to_string(file).expect("baseline file");
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    edit(&mut lines);
+    std::fs::write(file, lines.join("\n") + "\n").expect("write");
+}
+
 #[test]
 fn a_baseline_is_written_then_checked() {
     let dir = two_images("baseline");
-    let hashes = HashMode {
-        dir: scratch("baseline-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("baseline-hashes");
     let base = bc4_run(&dir, &hashes);
     assert_eq!(base.mismatches, 0, "{}", base.line);
     let file = hashes.dir.join("bc4.txt");
@@ -618,26 +683,96 @@ fn a_baseline_is_written_then_checked() {
     bad[2] = format!("{} {} {}", parts[2], parts[1], parts[0]);
     std::fs::write(&file, bad.join("\n") + "\n").expect("write");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 1);
-
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&hashes.dir);
 }
 
 #[test]
 fn a_listed_image_that_is_missing_is_a_mismatch() {
     let dir = two_images("missing");
-    let hashes = HashMode {
-        dir: scratch("missing-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("missing-hashes");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
     let file = hashes.dir.join("bc4.txt");
     let mut text = std::fs::read_to_string(&file).expect("baseline file");
     text.push_str("gone.png 4 0123456789abcdef\n");
     std::fs::write(&file, text).expect("write");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 1);
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&hashes.dir);
+}
+
+#[test]
+fn an_image_without_a_saved_line_is_a_mismatch() {
+    let dir = two_images("unlisted");
+    let (_hd, hashes) = mode("unlisted-hashes");
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    let file = hashes.dir.join("bc4.txt");
+    edit_baseline(&file, |lines| {
+        assert_eq!(lines.len(), 3, "header and 2 entries");
+        lines.remove(2);
+    });
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 1);
+}
+
+#[test]
+fn a_baseline_with_an_rgbcx_disagreement_writes_nothing() {
+    let dir = two_images("disagree");
+    let (_hd, hashes) = mode("disagree-hashes");
+    // The rgbcx side differs from every path's output, so each of the 4 + 2 blocks is a mismatch.
+    let s = run_in("bc4", &dir, 1, Some(&hashes), every_image, |_, d| {
+        cmp(d, || "disagree".to_string(), |_| [1u8; 4], || [2u8; 4]);
+    });
+    assert_eq!(s.mismatches, 6, "{}", s.line);
+    assert!(
+        !hashes.dir.join("bc4.txt").exists(),
+        "a baseline with a mismatch must not be saved"
+    );
+}
+
+#[test]
+fn a_baseline_of_only_unreadable_inputs_writes_nothing() {
+    let dir = scratch("unreadable");
+    std::fs::write(dir.join("bad.png"), b"this is not a png").expect("bad png");
+    let (_hd, hashes) = mode("unreadable-hashes");
+    let s = bc4_run(&dir, &hashes);
+    assert_eq!(
+        (s.files, s.unreadable, s.mismatches),
+        (1, 1, 0),
+        "{}",
+        s.line
+    );
+    assert!(
+        !hashes.dir.join("bc4.txt").exists(),
+        "a baseline with no readable file must not be saved"
+    );
+}
+
+/// What a competing baseline holds in the tests below.
+const COMPETING: &str = "# commit other input elsewhere every 1\nsaved.png 4 0123456789abcdef\n";
+
+#[test]
+fn a_baseline_never_replaces_a_file_that_appeared_during_the_run() {
+    let dir = two_images("race");
+    let (_hd, hashes) = mode("race-hashes");
+    let file = hashes.dir.join("flat.txt");
+    let once = std::sync::Once::new();
+    // Another run publishes its baseline after this one found none and before this one publishes.
+    let s = run_in("flat", &dir, 1, Some(&hashes), every_image, |px, d| {
+        once.call_once(|| std::fs::write(&file, COMPETING).expect("competing baseline"));
+        flat_check(px, d);
+    });
+    assert_eq!(s.mismatches, 0, "{}", s.line);
+    assert_eq!(
+        std::fs::read_to_string(&file).expect("file"),
+        COMPETING,
+        "the competing baseline must stay byte for byte"
+    );
+    assert!(
+        s.line.contains("baseline not written") && s.line.contains("already exists"),
+        "the run must say so: {}",
+        s.line
+    );
+    let left: Vec<_> = std::fs::read_dir(&*hashes.dir)
+        .expect("hash dir")
+        .map(|e| e.expect("entry").file_name())
+        .collect();
+    assert_eq!(left.len(), 1, "no temp file may stay: {left:?}");
 }
 
 #[test]
@@ -645,10 +780,7 @@ fn the_digest_is_the_saved_format() {
     let dir = scratch("digest");
     let img = noisy(8, 4, 3);
     img.save(dir.join("one.png")).expect("png");
-    let hashes = HashMode {
-        dir: scratch("digest-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("digest-hashes");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
     let text = std::fs::read_to_string(hashes.dir.join("bc4.txt")).expect("file");
     let written = text
@@ -683,8 +815,6 @@ fn the_digest_is_the_saved_format() {
         digest([a, c, b, d]),
         "block outermost, channel innermost: the swapped order must differ"
     );
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&hashes.dir);
 }
 
 /// Every path but the first returns something else, so every block differs between paths.
@@ -712,32 +842,22 @@ fn flat_check(px: &Block, s: &mut Sink) {
 
 #[test]
 fn a_check_run_never_encodes_with_rgbcx_and_flags_a_path_that_differs() {
-    if paths::paths().len() < 2 {
-        eprintln!("skipped: needs two code paths");
-        return;
-    }
     let dir = two_images("lazy");
-    let hashes = HashMode {
-        dir: scratch("lazy-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("lazy-hashes");
     let base = run_in("flat", &dir, 1, Some(&hashes), every_image, flat_check);
     assert_eq!(base.mismatches, 0, "{}", base.line);
-    // 4 + 2 blocks, each differing between paths; the digests (first path only) still match.
+    // With one path there is nothing to differ and `split_check`'s rgbcx side must still not run; with several,
+    // 4 + 2 blocks each differ between paths (the digests, of the first path only, still match).
+    let want = if paths::paths().len() < 2 { 0 } else { 6 };
     let checked = run_in("flat", &dir, 1, Some(&hashes), every_image, split_check);
-    assert_eq!(checked.mismatches, 6, "{}", checked.line);
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&hashes.dir);
+    assert_eq!(checked.mismatches, want, "{}", checked.line);
 }
 
 #[test]
-#[should_panic(expected = "every 1")]
+#[should_panic(expected = "every 1; this run is input")]
 fn a_check_run_with_another_every_panics() {
     let dir = two_images("every");
-    let hashes = HashMode {
-        dir: scratch("every-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("every-hashes");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
     run_in("bc4", &dir, 2, Some(&hashes), every_image, bc4_check);
 }
@@ -747,10 +867,7 @@ fn a_check_run_with_another_every_panics() {
 fn a_check_run_with_another_input_panics() {
     let dir = two_images("input");
     let other = two_images("input-other");
-    let hashes = HashMode {
-        dir: scratch("input-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("input-hashes");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
     bc4_run(&other, &hashes);
 }
@@ -759,10 +876,7 @@ fn a_check_run_with_another_input_panics() {
 #[should_panic(expected = "is listed twice")]
 fn a_saved_list_with_a_path_twice_panics() {
     let dir = two_images("twice");
-    let hashes = HashMode {
-        dir: scratch("twice-hashes"),
-        commit: "test".to_string(),
-    };
+    let (_hd, hashes) = mode("twice-hashes");
     assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
     let file = hashes.dir.join("bc4.txt");
     let mut text = std::fs::read_to_string(&file).expect("file");
@@ -771,4 +885,48 @@ fn a_saved_list_with_a_path_twice_panics() {
     text.push('\n');
     std::fs::write(&file, text).expect("write");
     bc4_run(&dir, &hashes);
+}
+
+#[test]
+#[should_panic(expected = "is not a header")]
+fn a_header_without_the_commit_prefix_is_rejected() {
+    let dir = two_images("junk");
+    let (_hd, hashes) = mode("junk-hashes");
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    edit_baseline(&hashes.dir.join("bc4.txt"), |lines| {
+        lines[0] = format!("junk input {} every 1", dir.display());
+    });
+    bc4_run(&dir, &hashes);
+}
+
+#[test]
+#[should_panic(expected = "is not a header")]
+fn a_header_with_an_empty_commit_is_rejected() {
+    let dir = two_images("nocommit");
+    let (_hd, hashes) = mode("nocommit-hashes");
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    edit_baseline(&hashes.dir.join("bc4.txt"), |lines| {
+        lines[0] = format!("# commit  input {} every 1", dir.display());
+    });
+    bc4_run(&dir, &hashes);
+}
+
+#[test]
+fn a_commit_label_with_input_in_it_reads_back() {
+    let dir = two_images("label");
+    let (_hd, hashes) = mode_with("label-hashes", "before input change");
+    assert_eq!(bc4_run(&dir, &hashes).mismatches, 0);
+    let head = std::fs::read_to_string(hashes.dir.join("bc4.txt")).expect("file");
+    assert_eq!(
+        head.lines().next(),
+        Some(
+            format!(
+                "# commit before input change input {} every 1",
+                dir.display()
+            )
+            .as_str()
+        )
+    );
+    let checked = bc4_run(&dir, &hashes);
+    assert_eq!(checked.mismatches, 0, "{}", checked.line);
 }

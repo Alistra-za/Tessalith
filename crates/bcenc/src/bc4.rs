@@ -1273,18 +1273,29 @@ mod tests {
         ]
     }
 
+    /// The width of the window's side (the clamped range of `window_pairs`): it offers this many squared pairs.
+    fn window_side(v: &[u8; 16]) -> u64 {
+        let (mn, mx) = minmax(v);
+        (clampi(mx as i32 + MAX_PAD) - clampi(mn as i32 - MAX_PAD) + 1) as u64
+    }
+
     /// The Max window scores the pairs its bound lets through in the frame's `Batch`: on `Avx2` half of them (rounded
     /// down) in `pair2` kernels; on `Base` no wide kernel runs. The pad-16 witness is not coded exactly by the radius-10
-    /// search, so its window runs.
+    /// search, so its window runs. Every pair of the window is offered once: skipped plus scored is the side squared.
     #[test]
     fn the_max_window_scores_its_pairs_in_the_batch() {
         let v = gen::MAX_PAD_WITNESS;
         let bound = Bound::new(&v, MAX_PAD as u8);
         on_each_path!(isa, {
             let (_, mut b) = searched(isa, &v, 10, &bound);
-            let [_, pass, pair2] = window_counts(isa, &v, &bound, &mut b);
+            let [skip, pass, pair2] = window_counts(isa, &v, &bound, &mut b);
             let p = isa_name(isa);
             assert!(pass > 0, "the window scored no pair on path {p}");
+            assert_eq!(
+                skip + pass,
+                window_side(&v).pow(2),
+                "pairs offered on path {p}"
+            );
             match path_of(isa) {
                 Path::Base => assert_eq!(pair2, 0, "path base"),
                 Path::Avx2 => assert_eq!(pair2, pass / 2, "path avx2"),
@@ -1307,6 +1318,11 @@ mod tests {
             assert!(
                 skip > 0 && pass > 0,
                 "skipped {skip}, scored {pass} on path {p}"
+            );
+            assert_eq!(
+                skip + pass,
+                window_side(&v).pow(2),
+                "pairs offered on path {p}"
             );
             match path_of(isa) {
                 Path::Base => assert_eq!(pair2, 0, "path base"),
@@ -1345,6 +1361,25 @@ mod tests {
                 "path {}",
                 isa_name(isa)
             );
+        });
+    }
+
+    /// A bound equal to the best error skips: a tie is never scored (it would not replace the incumbent).
+    #[test]
+    fn a_pair_whose_bound_equals_the_best_is_skipped() {
+        let v = fifteen_zeros_and_a_one();
+        let bound = Bound::new(&v, 16);
+        on_each_path!(isa, {
+            let p = isa_name(isa);
+            let mut best = Best::new();
+            best.try_pair_reference(&v, 0, 0);
+            assert_eq!((best.err, bound.lb(0, 0)), (1, 1));
+            let mut batch = Batch::new(isa, &bound);
+            let before = crate::hits::counts();
+            batch.push(&mut best, &v, 0, 0);
+            let after = crate::hits::counts();
+            assert_eq!(taken(&before, &after, Hit::BoundSkip), 1, "path {p}");
+            assert_eq!(taken(&before, &after, Hit::BoundPass), 0, "path {p}");
         });
     }
 
