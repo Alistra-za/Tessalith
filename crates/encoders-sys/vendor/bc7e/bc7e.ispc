@@ -961,27 +961,6 @@ static inline bool xc_decodes_exact(const uniform color_cell_compressor_params *
 	return ok;
 }
 
-// sdc patch 0005 (XC): xc_decodes_exact from quantised endpoints and p-bits, expanded as evaluate_solution does.
-static inline bool xc_endpoints_exact(const uniform color_cell_compressor_params *uniform pParams, const varying color_quad_i *uniform pLow, const varying color_quad_i *uniform pHigh,
-	const varying uint32_t *uniform pbits, uint32_t flags, const varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
-{
-	color_quad_i qMin = *pLow;
-	color_quad_i qMax = *pHigh;
-	if (pParams->m_has_pbits)
-	{
-		const uint32_t p0 = pbits[0];
-		const uint32_t p1 = pParams->m_endpoints_share_pbit ? pbits[0] : pbits[1];
-		for (uniform uint32_t c = 0; c < 4; c++)
-		{
-			qMin.m_c[c] = (pLow->m_c[c] << 1) | p0;
-			qMax.m_c[c] = (pHigh->m_c[c] << 1) | p1;
-		}
-	}
-	const color_quad_i aMin = scale_color(&qMin, pParams);
-	const color_quad_i aMax = scale_color(&qMax, pParams);
-	return xc_decodes_exact(pParams, &aMin, &aMax, flags, pSelectors, num_pixels, pPixels);
-}
-
 static const float pr_weight = (.5f / (1.0f - .2126f)) * (.5f / (1.0f - .2126f));
 static const float pb_weight = (.5f / (1.0f - .0722f)) * (.5f / (1.0f - .0722f));
 
@@ -2214,35 +2193,6 @@ static uint64_t find_optimal_solution(uniform uint32_t mode, varying vec4F *unif
 	return pResults->m_best_overall_err;
 }
 
-// sdc patch 0005 (XC): color_cell_compression's allSame branch with the mask set: the one-colour packer (its p loop
-// guarded), then a re-check of what it wrote, which scores XC_BAD when a flagged channel does not decode exactly
-// (pack_mode24_to_one_color has no p loop, so only the re-check guards it).
-static uint64_t xc_pack_to_one_color(uniform uint32_t mode, const uniform color_cell_compressor_params *uniform pParams, varying color_cell_compressor_results *uniform pResults,
-	uint32_t cr, uint32_t cg, uint32_t cb, uint32_t ca, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
-{
-	uint64_t e;
-	if (mode == 0)
-		e = pack_mode0_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
-	else if (mode == 1)
-		e = pack_mode1_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
-	else if (mode == 6)
-		e = pack_mode6_to_one_color(pParams, pResults, cr, cg, cb, ca, pResults->m_pSelectors, num_pixels, pPixels);
-	else if (mode == 7)
-		e = pack_mode7_to_one_color(pParams, pResults, cr, cg, cb, ca, pResults->m_pSelectors, num_pixels, pPixels);
-	else
-		e = pack_mode24_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
-
-	if (pResults->m_exact_const != 0)
-	{
-		if (!xc_endpoints_exact(pParams, &pResults->m_low_endpoint, &pResults->m_high_endpoint, pResults->m_pbits, pResults->m_exact_const, pResults->m_pSelectors, num_pixels, pPixels))
-		{
-			pResults->m_best_overall_err = XC_BAD;
-			e = XC_BAD;
-		}
-	}
-	return e;
-}
-
 // Note: In mode 6, m_has_alpha will only be true for transparent blocks.
 static uint64_t color_cell_compression(uniform uint32_t mode, const uniform color_cell_compressor_params *uniform pParams, varying color_cell_compressor_results *uniform pResults, 
 	const uniform bc7e_compress_block_params *uniform pComp_params, uint32_t num_pixels, const varying color_quad_i *uniform pPixels, uniform bool refinement)
@@ -2278,8 +2228,6 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 
 		cif (allSame)
 		{
-			if (pParams->m_exact_mask != 0) // sdc patch 0005 (XC)
-				return xc_pack_to_one_color(mode, pParams, pResults, cr, cg, cb, ca, num_pixels, pPixels);
 			if (mode == 0)
 				return pack_mode0_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
 			if (mode == 1)
