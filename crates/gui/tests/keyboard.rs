@@ -654,7 +654,7 @@ fn esc_keeps_the_selection() {
     h.run();
     h.run();
     let panel = |h: &Harness<'static, AppModel>| {
-        h.query_all_by_role_and_label(egui::accesskit::Role::ComboBox, "Sub-type")
+        h.query_all_by_role_and_label(egui::accesskit::Role::ComboBox, "Texture type")
             .count()
     };
     assert_eq!(panel(&h), 1, "the settings panel shows the texture");

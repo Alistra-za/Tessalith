@@ -7,15 +7,18 @@ use std::collections::BTreeMap;
 /// panel (fixed at 280 pt today, so its saved width changes nothing yet). The set 3D side panel (AG78) and the
 /// Advanced drawer (Note JI7) are gone: an old `set-3d` or `advanced` width is ignored like any unknown name.
 pub const WIDTH_IDS: [&str; 4] = ["textures", "sets", "meshes-tree", "preview-settings"];
-/// The Textures filter toggles, by their `gui.toml` names.
+/// The one Textures filter that is saved and restored, by its `gui.toml` name.
+pub const HIDE_HELPERS: &str = "hide-helpers";
+/// The Textures filter names the loader accepts, so an old file loads without an error. Only [`HIDE_HELPERS`] is
+/// restored; the status pills are read and ignored (review E19).
 pub const FILTER_NAMES: [&str; 5] = [
     "needs-decision",
     "warnings",
     "failed",
     "not-in-set",
-    "hide-helpers",
+    HIDE_HELPERS,
 ];
-/// What `[layout] sets_filters` may name: the Sets column's pills.
+/// The Sets column pill names the loader accepts from an old file; they are read and ignored (review E19).
 pub const SETS_FILTER_NAMES: [&str; 3] = ["attention", "ready", "no-json"];
 /// A saved panel width outside this range (points) is ignored.
 pub const WIDTH_RANGE: (f32, f32) = (200.0, 8000.0);
@@ -159,7 +162,8 @@ pub struct LayoutSettings {
     /// The Meshes view instead of the Textures view.
     #[serde(deserialize_with = "lenient")]
     pub meshes_view: bool,
-    /// The Textures filters that are on, by [`FILTER_NAMES`] name.
+    /// The Textures filters that are kept, by [`FILTER_NAMES`] name: only `hide-helpers` is saved and restored. The
+    /// status pills in an old file are read and ignored, and the next save drops them (review E19).
     #[serde(deserialize_with = "lenient_strings")]
     pub filters: Vec<String>,
     /// The Textures combo filters: a sub-type id, a format id (none: Any), and the set membership one
@@ -175,9 +179,12 @@ pub struct LayoutSettings {
     pub sort: String,
     #[serde(deserialize_with = "lenient_tile")]
     pub tile: f32,
-    /// The Sets column pills that are on, by [`SETS_FILTER_NAMES`] name, and its shader filter (a `Shader` id; none:
-    /// Any). Its search is not saved (R17).
-    #[serde(deserialize_with = "lenient_strings")]
+    /// The Sets column pills of an old file, by [`SETS_FILTER_NAMES`] name: read and ignored, never saved (review
+    /// E19). Its shader filter below (a `Shader` id; none: Any) is kept; its search is not saved (R17).
+    #[serde(
+        deserialize_with = "lenient_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub sets_filters: Vec<String>,
     #[serde(deserialize_with = "lenient")]
     pub sets_shader: Option<String>,

@@ -37,7 +37,12 @@ fn open_from_header(h: &mut H) {
 }
 
 fn mode_name(target: &str) -> String {
-    format!("Mode (this project): {target}")
+    let label = match target {
+        "cs" => "Community Shaders (cs)",
+        "vanilla" => "Base game (vanilla)",
+        other => panic!("no mode label for {other:?}"),
+    };
+    format!("Mode (this project): {label}")
 }
 
 /// The text of a combo: its value, or the label egui gives it (the selected text).
@@ -501,7 +506,8 @@ fn the_settings_tab_sets_the_project_mode() {
     open_from_header(&mut h);
     h.get_by_label(&mode_name("cs")).click();
     h.run();
-    h.get_by_role_and_label(Role::Button, "vanilla").click();
+    h.get_by_role_and_label(Role::Button, "Base game (vanilla)")
+        .click();
     h.run();
     // The target the plan reports lands with the re-plan.
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
@@ -571,6 +577,23 @@ fn the_mode_row_shows_in_the_popped_out_window() {
     h.get_by_label(PROJECT_HEADING);
 }
 
+#[test]
+fn the_mode_says_community_shaders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()), 1400.0);
+    open_from_header(&mut h);
+    h.get_by_label("Mode (this project): Community Shaders (cs)")
+        .click();
+    h.run();
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Base game (vanilla)")
+        .is_some());
+    assert!(h
+        .query_by_label("This beats the Target set in a preset.")
+        .is_some());
+    assert!(h.query_by_label_contains("Wins over").is_none());
+}
+
 /// The plan's 1280 px capture of the Settings tab, as a test: the Mode row is there and its pieces do not overlap.
 #[test]
 fn the_mode_row_fits_at_1280() {
@@ -580,7 +603,9 @@ fn the_mode_row_fits_at_1280() {
     let heading = h.get_by_label(PROJECT_HEADING).rect();
     let label = h.get_by_label("Mode").rect();
     let combo = h.get_by_label(&mode_name("cs")).rect();
-    let note = h.get_by_label("Wins over a preset's own Target.").rect();
+    let note = h
+        .get_by_label("This beats the Target set in a preset.")
+        .rect();
     let all = [heading, label, combo, note];
     for (i, a) in all.iter().enumerate() {
         assert!(a.right() <= 1280.5, "{a:?} runs off the window");

@@ -31,7 +31,7 @@ Skyrim's world has X pointing east, Y north and Z up. Each face is named after t
 
 A file named `_e` (`chrome_e.png`) or under a `cubemaps` folder gets the `cubemap` type suggested with High confidence.
 
-Only a crisp shape is a cube source: 4:3, 3:4, 6:1 or 1:6. A square or 2:1 image typed as a cube is Unresolved and skipped ("not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type."). A panorama, mirror ball, angular map or photo has to become six faces, a cross or a strip first.
+Only a crisp shape is a cube source: 4:3, 3:4, 6:1 or 1:6. A square or 2:1 image typed as a cube is Unresolved and skipped ("not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's type."). A panorama, mirror ball, angular map or photo has to become six faces, a cross or a strip first.
 
 The shape settles the layout. `cubemap.layout` is for trusting a 4:3 or 3:4 image whose empty cells aren't flat (refused otherwise), or for `faces`:
 
@@ -158,7 +158,7 @@ The default is one source cell rounded to a power of two, at most 4096 ([`cubema
 
 ## The cube panel in the GUI
 
-A texture whose sub-type is **Cubemap** (under *Other* in the sub-type dropdown) gets a **Cubemap** section in its settings panel with the **Source**, **Orientation**, **Colour grade** and **Look** groups. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key.
+A texture whose type is **Cubemap** (under *Other* in the type picker) gets a **Cubemap** section in its settings panel with the **Source**, **Orientation**, **Colour grade** and **Look** groups. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key.
 
 ![The panel of a six-face cubemap.](../img/gui/Cubemaps/cube-panel.png)
 

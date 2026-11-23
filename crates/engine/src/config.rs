@@ -177,14 +177,17 @@ impl Bc1Search {
 }
 // BC7 linear error weights for bc7e (DECISIONS Note CP): alpha priority. `linear` is bc7e's own 1,1,1,1 (the plain
 // call): it overrides an inherited weighting.
-cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha8, Alpha16 });
+cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha4, Alpha8, Alpha16, Alpha32, Alpha64 });
 impl Bc7Weights {
     /// Every value, in order; `all_lists_every_variant` ties it to the enum.
-    pub const ALL: [Bc7Weights; 4] = [
+    pub const ALL: [Bc7Weights; 7] = [
         Bc7Weights::Linear,
         Bc7Weights::Alpha2,
+        Bc7Weights::Alpha4,
         Bc7Weights::Alpha8,
         Bc7Weights::Alpha16,
+        Bc7Weights::Alpha32,
+        Bc7Weights::Alpha64,
     ];
 
     /// The R, G, B, A weights bc7e is given.
@@ -192,8 +195,11 @@ impl Bc7Weights {
         match self {
             Bc7Weights::Linear => [1, 1, 1, 1],
             Bc7Weights::Alpha2 => [1, 1, 1, 2],
+            Bc7Weights::Alpha4 => [1, 1, 1, 4],
             Bc7Weights::Alpha8 => [1, 1, 1, 8],
             Bc7Weights::Alpha16 => [1, 1, 1, 16],
+            Bc7Weights::Alpha32 => [1, 1, 1, 32],
+            Bc7Weights::Alpha64 => [1, 1, 1, 64],
         }
     }
 }

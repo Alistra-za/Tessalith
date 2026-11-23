@@ -11,16 +11,20 @@ use crate::model::fields::{
     auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
     field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_on,
     provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM,
-    BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
-    WEIGHTING, WEIGHTING_OPTIONS,
+    BC3_SEARCH, EXR_STRAIGHT_HOVER, FILTER_OPTIONS, HELPER_HELP, NOT_VALID, PARALLAX_HOVER,
+    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
+use crate::model::labels::{
+    effort_label, type_hover, RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL,
+    VARIANCE_BAKE_HOVER,
+};
 use crate::model::{Answer, AppModel};
 use eframe::egui;
 use engine::codes::{Code, Warning};
 use engine::config::{
-    AlphaPolicy, ColorTag, CubeLayout, CubeStyle, FaceFlip, Format, GreenConvention, MipFilter,
-    Profile, Subtype, Target, ALPHA_THRESHOLD,
+    AlphaPolicy, ColorTag, CubeLayout, CubeStyle, Effort, FaceFlip, Format, GreenConvention,
+    MipFilter, Profile, Subtype, Target, ALPHA_THRESHOLD,
 };
 use engine::helper::HelperRole;
 use engine::policy::{offered, Provenance, ResolvedJob};
@@ -31,10 +35,16 @@ enum Action {
     Set(&'static str, Value),
     Clear(&'static str),
     Decide(Answer),
+    /// The single card's Confirm and likely-type buttons: decide, then select the next undecided texture in view.
+    DecideAndAdvance(Answer),
     Select(String),
     Reencode(bool),
     /// Note HI4: a role picked under the ticked Helper box, or `None` (Reset) for the role guessed from the name.
     HelperRole(Option<HelperRole>),
+    /// "Used by N meshes": a shape link; the app brings Meshes forward for it.
+    ShowMesh(crate::model::used_by::MeshPick),
+    /// "Show all in Meshes": the texture's scan path, as the Meshes texture filter takes it.
+    ShowAllInMeshes(String),
 }
 
 /// Note HI4: an image's Helper row. `on` is the ticked box before a role is picked, held only in egui temp data (HI5);
@@ -60,13 +70,6 @@ pub(super) const CONTROL_MIN: f32 = super::set_editor::COMBO_W;
 pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
 const MAX_LEVELS: u32 = 13;
-
-const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
-    (MipFilter::Box, "Box"),
-    (MipFilter::Tent, "Tent"),
-    (MipFilter::Mitchell, "Mitchell"),
-    (MipFilter::Kaiser, "Kaiser"),
-];
 
 /// An enum's options as (JSON value, label).
 pub type Options = Vec<(Value, String)>;
@@ -263,13 +266,6 @@ pub fn alpha_hint(policy: AlphaPolicy) -> &'static str {
     }
 }
 
-fn capitalised(s: &str) -> String {
-    let mut c = s.chars();
-    c.next()
-        .map(|f| f.to_uppercase().chain(c).collect())
-        .unwrap_or_default()
-}
-
 /// Options for the fields that pick from a list; `None` for the checkboxes and the slider.
 pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
     Some(match field {
@@ -301,7 +297,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .filter_map(|((_, t), label)| {
                 let name = match t {
                     ColorTag::Srgb => "_SRGB",
-                    ColorTag::Unorm => "UNORM (linear)",
+                    ColorTag::Unorm => UNORM_LABEL,
                     ColorTag::NotApplicable => return None,
                 };
                 let mark = if label.ends_with(NOT_VALID) {
@@ -327,7 +323,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         }
         "mips.normal" => vec![
             opt(json!("renormalize"), "Renormalise"),
-            opt(json!("renormalize_bake"), "Renormalise and bake"),
+            opt(json!("renormalize_bake"), RENORM_BAKE_LABEL),
         ],
         "mips.normal_base" => vec![
             opt(json!("renormalize"), "Renormalise to unit length"),
@@ -377,17 +373,22 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             .into_iter()
             .map(|(e, label)| (json!(e), label))
             .collect(),
+        // The variants are listed by name, so a missing or misspelt level fails to compile; the id is the stored one.
         "encoder.effort" => [
-            "ultrafast",
-            "veryfast",
-            "fast",
-            "basic",
-            "veryslow",
-            "slowest",
-            "max",
+            Effort::Ultrafast,
+            Effort::Veryfast,
+            Effort::Fast,
+            Effort::Basic,
+            Effort::Veryslow,
+            Effort::Slowest,
+            Effort::Max,
         ]
         .into_iter()
-        .map(|e| opt(json!(e), &capitalised(e)))
+        .map(|e| {
+            let id = json!(e);
+            let label = effort_label(id.as_str().unwrap_or_default());
+            (id, label.to_string())
+        })
         .collect(),
         // Note JI4: the Effort row's choices on BC4 and BC5, BC1, and BC3 (both fields, `BC3_CHOICES`).
         "encoder.bc45_search_radius" => search_options(true),
@@ -533,6 +534,10 @@ pub(super) fn combo_for(
                         if let Ok(p) = serde_json::from_value::<AlphaPolicy>(v.clone()) {
                             r = r.on_hover_text(alpha_hint(p));
                         }
+                    } else if field == "color.tag" && *v == json!(ColorTag::Unorm) {
+                        r = r.on_hover_text(UNORM_HOVER);
+                    } else if field == "mips.normal" && *v == json!("renormalize_bake") {
+                        r = r.on_hover_text(RENORM_BAKE_HOVER);
                     }
                     if r.clicked() {
                         picked = Some(v.clone());
@@ -701,6 +706,65 @@ fn weighting_combo(
         i.current_text_value = Some(shown.to_string());
         i
     });
+    (picked, r)
+}
+
+/// Shown on an entry no selected texture can take.
+const NO_REACH_HOVER: &str = "None of the selected textures can take this";
+
+/// E14: the bulk combo of a value-dependent row (filter, BC7 weighting, Format, DDS tag). Each entry reads "{option}
+/// ({k} of {total})" and is enabled when a write of it reaches some texture (`BulkField::option_reach`); a pick
+/// dispatches when it differs from the row's one value (a mixed row has none). The closed combo shows the bare option.
+pub(super) fn reach_combo(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    field: &str,
+    current: &Value,
+    reach: &[(String, Value, usize)],
+    total: usize,
+    (mixed, busy): (bool, bool),
+) -> (Option<Value>, egui::Response) {
+    let shown = if mixed {
+        egui::RichText::new("— mixed").weak()
+    } else if current.is_null() {
+        egui::RichText::new("— not set").weak()
+    } else {
+        match reach.iter().find(|(_, v, _)| v == current) {
+            Some((l, _, _)) => egui::RichText::new(l),
+            None => egui::RichText::new(display_value(current)),
+        }
+    };
+    let mut picked = None;
+    let r = egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .show_ui_036(ui, |ui| {
+            for (label, v, k) in reach {
+                let on = *k > 0 && !busy;
+                let text = format!("{label} ({k} of {total})");
+                let r = ui.add_enabled(on, egui::Button::selectable(!mixed && v == current, text));
+                let hover = if field == WEIGHTING {
+                    WEIGHTING_OPTIONS
+                        .iter()
+                        .find(|o| v.as_str() == Some(o.0))
+                        .map(|o| o.2)
+                } else if field == "color.tag" && *v == json!(ColorTag::Unorm) {
+                    Some(UNORM_HOVER)
+                } else {
+                    None
+                };
+                // An entry that reaches nothing stays off after the plan too, so waiting is no reason for it.
+                let r = match (on, hover) {
+                    (false, _) if *k == 0 => r.on_disabled_hover_text(NO_REACH_HOVER),
+                    (false, _) => r.on_disabled_hover_text("Wait for the plan to finish"),
+                    (true, Some(h)) => r.on_hover_text(h),
+                    (true, None) => r,
+                };
+                if on && r.clicked() && v != current {
+                    picked = Some(v.clone());
+                }
+            }
+        })
+        .response;
     (picked, r)
 }
 
@@ -956,18 +1020,20 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         .inner
     });
     let r = own_name_after_link(r, f.field);
-    // Note CL40: on a `normal` in a complex material set, renormalize_bake is the opt-in gloss bake.
-    let r = if f.field == "mips.normal"
+    // Note CL40: on a `normal` in a complex material set, the bake is the opt-in gloss bake, so its hover shows
+    // before the choice. Elsewhere the hover (and the variance line) belongs to the active bake only.
+    let bake_active = f.field == "mips.normal" && f.value == json!("renormalize_bake");
+    let gloss_opt_in = f.field == "mips.normal"
         && cx.job.profile.subtype == Subtype::Normal
         && cx
             .job
             .shader
             .as_ref()
-            .is_some_and(|s| s.shader == engine::shader::Shader::ComplexMaterial)
-    {
-        r.on_hover_text(
-            "Renormalise and bake also bakes this set's complex _m gloss (anti-shimmer)",
-        )
+            .is_some_and(|s| s.shader == engine::shader::Shader::ComplexMaterial);
+    let r = if bake_active {
+        r.on_hover_text(format!("{RENORM_BAKE_HOVER}\n{VARIANCE_BAKE_HOVER}"))
+    } else if gloss_opt_in {
+        r.on_hover_text(RENORM_BAKE_HOVER)
     } else {
         r
     };
@@ -1319,6 +1385,7 @@ fn decision_box(
     decisions: &[Decision],
     warnings: &[Warning],
     alpha: Option<AlphaPolicy>,
+    likely: &[(Subtype, String)],
     actions: &mut Vec<Action>,
 ) {
     // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
@@ -1337,7 +1404,7 @@ fn decision_box(
             for d in decisions {
                 match d {
                     Decision::Subtype { suggested } => {
-                        subtype_decision(ui, cx, left, *suggested, actions)
+                        subtype_decision(ui, cx, left, *suggested, likely, actions)
                     }
                     // Note HI7, HI13: the dropdown on the resolved type and Confirm, in the Alpha row's columns (the
                     // strip keeps FM35's line); the engine's reason is the label's hover.
@@ -1393,7 +1460,8 @@ fn decision_box(
                             ui.label(m);
                         }
                         if *code == Code::CfgUnavailable {
-                            subtype_decision(ui, cx, left, None, actions);
+                            // No likely-type buttons: this type is decided but blocked, not undecided (3d-T11-2).
+                            subtype_decision(ui, cx, left, None, &[], actions);
                         }
                     }
                 }
@@ -1442,13 +1510,57 @@ fn decision_row(
     .inner
 }
 
+/// The likely types of one texture, built again only when the items, the document or the target change (the pairing
+/// walks the `[files]` keys, so it is not run every frame).
+fn cached_likely(ui: &egui::Ui, model: &AppModel, key: &str) -> Vec<(Subtype, String)> {
+    let id = ui.scope_id().with(("likely-types", key));
+    let stamp = (
+        model.items_rev(),
+        model.project.as_ref().map_or(0, |p| p.rev()),
+        model.target,
+    );
+    if let Some((s, v)) =
+        ui.data(|d| d.get_temp::<((u64, u64, Target), Vec<(Subtype, String)>)>(id))
+    {
+        if s == stamp {
+            return v;
+        }
+    }
+    let v = crate::model::likely::likely_types(model, &[key.to_string()]);
+    ui.data_mut(|d| d.insert_temp(id, (stamp, v.clone())));
+    v
+}
+
+/// Task 11: the likely types of an undecided card as buttons (the label, the reason on hover, "Use {label}" as the
+/// name). Returns the one clicked; the caller acts on it (the single card writes it and moves on, the bulk card puts
+/// it in its combo).
+pub(super) fn likely_buttons(ui: &mut egui::Ui, likely: &[(Subtype, String)]) -> Option<Subtype> {
+    if likely.is_empty() {
+        return None;
+    }
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        for (st, why) in likely {
+            let label = subtype_label(*st);
+            let r = ui.button(&label).on_hover_text(why);
+            super::helper_panel::named(&r, egui::Role::Button, &format!("Use {label}"), None);
+            if r.clicked() {
+                picked = Some(*st);
+            }
+        }
+    });
+    picked
+}
+
 /// A combo of the sub-types available under the target, the suggestion preselected, and a Confirm button. Aligned,
-/// they stand in the control column under the sentence (Note HI13).
+/// they stand in the control column under the sentence (Note HI13). `likely` are the buttons above the combo; a click
+/// on one answers as Confirm does (ruling 3d-T12-1).
 fn subtype_decision(
     ui: &mut egui::Ui,
     cx: &Ctx,
     left: Option<f32>,
     suggested: Option<Subtype>,
+    likely: &[(Subtype, String)],
     actions: &mut Vec<Action>,
 ) {
     ui.label("What kind of texture is this?");
@@ -1456,6 +1568,10 @@ fn subtype_decision(
     let mut chosen: Subtype = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
+    if let Some(st) = likely_buttons(ui, likely) {
+        chosen = st;
+        actions.push(Action::DecideAndAdvance(Answer::Subtype(st)));
+    }
     let mut controls = |ui: &mut egui::Ui| {
         let r = egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
@@ -1465,12 +1581,17 @@ fn subtype_decision(
                     ui.label(egui::RichText::new(heading).weak());
                     for st in members {
                         ui.selectable_value(&mut chosen, st, subtype_label(st))
-                            .on_hover_text(st.id());
+                            .on_hover_text(type_hover(st));
                     }
                 }
             })
             .response;
-        super::name_input(r, "Texture type");
+        super::helper_panel::named(
+            &r,
+            egui::Role::ComboBox,
+            "Type for this texture",
+            Some(&subtype_label(chosen)),
+        );
     };
     let confirm = match left {
         Some(left) => {
@@ -1490,7 +1611,7 @@ fn subtype_decision(
         }
     };
     if confirm {
-        actions.push(Action::Decide(Answer::Subtype(chosen)));
+        actions.push(Action::DecideAndAdvance(Answer::Subtype(chosen)));
     }
     ui.data_mut(|d| d.insert_temp(id, chosen));
 }
@@ -1556,12 +1677,32 @@ fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool, jo
 
 /// Why `sdc.toml` cannot take an edit, when its file is read-only.
 /// Item 9: the meshes that use this texture, winner first, from the scan database (read off the UI thread).
-fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
+fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str, actions: &mut Vec<Action>) {
     let Some(u) = model.used_by_for(key) else {
         return;
     };
+    // A read still outstanding (or a scan since the answer) leaves the answer on screen for context, but nothing
+    // that acts on it: its copy ids may not exist any more, in this store or in the one Meshes reads.
+    // While a scan is unsettled the store is being rewritten and no read runs: the links say so, not "reading".
+    let unsettled = model.scan_store_unsettled;
+    let reading = !unsettled
+        && (model.used_by.pending.is_some() || model.used_by.stale || model.meshes_rows_loading);
+    // `MeshesModel::store_path` and `AppModel::scan_db` are the one value (`SdcApp::new` copies it, nothing sets
+    // either again), so a plain comparison cannot differ by spelling.
+    let other_store = u
+        .as_ref()
+        .is_some_and(|u| model.meshes_store.as_ref().is_some_and(|s| *s != u.store));
+    let why_off = if unsettled {
+        Some(USED_BY_SCAN_WHY)
+    } else if reading {
+        Some(USED_BY_READING_WHY)
+    } else if other_store {
+        Some(USED_BY_OTHER_STORE_WHY)
+    } else {
+        None
+    };
     let title = match &u {
-        Some(u) => format!("Used by meshes ({})", u.rows.len() + u.more),
+        Some(u) => crate::model::used_by::header_line(u.total_copies),
         None => "Used by meshes".to_string(),
     };
     egui::CollapsingHeader::new(title)
@@ -1578,28 +1719,128 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
                 ui.weak(format!("No mesh of the latest scan uses {}.", u.tex));
             }
             for r in &u.rows {
-                let prio = if r.bsa {
-                    format!("BSA rank {}", r.priority)
-                } else {
-                    format!("priority {}", r.priority)
-                };
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(&r.nif);
-                    ui.weak(format!("{} · {prio}", r.mod_name));
-                    if r.decided_alpha {
-                        ui.colored_label(AMBER, "decided alpha").on_hover_text(
-                            "This mesh's alpha property decided the texture's alpha meaning",
-                        );
-                    }
-                });
+                used_by_group(ui, r, &u.store, why_off, actions);
             }
             if u.more > 0 {
-                ui.weak(format!("and {} more", u.more));
+                ui.weak(crate::model::used_by::more_line(u.more));
             }
-            if !u.rows.is_empty() && ui.link("Show in Meshes").clicked() {
-                model.show_in_meshes = Some(u.tex.clone()); // Note GC: app.rs switches the view
+            // The row facts are per copy above; this is the texture-wide filter.
+            if reading {
+                let link = ui.add_enabled(false, egui::Link::new("Reading meshes..."));
+                link.on_disabled_hover_text(USED_BY_READING_WHY);
+            } else if !u.rows.is_empty() {
+                let link = ui.add_enabled(why_off.is_none(), egui::Link::new("Show all in Meshes"));
+                match why_off {
+                    Some(why) => {
+                        link.on_disabled_hover_text(why);
+                    }
+                    None => {
+                        if link.clicked() {
+                            // Note GC: app.rs switches the view
+                            actions.push(Action::ShowAllInMeshes(u.tex.clone()));
+                        }
+                    }
+                }
             }
         });
+}
+
+/// Why they are off while a scan runs, or after one that did not finish.
+const USED_BY_SCAN_WHY: &str =
+    "A scan is running or did not finish, so this list may change. These links work once a scan has finished.";
+/// Why the Used-by links are off while the list is being read.
+const USED_BY_READING_WHY: &str =
+    "The mesh list is still being read. These links work once it has finished.";
+/// Why they are off when Meshes reads another scan database than this list.
+const USED_BY_OTHER_STORE_WHY: &str =
+    "Meshes shows another scan database than this list was read from.";
+
+/// One NIF in one mod name: its path (cut in the middle when it does not fit, the whole path on hover and in the
+/// accessible name), then each copy with its own facts and its own shape links. A group of several copies shows no
+/// row-level priority or rank: its copies come from different origins.
+fn used_by_group(
+    ui: &mut egui::Ui,
+    r: &crate::model::used_by::MeshUser,
+    store: &std::path::Path,
+    why_off: Option<&str>,
+    actions: &mut Vec<Action>,
+) {
+    use crate::model::used_by::{user_line, DECIDED_ALPHA, DECIDED_ALPHA_HOVER};
+    let glyph = ui.fonts_mut(|f| f.glyph_width(&egui::TextStyle::Body.resolve(ui.style()), '0'));
+    let chars = (ui.available_width() / glyph).floor().max(12.0) as usize;
+    let cut = super::header::elide_middle(&r.nif, chars);
+    let elided = cut != r.nif;
+    let label = ui.add(
+        egui::Label::new(&cut)
+            .truncate()
+            .show_tooltip_when_elided(!elided),
+    );
+    // The whole path is the name whether or not our cut applied: egui may still end-truncate a path it did not cut.
+    label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &r.nif));
+    if elided {
+        label.on_hover_text(&r.nif);
+    }
+    for c in &r.copies {
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(user_line(&r.mod_name, c.priority, c.bsa));
+            if let Some(by) = &c.overridden_by {
+                // The same mod name in another root reads as nonsense bare: name the root as well.
+                match c.overridden_root.as_ref().filter(|_| *by == r.mod_name) {
+                    Some(root) => {
+                        let cut = super::header::elide_middle(root, 40);
+                        let shown = format!("(overridden by {by} at {cut})");
+                        let full = format!("(overridden by {by} at {root})");
+                        let l = ui.weak(&shown);
+                        if shown != full {
+                            l.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::Label, true, &full)
+                            });
+                            l.on_hover_text(&full);
+                        }
+                    }
+                    None => {
+                        ui.weak(format!("(overridden by {by})"));
+                    }
+                }
+            }
+            if c.decided_alpha {
+                ui.colored_label(AMBER, DECIDED_ALPHA)
+                    .on_hover_text(DECIDED_ALPHA_HOVER);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(12.0);
+            for (block, name) in &c.shapes {
+                let shown = name.clone().unwrap_or_else(|| format!("Shape {block}"));
+                let accessible = format!(
+                    "Open {} at {shown} (copy {}, block {block})",
+                    r.nif, c.copy_id
+                );
+                let on = why_off.is_none();
+                let link = ui.add_enabled(on, egui::Link::new(&shown));
+                link.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, on, &accessible));
+                match why_off {
+                    Some(why) => {
+                        link.on_disabled_hover_text(why);
+                    }
+                    None => {
+                        let clicked = link.clicked();
+                        link.on_hover_text(format!(
+                            "Open this mesh in Meshes with {shown} selected."
+                        ));
+                        if clicked {
+                            actions.push(Action::ShowMesh(crate::model::used_by::MeshPick {
+                                store: store.to_path_buf(),
+                                copy_id: c.copy_id,
+                                block: *block,
+                                shape: name.clone(),
+                            }));
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// Draw texture `key`'s settings. `compact` (the preview's strip) keeps the decision box and the Alpha, Mipmaps and
@@ -1691,6 +1932,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 actions.push(Action::Reencode(false));
             }
         }
+        // Review E20: under the heading, above the type row, so it is on the first screen.
+        used_by(ui, model, key, &mut actions);
         ui.add_space(4.0);
     }
     // Note HI4 (DY17): any image can be made a helper from its Helper tick, one with no helper suffix too (HI15: one in
@@ -1813,7 +2056,15 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 });
             }
             if !decisions.is_empty() {
-                decision_box(ui, &cx, &decisions, &warnings, alpha, &mut actions);
+                let likely = if decisions
+                    .iter()
+                    .any(|d| matches!(d, Decision::Subtype { .. }))
+                {
+                    cached_likely(ui, model, key)
+                } else {
+                    vec![]
+                };
+                decision_box(ui, &cx, &decisions, &warnings, alpha, &likely, &mut actions);
             }
             if kind == ItemKind::Packed && !compact {
                 channels(ui, job);
@@ -1839,7 +2090,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
         }
     });
     if !compact {
-        used_by(ui, model, key);
         // Note JI3: the preset inspector, folded, last.
         super::inspector_section::section(ui, model, key);
     }
@@ -1853,7 +2103,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             Action::Set(f, v) => model.set_field(key, f, v),
             Action::Clear(f) => model.clear_field(key, f),
             Action::Decide(a) => model.decide(key, a),
+            Action::DecideAndAdvance(a) => model.decide_and_advance(key, a),
             Action::Select(k) => model.select_item(&k),
+            Action::ShowMesh(p) => model.show_mesh = Some(p),
+            Action::ShowAllInMeshes(t) => model.show_in_meshes = Some(t),
             Action::Reencode(on) => model.set_reencode(&[key.to_string()], on),
             Action::HelperRole(r) => {
                 ui.data_mut(|d| d.remove_temp::<bool>(super::helper_panel::tick_id(key)));

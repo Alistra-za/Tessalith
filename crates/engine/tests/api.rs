@@ -548,6 +548,17 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
     let set = iron(&plan(&["encoder.bc7_weights=alpha8"]));
     assert_eq!(set.profile.encoder.bc7_weights, Some(Bc7Weights::Alpha8));
     assert!(!ignored(&set), "{:?}", set.warnings);
+    // Note LN: the weights added later resolve like the others, and bc7e is given `[1, 1, 1, w]`.
+    for (name, want, w) in [
+        ("alpha4", Bc7Weights::Alpha4, 4),
+        ("alpha32", Bc7Weights::Alpha32, 32),
+        ("alpha64", Bc7Weights::Alpha64, 64),
+    ] {
+        let j = iron(&plan(&[&format!("encoder.bc7_weights={name}")]));
+        assert_eq!(j.profile.encoder.bc7_weights, Some(want), "{name}");
+        assert!(!ignored(&j), "{name}: {:?}", j.warnings);
+        assert_eq!(want.weights(), [1, 1, 1, w], "{name}");
+    }
     for extra in [
         "file:**/iron.png.encoder.perceptual=true",
         "file:**/iron.png.format=bc1",
@@ -570,12 +581,12 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
         assert!(!ignored(&j), "{extra}: {:?}", j.warnings);
     }
     // M3: an unknown value is refused, naming the key and the valid values. `rmaos` was dropped (Note CP12).
-    for bad in ["alpha4", "rmaos"] {
+    for bad in ["alpha3", "rmaos"] {
         let text = match try_plan(&[&format!("encoder.bc7_weights={bad}")]) {
             Err(e) => e.to_string(),
             Ok(_) => panic!("{bad} planned"),
         };
-        let valid = "expected one of `linear`, `alpha2`, `alpha8`, `alpha16`";
+        let valid = "expected one of `linear`, `alpha2`, `alpha4`, `alpha8`, `alpha16`, `alpha32`, `alpha64`";
         for want in [bad, "encoder.bc7_weights", valid] {
             assert!(text.contains(want), "{want}: {text}");
         }

@@ -916,7 +916,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             .decisions
             .iter()
             .map(|d| match d {
-                Decision::Subtype { .. } => "sub-type".into(),
+                Decision::Subtype { .. } => "type".into(),
                 Decision::AlphaMeaning => alpha.clone().unwrap_or_else(|| "alpha".into()),
                 Decision::NotACubeSource => {
                     format!("not a cube source ({})", engine::cube::plan::CUBE_SOURCES)

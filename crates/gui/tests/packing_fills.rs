@@ -606,8 +606,8 @@ fn the_open_dropdown_draws_the_skin_group_after_pbr_and_other_last() {
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h.run();
     h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("pbr albedo"))
-        .expect("the sub-type combo")
+        .find(|n| n.value().as_deref() == Some("PBR albedo"))
+        .expect("the type combo")
         .click();
     h.run();
     h.run();
@@ -622,7 +622,7 @@ fn the_open_dropdown_draws_the_skin_group_after_pbr_and_other_last() {
     assert!(y("Advanced skin (Community Shaders)") < y("Skin RFAOS"));
     assert!(y("Skin RFAOS") < y("Colour maps"));
     assert!(y("Other") > y("Grayscale maps"));
-    assert!(y("ui sky") > y("Other"));
+    assert!(y("Interface or sky") > y("Other"));
 }
 
 fn note(m: &AppModel, key: &str) -> Option<String> {

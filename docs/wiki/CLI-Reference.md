@@ -23,7 +23,7 @@ set textures/pbr/armor/ironplate/ironplate  shader pbr (auto:pbr)
     R source:ironplate_roughness.png:R  G source:ironplate_metallic.png:R  B source:ironplate_ao.png:R  A default:1
 C:\Work\IronPlate\textures\pbr\armor\ironplate\ironplate.png
   suggested pbr_albedo (high confidence: colour member of a PBR set)
-  sub-type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
+  type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
   status ready
 ...
 ```
@@ -103,7 +103,7 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
 | `--config <file>` | `sdc.toml` in the first input folder | The project config file. |
 | `--set <override>` | none | Override a profile field. Repeatable. See [--set syntax](#--set-syntax). |
-| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence sub-type suggestion. With `none`, a file whose sub-type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
+| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence type suggestion. With `none`, a file whose type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
 | `--allow <CODE>` | none | Acknowledge a blocking code for the whole batch. Repeatable. An unknown code is a usage error. See [Acknowledging blocking codes](#acknowledging-blocking-codes). |
 | `--json` | off | Write JSON Lines events to stdout. Human output stays on stderr. |
 
@@ -111,10 +111,10 @@ The user config and the user presets always load ([where they are](Installation.
 
 ### Why you usually want `--accept-suggestions high`
 
-A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence sub-type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise the file is reported as unresolved:
+A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise the file is reported as unresolved:
 
 ```text
-skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
+skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
 A lone file with an unknown suffix (`rock_bump.png`) has no suggestion, so the flag doesn't help: `sdc convert` exits 1 with `unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry` ([why it waits](Texture-Types.md#how-files-form-a-set)). `--allow SUG-LOW-CONFIDENCE` doesn't convert it either. <!-- D:GY5 --> Give it a type with its path under the input folder:
@@ -130,14 +130,14 @@ The GUI accepts High suggestions and writes each into `sdc.toml` as a `[files]` 
 | Form | Applies to | Can't set |
 |---|---|---|
 | `field=value` | Every file. | `helper.*` |
-| `subtype:<id>.field=value` | Every file of that sub-type. | `subtype`, `reencode`, `helper.*` |
+| `subtype:<id>.field=value` | Every file of that type (`subtype` in `sdc.toml`). | `subtype`, `reencode`, `helper.*` |
 | `file:<glob>.field=value` | Files matching the glob ([glob rules](Project-Config.md#rules)). | |
 | `set:<set id>.shader=<shader>` | A texture set's shader ([shader ids](Set-Shaders.md)). The set id is what `inspect` prints after `set`; an id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. | Anything but `shader` |
 
-- Every profile field works with `--set` ([the field list](Project-Config.md#fields)), except `target`, `category` and `resize_reference`, which the planner alone writes. `subtype` takes the `file:` form only: the sub-type is decided per file.
+- Every profile field works with `--set` ([the field list](Project-Config.md#fields)), except `target`, `category` and `resize_reference`, which the planner alone writes. `subtype` takes the `file:` form only: the type is decided per file.
 - `helper.role`, `helper.fills`, `helper.read` and `helper.invert` take only the `file:` form: an unscoped `helper.role=ao` would make every image a helper.
 - Values are TOML literals (`true`, `127`, `0.5`); anything else is a string, so `format=bc1` needs no quotes.
-- A misspelt field or sub-type is an error, never ignored.
+- A misspelt field or type is an error, never ignored.
 - A `--set` ranks above everything in `sdc.toml`, presets and suggestions ([layer order](Project-Config.md#how-settings-layer)).
 - `reencode` takes the `file:` form only.
 
@@ -159,7 +159,7 @@ sdc convert src --recursive --accept-suggestions high --set "set:textures/armor/
 
 A blocking code stops its file until you acknowledge it ([which codes](Diagnostic-Codes.md)). `--allow <CODE>` acknowledges it for the whole batch.
 
-- `--allow CFG-UNAVAILABLE` converts a sub-type or format the target lacks as the fallback the message names. With no fallback, change the sub-type or the target ([which sub-types the Vanilla target lacks](Texture-Types.md#sub-types-what-each-file-becomes)).
+- `--allow CFG-UNAVAILABLE` converts a type or format the target lacks as the fallback the message names. With no fallback, change the type or the target ([which types the Vanilla target lacks](Texture-Types.md#types-what-each-file-becomes)).
 - `--allow FMT-CS-SKIN-LOADER` does nothing: that code can't be lifted.
 - `--allow SUG-LOW-CONFIDENCE` converts nothing that has no suggestion ([above](#why-you-usually-want---accept-suggestions-high)).
 
@@ -173,7 +173,7 @@ Each flag is the first thing checked; `sdc.toml`, the user config and the defaul
 - A preset named by `sdc.toml` that isn't installed makes `sdc convert` exit 2. In the GUI the same preset blocks the export.
 - Load a preset file for one run with `--preset-file <file>` (load only) or `--preset <file.toml>` (load and select); copy it into `%APPDATA%\sdc\presets\` to keep it ([how to write one](Presets-and-Targets.md#writing-a-preset-by-hand)). A file given with `--preset-file` that fails to load is an error.
 - `sdc presets list` shows each preset's suffix aliases, and keeps presets marked `hidden = true` out.
-- `sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse` shows what a preset resolves to for one sub-type, before you convert with it.
+- `sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse` shows what a preset resolves to for one type, before you convert with it.
 
 ## sdc convert
 
@@ -289,7 +289,7 @@ Notice: a comma list means all of its words, so `cutout,mips` is a cutout output
 | `alpha` | It stores alpha: the alpha policy isn't `remove` and the format has an alpha channel (BC1 only with 1-bit alpha). A `data` alpha, such as a parallax height, counts. |
 | `cutout` | It has `alpha` and the game alpha-tests it: a `cutout` or `cutout_blend` policy, or `blend` written as 1-bit-alpha BC1. |
 | `mips` | The written file has more than one mip level, as its manifest record says. A record that doesn't say how many levels the file has counts as having mips, so `--ev` encodes it again rather than keep it by mistake. |
-| a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#sub-types-what-each-file-becomes)). |
+| a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#types-what-each-file-becomes)). |
 
 - Case doesn't matter and spaces around a word are trimmed: `" BC1 , Mips "` works.
 - An unknown or empty word exits 2 and lists the valid words.
@@ -335,7 +335,7 @@ For image inputs it runs the whole plan as a dry run and prints, per set:
 ```text
 set <set id>  shader <shader> (<why>)
   <severity> <CODE> <message>
-  pack <output> (<sub-type>) run|conflict|failed|disabled[: reason]
+  pack <output> (<type>) run|conflict|failed|disabled[: reason]
     R <source>  G <source>  B <source>  A <source>
 ```
 
@@ -343,8 +343,8 @@ and per file:
 
 ```text
 <input path>
-  suggested <sub-type> (<confidence> confidence: <reason>)
-  sub-type <id>  format <format>  tag <srgb|unorm|n/a>  alpha <policy>  output <relative output path>
+  suggested <type> (<confidence> confidence: <reason>)
+  type <id>  format <format>  tag <srgb|unorm|n/a>  alpha <policy>  output <relative output path>
   status <ready|unresolved|blocked|error|packing_input> <reasons or codes>
   <severity> <CODE> <message>
 ```
@@ -368,8 +368,8 @@ Runs the post-encode checks that need no source on DDS files that already exist,
 | Flag | Default | Meaning |
 |---|---|---|
 | `--target cs\|vanilla` | `cs` | Whose rules apply. |
-| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A sub-type the target doesn't have is an error. |
-| `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the sub-type's default, except that a sub-type whose default is `remove` is inferred as `data`. |
+| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A type the target doesn't have is an error. |
+| `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the type's default, except that a type whose default is `remove` is inferred as `data`. |
 | `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
 
@@ -397,7 +397,7 @@ sdc presets [--preset-file <file>]... <COMMAND>
 | Command | What it does |
 |---|---|
 | `list [--json]` | Lists selectable presets: id, version, target, description, suffix aliases, and the source file for user presets. |
-| `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each sub-type (or one) as JSON, with the provenance of each field. |
+| `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each type (or one) as JSON, with the provenance of each field. |
 | `schema <which> [--out <dir>]` | Prints a JSON Schema: `profile`, `preset`, `config`, `event`, `manifest`, `dds-info`, `dds-validation`. `all` writes every schema into `--out`, which it requires. |
 
 ```powershell
@@ -551,10 +551,10 @@ Partly. **Copy CLI command** (Files tab, [Review and Export](GUI-Review-and-Expo
 ### Every file is "unresolved"
 
 ```text
-skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
+skip  C:/src/rock.png: SUG-LOW-CONFIDENCE type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
+`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
 
 ### The run stops with `sdc: <message>`
 
@@ -590,11 +590,11 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 
 | Message | Cause and fix |
 |---|---|
-| `--set '<s>': unknown field '<f>'` and `unknown sub-type '<id>'` | A misspelt field or sub-type. [The field list](Project-Config.md#fields). |
-| `--set '<s>': a sub-type scope cannot set the sub-type` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
+| `--set '<s>': unknown field '<f>'` and `unknown type '<id>'` | A misspelt field or type. [The field list](Project-Config.md#fields). |
+| ``--set '<s>': a `subtype:` scope cannot set the type`` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
 | `--set '<s>': a set scope sets only shader` | `set:<id>.` takes `shader` and nothing else. |
 | `--allow <X>: unknown code` | A misspelt code. [All codes](Diagnostic-Codes.md). |
-| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
+| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a type the target lacks. |
 
 ### Presets and config
 

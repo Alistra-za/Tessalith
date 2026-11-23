@@ -1,6 +1,6 @@
 # Texture types and naming
 
-For anyone naming source files: this page says what each file becomes (set, sub-type, format, colour tag, alpha), how normal maps are read, and what the artist checks are telling you. Packing raw maps is on [Texture packing](Texture-Packing.md); shaders and the extra exports are on [Set shaders](Set-Shaders.md).
+For anyone naming source files: this page says what each file becomes (set, type, format, colour tag, alpha), how normal maps are read, and what the artist checks are telling you. Packing raw maps is on [Texture packing](Texture-Packing.md); shaders and the extra exports are on [Set shaders](Set-Shaders.md).
 
 ## Which files Tessalith reads
 
@@ -27,7 +27,7 @@ textures\armor\iron\
   iron_trim_n.png   set "iron_trim", suffix _n
 ```
 
-A file **waits for a type** instead of becoming a colour map when all three hold: no `[files]` entry or rule gives it a sub-type, its name has an underscore but no known suffix (aliases count), and it is alone in its set. `rock_bump.png` alone waits, because nothing says whether it is a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it.
+A file **waits for a type** instead of becoming a colour map when all three hold: no `[files]` entry or rule gives it a type, its name has an underscore but no known suffix (aliases count), and it is alone in its set. `rock_bump.png` alone waits, because nothing says whether it is a bump map or a colour map. `iron.png` has no underscore, so it stays a colour map, and `iron_ore.png` stays one while `iron_ore_n.png` sits beside it.
 
 Never waiting: files under `textures\cubemaps`, `landscape`, `sky` and `interface`, a kept `.dds`, and (in the GUI) a file that a scanned mesh or a GRAS model uses as its diffuse, because the mesh says what it is. A set's shader doesn't give the type. <!-- D:GY1 -->
 
@@ -45,7 +45,7 @@ subtype = "diffuse"
 
 Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmask` over `_m`.
 
-| Suffix | Suggested sub-type | Confidence |
+| Suffix | Suggested type | Confidence |
 |---|---|---|
 | none, or `_d` | `diffuse`; `pbr_albedo` in a PBR set; `skin_albedo` in an Advanced skin set; `landscape_diffuse` when a folder in the path is named `landscape`; `ui_sky` under `interface` or `sky` folders; `hdr_sky` for a float source under `sky` | High (`hdr_sky` Medium) |
 | `_n` | `normal`, `pbr_normal` in a PBR set, or `landscape_normal` under a `landscape` folder. See [Picking a shader for a normal](Set-Shaders.md#picking-a-shader-for-a-normal). | High |
@@ -101,46 +101,47 @@ Which way a normal's green points is under [Green direction](#green-direction).
 
 Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Presets-and-Targets.md#suffix-aliases).
 
-## Sub-types: what each file becomes
+<a id="sub-types-what-each-file-becomes"></a>
+## Types: what each file becomes
 
-One row per sub-type. **vanilla** says whether the sub-type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and the GUI's acknowledge button converts it as the fallback named there (on the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes)). With no fallback, change the sub-type or the target.
+One row per type: the first column is the id `sdc.toml` and the command line use, **In the window** is the name Tessalith's window shows ([the picker](GUI-Texture-Panel.md#changing-a-setting) adds a description to each). **vanilla** says whether the type exists under the Vanilla target; when it doesn't, the file is blocked with `CFG-UNAVAILABLE`, and the GUI's acknowledge button converts it as the fallback named there (on the command line: [CLI reference](CLI-Reference.md#acknowledging-blocking-codes)). With no fallback, change the type or the target.
 
-| Sub-type | Category | Default format | Tag (`cs`) | Default alpha | vanilla | Notes |
-|---|---|---|---|---|---|---|
-| `diffuse` | Color | BC7 | UNORM | remove | yes | The mesh decides the alpha. |
-| `landscape_diffuse` | Color | BC7 | UNORM | data | yes | Alpha is the snow/height mask. BC1 refused (`FMT-LANDSCAPE-BC1`). |
-| `pbr_albedo` | Color | BC7 | sRGB | remove | `diffuse` | `cs` only. |
-| `pbr_emissive` | Color | BC6H for a float source above 1.0, else BC7 | n/a or sRGB | remove | `glow` | `cs` only. `FMT-HDR-SOURCE`. |
-| `glow` | Color | BC7 | UNORM | remove | yes | |
-| `pbr_subsurface` | Color | BC7 | sRGB | data | no | `cs` only. Also the coat colour map. |
-| `pbr_fuzz` | Color | BC7 | sRGB | data | no | `cs` only. |
-| `subsurface_tint` | Color | BC7 | UNORM | remove | yes | |
-| `backlight_tint` | Color | BC7 | UNORM | remove | yes | |
-| `ui_sky` | Color | BC7 | UNORM | remove | yes | No mips. |
-| `skin_albedo` | Color | BC7 | UNORM | remove | no | Advanced skin. UNORM because the CS skin shader reads it that way. |
-| `cubemap` | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | yes | See [Cubemaps](Cubemaps.md). BC1, BC3, BC7, RGBA8 or RGB8 only. |
-| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
-| `landscape_normal` | Normal | BC7 | UNORM | data | yes | |
-| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. The default drops specular alpha silently. Pick **Data** on the Alpha row to keep it. For shared normals, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS8 --> |
-| `detail_normal` | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
-| `msn` | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
-| `coat_normal` | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
-| `skin_wet` | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only some formats here: see `FMT-CS-SKIN-LOADER`. <!-- D:HB3,HB4 --> |
-| `skin_detail` | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
-| `envmask` | Grayscale | BC4 | UNORM | remove, exact opaque | yes | `_m`. |
-| `height` | Grayscale | BC4 | UNORM | remove | yes | `_p`. |
-| `projected_noise` | Grayscale | BC4 | UNORM | remove | yes | `_noise`, for an XPMF profile. |
-| `msn_specular` | Grayscale | BC4 | UNORM | remove | yes | `_s` beside an `_msn`. |
-| `skin_sk` | Grayscale | BC4 | UNORM | remove | no | Red channel only. |
-| `gray` | Grayscale | BC4 | UNORM | remove | yes | A plain grey map you pick on the file. BC4 or R8 only. Reads red unless [`channels.grayscale_source`](Project-Config.md#channels) says otherwise. <!-- D:FM37 --> |
-| `complex_material` | MixedPacked | BC7 | UNORM | data, exact opaque | yes | Complex `_m`. |
-| `rmaos` | MixedPacked | BC7 | UNORM | data | no | `cs` only. |
-| `skin_rfaos` | MixedPacked | BC7 | UNORM | data | no | |
-| `flow` | MixedPacked | BC5 | UNORM | remove | no | Hair flow. At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
-| `generic_two_channel` | MixedPacked | BC5 | UNORM | remove | yes | |
-| `generic_data` | MixedPacked | BC7 | UNORM | data | yes | Any data map Tessalith has no type for. |
-| `complex_grass` | MixedPacked | BC7 only | UNORM only | cutout (when alpha varies) | yes | Own size. Both targets accept it; only CS and ENB read it. See [Complex grass](PBR-Landscape.md#complex-grass). |
-| `hdr_sky` | Hdr | BC6H | n/a | | no | `cs` only. |
+| Type | In the window | Category | Default format | Tag (`cs`) | Default alpha | vanilla | Notes |
+|---|---|---|---|---|---|---|---|
+| `diffuse` | Diffuse | Color | BC7 | UNORM | remove | yes | The mesh decides the alpha. |
+| `landscape_diffuse` | Landscape diffuse | Color | BC7 | UNORM | data | yes | Alpha is the snow/height mask. BC1 refused (`FMT-LANDSCAPE-BC1`). |
+| `pbr_albedo` | PBR albedo | Color | BC7 | sRGB | remove | `diffuse` | `cs` only. |
+| `pbr_emissive` | PBR emissive | Color | BC6H for a float source above 1.0, else BC7 | n/a or sRGB | remove | `glow` | `cs` only. `FMT-HDR-SOURCE`. |
+| `glow` | Glow | Color | BC7 | UNORM | remove | yes | |
+| `pbr_subsurface` | PBR subsurface or coat colour | Color | BC7 | sRGB | data | no | `cs` only. Also the coat colour map. |
+| `pbr_fuzz` | PBR fuzz | Color | BC7 | sRGB | data | no | `cs` only. |
+| `subsurface_tint` | Subsurface tint | Color | BC7 | UNORM | remove | yes | |
+| `backlight_tint` | Backlight tint | Color | BC7 | UNORM | remove | yes | |
+| `ui_sky` | Interface or sky | Color | BC7 | UNORM | remove | yes | No mips. |
+| `skin_albedo` | Skin albedo | Color | BC7 | UNORM | remove | no | Advanced skin. UNORM because the CS skin shader reads it that way. |
+| `cubemap` | Cubemap | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | yes | See [Cubemaps](Cubemaps.md). BC1, BC3, BC7, RGBA8 or RGB8 only. |
+| `normal` | Normal map | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
+| `landscape_normal` | Landscape normal | Normal | BC7 | UNORM | data | yes | |
+| `pbr_normal` | PBR normal | Normal | BC7 | UNORM | remove | `normal` | `cs` only. The default drops specular alpha silently. Pick **Data** on the Alpha row to keep it. For shared normals, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS8 --> |
+| `detail_normal` | Detail normal | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
+| `msn` | Model-space normal | Normal | BC7 | UNORM | remove | yes | Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
+| `coat_normal` | PBR coat normal | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
+| `skin_wet` | Skin wet | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only some formats here: see `FMT-CS-SKIN-LOADER`. <!-- D:HB3,HB4 --> |
+| `skin_detail` | Skin detail | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
+| `envmask` | Environment mask | Grayscale | BC4 | UNORM | remove, exact opaque | yes | `_m`. |
+| `height` | Height (parallax) | Grayscale | BC4 | UNORM | remove | yes | `_p`. |
+| `projected_noise` | Projected noise | Grayscale | BC4 | UNORM | remove | yes | `_noise`, for an XPMF profile. |
+| `msn_specular` | Model-space specular | Grayscale | BC4 | UNORM | remove | yes | `_s` beside an `_msn`. |
+| `skin_sk` | Skin subsurface mask | Grayscale | BC4 | UNORM | remove | no | Red channel only. |
+| `gray` | Grey map | Grayscale | BC4 | UNORM | remove | yes | A plain grey map you pick on the file. BC4 or R8 only. Reads red unless [`channels.grayscale_source`](Project-Config.md#channels) says otherwise. <!-- D:FM37 --> |
+| `complex_material` | Complex material | MixedPacked | BC7 | UNORM | data, exact opaque | yes | Complex `_m`. |
+| `rmaos` | PBR RMAOS | MixedPacked | BC7 | UNORM | data | no | `cs` only. |
+| `skin_rfaos` | Skin RFAOS | MixedPacked | BC7 | UNORM | data | no | |
+| `flow` | Hair flow | MixedPacked | BC5 | UNORM | remove | no | At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
+| `generic_two_channel` | Two-channel data | MixedPacked | BC5 | UNORM | remove | yes | |
+| `generic_data` | Other data | MixedPacked | BC7 | UNORM | data | yes | Any data map Tessalith has no type for. |
+| `complex_grass` | Complex grass | MixedPacked | BC7 only | UNORM only | cutout (when alpha varies) | yes | Own size. Both targets accept it; only CS and ENB read it. See [Complex grass](PBR-Landscape.md#complex-grass). |
+| `hdr_sky` | HDR sky | Hdr | BC6H | n/a | | no | `cs` only. |
 
 - **Default alpha is a start.** Analysis decides: no alpha channel resolves to `remove`; alpha is opaque when its minimum is 251 or more, or when fewer than 0.1 % of texels are below 251 and no connected group of them is larger than 16 texels (stray noise from a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes answer.
 - **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
@@ -152,7 +153,7 @@ Under `cs`, PBR colour maps (`pbr_albedo`, `pbr_emissive` as BC7, `pbr_subsurfac
 
 ## Normal maps
 
-Everything Tessalith does with a normal map: which way its green points, model-space normals, detail normals, formats and mips. Each normal sub-type (`normal`, `landscape_normal`, `pbr_normal`, `detail_normal`, `msn`, `coat_normal`, `skin_wet`, `skin_detail`) has its row in [the sub-type table](#sub-types-what-each-file-becomes).
+Everything Tessalith does with a normal map: which way its green points, model-space normals, detail normals, formats and mips. Each normal type (`normal`, `landscape_normal`, `pbr_normal`, `detail_normal`, `msn`, `coat_normal`, `skin_wet`, `skin_detail`) has its row in [the type table](#types-what-each-file-becomes).
 
 ### Green direction
 
@@ -197,7 +198,7 @@ The three detail spellings all mean the set's detail normal. What the file becom
 | Advanced skin (`cs` only) | `skin_detail` |
 
 - **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or [XPMF profile](PBR-Landscape.md#projected-noise-and-detail-normal) looks for that name.
-- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. `iron_detail_n.png` there keeps its own set stem, as a normal in set `iron_detail`.
+- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a type on the file. `iron_detail_n.png` there keeps its own set stem, as a normal in set `iron_detail`.
 
 ## Alpha
 

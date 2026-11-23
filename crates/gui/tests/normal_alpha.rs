@@ -282,11 +282,49 @@ fn a_follow_only_recording_does_not_claim_high_confidence() {
         .iter()
         .find(|r| r.text.contains("set automatically"))
         .unwrap();
-    assert!(!row.text.contains("High confidence"), "{}", row.text);
+    assert_eq!(row.text, "1 type set automatically: wall_n.png");
     let detail = row.detail.as_deref().unwrap();
     assert!(
-        detail.contains("wall_n.png") && !detail.contains("High confidence"),
+        detail.contains("wall_n.png") && !detail.contains("sets a type on its own"),
         "{detail}"
+    );
+}
+
+/// A batch with an alpha write and only a guarded normal follow: the hover has both details and no paragraph on
+/// when Tessalith decides (the follow retypes a file already typed; it is not a first automatic type).
+#[test]
+fn an_alpha_write_beside_a_normal_follow_has_no_confidence_paragraph() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.accept = engine::policy::AcceptSuggestions::None;
+    ImageBuffer::from_fn(16, 16, |x, _| Rgba([90u8, 60, 30, (x * 16) as u8]))
+        .save(t.join("door.png"))
+        .unwrap();
+    m.mesh_alpha.insert(
+        "textures/test/door".to_string(),
+        vec![engine::shader::MeshAlpha {
+            blend: false,
+            test: true,
+            threshold: 90,
+        }],
+    );
+    m.scan_store_unsettled = true;
+    add_rmaos(&t, &mut m);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|r| r.text.contains("set automatically"))
+        .unwrap();
+    let detail = row.detail.as_deref().unwrap();
+    assert!(
+        detail.contains("wall_n.png: ") && detail.contains("door.png: cutout"),
+        "{detail}"
+    );
+    assert!(!detail.contains("sets a type on its own"), "{detail}");
+    assert!(
+        !detail.contains("\n\n"),
+        "no blank line or paragraph: {detail}"
     );
 }
 
@@ -3593,7 +3631,7 @@ fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
     assert_eq!(
         held(&m, IRON_N, "subtype"),
         typed,
-        "the pick leaves the sub-type"
+        "the pick leaves the type"
     );
     assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
 }

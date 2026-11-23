@@ -212,7 +212,7 @@ fn print_planned(job: &ResolvedJob) {
         None => out!("  no suggestion"),
     }
     out!(
-        "  sub-type {}  format {}  tag {}  alpha {}  output {}",
+        "  type {}  format {}  tag {}  alpha {}  output {}",
         job.profile.subtype.id(),
         tag!(&job.profile.format),
         tag!(&job.profile.color.tag),
@@ -647,7 +647,7 @@ pub fn validate_files(a: ValidateArgs) -> Result<i32, EngineError> {
         .as_ref()
         .map(|id| {
             serde_json::from_value(Value::String(id.clone()))
-                .map_err(|_| EngineError::Usage(format!("--subtype {id}: unknown sub-type")))
+                .map_err(|_| EngineError::Usage(format!("--subtype {id}: unknown type")))
         })
         .transpose()?;
     if let Some(st) =
@@ -868,7 +868,7 @@ pub fn presets(args: PresetsArgs) -> Result<i32, EngineError> {
                 .unwrap_or(Target::Cs);
             let subtypes: Vec<Subtype> = match subtype {
                 Some(s) => vec![serde_json::from_value(Value::String(s.clone()))
-                    .map_err(|_| EngineError::Usage(format!("--subtype {s}: unknown sub-type")))?],
+                    .map_err(|_| EngineError::Usage(format!("--subtype {s}: unknown type")))?],
                 None => Subtype::ALL.to_vec(),
             };
             if let Some(a) = alias_list(&preset.suffix_aliases) {

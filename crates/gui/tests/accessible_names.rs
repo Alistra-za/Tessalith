@@ -242,7 +242,7 @@ const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
 const GROUP_ROW: &str =
     "a group header named after its main row, whose control carries the same name";
-const SUBTYPE_ROWS: &str = "two open sub-type rows draw the same tree with fixed labels";
+const SUBTYPE_ROWS: &str = "two open type rows draw the same tree with fixed labels";
 
 /// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
 /// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
@@ -556,9 +556,9 @@ fn every_input_has_a_name_in_presets_and_rename() {
     m.presets_model().duplicate();
     let mut h = harness(m);
     h.run();
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
-    h.get_by_label_contains("rmaos —").click();
+    h.get_by_label_contains("PBR RMAOS —").click();
     h.run();
     h.get_by_label("TOML preview").click();
     h.run();
@@ -717,7 +717,7 @@ fn the_textures_filters_have_short_names() {
     h.run();
     open_filters(&mut h);
     for n in [
-        "Sub-type filter",
+        "Filter by type",
         "Output format filter",
         "Set membership filter",
         "Sort order",

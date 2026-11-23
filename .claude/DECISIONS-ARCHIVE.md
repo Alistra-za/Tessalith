@@ -194,6 +194,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
   - **Tests.** `review::{a_pgpatcher_pitfall_is_a_problems_row_not_a_gate, review_still_gates_on_blockers_and_overwrites, review_has_no_half_size_or_stale_group}`; the last lists every label the Review panel draws for one fixture, so a renamed or returning group fails it.
   - Supersedes: CA4 (whole), and the FC14 bullets on stale JSON rows, the half-size write and the half step. In part: CN62, CN64, CN66, CL (the Carried to Task 5 bullet), CL25, FL (the gate timing), the FC14 Review footer bullet, CA5, CL15, CL20 (Hold, the flagged-again bullet), CL26, FC2 (the Review question and the engine Hold pieces), FC5 (the half-size order, the Warnings row of a blocked NIF edit), FC11 (stale outputs in Review; the sidecar stays), FC12 (the portrait photo is a Problems row), the `Half size has one meaning` bullet of FC, the two FC bullets on `stale_outputs`, DS26, V4 (the ask before export), AA2, AD5, AG90, AT (Untick or orphan), DR9 and DV7 (the Review stale row). CL24, CL27 and CL43 were already archived by FC2.
 
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- **FM10 Removed keys and values are errors that name the fix (`crates/engine/src/migrate.rs`, ruling P21, 2026-11-02).** `migrate::REMOVED` is a table of `Removed { key, value, hint }`; every removal task of 2.0 adds its rows. `key` is dot-separated segments compared with the last segments of each key's path, so `encoder.backend` matches under `[defaults]`, `[subtypes.X]`, `[files."k"]` and `[[rules]]` tables alike; array indices are not segments, a file key with dots is one segment, and a table key matches (`subtypes.rfaos`). `value: None` matches any value, `Some(v)` a string equal to `v` or an array holding it. A removed key is an error even when its value is harmless. `removed_in(table)` returns the first hit in document order as `<dotted path>: removed in 2.0; <hint>` (a path shows array entries as `rules[0].subtype` and quotes a key that is not a bare key); `removed_set(field, value)` does the same for one `--set` (a `file:<glob>.` prefix counts by its last segments; `subtype:<id>.<field>` checks `subtypes.<id>`), and `parse_set` calls it before its "unknown field" and "unknown sub-type" errors. `migrate_config` and `migrate_preset` check the version first (a newer file may use keys this sdc does not know, so `Newer` wins), then the removed keys (`MigrateError::Removed`). `ConfigFile::parse` maps it to `PresetError::Parse("<origin>: <message>")`, the preset loader to `<source label>: <message>`. In the GUI a project file with a removed key opens read-only with that text and is not rewritten (`crates/gui/tests/project.rs` `a_removed_key_opens_read_only_and_keeps_the_file`: `ProjectDoc::open` runs `config()` and marks any rejected config read-only, not only TOML syntax errors). The first rows are `subtypes.rfaos` (any value), `subtype = "rfaos"` and `subtypes` holding `"rfaos"` (a rule's `match.subtypes`).
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -455,6 +458,57 @@ ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LL, 2026-11-22)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK
+
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS, JY, LA
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY, LB, LC, LD
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY, LD
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV, JE, JO, JQ, JS, JY
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS, JE, JQ, JR, JS, JW
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH, LI, LK
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS, JY, LA, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY, LG
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY, LB, LC, LD, LE, LF, LG, LI, LJ
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI, LN
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK, LL
 
 ## Digest
 
@@ -851,6 +905,33 @@ ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 - A set card uses a one-row heading only when the name gets at least 80 px, or its whole width when that is less (HP12). [FI13, HP12]
 
+ARCHIVED (wording before the edit; superseded in part by Note LN1, 2026-11-22)
+- BC7 weighting is a dropdown with a stated precedence; inherited values are overridable; RMAOS weighting R4 G1 B2 A1 was dropped. [CP1, CP3, CP9, CP12]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- "(auto)" in the Sub-type row means the decision came from evidence, with the reason on hover. [U4]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- A rule's `overrides` may not set `subtype`: `check_preset` and `check_up_front` refuse it ("set the sub-type with `subtype =` on the rule"). [BC11]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Textures combos: Sub-type, Output format, Set membership (Any, In a set, Not in a set); each lists Any, the values present and a saved value the folder lacks; a texture with no job matches no value; name and choice share one box. [AG46, AG53]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- One type picker for Set type and the texture panel's Sub-type; a Problems row accepts its suggestion in one click, Enter or Space. [FB9]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Window and layout live in `gui.toml` (not eframe persistence), debounced, in native points so another egui zoom restores the same window; a clamped window never overwrites its saved size. The saved view returns only when a project reopens. [AG3, AG17, AG19, AG105, CE21, FM31, JY10, JY17]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- "Used by meshes (N)" is read per selected texture off the UI thread (stale answers dropped; a panic shows "Reading the scan database failed: …"); every texture path the Meshes view lists that is in the open folder gets "Open in Textures". [AG96, AG97, AG128]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Meshes list: picking a mod never deselects; a reload keeps the picked mod while it has NIFs and is not derived, else Any mod, and reselects the NIF it holds (picked under Any mod, or under a picked mod while the store is not settled) once the store settles. Winning hides under Any mod; Overridden lists every losing copy; Conflicted is `n_copies > 1`; Problems is a problem or an LE mesh. Search matches path (no `meshes/`) or mod, ASCII case-insensitive, `\` as `/`; the texture chip (`users_of_texture`) combines with it; "Show in Meshes" sets Any mod, clears search and chips. Row chips list warnings first; "In game" is short, full text as its AccessKit name. [BT5, GC4, GC6, GC7, GC8, GC9, GC10, GC16, GC17, GC19, GC20, GQ4]
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Sort: Name (default), Source size (largest first) or Status (errors, warnings, undecided, ok); ties by name. Filters, sort and tile size live in `gui.toml`; a bad value falls back to its default. [AG4, AG47, AG50]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -1029,6 +1110,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JS6, 2026-11-19)
 ARCHIVED (wording before the edit; superseded in part by Note HS10, 2026-11-10)
 - **IB11 The output is `<same file name>.png` in a `dilated` folder beside the input (`--out` overrides), same bit depth and channel layout.** The name stays so Tessalith still reads the suffix. An existing output is kept and reported unless `--overwrite`; an output that would replace its own input is refused. Exit codes as `sdc uv` (IB6): 0 all written; 1 an input wrote nothing (no mask, size mismatch, float, no valid texel, exists); 2 no image matches; 3 a write failed. One stdout line per file: path, kind, mask, filled texel count.
 
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- **IB9 The fill kind comes from the engine's own name reading, and a name with no sub-type is data.** The stem goes through `group::split_vocab`/`split_suffix` and `suggest::suggest` (vanilla, no set) and the first sub-type decides: Normal-category except `coat_normal` and `skin_wet` is a normal map, an sRGB `sdc-base` colour content is colour, everything else is data, and a stem with no known suffix is filled as stored with "no sub-type from the name" on stdout. Colour is filled in linear light (alpha never decoded); a normal map is filled as stored and each filled texel is renormalised over all three channels (a zero vector becomes 0,0,1).
+
 ## Note HY — bcenc, rgbcx's block encoders in Rust (main team, 2026-11-13)
 
 ARCHIVED (wording before the edit; superseded in part by Note HY9, 2026-11-13)
@@ -1113,6 +1197,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JI3, 2026-11-15)
 
 ARCHIVED (wording before the edit; superseded in part by Note JI3 and Note JI7, 2026-11-15)
 - **HI18 The preview's settings strip and the Advanced drawer show no `?` (agent ruling).** The strip's labels are about 90 px and already cut short, and in the drawer at 280 px a `?` pushed every combo about 4 px past its edge; there the label's hover carries the help (with the full label where it is cut short).
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- **HI4 Helper is a tick under Sub-type (owner).** An image's Type group has a "Helper" row right under Sub-type; ticking it puts a "Helper role" combo ("Pick a role…") in Sub-type's place, and picking a role writes `helper.role`. The helper panel draws the same tick, ticked, under its Role row. A non-image has no Helper row; an image with no job (failed, skipped, packed) draws the Helper row alone, with the role combo once ticked.
 
 ## Note HV — analysis cache: compressed thumbnails and a limit the user sets (owner, 2026-11-10)
 
@@ -1750,6 +1837,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
   5. **The TextEdit stroke is drawn inside its margin** (`widgets/text_edit/builder.rs:696-701`), so the focus stroke shifts no layout. With `TEXT_EDIT_MARGIN` a box is 21.28 tall at rest and focused, as on 0.36.2, so nothing a user sees changes. Test `egui_gotchas::text_edit_height_with_and_without_the_036_margin`.
   6. **Glyph rasterising and colour glyphs; Latin metrics unchanged.** Both versions lay a row out in epaint's `text::text_layout::layout` (epaint-0.37.0 `text/text_layout.rs:90`, epaint-0.36.2 `:101`), shape each run with harfrust 0.12 in `shape_text` (0.37 `:1572`, 0.36.2 `:1400`) and take each glyph's advance from the shaper's `x_advance` in `layout_shaped_run` (0.37 `:252`, 0.36.2 `:253`); what 0.37 adds is `layout_raster_run` (`text/text_layout.rs:452`) for glyphs a `GlyphRasterizer` draws (colour glyphs, and a cluster in a family with no font) and vello_cpu 0.2 as the rasteriser (`text/font_face.rs:155`). For Latin text in Segoe UI the advances measured the same: a 14 pt sample line is 360.7 wide in both versions. The Sets column still holds five chips a row at 266 px (`sets_column::tests::the_default_sets_width_holds_five_chips_beside_the_bar`), and the header is one row at 1280 and 1215 and wraps at 1205 (`header_layout::the_header_is_one_row_from_1280`). Other scripts (CJK, Arabic, emoji) were not measured.
 
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+  - **A link under the clip is scrolled to.** `used_by_meshes::no_scan_database_hides_the_list_and_a_database_reads_it_off_the_ui_thread` scrolls "Show in Meshes" into view before the click: with real fonts the link sits below the panel's clip.
+
 ## Note JY — Export, Review, header and start (review E 3c; controller for the owner, 2026-11-16)
 
 ARCHIVED (wording before the edit; superseded in part by Note LC, 2026-11-20)
@@ -1796,3 +1886,8 @@ ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note HY24, 2026-11-22)
 - **LI6 Quality and time.** The bench quality table, cited not copied: over the shipped Slowest, +0.033 dB on BC4 (`mask_real`), +0.020 dB on BC5 (`normal_real`), +0.076 dB on BC3 alpha over all BC3 sets and +0.211 dB on the cutout set (both against the guarded search BC3 ships; bc4-family.md:153-162). The 0.020 dB whole-BC3 figure is against the unguarded search and is not quoted. A complete block takes about 4 times Slowest's time on BC4, about 5 on BC5 and about 2 on BC3 (`bcenc`'s `max_speed` example on 20 sampled PNGs, measured with the BC45 plan's Task 5 (a3099de2), before the plan E merge gave Max an AVX2 frame, so on the base SSE2 code, while other builds ran; docs/research/bc4-family.md#max-near-exhaustive).
+
+## Note GU — v3 cube sources and removed-key versions (owner, 2026-11-06)
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- **GU2 A cube source is six faces, a cross or a strip.** A cube source is six faces, a cross or a strip (exact 4:3, 3:4, 6:1, 1:6 proportions), or a cube DDS; a square or 2:1 image typed as a cube is Unresolved with "not a cube source: {w}x{h} is not six faces, a cross or a strip. Change this file's sub-type.", and the GUI shows that sentence with the cube section's Layout combo disabled (the sentence on hover), no **Set layout** menu, and **Set type…** on its Problems and Review row. `cubemap.layout` = `equirect`, `mirror_ball`, `angular` or `photo` is refused in config, presets and `--set` with "removed in 3.0; convert it to six faces, a cross or a strip first".

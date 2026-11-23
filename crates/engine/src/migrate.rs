@@ -47,7 +47,7 @@ pub const REMOVED: &[Removed] = &[
     Removed {
         key: "subtypes.rfaos",
         value: None,
-        hint: "the sub-type is skin_rfaos",
+        hint: "the type is skin_rfaos",
         since: "2.0",
     },
     Removed {
@@ -911,10 +911,7 @@ mod tests {
     #[test]
     fn a_2_0_row_still_says_2_0() {
         let m = removed_set("subtypes.rfaos", "x").unwrap();
-        assert_eq!(
-            m,
-            "subtypes.rfaos: removed in 2.0; the sub-type is skin_rfaos"
-        );
+        assert_eq!(m, "subtypes.rfaos: removed in 2.0; the type is skin_rfaos");
     }
 
     #[test]

@@ -60,7 +60,7 @@ fn the_orm_example_is_shown_read_only_and_never_written() {
     m.presets_model().duplicate();
     let mut h = harness(m);
     h.run();
-    h.get_by_label_contains("rmaos —").click();
+    h.get_by_label_contains("PBR RMAOS —").click();
     h.run();
     h.get_by_label_contains("ORM → RMAOS");
     assert!(!h.state_mut().presets_model().toml_text().contains("orm"));
@@ -78,7 +78,7 @@ fn the_reset_arrow_drops_an_override() {
     let mut h = harness(m);
     h.run();
     collapse_pbr(&mut h);
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
     h.get_by_label("Suffixes");
     // Colour rows have no Channel remap or Packing fills.
@@ -108,7 +108,7 @@ fn the_one_bit_alpha_box_shows_for_a_bc1_row_only() {
     let mut h = harness(m);
     h.run();
     collapse_pbr(&mut h);
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
     h.get_by_label("Alpha");
     assert!(
@@ -147,7 +147,7 @@ fn the_perceptual_box_sets_and_clears_the_field() {
     let mut h = harness(m);
     h.run();
     collapse_pbr(&mut h);
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
     h.get_by_role_and_label(Role::CheckBox, "Perceptual")
         .click();
@@ -286,7 +286,7 @@ fn the_orm_example_is_a_read_only_branch_under_rmaos() {
     m.presets_model().select("cs-quality");
     let mut h = harness(m);
     h.run();
-    h.get_by_label_contains("rmaos —").click();
+    h.get_by_label_contains("PBR RMAOS —").click();
     h.run();
     h.get_by_label_contains("_orm → _rmaos — ORM → RMAOS");
     assert_eq!(h.query_all_by_label_contains("_rmaos — ").count(), 2);
@@ -304,7 +304,7 @@ fn a_branch_shows_its_overrides_hints_the_sub_type_and_resets() {
     let mut h = harness(m);
     h.run();
     collapse_pbr(&mut h);
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
     h.get_by_label("_d — BC7 · linear (overrides 1)").click();
     h.run();
@@ -330,7 +330,7 @@ fn add_alias_opens_its_empty_branch() {
     let mut h = harness(m);
     h.run();
     collapse_pbr(&mut h);
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
     h.get_by_role_and_label(TEXT, "New alias _").focus();
     h.run();
@@ -356,8 +356,8 @@ fn the_families_show_in_order_with_their_hints() {
     h.get_by_label("PBR / Community Shaders — used under the cs target");
     // pbr_emissive under PBR / CS; glow and complex material under Vanilla (Note AZ).
     let emissive = h.get_by_label_contains("emissive —").rect().top();
-    let glow = h.get_by_label_contains("glow —").rect().top();
-    let complex = h.get_by_label_contains("complex material —").rect().top();
+    let glow = h.get_by_label_contains("Glow —").rect().top();
+    let complex = h.get_by_label_contains("Complex material —").rect().top();
     assert!(pbr < emissive && emissive < van, "{emissive}");
     assert!(van < glow && van < complex, "{glow} {complex}");
 }
@@ -375,7 +375,7 @@ fn the_presets_tab_has_no_project_block() {
     assert!(h.query_by_label_contains("This project").is_none());
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h
-        .query_by_label("Wins over a preset's own Target.")
+        .query_by_label("This beats the Target set in a preset.")
         .is_none());
 }
 

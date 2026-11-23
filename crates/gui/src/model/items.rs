@@ -104,6 +104,18 @@ impl TextureItem {
     pub fn kept_dds(&self) -> bool {
         self.kind == ItemKind::Dds && self.job.is_none()
     }
+
+    /// The thumbnail's alpha is data (a packed map's specular) or absent from the output, never opacity: the tile
+    /// draws it opaque. A colour map (Blend, Cutout, CutoutBlend) and a non-packed item with no job keep their transparency.
+    pub fn alpha_is_data(&self) -> bool {
+        self.kind == ItemKind::Packed
+            || self.job.as_ref().is_some_and(|j| {
+                matches!(
+                    j.profile.alpha.policy,
+                    AlphaPolicy::Data | AlphaPolicy::Remove
+                )
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -186,6 +198,11 @@ pub(crate) fn key_of(root: &Path, path: &Path) -> String {
         real_rel: None,
     };
     project_rel(root, &f).unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+}
+
+/// The file name of a `[files]` key or a game path, without its folders (either separator).
+pub(crate) fn key_file_name(key: &str) -> &str {
+    key.rsplit(['/', '\\']).next().unwrap_or(key)
 }
 
 /// A packed job's key: its first source's folder plus the stem of its own output name (`files_stem`, Note HS2),

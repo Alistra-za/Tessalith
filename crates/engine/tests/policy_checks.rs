@@ -2199,6 +2199,90 @@ fn kaiser_on_srgb_diffuse_without_alpha_is_allowed() {
 }
 
 #[test]
+fn filter_reasons_cite_no_spec() {
+    let j = m6_job(&["subtype=normal", "file:**/x.png.mips.filter=tent"]);
+    let msgs = cfg_invalid(&j);
+    let reason = msgs
+        .iter()
+        .find(|m| m.starts_with("mips.filter = tent: ") && m.contains("sRGB colour only"))
+        .expect("file-scoped Tent on a normal emits the detailed CFG-INVALID");
+    assert!(!reason.contains('§'), "{reason}");
+}
+
+/// The two HDR filter reasons, read through the public `filter_allowed`, cite no spec either.
+#[test]
+fn hdr_filter_reasons_cite_no_spec() {
+    let mut p = PresetRegistry::builtin()
+        .unwrap()
+        .base_profile(Target::Cs, Subtype::Glow);
+    p.format = Format::Rgba16f;
+    p.mips.filter = MipFilter::Mitchell;
+    let non_tent = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(non_tent.contains("HDR mips use box or tent"), "{non_tent}");
+    p.mips.filter = MipFilter::Tent;
+    p.category = Category::Normal;
+    let not_colour = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(not_colour.contains("alpha weighting"), "{not_colour}");
+    for r in [non_tent, not_colour] {
+        assert!(!r.contains('§') && !r.contains("spec"), "{r}");
+    }
+}
+
+/// No user-visible engine message names a DECISIONS note or a spec cite: the RGBA16F and BC6H outside-cs errors and the
+/// two suffix-alias refusals.
+#[test]
+fn messages_cite_no_decision() {
+    // Each case's own phrase first, so a case that never reaches its message fails rather than passing on another text;
+    // the phrases span where the old cites sat ("[D#3]", "(DECISIONS S4)", "since Note AL").
+    let mut texts = vec![];
+    for (format, kept) in [
+        (
+            "rgba16f",
+            "RGBA16F is usable only under Community Shaders; choose another format",
+        ),
+        (
+            "bc6h_uf16",
+            "BC6H is usable only under Community Shaders; choose another format",
+        ),
+    ] {
+        let j = run(
+            Target::Vanilla,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            &["subtype=glow", &format!("format={format}"), "color.tag=n/a"],
+            &[Code::CfgUnavailable],
+        );
+        let m = warning(&j, Code::CfgUnavailable).message.clone();
+        assert!(m.contains(kept), "{format}: {m}");
+        texts.push(m);
+    }
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (alias, kept) in [
+        (
+            "orm",
+            "orm is a built-in packing input (AO, roughness, metallic)",
+        ),
+        ("detail", "is a detail map name"),
+    ] {
+        let e = PresetRegistry::builtin()
+            .unwrap()
+            .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(kept), "{alias}: {e}");
+        texts.push(e);
+    }
+    for t in &texts {
+        assert!(
+            !t.contains("DECISIONS") && !t.contains("Note ") && !t.contains("[D#"),
+            "{t}"
+        );
+    }
+}
+
+#[test]
 fn non_box_filters_are_cfg_invalid_outside_srgb_colour() {
     for st in [
         "normal",

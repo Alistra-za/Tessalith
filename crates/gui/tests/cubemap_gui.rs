@@ -320,7 +320,7 @@ fn a_square_cube_has_no_layout_combo() {
     h.run();
     // The settings panel's box shows the engine's own reason (with the size); the Problems row's shorter text has no
     // size, so this label can only come from the box of the selected square cube.
-    let reason = "64x64 is not six faces, a cross or a strip. Change this file's sub-type.";
+    let reason = "64x64 is not six faces, a cross or a strip. Change this file's type.";
     let box_text: Vec<_> = h.query_all_by_label_contains(reason).collect();
     assert_eq!(box_text.len(), 1, "the texture panel's Undecided box");
     assert!(

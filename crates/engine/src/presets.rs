@@ -545,7 +545,7 @@ fn without_nulls(v: &Value) -> Option<Value> {
 
 /// Audit EC-4 (Note BC): a rule's `overrides.subtype` is overwritten by the decided sub-type, so it would do nothing.
 pub(crate) const SUBTYPE_IN_OVERRIDES: &str =
-    "set the sub-type with `subtype =` on the rule, not in overrides";
+    "set the type with `subtype =` on the rule, not in overrides";
 
 /// Dotted paths of every non-null leaf of `v`.
 pub fn leaf_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
@@ -681,9 +681,7 @@ impl PresetRegistry {
                 )));
             }
             if SUFFIXES.contains(&alias.as_str()) {
-                return Err(bad(format!(
-                    "suffix alias '{alias}' is a canonical suffix (spec §6.1)"
-                )));
+                return Err(bad(format!("suffix alias '{alias}' is a canonical suffix")));
             }
             if alias == crate::group::GENERATED {
                 return Err(bad(
@@ -692,7 +690,7 @@ impl PresetRegistry {
             }
             if alias == "orm" {
                 return Err(bad(
-                    "suffix alias 'orm' is an exporter vocabulary term: orm is a built-in packing input since Note AL (AO, roughness, metallic); remove the alias".into(),
+                    "suffix alias 'orm' is an exporter vocabulary term: orm is a built-in packing input (AO, roughness, metallic); remove the alias".into(),
                 ));
             }
             if crate::group::is_vocabulary(alias) {
@@ -701,13 +699,11 @@ impl PresetRegistry {
                 )));
             }
             if crate::group::DETAIL_SPELLINGS.contains(&alias.as_str()) {
-                return Err(bad(format!(
-                    "suffix alias '{alias}' is a detail map name (DECISIONS Note GW)"
-                )));
+                return Err(bad(format!("suffix alias '{alias}' is a detail map name")));
             }
             if !SUFFIXES.contains(&canonical.as_str()) {
                 return Err(bad(format!(
-                    "suffix alias '{alias}' maps to '{canonical}', which is not a canonical suffix (spec §6.1)"
+                    "suffix alias '{alias}' maps to '{canonical}', which is not a canonical suffix"
                 )));
             }
             if let Some(owner) = self.alias_owner.get(alias).filter(|o| **o != p.id) {

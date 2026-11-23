@@ -318,7 +318,7 @@ fn hand_role_warning_points_to_none() {
     );
     let w = &j.warnings[0].message;
     assert!(w.contains("helper.role = \"none\""), "{w}");
-    assert!(!w.contains("sub-type"), "{w}");
+    assert!(!w.contains("set a type"), "{w}");
 }
 
 /// Controller ruling 4: a hand-set helper without a recognised suffix joins the set of its stem minus the last

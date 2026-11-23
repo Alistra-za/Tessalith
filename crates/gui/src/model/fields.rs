@@ -7,7 +7,7 @@ use serde_json::Value;
 /// The editable fields, with the label each row shows (Note JI3: the drawer's DDS header and Size rows included). The
 /// panel draws them by group (`group_of`, in `settings_panel::GROUPS` order), in this order within a group.
 pub const FIELDS: [(&str, &str); 21] = [
-    ("subtype", "Sub-type"),
+    ("subtype", "Texture type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
     (MSN_SOURCE, "Baked in"),
     ("alpha.policy", "Alpha"),
@@ -46,7 +46,7 @@ pub const PERCEPTUAL_HOVER: &str =
 pub const WEIGHTING: &str = "encoder.bc7_weights";
 
 /// The BC7 weighting row's options: the row's value, its label, its hover text.
-pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
+pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 8] = [
     ("linear", "Linear", "Linear: every channel counts the same (the default)."),
     (
         "perceptual",
@@ -59,6 +59,11 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
         "Alpha ×2: a light lean towards alpha accuracy, for little colour cost.",
     ),
     (
+        "alpha4",
+        "Alpha ×4",
+        "Alpha ×4: a moderate lean towards alpha accuracy, between ×2 and ×8.",
+    ),
+    (
         "alpha8",
         "Alpha ×8",
         "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. Costs about 1 dB of RGB per 3 dB of alpha.",
@@ -66,7 +71,17 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
     (
         "alpha16",
         "Alpha ×16",
-        "Alpha ×16: the strongest alpha priority; best for a _n with specular in alpha.",
+        "Alpha ×16: strong alpha priority; best for a _n with specular in alpha.",
+    ),
+    (
+        "alpha32",
+        "Alpha ×32",
+        "Alpha ×32: stronger alpha priority than ×16, for alpha that matters more than colour; a small alpha gain over ×16 for more colour cost.",
+    ),
+    (
+        "alpha64",
+        "Alpha ×64",
+        "Alpha ×64: the strongest alpha priority; alpha first, colour last.",
     ),
 ];
 
@@ -252,6 +267,14 @@ pub fn cube_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
 pub const LEVELS_FIELD: (&str, &str) = ("mips.levels", "Levels");
 /// The mip filter: a live combo in the basic Mipmaps group, each option locked by `filter_option_lock`.
 pub const FILTER_FIELD: (&str, &str) = ("mips.filter", "Filter");
+
+/// The mip filters a picker lists, in order, with their labels.
+pub const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
+    (MipFilter::Box, "Box"),
+    (MipFilter::Tent, "Tent"),
+    (MipFilter::Mitchell, "Mitchell"),
+    (MipFilter::Kaiser, "Kaiser"),
+];
 pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
 
 pub fn group_of(field: &str) -> &'static str {
@@ -535,7 +558,7 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "mips.levels" => "How many mipmaps to write: the smaller copies the game shows at a distance.",
         "mips.filter" => "How each smaller mipmap is averaged. Box is the default. Tent, Mitchell and Kaiser are for sRGB colour. With see-through alpha the only other choice is Tent.",
         "mips.edge" => "How Tent, Mitchell and Kaiser read past the texture's edge: Wrap for a tiling texture, Clamp for one that doesn't tile. Box ignores it.",
-        "mips.normal" => "How normal-map mipmaps are built. Renormalise and bake also bakes the detail each mipmap loses into the roughness stored in the same texture.",
+        "mips.normal" => "How normal-map mipmaps are built. The bake option puts the detail each mipmap loses into the roughness stored in the same texture, or into a complex material's gloss.",
         "mips.normal_base" => "Renormalise to unit length is the default. Keep as authored preserves the average authored length in lower mips of XYZ tangent-space base normals and coat normals, up to what XYZ can hold. Advanced Skin detail normals always start from unit length, as do tangent normal outputs in formats that drop Z. On other normal maps Keep preserves the full-size level only.",
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
@@ -689,12 +712,12 @@ pub fn provenance_text(p: &str) -> String {
     match p {
         "project_file" => "from this texture's settings".into(),
         "user" => "from the command line".into(),
-        "builtin" => "built-in default".into(),
+        "builtin" => "Tessalith's default".into(),
         "project_config" => "from sdc.toml".into(),
         "user_config" => "from your config.toml".into(),
         "suggestion" => "suggested".into(),
         "analysis" => "from the image analysis".into(),
-        "fallback" => "fallback value (sub-type or box filter)".into(),
+        "fallback" => "fallback value (type or box filter)".into(),
         "set" => "decided by the texture set".into(),
         "mesh:alpha" => "from the meshes that use this texture".into(),
         _ => match p.split_once(':') {

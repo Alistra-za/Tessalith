@@ -26,10 +26,12 @@ pub mod items;
 mod json_finish;
 pub mod known_paths;
 pub mod labels;
+pub mod likely;
 pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod new_set_note;
 mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
@@ -118,6 +120,36 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
+/// Why a plan runs. An open starts with "Planning…" and then counts "Analysing n / m files…"; a re-plan after the
+/// user's edit says "Re-checking after your change"; every other re-plan, Undo and Redo included, says "Re-checking".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlanCause {
+    #[default]
+    Open,
+    Edit,
+    Other,
+}
+
+impl PlanCause {
+    /// The status line before the first progress event.
+    fn waiting_line(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Planning…",
+            PlanCause::Edit => "Re-checking after your change…",
+            PlanCause::Other => "Re-checking…",
+        }
+    }
+
+    /// The words ahead of "n / m files…".
+    fn lead(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Analysing",
+            PlanCause::Edit => "Re-checking after your change:",
+            PlanCause::Other => "Re-checking",
+        }
+    }
+}
+
 /// Note JI4: an undo step's label for a field write: every field the Effort row writes reads "Effort", as the bulk
 /// panel's step does (`bulk.rs`), not the raw config key.
 fn field_step_label(verb: &str, field: &str) -> String {
@@ -129,10 +161,11 @@ fn field_step_label(verb: &str, field: &str) -> String {
 }
 
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
-/// A7; not `counted`, which has no thousands separator).
-pub fn plan_bar_text(done: usize, total: usize) -> String {
+/// A7; not `counted`, which has no thousands separator). A re-plan reads "Re-checking …" (`PlanCause`).
+pub fn plan_bar_text(cause: PlanCause, done: usize, total: usize) -> String {
+    let lead = cause.lead();
     format!(
-        "Analysing {} / {} {}…",
+        "{lead} {} / {} {}…",
         thousands(done),
         thousands(total),
         if total == 1 { "file" } else { "files" }
@@ -984,8 +1017,14 @@ pub struct AppModel {
     reencode_follow: Option<String>,
     /// A Save report write is on a worker (AG130); the app keeps frames coming until it lands.
     pub report_saving: bool,
-    /// "Show in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
+    /// "Show all in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
     pub show_in_meshes: Option<String>,
+    /// A shape link in "Used by N meshes" was clicked; `SdcApp::route_3d` takes it and brings Meshes forward.
+    pub show_mesh: Option<used_by::MeshPick>,
+    /// The scan database the Meshes view reads and whether it is reading its rows, copied by `SdcApp::route_3d` each
+    /// frame; the Used-by links stay off while either disagrees with the answer they would act on.
+    pub meshes_store: Option<std::path::PathBuf>,
+    pub meshes_rows_loading: bool,
     /// A NIF worklist row's fix: (NIF path, tab, field); app.rs switches to the Meshes view (NIF team, Note GD1).
     pub nif_tab_request: Option<(String, meshes::NifTab, Option<nif::fields::Field>)>,
     /// Note FC1 (AM14): `Choose preset…` was clicked on this pass (`ctx.cumulative_pass_nr`); the header opens its
@@ -1091,6 +1130,10 @@ pub struct AppModel {
     type_pending: Option<encoding_follow::Pending>,
     /// The sub-types before the plan chain in flight (`settle_types` compares them with the final pass).
     type_base: Option<std::collections::HashMap<String, Subtype>>,
+    /// Type choices waiting for the plan that settles them: the settled plan says which made a new set (E8).
+    pending_new_sets: Vec<new_set_note::NewSetNote>,
+    /// The folder the pending choices were made in and every card ID listed before the first of them.
+    carded_before: Option<(PathBuf, Vec<String>)>,
     /// A user step started the chain in flight: its cleanup folds into that step.
     type_cause: bool,
     /// One-shot guard: the chain in flight is a cleanup's own replan.
@@ -1141,6 +1184,8 @@ pub struct AppModel {
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
+    /// The cause of the latest plan started (it stays after the plan lands); words its status line and progress text.
+    pub plan_cause: PlanCause,
     /// While a folder's first plan is in flight: the folder open before it (`None`: none), Recent as it was, and that
     /// folder's undo history and selection (Note FC12). Cancel goes back to all of them.
     opening: Option<(Option<PathBuf>, Vec<PathBuf>, history::History, Selection)>,
@@ -1385,6 +1430,9 @@ impl AppModel {
             reencode_follow: None,
             report_saving: false,
             show_in_meshes: None,
+            show_mesh: None,
+            meshes_store: None,
+            meshes_rows_loading: false,
             nif_tab_request: None,
             choose_preset: None,
             auto_note: None,
@@ -1398,6 +1446,8 @@ impl AppModel {
             auto_replans: 0,
             type_pending: None,
             type_base: None,
+            pending_new_sets: vec![],
+            carded_before: None,
             type_cause: false,
             type_cleaned: false,
             votes_gen: 0,
@@ -1426,6 +1476,7 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
+            plan_cause: PlanCause::Open,
             opening: None,
             open_cancelled: false,
             tx,
@@ -1913,12 +1964,12 @@ impl AppModel {
 
     /// Plan again on a worker; a newer plan supersedes (cancels) an older one. Sends no partial plan.
     pub fn replan(&mut self) {
-        self.replan_with(false);
+        self.replan_with(false, PlanCause::Other);
     }
 
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
-    /// partial plan first (`send_partial`).
-    fn replan_with(&mut self, files_edit: bool) {
+    /// partial plan first (`send_partial`). `cause` words the status line; an open in progress always wins.
+    fn replan_with(&mut self, files_edit: bool, cause: PlanCause) {
         self.take_shown_next_step();
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
@@ -1948,7 +1999,12 @@ impl AppModel {
         let cancel = CancelToken::default();
         self.planning = Some(cancel.clone());
         self.plan_progress = None;
-        self.status_line = "Planning…".into();
+        self.plan_cause = if self.opening.is_some() {
+            PlanCause::Open
+        } else {
+            cause
+        };
+        self.status_line = self.plan_cause.waiting_line().into();
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
@@ -2121,6 +2177,7 @@ impl AppModel {
                 self.root = None;
                 self.project = None;
                 self.sets_doc = None;
+                self.forget_new_sets();
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
@@ -2324,7 +2381,7 @@ impl AppModel {
                 self.plan_progress = Some((done, total));
                 // Note FL: a partial's "<counts> · planning…" stays until the full plan lands.
                 if !self.partial_shown() {
-                    self.status_line = plan_bar_text(done, total);
+                    self.status_line = plan_bar_text(self.plan_cause, done, total);
                 }
             }
             WorkerMsg::PlanProgress { .. } => {}
@@ -2442,6 +2499,7 @@ impl AppModel {
             }
         }
         self.plan_failed = true;
+        self.forget_new_sets();
         self.status_line = format!("Planning failed: {}", f.message);
         self.raise_error(f.message);
     }
@@ -3090,16 +3148,16 @@ impl AppModel {
     /// A user edit recorded a step: re-plan as a change (`replan_changed`).
     fn replan_after_edit(&mut self, files_edit: bool) {
         self.type_edit_recorded();
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Edit);
     }
 
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
-    fn replan_changed(&mut self, files_edit: bool) {
+    fn replan_changed(&mut self, files_edit: bool, cause: PlanCause) {
         let cancel = (self.export_after_plan || self.armed.is_some())
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
-        self.replan_with(files_edit);
+        self.replan_with(files_edit, cause);
         if cancel {
             self.export_after_plan = false;
             self.disarm_write();
@@ -3949,6 +4007,8 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
+        // E8: the settled plan says which type choices made a set; the post-open next step below still wins the note.
+        self.note_new_sets();
         if std::mem::take(&mut self.next_step_pending) {
             self.status_note = self.next_step_text();
             self.shown_next_step.clone_from(&self.status_note);
@@ -4621,7 +4681,7 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Other);
     }
 
     pub fn can_undo(&self) -> bool {
@@ -4943,7 +5003,7 @@ impl AppModel {
     pub fn set_field(&mut self, item_key: &str, field: &str, value: serde_json::Value) {
         if field == "subtype" {
             if let Ok(st) = serde_json::from_value::<Subtype>(value.clone()) {
-                return self.edit_subtype("Change subtype", item_key, Some(st));
+                return self.edit_subtype("Change type", item_key, Some(st));
             }
         }
         if !self.format_write_ok(item_key, field, &value) {
@@ -5014,7 +5074,7 @@ impl AppModel {
 
     pub fn clear_field(&mut self, item_key: &str, field: &str) {
         if field == "subtype" {
-            return self.edit_subtype("Reset subtype", item_key, None);
+            return self.edit_subtype("Reset type", item_key, None);
         }
         // Note JI4: the BC3 Effort row's ↺ clears both search fields, as one step.
         if field == fields::BC3_SEARCH {
@@ -5055,6 +5115,16 @@ impl AppModel {
                 p.set_allow(&k, &codes);
             }
         });
+    }
+
+    /// `decide`, then the selection moves to the next undecided texture in view (the single card's Confirm). The next
+    /// key is read before the plan starts, from the current list; with none, the selection stays.
+    pub fn decide_and_advance(&mut self, key: &str, a: Answer) {
+        let next = self.next_undecided_after(key);
+        self.decide(key, a);
+        if let Some(next) = next {
+            self.select_item(&next);
+        }
     }
 
     /// The PGPatcher JSON file name (header field); empty restores the default (the folder's name). No re-plan (P7).

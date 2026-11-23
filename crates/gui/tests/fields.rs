@@ -112,7 +112,7 @@ fn mixed_tags() -> (Subtype, Vec<(Format, ColorTag)>) {
             a.iter().filter(|(_, t)| *t == ColorTag::Srgb).count() >= 2
                 && a.iter().any(|(f, _)| !a.contains(&(*f, ColorTag::Srgb)))
         })
-        .expect("a sub-type with and without sRGB forms")
+        .expect("a type with and without sRGB forms")
 }
 
 #[test]

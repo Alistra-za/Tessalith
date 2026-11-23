@@ -3,9 +3,11 @@
 use super::fields::{
     all_fields, bc3_pair, effort_field, encoding_options, field_view, filter_option_lock,
     hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
-    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
+    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, FILTER_OPTIONS, LEVELS_FIELD, NOT_VALID,
+    NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use super::items::TextureItem;
+use super::labels::UNORM_LABEL;
 use super::set_groups::GroupTarget;
 use super::sets::{
     locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
@@ -69,10 +71,12 @@ pub struct BulkView {
     pub rows: Vec<BulkField>,
     /// The kind chips over the selected sets (empty with fewer than two).
     pub chips: Vec<KindChip>,
-    /// The Format row's (format, tag) choices: `bulk_encodings`.
-    pub encodings: Vec<((Format, ColorTag), String)>,
     /// `reencode_split(keys)`: the DDS files the Re-encode button can take, and the names of the blocked ones.
     pub reencode: (Vec<String>, Vec<String>),
+    /// `type_card_split`: the selected textures the type card asks about, and the count of typed ones beside them.
+    pub undecided: (Vec<String>, usize),
+    /// `likely::likely_types` over the textures the type card asks about (Task 11).
+    pub likely: Vec<(Subtype, String)>,
 }
 
 impl AppModel {
@@ -132,6 +136,18 @@ impl AppModel {
             .iter()
             .map(|&i| self.items[i].key.clone())
             .collect()
+    }
+
+    /// The first key after `key` in the visible order that still waits for a decision. No wrap; a key the filter
+    /// hides never counts.
+    pub fn next_undecided_after(&self, key: &str) -> Option<String> {
+        let undecided = self.undecided_keys();
+        let visible = self.visible_keys();
+        let at = visible.iter().position(|k| k == key)?;
+        visible
+            .into_iter()
+            .skip(at + 1)
+            .find(|k| undecided.contains(k))
     }
 
     /// Note DY16 review: what the column shows, tiles then helper rows, in display order (mouse ranges and the
@@ -448,7 +464,7 @@ fn skip_of(
         // parsable sub-types and filters; an unparsable one is reported, not written.
         let bad = v.is_null()
             || (field == "subtype" && serde_json::from_value::<Subtype>(v.clone()).is_err())
-            || (field == "mips.filter" && serde_json::from_value::<MipFilter>(v.clone()).is_err())
+            || (field == FILTER_FIELD.0 && serde_json::from_value::<MipFilter>(v.clone()).is_err())
             || (field == WEIGHTING
                 && !super::fields::WEIGHTING_OPTIONS
                     .iter()
@@ -460,7 +476,7 @@ fn skip_of(
         }
         let barred = serde_json::from_value::<MipFilter>(v.clone())
             .ok()
-            .filter(|_| field == "mips.filter")
+            .filter(|_| field == FILTER_FIELD.0)
             .and_then(|f| filter_option_lock(&job.profile, f));
         if let Some(lock) = barred {
             return Some(lock.into());
@@ -575,11 +591,16 @@ pub struct BulkField {
     /// Note JI4 (spec 4.6): the Effort row over textures whose formats read different search fields (BC1 and BC3
     /// count as different): nothing is offered, and the row says to edit one format at a time.
     pub formats_differ: bool,
+    /// E14: the fields whose locks depend on the value (mip filter, BC7 weighting, Format, DDS tag) list every option
+    /// they offer here: its label, its exact write value and the textures that write reaches (`Change::Write` of
+    /// `plan_bulk_edit`). Empty for every other field.
+    pub option_reach: Vec<(String, Value, usize)>,
 }
 
 impl BulkField {
-    /// The note column: "— mixed", "applies to K of N", both, or nothing (also when the formats differ: the
-    /// control cell says why).
+    /// The note column: "— mixed", then "applies to K of N", or, on a value-dependent row, the options grouped by
+    /// equal reach ("Box: 4 of 4 · Tent, Mitchell: 1 of 4", two groups at most, then "others vary"); nothing when the
+    /// formats differ (the control cell says why).
     pub fn note(&self) -> String {
         if self.formats_differ {
             return String::new();
@@ -588,8 +609,30 @@ impl BulkField {
         if self.value.is_none() && self.applies > 0 {
             parts.push("— mixed".to_string());
         }
-        if self.applies < self.total {
+        if self.option_reach.is_empty() {
             parts.push(format!("applies to {} of {}", self.applies, self.total));
+        } else if self.option_reach.iter().all(|o| o.2 == 0) {
+            // No option reaches any texture: one plain count, not every option at zero.
+            parts.push(format!("applies to 0 of {}", self.total));
+        } else {
+            let mut groups: Vec<(usize, Vec<&str>)> = vec![];
+            for (label, _, k) in &self.option_reach {
+                match groups.iter_mut().find(|g| g.0 == *k) {
+                    Some(g) => g.1.push(label),
+                    None => groups.push((*k, vec![label])),
+                }
+            }
+            // The widest reaches first, so a big group is never folded into "others vary"; ties keep option order.
+            groups.sort_by_key(|g| std::cmp::Reverse(g.0));
+            parts.extend(
+                groups
+                    .iter()
+                    .take(2)
+                    .map(|(k, ls)| format!("{}: {k} of {}", ls.join(", "), self.total)),
+            );
+            if groups.len() > 2 {
+                parts.push("others vary".to_string());
+            }
         }
         parts.join(" · ")
     }
@@ -604,8 +647,9 @@ impl BulkField {
     }
 }
 
-/// The bulk panel's rows over `keys` (F3a D2). Counts are the value-independent ones; the filter
-/// lock of a picked value shows in the report. One profile serialisation per texture; `AppModel::bulk_view` caches.
+/// The bulk panel's rows over `keys` (F3a D2). `applies` and `skipped` are the value-independent
+/// counts; a value-dependent row also lists each option's reach (`option_reach`). One profile serialisation per
+/// texture; `AppModel::bulk_view` caches.
 pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
     let fields = panel_fields();
     let mut rows: Vec<BulkField> = fields
@@ -619,10 +663,18 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
             skipped: vec![],
             total: keys.len(),
             formats_differ: false,
+            option_reach: vec![],
         })
         .collect();
     let mut values: Vec<Vec<Value>> = vec![vec![]; fields.len()];
     let locked = locked_items(m);
+    // E14: the value-dependent rows start with every option at no reach; the texture loop counts them.
+    for row in &mut rows {
+        row.option_reach = option_candidates(m, keys, row.field)
+            .into_iter()
+            .map(|(l, v)| (l, v, 0))
+            .collect();
+    }
     // Note JI4: the Effort row edits the field every selected texture's format reads (`effort_field`); a texture in a
     // locked slot, or with no search, does not count. Two or more fields: the formats differ.
     let effort = rows.iter().position(|r| r.field == "encoder.effort");
@@ -668,6 +720,14 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
                 other = job.and_then(|j| field_view(m.target, j, row.field));
                 other.as_ref()
             };
+            // E14: the textures a write of each option reaches, by the rule the plan applies.
+            for (_, v, reach) in &mut row.option_reach {
+                let write = BulkOp::Set(v.clone());
+                let lock = locked.get(k).map(String::as_str);
+                *reach += usize::from(
+                    skip_of(job, view, row.field, Some(&write), lock, m.target).is_none(),
+                );
+            }
             match skip_of(
                 job,
                 view,
@@ -719,6 +779,56 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
         }
     }
     rows
+}
+
+/// E14: whether the field's locks depend on the value picked (so its row lists each option's reach).
+pub fn is_value_dependent(field: &str) -> bool {
+    [FILTER_FIELD.0, WEIGHTING, "format", "color.tag"].contains(&field)
+}
+
+/// E14: the options of a value-dependent row (label, exact write value), in the order the picker lists them. The
+/// Format row's are `bulk_encodings`' pairs; the tag row's, the tags the engine allows with each selected texture's
+/// own format, in first-seen order (a stray current pair is not one a write can make).
+fn option_candidates(m: &AppModel, keys: &[String], field: &str) -> Vec<(String, Value)> {
+    match field {
+        f if f == FILTER_FIELD.0 => FILTER_OPTIONS
+            .iter()
+            .map(|(f, l)| (l.to_string(), serde_json::json!(f)))
+            .collect(),
+        WEIGHTING => WEIGHTING_OPTIONS
+            .iter()
+            .map(|o| (o.1.to_string(), Value::from(o.0)))
+            .collect(),
+        "format" => bulk_encodings(m, keys)
+            .into_iter()
+            .map(|(e, l)| (l, serde_json::json!(e)))
+            .collect(),
+        "color.tag" => {
+            let mut tags: Vec<ColorTag> = vec![];
+            for j in keys
+                .iter()
+                .filter_map(|k| m.item(k).and_then(|i| i.job.as_ref()))
+            {
+                for ((f, t), label) in encoding_options(m.target, &j.profile) {
+                    let own = f == j.profile.format && !label.ends_with(NOT_VALID);
+                    if own && t != ColorTag::NotApplicable && !tags.contains(&t) {
+                        tags.push(t);
+                    }
+                }
+            }
+            tags.into_iter()
+                .map(|t| {
+                    let label = if t == ColorTag::Srgb {
+                        "_SRGB"
+                    } else {
+                        UNORM_LABEL
+                    };
+                    (label.to_string(), serde_json::json!(t))
+                })
+                .collect()
+        }
+        _ => vec![],
+    }
 }
 
 /// The members of sets `set_keys` (in that order, then member order) whose slot is `kind`; `None` is every member.
@@ -806,6 +916,61 @@ fn report(label: &str, plan: &[(String, Change)]) -> String {
 impl AppModel {
     pub(super) fn toml_writable(&self) -> bool {
         self.project.as_ref().is_some_and(|p| !p.read_only())
+    }
+
+    /// The selected textures that wait for a type (`subtype_question`: not an alpha or green question, and not the
+    /// blocked-type picker), minus those filling a locked slot, in selection order; and how many other selected
+    /// textures already have a type (a job and no type question, a locked one too). Read from the selection, not from
+    /// Review's run.
+    pub fn type_card_split(&self) -> (Vec<String>, usize) {
+        let locked = locked_items(self);
+        let mut undecided = vec![];
+        let mut typed = 0;
+        for k in self.selected_items() {
+            if self.subtype_question(&k).is_some() {
+                // A waiting texture in a locked slot takes no write, and is no typed peer either.
+                if !locked.contains_key(&k) {
+                    undecided.push(k);
+                }
+            } else if self.item(&k).is_some_and(|i| i.job.is_some()) {
+                typed += 1;
+            }
+        }
+        (undecided, typed)
+    }
+
+    /// Whether the picker offers `st` for texture `key` under the target (`complex_grass` only in a grass context).
+    pub fn type_offered_to(&self, key: &str, st: Subtype) -> bool {
+        self.item(key)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| {
+                engine::policy::offered_for(self.target, st, engine::policy::grass_context(j))
+            })
+    }
+
+    /// The selected textures the bulk type card asks about (Task 10, 3d-R3).
+    pub fn selected_undecided(&self) -> Vec<String> {
+        self.type_card_split().0
+    }
+
+    /// The bulk type card's Apply: write `st` to the textures of `keys` that are still selected, still ask for
+    /// a type, are not locked, and are offered `st` under the target, as one step through `apply_bulk_edit`. Everything
+    /// is read again here, at click time: nothing is written while the plan is out or `sdc.toml` is read-only.
+    pub fn decide_many(&mut self, keys: &[String], st: Subtype) {
+        if self.fix_off().is_some() {
+            return;
+        }
+        let current = self.selected_undecided();
+        let mut eligible: Vec<String> = vec![];
+        for k in keys {
+            if self.type_offered_to(k, st) && current.contains(k) && !eligible.contains(k) {
+                eligible.push(k.clone());
+            }
+        }
+        if eligible.is_empty() {
+            return;
+        }
+        self.apply_bulk_edit(&eligible, "subtype", BulkOp::Set(serde_json::json!(st)));
     }
 
     /// F3a D2/D5: write (or clear) `field` on every texture of `keys` it applies to, through the single-texture
@@ -1252,14 +1417,16 @@ impl AppModel {
         } else {
             vec![]
         };
-        let encodings = bulk_encodings(self, &keys);
         let reencode = self.reencode_split(&keys);
+        let undecided = self.type_card_split();
+        let likely = super::likely::likely_types(self, &undecided.0);
         let view = std::sync::Arc::new(BulkView {
             keys,
             rows,
             chips,
-            encodings,
             reencode,
+            undecided,
+            likely,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;

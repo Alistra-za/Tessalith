@@ -20,11 +20,11 @@ const BC1: &str = "encoder.bc1_search";
 /// The BC3 row's id (`fields::BC3_SEARCH`), spelt out so these tests compile before it exists.
 const BC3: &str = "encoder.bc3_search";
 const LEVELS: [&str; 7] = [
-    "Ultrafast",
-    "Veryfast",
+    "Ultra fast",
+    "Very fast",
     "Fast",
     "Basic",
-    "Veryslow",
+    "Very slow",
     "Slowest",
     "Max",
 ];
@@ -552,7 +552,7 @@ fn different_custom_bc3_pairs_read_mixed_in_bulk() {
     };
     let row = effort(&m);
     assert_eq!((row.field, row.value.clone(), row.applies), (BC3, None, 2));
-    assert_eq!(row.note(), "— mixed");
+    assert_eq!(row.note(), "— mixed · applies to 2 of 2");
     m.set_field(LEAF, BC1, json!("fast"));
     m.set_field(LEAF, RADIUS, json!("max"));
     idle(&mut m);

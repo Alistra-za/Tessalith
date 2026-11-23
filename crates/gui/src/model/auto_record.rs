@@ -6,9 +6,11 @@
 //! R5 (amends R1): a user action that re-types (a set-shader pick, PBR follow, a preset alias change) treats an
 //! untouched recorded sub-type, one equal to what auto-accept picks from the plan, as not set, as before FC1. Scan
 //! evidence still never rewrites one.
+// The hover lists file names, not folders or game paths (the folder is in the Textures tree).
+use super::items::key_file_name as file_name;
 use super::items::{ItemKind, ItemStatus};
 use super::sets::{SlotFill, SlotKind};
-use super::{fields, AppModel};
+use super::{fields, AppModel, PlanCause};
 use crate::project::AutoWrite;
 use engine::config::{PackRecipe, Subtype, Target};
 use engine::group::{is_fuzz_stem, split_suffix_with};
@@ -24,10 +26,10 @@ use std::path::Path;
 pub(crate) struct AutoNote {
     /// Only a shader follow has a command the row can undo.
     pub step: Option<u64>,
-    /// The row's count is the number of decisions. A follow-only row names no suggestion confidence.
+    /// The row's count is the number of decisions, then the first three distinct file names and how many more.
     pub text: String,
-    /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; the
-    /// last line explains High confidence when a sub-type was set.
+    /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; a
+    /// blank line and the paragraph on when Tessalith decides end it when a first sub-type was set (not a retype).
     pub lines: Vec<String>,
 }
 
@@ -49,13 +51,9 @@ fn show_type(v: &serde_json::Value) -> String {
         .map_or_else(|_| show(v), super::labels::subtype_name)
 }
 
-/// The file's name, not its folder or game path (the hover lists files; the folder is in the Textures tree).
-fn file_name(key: &str) -> &str {
-    key.rsplit(['/', '\\']).next().unwrap_or(key)
-}
-
-/// Ends the row's hover when a sub-type was set (Note FI11, A17).
-const HIGH_CONFIDENCE: &str = "High confidence: the file name and the pixels agree on the type.";
+/// Ends the row's hover, after a blank line, only when a first automatic sub-type was set, not a guarded retype such
+/// as a normal follow (Note FI11, A17).
+const HIGH_CONFIDENCE: &str = "Tessalith sets a type on its own only when the evidence is clear: a known file ending such as _n, the folder it is in, or the meshes and grass that use it. Anything less sure stays Undecided for you.";
 
 /// Fuzz-8: ends the switch row's hover.
 pub const FUZZ_SWITCH_HOVER: &str = "A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.";
@@ -525,7 +523,6 @@ impl AppModel {
             "value"
         };
         let s = if n == 1 { "" } else { "s" };
-        let follow_only = followed.len() == writes.len();
         let decisions = writes.len();
         let cubes = self.cube_face_keys();
         let joins_switch = join
@@ -707,12 +704,27 @@ impl AppModel {
                 sw.step = self.history.pushes;
             }
         } else {
-            let typed = !follow_only && writes.iter().any(|w| w.field == "subtype");
-            let confidence = if follow_only {
-                ""
+            // A first automatic type, not a guarded retype (a normal follow): only that claims the evidence was clear.
+            let typed = writes[..decisions]
+                .iter()
+                .any(|w| w.field == "subtype" && w.only_if.is_none());
+            // Distinct file names in recording order; same-named files in different folders read as one name.
+            let mut seen = HashSet::new();
+            let mut files: Vec<&str> = Vec::new();
+            for (key, _) in &lines {
+                let name = file_name(key);
+                if seen.insert(name) {
+                    files.push(name);
+                }
+            }
+            let more = files.len().saturating_sub(3);
+            let listed = files[..files.len() - more].join(", ");
+            let listed = if more > 0 {
+                format!("{listed}, and {more} more")
             } else {
-                " (High confidence)"
+                listed
             };
+            let text = format!("{n} {noun}{s} set automatically: {listed}");
             self.auto_note = Some(AutoNote {
                 step: if followed.is_empty() {
                     self.auto_note
@@ -722,16 +734,16 @@ impl AppModel {
                 } else {
                     Some(self.history.pushes)
                 },
-                text: format!("{n} {noun}{s} set automatically{confidence}"),
+                text,
                 lines: lines
                     .into_iter()
                     .map(|(_, l)| l)
-                    .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
+                    .chain(typed.then(|| format!("\n{HIGH_CONFIDENCE}")))
                     .collect(),
             });
         }
         self.invalidate_views();
-        self.replan_changed(!listing_changed);
+        self.replan_changed(!listing_changed, PlanCause::Other);
         true
     }
 }

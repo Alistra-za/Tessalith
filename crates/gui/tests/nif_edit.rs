@@ -18112,3 +18112,938 @@ fn final_wave_each_nif_recovery_path_invalidates_the_review_inventory() {
         );
     }
 }
+
+// ---- Review E (Task 17): a Used-by shape link opens Meshes on that copy and shape ----
+
+use sdc_gui::model::meshes::NifFilter;
+
+/// Waits for the row read a scan or a reload started, then checks every copy in `ids` is in the installed rows.
+fn wait_shape_rows(m: &mut MeshesModel, ids: &[i64]) {
+    let end = Instant::now() + Duration::from_secs(60);
+    while m.poll_rows() {
+        assert!(Instant::now() < end, "timed out reading the mesh rows");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(m.store_settled() && !m.rows_loading());
+    assert_eq!(m.error, None);
+    for &id in ids {
+        assert!(
+            m.winners
+                .iter()
+                .chain(m.losers.iter())
+                .any(|(row, _)| row.copy_id == id),
+            "copy {id} missing from installed rows"
+        );
+    }
+}
+
+/// The scan's block of the shape named `name` in copy `id`.
+fn scan_block(db: &Path, id: i64, name: &str) -> u32 {
+    let store = modscan::store::Store::open_read_only(db).unwrap();
+    store
+        .shapes_of(id)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.name.as_deref() == Some(name))
+        .unwrap()
+        .block
+}
+
+/// The 3D view shows the plain mesh of copy `id`.
+fn shows_mesh_of(m: &MeshesModel, id: i64) -> bool {
+    matches!(m.v3.content(), Some(Content::Mesh(spec)) if spec.key == id)
+}
+
+/// BSTriShapes named `first` and `second` (0, 1), each with its own BSLSP (2, 3).
+fn shapes_named(first: &str, second: &str) -> Vec<u8> {
+    let mut n = builder::Nif::new(100);
+    let (a, b) = (n.string(first), n.string(second));
+    n.block("BSTriShape", one_tri(a, 2));
+    n.block("BSTriShape", one_tri(b, 3));
+    n.block("BSLightingShaderProperty", scenes::lsp(0, -1));
+    n.block("BSLightingShaderProperty", scenes::lsp(0, -1));
+    n.bytes()
+}
+
+/// A's x.nif and PGPatcher's copy of it (`pgp`), plus A's y.nif when `y`, scanned (x.nif's source row selected on
+/// its game side) and the rows read.
+fn scanned_pair_of(
+    pgp: &[u8],
+    y: bool,
+) -> (
+    tempfile::TempDir,
+    MeshesModel,
+    sdc_gui::model::meshes::CopyPair,
+) {
+    let d = files_pair(&two_named(false), pgp);
+    if y {
+        put(d.path(), "mods/A/meshes/y.nif", None);
+    }
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let pair = m.pair.expect("x.nif has a PGPatcher copy");
+    wait_shape_rows(&mut m, &[pair.source, pair.game]);
+    (d, m, pair)
+}
+
+/// `scanned_pair_of` with PGPatcher's copy numbering A and B the other way round.
+fn scanned_pair(
+    y: bool,
+) -> (
+    tempfile::TempDir,
+    MeshesModel,
+    sdc_gui::model::meshes::CopyPair,
+) {
+    scanned_pair_of(&two_named(true), y)
+}
+
+/// The winning copy whose path ends with `name`.
+fn winner(m: &MeshesModel, name: &str) -> i64 {
+    m.winners
+        .iter()
+        .find(|(r, _)| r.path.ends_with(name))
+        .unwrap()
+        .0
+        .copy_id
+}
+
+/// The list shows copy `id`: its row passes the mod picker, the chips and the search.
+fn listed(m: &mut MeshesModel, id: i64) -> bool {
+    let v = m.visible_nifs();
+    v.iter().any(|&i| m.nif_at(i).0.copy_id == id)
+}
+
+/// A shape link opened copy `id` on its shape at `block` named `name`: the row, the side, the cards and the list.
+fn opened_on(m: &mut MeshesModel, id: i64, block: u32, name: Option<&str>) {
+    assert_eq!(m.selected_nif, Some(id), "the row");
+    assert_eq!(m.shown_copy(), Some(id), "the side");
+    assert!(
+        m.shapes
+            .iter()
+            .any(|s| s.block == block && s.name.as_deref() == name),
+        "the cards are copy {id}'s"
+    );
+    assert_eq!(m.card_sel, Some((block, name.map(str::to_owned))));
+    assert!(m.shapes_col, "the shapes column");
+    assert!(listed(m, id), "copy {id} is in the list");
+}
+
+/// Review E (Task 17): a link to either side of a PGPatcher pair shows that side, from the other side of the same
+/// row (named explicitly, not the row's default) and from another row; what hides the row is cleared.
+#[test]
+fn a_shape_link_shows_the_requested_side_of_a_patched_pair() {
+    let (d, mut m, pair) = scanned_pair(true);
+    let db = d.path().join("scan.db");
+    let (source_a, game_a) = (
+        scan_block(&db, pair.source, "A"),
+        scan_block(&db, pair.game, "A"),
+    );
+    assert_ne!(source_a, game_a, "the copies number A differently");
+    assert_eq!(
+        (m.selected_nif, m.shown_copy()),
+        (Some(pair.source), Some(pair.game)),
+        "premise: the source row, on its game side"
+    );
+    m.search = "nothing like it".into();
+    m.set_tex_filter(Some("textures/none.dds".into()));
+    m.show_shape(pair.source, source_a, Some("A".into()));
+    opened_on(&mut m, pair.source, source_a, Some("A"));
+    assert!(shows_mesh_of(&m, pair.source));
+    assert_eq!(
+        (m.selected_mod, m.filter),
+        (None, NifFilter::Overridden),
+        "a losing copy"
+    );
+    assert!(
+        m.search.is_empty() && m.tex_filter.is_none(),
+        "what hid the row is cleared"
+    );
+    m.search = "x.nif".into();
+    m.show_shape(pair.game, game_a, Some("A".into()));
+    opened_on(&mut m, pair.game, game_a, Some("A"));
+    assert!(shows_mesh_of(&m, pair.game));
+    assert_eq!(
+        (m.selected_mod, m.filter),
+        (None, NifFilter::All),
+        "the winner"
+    );
+    assert_eq!(m.search, "x.nif", "a search that shows the row stays");
+    let y = winner(&m, "y.nif");
+    m.select_nif(y);
+    m.show_shape(pair.source, source_a, Some("A".into()));
+    opened_on(&mut m, pair.source, source_a, Some("A"));
+    assert!(shows_mesh_of(&m, pair.source));
+}
+
+/// `gloss` as a drag tick: a merged push is unsaved until the drag ends (nif_edit.rs `push`).
+fn gloss_drag(m: &mut MeshesModel, v: f32) {
+    let e = m.edit.as_ref().unwrap();
+    let (shape, shader) = lit_shape(e);
+    let cur = e.model.lighting[&shader].lighting.params.glossiness;
+    let op = Op::SetField {
+        at: nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap(),
+        field: Field::Glossiness,
+        value: Value::F32(v.to_bits()),
+        base: Value::F32(cur.to_bits()),
+    };
+    m.edit_push(vec![op], Some("gloss".into()));
+}
+
+/// The 3D view shows the open edit's preview, with the edit's shape `block` named `name` in it (ruling 3d-R7: not the
+/// plain mesh of the shown copy).
+fn shows_edit_preview(m: &MeshesModel, block: u32, name: &str) -> bool {
+    matches!(m.v3.content(), Some(Content::Parsed { nif, .. })
+        if nif.shapes.iter().any(|s| s.id == ShapeId(block) && &*s.name == name))
+}
+
+/// A live draft of this NIF stays open, with its preview, when a link reveals either row of its pair; the edit card
+/// is the shape's counterpart in the edit, the scan card is in the shown copy's numbering.
+#[test]
+fn a_shape_link_selects_the_edit_card_on_the_paired_source() {
+    let (d, mut m, pair) = scanned_pair(false);
+    let db = d.path().join("scan.db");
+    let (source_a, game_a) = (
+        scan_block(&db, pair.source, "A"),
+        scan_block(&db, pair.game, "A"),
+    );
+    assert_ne!(source_a, game_a);
+    m.set_project_root(Some(d.path()));
+    m.open_edit();
+    m.set_view_source(false);
+    assert_eq!(m.shown_copy(), Some(pair.game));
+    let b = select(&mut m, "B");
+    gloss_drag(&mut m, 30.5);
+    let session = m.edit.as_ref().unwrap().session;
+    let before = ops(&m);
+    assert_eq!(before.len(), 1);
+    assert_eq!(m.edit.as_ref().unwrap().selection, Selection::Shape(b));
+    let edit_a = shape_named(m.edit.as_ref().unwrap(), "A");
+    for (copy, block) in [(pair.source, source_a), (pair.game, game_a)] {
+        m.show_shape(copy, block, Some("A".into()));
+        assert_eq!(m.selected_nif, Some(copy));
+        assert_eq!(m.shown_copy(), Some(copy));
+        assert_eq!(m.edit.as_ref().unwrap().selection, Selection::Shape(edit_a));
+        assert_eq!(m.card_sel, Some((block, Some("A".into()))));
+        assert!(m
+            .shapes
+            .iter()
+            .any(|s| s.block == block && s.name.as_deref() == Some("A")));
+        assert!(m.shapes_col && m.v3.nif_view);
+        assert!(
+            shows_edit_preview(&m, edit_a, "A"),
+            "the edit's preview stays"
+        );
+        assert_eq!(m.edit.as_ref().unwrap().session, session);
+        assert_eq!(ops(&m), before);
+        assert!(listed(&mut m, copy));
+    }
+}
+
+/// An edit of this NIF with no counterpart of the asked shape (PGPatcher's copy has a shape the source lacks) is
+/// left as ruling E6-C allows, never matched to Root or the only shape; its ops come back on the next open.
+#[test]
+fn a_shape_link_without_a_counterpart_in_the_edit_leaves_it() {
+    let (d, mut m, pair) = scanned_pair_of(&shapes_named("A", "C"), false);
+    let c = scan_block(&d.path().join("scan.db"), pair.game, "C");
+    m.set_project_root(Some(d.path()));
+    m.open_edit();
+    gloss_drag(&mut m, 30.5);
+    m.show_shape(pair.game, c, Some("C".into()));
+    assert!(m.edit.is_none(), "the session ended");
+    opened_on(&mut m, pair.game, c, Some("C"));
+    assert!(shows_mesh_of(&m, pair.game));
+    m.select_nif(pair.source);
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [30.5]
+    );
+}
+
+/// The app's route: a request for the store Meshes reads opens that copy on that shape; a block or name the scan no
+/// longer has says so in Meshes' status line and changes nothing.
+#[test]
+fn a_shape_link_selects_that_shape() {
+    use sdc_gui::model::used_by::MeshPick;
+    app_data();
+    let (d, mut meshes) = export_session();
+    let x = meshes.selected_nif.expect("export_session selects x");
+    let y = y_nif(&meshes);
+    wait_shape_rows(&mut meshes, &[x, y]);
+    meshes.select_nif(y);
+    let block = meshes.shapes[0].block;
+    let shape = meshes.shapes[0].name.as_deref().map(str::to_owned);
+    meshes.select_nif(x);
+    let texture_dir = tempfile::tempdir().unwrap();
+    let mut app = sdc_gui::app::SdcApp::new(support::opened(texture_dir.path()));
+    let store = d.path().join("scan.db");
+    app.model.scan_db = Some(store.clone());
+    app.meshes = meshes;
+    app.model.centre_over_meshes = true;
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: y,
+        block,
+        shape: shape.clone(),
+    });
+    let ctx = eframe::egui::Context::default();
+    app.route_3d(&ctx);
+    assert!(sdc_gui::ui::header::meshes_view_active(&ctx));
+    assert!(!app.model.centre_over_meshes);
+    assert!(app.model.show_mesh.is_none());
+    opened_on(&mut app.meshes, y, block, shape.as_deref());
+
+    let gone = u32::MAX;
+    assert!(app.meshes.shapes.iter().all(|s| s.block != gone));
+    app.meshes.select_nif(x);
+    let card = app.meshes.card_sel.clone();
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: y,
+        block: gone,
+        shape: None,
+    });
+    app.route_3d(&ctx);
+    assert_eq!(app.meshes.selected_nif, Some(x));
+    assert_eq!(app.meshes.card_sel, card);
+    assert_eq!(app.meshes.status, "That shape is no longer in the scan");
+    // The block is there but holds another shape now.
+    app.meshes.status.clear();
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: y,
+        block,
+        shape: Some("not this shape".into()),
+    });
+    app.route_3d(&ctx);
+    assert_eq!(app.meshes.selected_nif, Some(x));
+    assert_eq!(app.meshes.card_sel, card);
+    assert_eq!(app.meshes.status, "That shape is no longer in the scan");
+    // A copy the rows no longer hold.
+    app.meshes.status.clear();
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: i64::MAX,
+        block,
+        shape: shape.clone(),
+    });
+    app.route_3d(&ctx);
+    assert_eq!(app.meshes.selected_nif, Some(x));
+    assert_eq!(app.meshes.card_sel, card);
+    assert_eq!(app.meshes.status, "That shape is no longer in the scan");
+    // A link that opens clears that line; a scan's own status line stays.
+    app.model.show_mesh = Some(MeshPick {
+        store: store.clone(),
+        copy_id: y,
+        block,
+        shape: shape.clone(),
+    });
+    app.route_3d(&ctx);
+    opened_on(&mut app.meshes, y, block, shape.as_deref());
+    assert_eq!(app.meshes.status, "");
+    app.meshes.select_nif(x);
+    app.meshes.status = "Scanned 3 NIFs".into();
+    app.model.show_mesh = Some(MeshPick {
+        store,
+        copy_id: y,
+        block,
+        shape,
+    });
+    app.route_3d(&ctx);
+    assert_eq!(app.meshes.selected_nif, Some(y));
+    assert_eq!(app.meshes.status, "Scanned 3 NIFs");
+}
+
+/// A link to another NIF saves the open draft (a drag tick included) before the session ends.
+#[test]
+fn a_shape_link_saves_the_open_draft_before_switching() {
+    let (d, mut m) = export_session();
+    m.set_project_root(Some(d.path()));
+    let id =
+        |m: &MeshesModel, n: &str| m.nifs.iter().find(|r| r.path.ends_with(n)).unwrap().copy_id;
+    let (x, y) = (id(&m, "x.nif"), id(&m, "y.nif"));
+    wait_shape_rows(&mut m, &[x, y]);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(y);
+    m.open_edit();
+    gloss_drag(&mut m, 30.5);
+    m.show_shape(x, block, name.clone());
+    assert!(m.edit.is_none(), "the session ended");
+    assert_eq!(m.selected_nif, Some(x));
+    assert_eq!(m.card_sel, Some((block, name)));
+    // The draft is on disk: a session that reads it fresh, with nothing in memory, gets the drag.
+    let draft = draft_path(d.path(), "meshes/y.nif").unwrap();
+    let doc = EditDoc::from_text(&std::fs::read_to_string(&draft).unwrap()).unwrap();
+    let saved: Vec<f32> = doc
+        .ops
+        .iter()
+        .map(|o| match &o.op {
+            Op::SetField {
+                value: Value::F32(v),
+                ..
+            } => f32::from_bits(*v),
+            o => panic!("{o:?}"),
+        })
+        .collect();
+    assert_eq!(saved, [30.5], "the draft file holds the drag");
+    m.select_nif(y);
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [30.5]
+    );
+}
+
+/// A link while a scan runs waits: through the scan's end and the row read it starts, opening once, after the rows.
+#[test]
+fn a_shape_link_clicked_during_a_scan_opens_once_it_settles() {
+    let (_d, mut m) = export_session();
+    let y = y_nif(&m);
+    let x = m.selected_nif.expect("export_session selects x");
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name.clone());
+    assert_eq!(m.selected_nif, Some(x));
+    m.set_scanning_for_test(false);
+    let rows = m.hold_rows_read();
+    assert!(m.poll_rows(), "the read is still out");
+    assert_eq!(
+        m.selected_nif,
+        Some(x),
+        "even a settled scan still waits for rows"
+    );
+    rows.send(Ok((m.winners.as_ref().clone(), m.losers.as_ref().clone())))
+        .unwrap();
+    m.poll_rows();
+    assert_eq!(m.selected_nif, Some(y));
+    assert_eq!(m.card_sel, Some((block, name)));
+    m.select_nif(x);
+    let rows = m.hold_rows_read();
+    rows.send(Ok((m.winners.as_ref().clone(), m.losers.as_ref().clone())))
+        .unwrap();
+    m.poll_rows();
+    assert_eq!(
+        m.selected_nif,
+        Some(x),
+        "the consumed request did not replay"
+    );
+}
+
+/// A real rescan: a link waits through the scan and its row read, and a later link replaces an earlier one (the
+/// earlier one, opened first, would have cleared the search that hides its row).
+#[test]
+fn a_later_shape_link_during_a_rescan_replaces_the_first() {
+    let (_d, mut m) = export_session();
+    let y = y_nif(&m);
+    let x = m.selected_nif.expect("export_session selects x");
+    wait_shape_rows(&mut m, &[x, y]);
+    let shape0 = |m: &MeshesModel| {
+        (
+            m.shapes[0].block,
+            m.shapes[0].name.as_deref().map(str::to_owned),
+        )
+    };
+    let (xb, xn) = shape0(&m);
+    m.select_nif(y);
+    let (yb, yn) = shape0(&m);
+    m.select_nif(x);
+    m.search = "y.nif".into();
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    assert!(m.scanning());
+    m.show_shape(x, xb, xn);
+    m.show_shape(y, yb, yn.clone());
+    let t = Instant::now();
+    while m.scanning() {
+        assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    assert!(
+        m.rows_loading(),
+        "the completed scan's reload reads the rows"
+    );
+    assert_eq!(m.selected_nif, Some(x), "not on the scan's end alone");
+    wait_shape_rows(&mut m, &[x, y]);
+    assert_eq!(m.selected_nif, Some(y));
+    assert_eq!(m.card_sel, Some((yb, yn)));
+    assert_eq!(m.search, "y.nif", "the replaced link never opened");
+}
+
+/// Ruling E6-C: a link to another NIF keeps an edit that can be saved nowhere (ops, row, card and the refusal's
+/// error); a link to the selected copy keeps it too and opens on the card.
+#[test]
+fn a_shape_link_keeps_an_edit_that_cannot_be_saved() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (yb, yn) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    let (xb, xn) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    unsaveable_edit(&d, &mut m);
+    let session = m.edit.as_ref().unwrap().session;
+    let (selected, card) = (m.selected_nif, m.card_sel.clone());
+    m.show_shape(y, yb, yn);
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5]
+    );
+    assert_eq!(m.edit.as_ref().unwrap().session, session);
+    assert_eq!((m.selected_nif, m.card_sel.clone()), (selected, card));
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert_eq!(m.error.as_deref(), Some(why.as_str()));
+    m.show_shape(x, xb, xn.clone());
+    assert_eq!(m.edit.as_ref().unwrap().session, session, "the same NIF");
+    assert_eq!(m.selected_nif, Some(x));
+    assert_eq!(m.card_sel, Some((xb, xn)));
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5]
+    );
+}
+
+/// The refusal with a PGPatcher pair: an edit of y.nif that can be saved nowhere keeps everything when a link asks
+/// for x.nif's game side: the ops, the side, the cards, the filters, the edit card and the scan card.
+#[test]
+fn a_shape_link_to_a_pair_keeps_an_edit_of_another_nif_that_cannot_be_saved() {
+    let (d, mut m, pair) = scanned_pair(true);
+    let game_a = scan_block(&d.path().join("scan.db"), pair.game, "A");
+    let y = winner(&m, "y.nif");
+    m.select_nif(y);
+    unsaveable_edit(&d, &mut m);
+    m.search = "y.nif".into();
+    let snapshot = |m: &MeshesModel| {
+        (
+            op_values(m),
+            m.shown_copy(),
+            m.shapes
+                .iter()
+                .map(|s| (s.block, s.name.clone()))
+                .collect::<Vec<_>>(),
+            (
+                m.selected_mod,
+                m.filter,
+                m.search.clone(),
+                m.tex_filter.clone(),
+            ),
+            m.project_on,
+            m.edit.as_ref().unwrap().selection,
+            (m.card_sel.clone(), m.selected_nif),
+        )
+    };
+    let before = snapshot(&m);
+    assert!(before.3 .0.is_some(), "premise: a mod is picked");
+    m.show_shape(pair.game, game_a, Some("A".into()));
+    assert_eq!(snapshot(&m), before);
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert_eq!(m.error.as_deref(), Some(why.as_str()));
+    // The visible losing row (the source, under Overridden once it opens) is refused the same way.
+    let source_a = scan_block(&d.path().join("scan.db"), pair.source, "A");
+    m.show_shape(pair.source, source_a, Some("A".into()));
+    assert_eq!(snapshot(&m), before);
+    assert_eq!(m.error.as_deref(), Some(why.as_str()));
+}
+
+/// Meshes' status line for a link the scan database could not serve (ruling 3d-T17-1).
+const UNREAD_LINK: &str = "The scan database could not be read, so that mesh link opened nothing.";
+
+/// A waiting link is dropped by a row read that fails or stops, and says so: the error and the selection stay, the
+/// old rows are no fallback (a link after the failure is dropped too, never parked), and the next read that works
+/// does not bring either back.
+#[test]
+fn a_failed_row_read_drops_a_waiting_shape_link() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let rows = (m.winners.as_ref().clone(), m.losers.as_ref().clone());
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    let card = m.card_sel.clone();
+    for (fails, why) in [
+        (true, "Scan database: locked"),
+        (false, "Scan database: reading the mesh list stopped"),
+    ] {
+        m.set_scanning_for_test(true);
+        m.show_shape(y, block, name.clone());
+        m.set_scanning_for_test(false);
+        let tx = m.hold_rows_read();
+        if fails {
+            tx.send(Err("Scan database: locked".into())).unwrap();
+        } else {
+            drop(tx);
+        }
+        m.poll_rows();
+        assert_eq!(m.error.as_deref(), Some(why));
+        assert_eq!(m.status, UNREAD_LINK);
+        assert_eq!(
+            (m.selected_nif, m.card_sel.clone()),
+            (Some(x), card.clone())
+        );
+        m.hold_rows_read().send(Ok(rows.clone())).unwrap();
+        m.poll_rows();
+        assert_eq!(m.selected_nif, Some(x), "the dropped link stays dropped");
+        m.error = None;
+        m.status.clear();
+    }
+    // No fallback: after a failed read a link opens nothing on the old rows and is not parked either.
+    m.hold_rows_read()
+        .send(Err("Scan database: locked".into()))
+        .unwrap();
+    m.poll_rows();
+    m.show_shape(y, block, name.clone());
+    assert_eq!(m.selected_nif, Some(x), "the old rows are not used");
+    assert_eq!(m.status, UNREAD_LINK);
+    assert_eq!(
+        m.error.as_deref(),
+        Some("Scan database: locked"),
+        "the error stays"
+    );
+    m.hold_rows_read().send(Ok(rows)).unwrap();
+    m.poll_rows();
+    assert_eq!(m.selected_nif, Some(x), "the dropped link stays dropped");
+}
+
+/// Ruling 3d-T17-1: a reload that stopped on the mod list reads no rows, so a link, waiting or new, is dropped with
+/// the status line beside the database error.
+#[test]
+fn a_shape_link_after_a_reload_that_could_not_read_the_mods_is_dropped() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    let other = modscan::store::Store::open(&d.path().join("scan.db")).unwrap();
+    other
+        .conn()
+        .execute("ALTER TABLE origin RENAME TO origin_gone", [])
+        .unwrap();
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name.clone());
+    m.set_scanning_for_test(false);
+    m.reload();
+    assert!(
+        m.error.is_some() && !m.rows_loading(),
+        "premise: the reload stopped"
+    );
+    assert_eq!(m.status, UNREAD_LINK, "the waiting link");
+    assert_eq!(m.selected_nif, Some(x));
+    m.status.clear();
+    m.show_shape(y, block, name);
+    assert_eq!(m.status, UNREAD_LINK, "a new link");
+    assert_eq!(m.selected_nif, Some(x));
+}
+
+/// Ruling 3d-T17-1: a scan database that would not open: a link, waiting or new, is dropped with the status line.
+#[test]
+fn a_shape_link_with_a_database_that_would_not_open_is_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    // A folder where the database file should be: the open fails.
+    let mut m = MeshesModel::new(Some(d.path().to_path_buf()), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    m.activate_with(None);
+    assert!(m.error.is_some(), "premise: the open failed");
+    m.show_shape(1, 0, None);
+    assert_eq!(m.status, UNREAD_LINK);
+    assert_eq!(m.selected_nif, None);
+}
+
+/// Rows on hand with no store open (only the `hold_rows_read` test hook makes that state): the link says the scan
+/// database could not be read.
+#[test]
+fn a_shape_link_on_rows_without_a_store_says_so() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let rows = (m.winners.as_ref().clone(), m.losers.as_ref().clone());
+    let mut bare = MeshesModel::empty();
+    bare.hold_rows_read().send(Ok(rows)).unwrap();
+    bare.poll_rows();
+    bare.show_shape(y, 0, None);
+    assert_eq!(bare.status, UNREAD_LINK);
+    assert_eq!(bare.selected_nif, None);
+}
+
+/// A manual pick after a link that still waits for its rows is the latest pick: the link does not take it back.
+#[test]
+fn a_manual_pick_drops_a_waiting_shape_link() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    m.reload();
+    m.show_shape(y, block, name);
+    m.select_nif(x);
+    wait_shape_rows(&mut m, &[x, y]);
+    assert_eq!(m.selected_nif, Some(x));
+}
+
+/// Ruling E6-C and review I2: an edit of x.nif stays only for its own row or its PGPatcher pair. Another mod's copy of
+/// the same path is another row: the session ends as a leave allows, and its ops come back on the next open.
+#[test]
+fn a_shape_link_to_another_mods_copy_of_the_edited_nif_leaves_the_edit() {
+    let d = instance("+B\n+A\n");
+    put(d.path(), "mods/A/meshes/x.nif", Some(&two_named(false)));
+    put(d.path(), "mods/B/meshes/x.nif", Some(&two_named(false)));
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let a = m.selected_nif.expect("A's x.nif");
+    wait_shape_rows(&mut m, &[a]);
+    let b = winner(&m, "x.nif");
+    assert_ne!(a, b, "premise: B's copy wins");
+    assert_eq!(m.pair, None, "premise: no PGPatcher pair");
+    let block = scan_block(&d.path().join("scan.db"), b, "A");
+    m.set_project_root(Some(d.path()));
+    m.open_edit();
+    gloss_drag(&mut m, 30.5);
+    m.show_shape(b, block, Some("A".into()));
+    assert!(m.edit.is_none(), "the session ended");
+    opened_on(&mut m, b, block, Some("A"));
+    assert!(shows_mesh_of(&m, b));
+    m.select_nif(a);
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [30.5]
+    );
+}
+
+/// Review M4: a switch to a second scanned database through the model's own read (`reload` after `store_path`
+/// changes): the waiting link is dropped at once and says why, and the other database's same-numbered copy never
+/// opens.
+#[test]
+fn a_waiting_shape_link_is_dropped_when_the_database_switches() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    // The second database numbers a copy `y` too (`wait_shape_rows` checks it).
+    let (d2, mut other) = export_session();
+    wait_shape_rows(&mut other, &[y]);
+    drop(other);
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name);
+    m.set_scanning_for_test(false);
+    m.store_path = Some(d2.path().join("scan.db"));
+    m.reload();
+    assert_eq!(
+        m.status,
+        "That mesh link came from another scan database than Meshes shows, so it opened nothing.",
+        "dropped at the switch, before any rows land"
+    );
+    assert!(m.rows_loading());
+    wait_shape_rows(&mut m, &[]);
+    assert_ne!(m.selected_nif, Some(y));
+}
+
+/// A link clicked while a reload's row read is out (the panel's state is a frame old) waits for that read.
+#[test]
+fn a_shape_link_during_a_reload_waits_for_its_rows() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    // Any mod: the reload holds x and selects it again when the rows land, before the link opens.
+    m.any_mod();
+    m.reload();
+    assert!(m.rows_loading());
+    m.show_shape(y, block, name.clone());
+    assert_ne!(
+        m.selected_nif,
+        Some(y),
+        "not on the rows the reload replaces"
+    );
+    wait_shape_rows(&mut m, &[x, y]);
+    assert_eq!(m.selected_nif, Some(y));
+    assert_eq!(m.card_sel, Some((block, name)));
+}
+
+/// A scan PGPatcher pauses leaves the store as it was: a link clicked meanwhile opens on the rows from before.
+#[test]
+fn a_shape_link_during_a_paused_scan_opens_on_the_rows_from_before() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    m.procs = || vec!["pgpatcher.exe".to_string()];
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    m.show_shape(y, block, name.clone());
+    assert_eq!(m.selected_nif, Some(x), "the scan runs");
+    let t = Instant::now();
+    while m.scanning() {
+        assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    assert!(
+        m.store_untouched && !m.rows_loading(),
+        "premise: paused, no read"
+    );
+    assert_eq!(m.selected_nif, Some(y));
+    assert_eq!(m.card_sel, Some((block, name)));
+}
+
+/// An open edit of an unpaired NIF keeps its side (Edited source) when a link opens one of its shapes.
+#[test]
+fn a_shape_link_into_the_edited_unpaired_nif_keeps_its_side() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    m.set_project_root(Some(d.path()));
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.open_edit();
+    assert!(m.view_source, "premise: the edit opens on Edited source");
+    let session = m.edit.as_ref().unwrap().session;
+    m.show_shape(y, block, name.clone());
+    assert_eq!(m.edit.as_ref().unwrap().session, session);
+    assert!(m.view_source, "the side stays");
+    assert_eq!(m.card_sel, Some((block, name)));
+}
+
+/// A texture chip whose meshes include the asked row stays on.
+#[test]
+fn a_shape_link_keeps_a_texture_chip_that_shows_the_row() {
+    let (_d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    let tex = m
+        .shapes
+        .iter()
+        .flat_map(|s| s.textures.iter().flatten())
+        .next()
+        .expect("x.nif names a texture")
+        .clone();
+    m.set_tex_filter(Some(tex.clone()));
+    m.show_shape(x, block, name);
+    assert_eq!(m.tex_filter.as_ref().map(|(t, _)| t), Some(&tex));
+    assert!(listed(&mut m, x));
+}
+
+/// A This project pill that hides the asked row is turned off; one that shows it stays on.
+#[test]
+fn a_shape_link_turns_off_a_project_pill_only_when_it_hides_the_row() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let game = m.pair.expect("x.nif has a PGPatcher copy").game;
+    m.select_nif(y);
+    let (yb, yn) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    let (gb, gn) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    // The project is PGPatcher's mod: its pill lists x.nif, not y.nif.
+    m.set_project_root(Some(&d.path().join("mods").join("PGP")));
+    let t = Instant::now();
+    while m.project_nifs().is_none() {
+        assert!(t.elapsed() < Duration::from_secs(60), "the pill read");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    assert!(m.project_on);
+    m.show_shape(game, gb, gn);
+    assert!(m.project_on, "the pill shows PGPatcher's copy");
+    assert!(listed(&mut m, game));
+    m.show_shape(y, yb, yn);
+    assert!(!m.project_on, "the pill hid y.nif");
+    assert!(listed(&mut m, y));
+}
+
+/// A waiting link belongs to the store it was asked on: after a database switch it never opens the same-numbered
+/// copy of the other store, and it is gone, not held, when the first store is back.
+#[test]
+fn a_waiting_shape_link_never_opens_in_another_database() {
+    let (d, mut m) = export_session();
+    let x = m.selected_nif.expect("export_session selects x");
+    let y = y_nif(&m);
+    wait_shape_rows(&mut m, &[x, y]);
+    let rows = (m.winners.as_ref().clone(), m.losers.as_ref().clone());
+    m.select_nif(y);
+    let (block, name) = (
+        m.shapes[0].block,
+        m.shapes[0].name.as_deref().map(str::to_owned),
+    );
+    m.select_nif(x);
+    m.set_scanning_for_test(true);
+    m.show_shape(y, block, name);
+    m.set_scanning_for_test(false);
+    let first = m.store_path.replace(d.path().join("other.db"));
+    m.hold_rows_read().send(Ok(rows.clone())).unwrap();
+    m.poll_rows();
+    assert_eq!(m.selected_nif, Some(x), "copy {y} of another database");
+    m.store_path = first;
+    m.hold_rows_read().send(Ok(rows)).unwrap();
+    m.poll_rows();
+    assert_eq!(m.selected_nif, Some(x), "dropped, not held");
+}

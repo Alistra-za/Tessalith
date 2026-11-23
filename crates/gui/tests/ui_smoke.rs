@@ -833,7 +833,8 @@ fn the_settings_strip_is_compact() {
     model.select_item("landscape/rock01_rmaos");
     let mut h = harness(model);
     h.run();
-    assert!(h.query_all_by_label_contains("built-in default").count() > 0);
+    assert!(h.query_all_by_label_contains("Tessalith's default").count() > 0);
+    assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
     // The strip keeps Alpha, Mipmaps and Compression and drops that text.
     let mut model = opened(d.path());
     model.expand("landscape/rock01_rmaos");
@@ -849,7 +850,10 @@ fn the_settings_strip_is_compact() {
     for row in ["Colour", "Input content", "DDS tag"] {
         assert!(h.query_by_label_contains(row).is_none(), "{row}");
     }
-    assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
+    assert_eq!(
+        h.query_all_by_label_contains("Tessalith's default").count(),
+        0
+    );
 }
 
 /// The preview's toolbar panel rect (A7: every toolbar lookup is scoped to it).

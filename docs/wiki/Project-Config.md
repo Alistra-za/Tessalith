@@ -17,12 +17,12 @@ schema_version = 1
 preset = "cs-quality"
 target = "cs"
 
-# Applies to every texture, before sub-type tables
+# Applies to every texture, before type tables
 [defaults]
 encoder.effort = "veryslow"
 mips.filter = "box"
 
-# Applies to one sub-type
+# Applies to one type
 [subtypes.diffuse]
 mips.filter = "kaiser"
 
@@ -65,7 +65,7 @@ as = "textures/armor/iron/iron_n.png"
 | `preset` | string | the target's default | The preset, by id: built-in or a user preset ([Presets and targets](Presets-and-Targets.md)). |
 | `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** row ([Settings tab](GUI-Main-Window.md#settings-tab)) writes it. |
 | `[defaults]` | partial profile | none | Field values for every texture. |
-| `[subtypes.<id>]` | partial profile | none | Field values for one sub-type. |
+| `[subtypes.<id>]` | partial profile | none | Field values for one type. |
 | `[[rules]]` | array of tables | none | Conditional settings. |
 | `[files."<path>"]` | partial profile plus extra keys | none | Settings for one file. Project config only. |
 | `[inputs."<path>"]` | table with `as` | none | Read a file under another name. Project config only. |
@@ -83,7 +83,7 @@ A texture's final settings (its profile) are built from layers. Later layers ove
 6. Facts from analysing the image, such as a High-confidence alpha policy (no alpha channel means `remove`).
 7. The set shader's member settings, and alpha from scanned meshes (GUI only).
 8. Facts from the file's suffix.
-9. Accepted suggestions (always in the GUI; on the command line you opt in, see [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high)). A suggestion only picks the sub-type, never a field value. In that choice it ranks below command-line overrides, `[files]`, rules and a shader you chose for the set.
+9. Accepted suggestions (always in the GUI; on the command line you opt in, see [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high)). A suggestion only picks the type, never a field value. In that choice it ranks below command-line overrides, `[files]`, rules and a shader you chose for the set.
 10. The file's `[files]` entry.
 11. Command-line overrides: unscoped first, then `subtype:` scoped, then `file:` scoped ([CLI reference](CLI-Reference.md#--set-syntax)).
 
@@ -91,14 +91,14 @@ The GUI shows each field's provenance, so you can see which layer set it.
 
 ## [defaults] and [subtypes]
 
-Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Sub-type ids are on [Texture types](Texture-Types.md#sub-types-what-each-file-becomes). `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
+Both take a partial profile: any of the [fields](#fields) below, as nested tables or dotted keys (`alpha = { policy = "cutout" }` is the same as `alpha.policy = "cutout"`). Type ids are on [Texture types](Texture-Types.md#types-what-each-file-becomes); the type itself is set per file by `[files]` or a rule's `subtype`, not a field here. `subtype`, `target`, `category` and `resize_reference` in either are a load error: the file is rejected and the message tells you to remove the key.
 
 ## [[rules]]
 
 ```toml
 [[rules]]
 match = { glob = "...", suffix = "...", set_has = "...", alpha = "...", subtypes = ["..."] }
-subtype = "<sub-type id>"     # optional
+subtype = "<type id>"         # optional
 overrides = { ... }           # optional partial profile
 ```
 
@@ -108,10 +108,10 @@ overrides = { ... }           # optional partial profile
 | `suffix` | The file's recognised suffix without the underscore, such as `"n"` or `"rmaos"`. `""` means no suffix (the colour map). |
 | `set_has` | The file's texture set contains a member with this suffix. |
 | `alpha` | The source's alpha content: `"none"` (no alpha channel, or varying alpha that scanned meshes decided to remove), `"constant255"`, `"varying"`. |
-| `subtypes` | The file's sub-type is one of these. A rule with this key never decides a sub-type; it only adds settings once the sub-type is known. |
+| `subtypes` | The file's type is one of these. A rule with this key never decides a type; it only adds settings once the type is known. |
 
 - All given match keys must match. A rule with no match keys matches everything.
-- `subtype` names the sub-type for matching files. It decides the file's sub-type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's sub-type, a rule naming a different `subtype` doesn't apply to it.
+- `subtype` names the type for matching files. It decides the file's type ahead of suggestions, but below a `[files]` entry or a command-line override. When something else decided the file's type, a rule naming a different `subtype` doesn't apply to it.
 - `overrides` is a partial profile applied to matching files.
 
 ```toml
@@ -220,15 +220,15 @@ Also export needs the `cs` target. A value out of range is an error only when an
 
 ## Fields
 
-Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a `[files]` entry, except `subtype`, `target`, `category` and `resize_reference`: the sub-type is decided per file, and the planner alone writes the other three. Defaults are the base preset's; a sub-type or preset may change them, as noted.
+Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a `[files]` entry, except `subtype`, `target`, `category` and `resize_reference`: the type is decided per file, and the planner alone writes the other three. Defaults are the base preset's; a type or preset may change them, as noted.
 
 ### Type and colour
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `subtype` | a sub-type id | from the file name | Per file: `[files]` or a rule's `subtype`. |
-| `color.content` | `srgb`, `linear` | `linear`; `srgb` for colour sub-types | What the pixels mean. Affects mip filtering. On a `cubemap` it stays `srgb` but means the game's `pow(c, 1.6)` curve, not the sRGB curve. |
-| `color.tag` | `srgb`, `unorm`, `n/a` | `unorm`; `srgb` for PBR colour under `cs`; `n/a` for HDR | The DDS format's `_SRGB` flag. `n/a` for BC6H and RGBA16F. Which sub-types take which tag: [sRGB or UNORM](Texture-Types.md#srgb-or-unorm). |
+| `subtype` | a type id | from the file name | Per file: `[files]` or a rule's `subtype`. |
+| `color.content` | `srgb`, `linear` | `linear`; `srgb` for colour types | What the pixels mean. Affects mip filtering. On a `cubemap` it stays `srgb` but means the game's `pow(c, 1.6)` curve, not the sRGB curve. |
+| `color.tag` | `srgb`, `unorm`, `n/a` | `unorm`; `srgb` for PBR colour under `cs`; `n/a` for HDR | The DDS format's `_SRGB` flag. `n/a` for BC6H and RGBA16F. Which types take which tag: [sRGB or UNORM](Texture-Types.md#srgb-or-unorm). |
 
 ### Alpha
 
@@ -248,9 +248,9 @@ Every field works in `[defaults]`, `[subtypes.<id>]`, a rule's `overrides` and a
 | `channels.swizzle` | four characters from `r g b a 0 1` | none | Reorder channels before encoding, for example `"bgra"` or `"rrr1"`. Anything else is `CFG-INVALID`. |
 | `channels.flip_green` | `true`, `false` | `false` | Invert the green channel of a normal map. |
 | `channels.green_convention` | `directx`, `opengl` | unset | Which way the source normal map's green points. `opengl` turns on `flip_green`. A plain `_normal` file with this unset is converted as DirectX and notes `IN-GREEN-UNSTATED`. An explicit `flip_green` that contradicts the convention gives `CFG-GREEN-CONFLICT`, and `flip_green` wins. |
-| `channels.msn_source` | `skyrim`, `swap_gb`, `invert_b`, `invert_gb` | `skyrim` | `msn` only; other sub-types ignore it. The baker a model-space normal came from, which Tessalith changes to Skyrim's layout when it encodes. `swap_gb` for a Blender object-space bake, `invert_b` for Marmoset right-handed or Substance, `invert_gb` for Marmoset left-handed. The GUI row is **Baked in** (`Skyrim MSN (no change)`, `Blender object-space (swap G and B)`, `Marmoset right-handed or Substance (invert B)`, `Marmoset left-handed (invert G and B)`). <!-- D:IA1 --> |
+| `channels.msn_source` | `skyrim`, `swap_gb`, `invert_b`, `invert_gb` | `skyrim` | `msn` only; other types ignore it. The baker a model-space normal came from, which Tessalith changes to Skyrim's layout when it encodes. `swap_gb` for a Blender object-space bake, `invert_b` for Marmoset right-handed or Substance, `invert_gb` for Marmoset left-handed. The GUI row is **Baked in** (`Skyrim MSN (no change)`, `Blender object-space (swap G and B)`, `Marmoset right-handed or Substance (invert B)`, `Marmoset left-handed (invert G and B)`). <!-- D:IA1 --> |
 | `channels.reconstruct_z` | `true`, `false` | `false` | Rebuild the normal's blue channel from red and green. |
-| `channels.grayscale_source` | `r`, `g`, `b`, `a`, `luma` | `r` | The channel a grayscale value is read from in a colour source: red, green, blue, alpha or Rec. 709 luminance. It applies to grayscale sub-types and to the raw maps that [pack](Texture-Packing.md#packing-loose-maps) into a recipe. With `a` the alpha is the data, so it isn't reported as discarded; a source with no alpha channel reads 255 (`CHAN-NOT-GRAY`). To pick for one raw map only, set `helper.read` on that file; it beats this value. |
+| `channels.grayscale_source` | `r`, `g`, `b`, `a`, `luma` | `r` | The channel a grayscale value is read from in a colour source: red, green, blue, alpha or Rec. 709 luminance. It applies to grayscale types and to the raw maps that [pack](Texture-Packing.md#packing-loose-maps) into a recipe. With `a` the alpha is the data, so it isn't reported as discarded; a source with no alpha channel reads 255 (`CHAN-NOT-GRAY`). To pick for one raw map only, set `helper.read` on that file; it beats this value. |
 
 ### Mipmaps
 
@@ -284,7 +284,7 @@ BC5, RG8, BC4 and R8 discard Z. Tangent normal outputs using these formats start
 
 | Field | Values | Default | Notes |
 |---|---|---|---|
-| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `rgb8`, `r8`, `rg8`, `rgba16f` | `bc7` (per sub-type: [Texture types](Texture-Types.md#sub-types-what-each-file-becomes)) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgb8` is 24-bit: no alpha (`FMT-RGB8-ALPHA`), linear tag only, legacy header only. <!-- D:FM38 --> Which encoder each format uses: [Research](Research.md). |
+| `format` | `bc1`, `bc3`, `bc4`, `bc5`, `bc6h_uf16`, `bc7`, `rgba8`, `rgb8`, `r8`, `rg8`, `rgba16f` | `bc7` (per type: [Texture types](Texture-Types.md#types-what-each-file-becomes)) | `bc6h_uf16` and `rgba16f` only under `cs`. BC1 keeps alpha only with `encoder.bc1_alpha`. `rgb8` is 24-bit: no alpha (`FMT-RGB8-ALPHA`), linear tag only, legacy header only. <!-- D:FM38 --> Which encoder each format uses: [Research](Research.md). |
 | `header` | `auto`, `dx10`, `legacy` | `auto` | DDS header form. `auto` writes a legacy header for BC1, BC3 and RGBA8 without the `_SRGB` tag, and the DX10 header for everything else. `legacy` is valid only for formats that have a legacy form (BC1, BC3, BC4, BC5) and no `_SRGB` tag; otherwise it is `CFG-INVALID`. |
 | `resize` | `none`, `half`, `quarter`, `eighth` | `none` | Halves both sides once, twice or three times. Each halving happens only while the longer side stays at or above `resize_floor`: with the 512 floor, 2048x1024 under `quarter` becomes 512x256, and 1024x1024 under `eighth` stops at 512x512. A changed size is noted as `DIM-RESIZED`. A `cubemap` ignores it (its size is [`cubemap.face_size`](#cubemap)). Textures with mips are first rounded to a power of two (below the table). <!-- D:FM29 --> |
 | `resize_relative_to` | `self`, `slot1` to `slot8` | `self` | What `resize` is measured from. `self` halves the texture's own size. A slot measures from the source size of the set's map in that texture-set slot (1 diffuse, 2 normal, 3 glow or skin, 4 height, 5 environment, 6 environment mask, complex material or RMAOS, 7 multilayer or coat, 8 back-light, specular or PBR subsurface): the texture halves while its longer side is above that map's size after the same `resize` and power-of-two step, and is never enlarged. With a 2048 diffuse and `half`, a 2048 normal becomes 1024 and a 1024 or 512 normal keeps its size. It does nothing under `resize = "none"`, and the texture's own slot works as `self`. When the set has no map in the slot, or more than one, `resize` applies to the texture's own size and the texture gets `RESIZE-NO-REFERENCE`. <!-- D:FM44 --> |
@@ -297,8 +297,8 @@ Every texture with mips is written at a power-of-two size, before `resize` appli
 | Field | Values | Default | Notes |
 |---|---|---|---|
 | `encoder.effort` | `ultrafast`, `veryfast`, `fast`, `basic`, `veryslow`, `slowest`, `max` | `veryslow` | bc7e quality level; `max` costs several times `veryslow`'s time ([timings](Research.md)). For BC6H, `ultrafast` and `veryfast` map to veryfast and `veryslow` to veryslow; `slowest` and `max` both use a peak-preserving veryslow that keeps small, very bright highlights (a sun) near their source brightness. A BC6H texture with no effort set anywhere but the built-in defaults uses `slowest`; set `veryslow` for the plain mode. <!-- D:FM43 --> |
-| `encoder.perceptual` | `true`, `false` | `false` | Perceptual error metric for BC1, BC3 and BC7: BC7 uses bc7e's own weights; BC1 and BC3's colour block weight red, green and blue error by Rec.709 luma (54, 183, 19 of 256). It keeps luma detail at some cost in colour ([measurements](Research.md)). Other formats ignore it. Colour sub-types whose alpha policy isn't `data` only: anywhere else it is `FMT-PERCEPTUAL-DATA`. Which presets turn it on: [Presets and targets](Presets-and-Targets.md). <!-- D:FM43 --> |
-| `encoder.bc7_weights` | `linear`, `alpha2`, `alpha8`, `alpha16` | unset | BC7 linear error weights for bc7e (R, G, B, A): `linear` 1,1,1,1 (the same encode as unset; use it to override an inherited weighting for one file); `alpha2` 1,1,1,2; `alpha8` 1,1,1,8 (an alternative to BC3 for delicate alpha); `alpha16` 1,1,1,16 (a `_n` with specular in alpha). `encoder.perceptual = true` wins over it. On another format, or with perceptual on, it has no effect and raises `ENC-WEIGHTS-IGNORED`. The GUI's **BC7 weighting** row edits both fields. |
+| `encoder.perceptual` | `true`, `false` | `false` | Perceptual error metric for BC1, BC3 and BC7: BC7 uses bc7e's own weights; BC1 and BC3's colour block weight red, green and blue error by Rec.709 luma (54, 183, 19 of 256). It keeps luma detail at some cost in colour ([measurements](Research.md)). Other formats ignore it. Colour types whose alpha policy isn't `data` only: anywhere else it is `FMT-PERCEPTUAL-DATA`. Which presets turn it on: [Presets and targets](Presets-and-Targets.md). <!-- D:FM43 --> |
+| `encoder.bc7_weights` | `linear`, `alpha2`, `alpha4`, `alpha8`, `alpha16`, `alpha32`, `alpha64` | unset | BC7 linear error weights for bc7e (R, G, B, A): `linear` 1,1,1,1 (the same encode as unset; use it to override an inherited weighting for one file); `alpha2` 1,1,1,2; `alpha4` 1,1,1,4; `alpha8` 1,1,1,8 (an alternative to BC3 for delicate alpha); `alpha16` 1,1,1,16 (a `_n` with specular in alpha); `alpha32` 1,1,1,32; `alpha64` 1,1,1,64 (alpha first, colour last). `encoder.perceptual = true` wins over it. On another format, or with perceptual on, it has no effect and raises `ENC-WEIGHTS-IGNORED`. The GUI's **BC7 weighting** row edits both fields. |
 | `encoder.bc1_alpha` | `true`, `false` | `false` | BC1 with 1-bit alpha for `cutout`, `blend` and `cutout_blend` ([BC1 alpha](Texture-Types.md#alpha)). Ignored by other formats. |
 | `encoder.bc45_search_radius` | `fast`, `default`, `slowest`, `max` | `default` | BC4/BC5 endpoint search, and BC3's alpha. `fast` searches a radius of 4, `default` 5, `slowest` 10; `max` runs the `slowest` search, then tries every endpoint pair within 16 of the block's lowest and highest value. On an Intel Core i9-13900K (measured in a VM, on its AVX2 path; `max` was not timed on the Base path, the code CPUs without AVX2 run) `max` takes about 2.6 times `slowest`'s time on BC4 and BC5 and 1.06 times on BC3 ([measurements](../research/bc4-family.md#max-near-exhaustive)). A config that sets `slowest` can't be read by 3.0.0. <!-- D:LI --> |
 | `encoder.bc1_search` | `default`, `fast` | `default` | BC1 search depth. `fast` runs rgbcx level 12 instead of 18 on BC1, the colour half of BC3 and fully opaque blocks of 1-bit-alpha BC1; other formats and blocks with a transparent texel ignore it. It encodes BC1 and BC3 colour in about a third of the time and costs about 0.1 dB of colour PSNR ([measurements](../research/encoder-benchmark.md#fast-bc1-search-2026-11-14)). A config that sets `fast` can't be read by 3.0.0. <!-- D:HY17 --> |
@@ -317,13 +317,13 @@ Every texture with mips is written at a power-of-two size, before `resize` appli
 | `packing.roughness_default` | 0 to 1 | 0.5 | Roughness used when there is no roughness or glossiness source. |
 | `packing.prefer` | `prepacked`, `raw` | `prepacked` | When a set has both a packed file (such as `_rmaos.png`) and raw maps: keep the packed file, or build from the raw maps (`PACK-CONFLICT`). A lone specular beside a packed image with a flat alpha fills that alpha under either value. |
 | `packing.recipe` | `auto`, `rmaos`, `rfaos` | `auto` | Which `cs` recipe a set packs. `auto` builds `_rfaos` when you picked **Advanced Skin** as the set's shader (with a roughness, glossiness or AO source), or when a skin fuzz mask fills G: a `_fuzz`, `_sheen` or plain `_f` map in a set that is [Advanced skin](Texture-Types.md#suffixes) for another reason, or a file with `helper.role = "fuzz"`. Otherwise `auto` builds `_rmaos`. A written `rfaos` or `rmaos` wins over the shader. <!-- D:JQ1,JQ23 --> |
-| `packing.fill.<role>` | 0 to 255 | unset | Value for a channel with no source map. Roles: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`. Unset means the neutral default (AO 1, metallic 0, specular 1, roughness `roughness_default`, height 0). `[defaults]` takes no fills: set them per file or sub-type. |
+| `packing.fill.<role>` | 0 to 255 | unset | Value for a channel with no source map. Roles: `roughness`, `metallic`, `ao`, `specular`, `glossiness`, `height`, `opacity`, `fuzz`. Unset means the neutral default (AO 1, metallic 0, specular 1, roughness `roughness_default`, height 0). `[defaults]` takes no fills: set them per file or type. |
 
 Packing fields go on the packed output's key, for example `[files."textures/armor/iron/iron_rmaos"]`.
 
 ### Cubemap
 
-These apply to the `cubemap` sub-type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. A cube's formats are on [Cubemaps](Cubemaps.md#checks): any other `format`, or an sRGB tag, is `CFG-INVALID`; `mips.levels = "none"` raises `CUBE-NO-MIPS`.
+These apply to the `cubemap` type (`_e` files and files under a `cubemaps` folder) and are ignored by every other. A cube's formats are on [Cubemaps](Cubemaps.md#checks): any other `format`, or an sRGB tag, is `CFG-INVALID`; `mips.levels = "none"` raises `CUBE-NO-MIPS`.
 
 | Field | Values | Default | Notes |
 |---|---|---|---|

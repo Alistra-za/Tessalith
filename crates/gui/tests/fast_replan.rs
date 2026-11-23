@@ -1209,3 +1209,68 @@ fn subtype_edit_on_the_fast_path_clears_an_invalid_format() {
         .file_value(LEAF, "format")
         .is_some());
 }
+
+/// The bulk BC7 weighting row's reach of (Linear, Perceptual) over the diffuse and the normal, checked against what
+/// the planner's write reaches.
+fn weighting_reach(m: &AppModel) -> (usize, usize) {
+    use sdc_gui::model::bulk::{bulk_fields, plan_bulk_edit, BulkOp, Change};
+    use sdc_gui::model::fields::WEIGHTING;
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let keys = vec![ROCK.to_string(), NORMAL.to_string()];
+    let row = bulk_fields(m, &keys)
+        .into_iter()
+        .find(|r| r.field == WEIGHTING)
+        .unwrap();
+    for (label, v, k) in &row.option_reach {
+        let writes = plan_bulk_edit(m, &keys, WEIGHTING, &BulkOp::Set(v.clone()))
+            .iter()
+            .filter(|(_, c)| *c == Change::Write)
+            .count();
+        assert_eq!(*k, writes, "{label}");
+    }
+    let of = |name: &str| row.option_reach.iter().find(|o| o.0 == name).unwrap().2;
+    (of("Linear"), of("Perceptual"))
+}
+
+/// E14 and the fast re-plan's rule (CODING_STANDARDS B3b): the bulk rows' per-option reach is right after a partial
+/// plan on its own and after the full plan on its own. Data alpha on the diffuse bars Perceptual there (colour maps
+/// without data alpha only), so Perceptual reaches no texture and Linear still reaches both.
+#[test]
+fn the_bulk_reach_follows_the_partial_plan_and_the_full_plan_each_alone() {
+    for partial_first in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        decide_all(&mut m);
+        assert_eq!(weighting_reach(&m), (2, 1));
+        m.hold_plan_results = true;
+        m.edit_docs("Data alpha", None, true, |p, _| {
+            p.set_file_value(ROCK, "alpha.policy", &json!("data"));
+        });
+        let (partials, full) = collect(&mut m, 1, 1);
+        if partial_first {
+            deliver(&mut m, partials);
+            assert_eq!(weighting_reach(&m), (2, 0), "after the partial plan alone");
+            finish(&mut m, full);
+        } else {
+            // The full plan lands without the partial applied; the stale partial arrives behind it.
+            deliver(&mut m, full);
+            // Under load the edit can start a second full plan (the first lands stale): deliver full plans until one
+            // lands, never a partial.
+            let end = Instant::now() + Duration::from_secs(60);
+            while weighting_reach(&m) != (2, 0) {
+                assert!(Instant::now() < end, "no full plan landed the edit");
+                m.poll();
+                let more: Vec<_> = m
+                    .take_held()
+                    .into_iter()
+                    .filter(|x| !is_partial(x))
+                    .collect();
+                deliver(&mut m, more);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(weighting_reach(&m), (2, 0), "after the full plan alone");
+            finish(&mut m, partials);
+        }
+        assert_eq!(weighting_reach(&m), (2, 0), "settled");
+    }
+}

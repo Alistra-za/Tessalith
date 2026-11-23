@@ -543,7 +543,7 @@ pub fn card_warnings(m: &AppModel, v: &SetView, ts: &[CmTarget]) -> Vec<String> 
         let n = &t.name;
         if env_written(m, &t.key) {
             out.push(format!(
-                "{n} is written as an env mask without alpha, so PGPatcher ignores the JSON. Set its sub-type to \
+                "{n} is written as an env mask without alpha, so PGPatcher ignores the JSON. Set its type to \
                  complex material."
             ));
         } else {

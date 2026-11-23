@@ -14,7 +14,7 @@ use support::*;
 const KEY: &str = "landscape/rock01.png";
 
 const COMBOS: [&str; 17] = [
-    "Sub-type",
+    "Texture type",
     "Input content",
     "DDS tag",
     "Alpha",
@@ -91,6 +91,68 @@ fn controls(h: &Harness<'static, AppModel>, area: Rect) -> Vec<(&'static str, Re
     v
 }
 
+fn open_combo(h: &mut Harness<'static, AppModel>, name: &str) {
+    let c = centre(h);
+    let at = control(h, Role::ComboBox, name, c);
+    h.query_all(by().role(Role::ComboBox).label(name))
+        .find(|n| n.rect() == at)
+        .unwrap()
+        .click();
+    h.run();
+}
+
+#[test]
+fn the_tag_and_normal_entries_read_plainly() {
+    use sdc_gui::model::labels::{RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(model(d.path()), 1280.0);
+    instant_tips(&h.ctx); // the file's harness keeps egui's tooltip delay
+    open_combo(&mut h, "DDS tag");
+    let entry = h
+        .query_all_by_label_contains(UNORM_LABEL)
+        .next()
+        .expect("the UNORM entry");
+    entry.hover();
+    h.run();
+    assert!(h.query_by_label(UNORM_HOVER).is_some());
+    assert!(h.query_by_label_contains("UNORM (linear)").is_none());
+    // a PBR normal shows Normal handling
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01_normal.png");
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    let closed = control(&h, Role::ComboBox, "Normal handling", centre(&h));
+    open_combo(&mut h, "Normal handling");
+    // The set may already have chosen the bake, so the label can also be the combo's shown text: the popup's entry
+    // is the match that is not the closed combo.
+    h.query_all_by_label(RENORM_BAKE_LABEL)
+        .find(|n| n.rect() != closed)
+        .expect("the popup's entry")
+        .hover();
+    h.run();
+    assert!(h.query_by_label(RENORM_BAKE_HOVER).is_some());
+}
+
+#[test]
+fn the_variance_bake_provenance_explains_itself() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01_normal.png");
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    h.run();
+    let c = centre(&h);
+    h.query_all(by().role(Role::ComboBox).label("Normal handling"))
+        .find(|n| c.contains_rect(n.rect()))
+        .expect("normal handling on this normal")
+        .hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains(sdc_gui::model::labels::VARIANCE_BAKE_HOVER)
+        .is_some());
+}
+
 #[test]
 fn every_control_starts_at_the_same_x() {
     let d = tempfile::tempdir().unwrap();
@@ -100,7 +162,7 @@ fn every_control_starts_at_the_same_x() {
     for (n, r) in &all {
         assert!(
             (r.min.x - x).abs() <= 1.0,
-            "{n} starts at {}, Sub-type at {x}",
+            "{n} starts at {}, Type at {x}",
             r.min.x
         );
     }
@@ -112,20 +174,17 @@ fn the_helper_tick_sits_under_sub_type() {
     let d = tempfile::tempdir().unwrap();
     let h = harness(model(d.path()), 1280.0);
     let c = centre(&h);
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
-    assert!(
-        tick.min.y >= sub.max.y,
-        "tick {tick:?} below Sub-type {sub:?}"
-    );
+    assert!(tick.min.y >= sub.max.y, "tick {tick:?} below Type {sub:?}");
     // The next row: nothing else of the Type group between them.
     assert!(
         tick.min.y - sub.max.y < 2.0 * sub.height(),
-        "tick {tick:?} right under Sub-type {sub:?}"
+        "tick {tick:?} right under Type {sub:?}"
     );
 }
 
@@ -223,7 +282,7 @@ fn rows_stay_inside_the_column_at_1100() {
             let width = *combo_width.get_or_insert(r.width());
             assert!(
                 (r.width() - width).abs() <= 1.0,
-                "{n} is {} wide, Sub-type {width}",
+                "{n} is {} wide, Type {width}",
                 r.width()
             );
         }
@@ -513,8 +572,7 @@ fn alpha_row_shows_the_proposal() {
 #[test]
 fn a_linked_control_keeps_its_label_under_a_hover() {
     const NORMAL: &str = "landscape/rock01_normal.png";
-    const HOVER: &str =
-        "Renormalise and bake also bakes this set's complex _m gloss (anti-shimmer)";
+    const HOVER: &str = sdc_gui::model::labels::RENORM_BAKE_HOVER;
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
@@ -528,7 +586,7 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
     h.hover_at(combo.center());
     h.run();
     assert!(
-        h.query_all_by_label_contains("anti-shimmer")
+        h.query_all_by_label_contains("smaller mips of the _m green channel")
             .next()
             .is_some()
             || h.query_all_by_value(HOVER).next().is_some(),
@@ -543,12 +601,108 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
     let named_by_hover: Vec<String> = h
         .query_all_by_role(Role::ComboBox)
         .filter_map(|n| n.accesskit_node().label())
-        .filter(|l| l.contains("anti-shimmer"))
+        .filter(|l| l.contains("_m green channel"))
         .collect();
     assert!(
         named_by_hover.is_empty(),
         "no combo is named by the hover: {named_by_hover:?}"
     );
+}
+
+/// The explicit choice of the bake on a plain normal in a complex material set says what it does to the _m gloss, and
+/// the active bake also says what it does to the average length of the smaller mips (Table B).
+#[test]
+fn the_explicit_bake_on_a_complex_material_normal_explains_itself() {
+    use sdc_gui::model::labels::VARIANCE_BAKE_HOVER;
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize_bake"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    instant_tips(&h.ctx);
+    h.run();
+    let c = centre(&h);
+    let at = control(&h, Role::ComboBox, "Normal handling", c);
+    h.hover_at(at.center());
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("smaller mips of the _m green channel")
+            .next()
+            .is_some(),
+        "the gloss sentence"
+    );
+    // The active bake adds the variance line: preserved average length and unit bake directions.
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_some());
+}
+
+/// The bake and variance explanations belong to the active bake only: not to a CM normal that has not chosen it, not
+/// to a normal kept as authored under the plain renormalise, and not to another field of a set-decided normal.
+#[test]
+fn the_bake_hover_shows_only_for_the_active_bake() {
+    use sdc_gui::model::labels::{RENORM_BAKE_HOVER, VARIANCE_BAKE_HOVER};
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    let hovered = |h: &mut Harness<'static, AppModel>, name: &str| {
+        let c = centre(h);
+        let at = control(h, Role::ComboBox, name, c);
+        h.hover_at(at.center());
+        h.run();
+    };
+    // A complex material normal that has not chosen the bake: the opt-in hover, never the variance line.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    instant_tips(&h.ctx);
+    h.run();
+    hovered(&mut h, "Normal handling");
+    assert!(h.query_by_label_contains(RENORM_BAKE_HOVER).is_some());
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_none());
+    // Keep as authored under the plain renormalise in the same set: no bake, so no variance line. The opt-in hover
+    // shows on the combo (the anchor that a tooltip appeared).
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.set_field(NORMAL, "mips.normal", serde_json::json!("renormalize"));
+    m.set_field(NORMAL, "mips.normal_base", serde_json::json!("keep"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    instant_tips(&h.ctx);
+    h.run();
+    hovered(&mut h, "Normal handling");
+    assert!(h.query_by_label_contains(RENORM_BAKE_HOVER).is_some());
+    assert!(h.query_by_label_contains(VARIANCE_BAKE_HOVER).is_none());
+    // A normal whose bake the set chose ("set" provenance on Normal handling; the engine gives no other field that
+    // provenance, `bake/plan.rs` inserts it for `mips.normal` only): its other rows carry neither explanation. The
+    // "?" of Normal base level is the anchor that tooltips show in this harness.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1280.0);
+    instant_tips(&h.ctx);
+    h.run();
+    h.get_by_role_and_label(Role::Label, "Help: Normal base level")
+        .hover();
+    h.run();
+    assert!(h
+        .query_by_label_contains("Renormalise to unit length is the default")
+        .is_some());
+    hovered(&mut h, "Normal base level");
+    assert!(h.query_by_label_contains("average length").is_none());
+    assert!(h.query_by_label_contains("unit directions").is_none());
 }
 
 /// Note HI14: the proposal is display only.
@@ -597,7 +751,7 @@ fn the_sub_type_question_lines_up_too() {
         .map(|n| n.rect())
         .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
         .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the sub-type question's combo");
+        .expect("the type question's combo");
     let row = control(&h, Role::ComboBox, "Alpha", c);
     assert!(
         (combo.min.x - row.min.x).abs() <= 1.0,
@@ -901,7 +1055,7 @@ fn picking_a_format_keeps_the_tag() {
             (st, srgb)
         })
         .find(|(_, s)| s.len() >= 2)
-        .expect("a sub-type with two sRGB formats");
+        .expect("a type with two sRGB formats");
     let d = tempfile::tempdir().unwrap();
     let mut m = model(d.path());
     m.decide(KEY, Answer::Subtype(st));
@@ -994,10 +1148,10 @@ fn question_marks_line_up() {
         );
     }
     // At the end of the label column: left of every control.
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     assert!(
         x <= sub.min.x,
-        "the marks end at {x}, past Sub-type at {}",
+        "the marks end at {x}, past Type at {}",
         sub.min.x
     );
 }
@@ -1125,7 +1279,7 @@ fn the_sub_type_question_has_the_rows_width() {
         .map(|n| n.rect())
         .filter(|r| r.min.y >= q.max.y && c.contains(r.center()))
         .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
-        .expect("the sub-type question's combo");
+        .expect("the type question's combo");
     let row = control(&h, Role::ComboBox, "Alpha", c);
     assert!(
         (combo.width() - row.width()).abs() <= 1.0,
@@ -1144,11 +1298,11 @@ fn a_no_set_image_has_the_helper_tick() {
     m.select_item(LEAF);
     let mut h = harness(m, 1280.0);
     let c = centre(&h);
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
     h.get_by_role_and_label(Role::CheckBox, "Helper").click();
     h.run();
@@ -1163,16 +1317,13 @@ fn the_helper_tick_at_1100_stays_in_the_control_column() {
     let c = centre(&h);
     let edge = h.ctx.content_rect().right() - 8.0;
     assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
-    let sub = control(&h, Role::ComboBox, "Sub-type", c);
+    let sub = control(&h, Role::ComboBox, "Texture type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(
         (tick.min.x - sub.min.x).abs() <= 1.0,
-        "tick {tick:?}, Sub-type {sub:?}"
+        "tick {tick:?}, Type {sub:?}"
     );
-    assert!(
-        tick.min.y >= sub.max.y,
-        "tick {tick:?} below Sub-type {sub:?}"
-    );
+    assert!(tick.min.y >= sub.max.y, "tick {tick:?} below Type {sub:?}");
     assert!(tick.max.x <= c.max.x, "tick {tick:?} past the centre {c:?}");
 }
 
