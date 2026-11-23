@@ -697,3 +697,250 @@ fn a_header_drawn_before_disabled_rows_toggles() {
     h.run();
     assert!(!*h.state(), "the header still toggles");
 }
+
+// Task 3: group summaries and the changed mark.
+
+use engine::config::{ColorTag, Format, Target};
+use sdc_gui::model::fields::FieldView;
+use sdc_gui::model::panel_groups::{panel_views, summary, GroupSummary, SummaryExtra};
+use sdc_gui::model::{Answer, AppModel};
+use serde_json::json;
+use std::time::Duration;
+
+const KEY: &str = "landscape/rock01.png";
+const CUBE: &str = "a/chrome.png";
+const E: SummaryExtra = SummaryExtra { channels: None };
+
+/// The fixture's rock01 decided as a CS diffuse (BC7) and selected: `texture_panel_layout.rs::model`, copied.
+fn rock(dir: &std::path::Path) -> AppModel {
+    let mut m = support::opened(dir);
+    m.set_target(Target::Cs);
+    m.decide(KEY, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(KEY);
+    m
+}
+
+/// `cubemap_gui.rs::cube_model`, copied: a 6:1 strip decided as Cubemap and a flat 2D texture, with `selected` open.
+fn cube_model(d: &std::path::Path, selected: &str) -> AppModel {
+    let r = d.join("textures/a");
+    std::fs::create_dir_all(&r).unwrap();
+    image::RgbImage::from_fn(384, 64, |x, _| image::Rgb([(x % 256) as u8, 9, 9]))
+        .save(r.join("chrome.png"))
+        .unwrap();
+    image::RgbImage::from_fn(64, 64, |x, y| image::Rgb([x as u8, y as u8, 90]))
+        .save(r.join("flat.png"))
+        .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(d.join("export")),
+        ..sdc_gui::settings::GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, support::session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.join("textures"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    support::choose_export(&mut m, d.join("export"));
+    m.decide(CUBE, Answer::Subtype(engine::config::Subtype::Cubemap));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(selected);
+    m
+}
+
+fn job<'a>(m: &'a AppModel, k: &str) -> &'a engine::policy::ResolvedJob {
+    m.item(k).and_then(|i| i.job.as_ref()).expect("a job")
+}
+
+fn views(m: &AppModel) -> Vec<FieldView> {
+    panel_views(m.target, job(m, KEY))
+}
+
+fn set(m: &mut AppModel, writes: &[(&str, serde_json::Value)]) {
+    for (field, value) in writes {
+        m.set_field(KEY, field, value.clone());
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+fn sum(m: &AppModel, g: PanelGroup) -> GroupSummary {
+    summary(g, &views(m), Target::Cs, &job(m, KEY).profile, &E)
+}
+
+#[test]
+fn summaries_read_like_the_table() {
+    use PanelGroup::*;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    set(&mut m, &[("mips.filter", json!("kaiser"))]);
+    assert_eq!(sum(&m, Mipmaps).text, "Kaiser, full chain");
+    // rock01 is 64x64 (support/mod.rs:113-118): 7 levels, so 4 is offered.
+    set(
+        &mut m,
+        &[("mips.filter", json!("box")), ("mips.levels", json!(4))],
+    );
+    assert_eq!(sum(&m, Mipmaps).text, "Box, 4 levels");
+    set(&mut m, &[("mips.levels", json!("none"))]);
+    assert_eq!(sum(&m, Mipmaps).text, "None (base level only)");
+    set(
+        &mut m,
+        &[
+            ("alpha.policy", json!("cutout")),
+            ("alpha.threshold", json!(128)),
+        ],
+    );
+    assert_eq!(sum(&m, Alpha).text, "Cutout at 128");
+    set(
+        &mut m,
+        &[("resize", json!("half")), ("resize_floor", json!(512))],
+    );
+    assert_eq!(sum(&m, Size).text, "Half, floor 512 px");
+    set(&mut m, &[("resize_relative_to", json!("slot8"))]);
+    assert!(
+        sum(&m, Size).text.starts_with("Half of Slot 8 · "),
+        "Relative to reads its slot label: {}",
+        sum(&m, Size).text
+    );
+    // The brief writes `color.tag = srgb` here, but under cs a plain Diffuse blocks _SRGB (TAG-SRGB-NONPBR), so
+    // `format_write_ok` refuses the write: the diffuse keeps its UNORM tag, and the _SRGB case is the next test's.
+    set(&mut m, &[("encoder.effort", json!("veryslow"))]);
+    assert_eq!(
+        sum(&m, Compression).text,
+        "UNORM (as stored), Effort Very slow"
+    );
+    assert_eq!(sum(&m, Sources).text, "How each value was chosen");
+}
+
+#[test]
+fn a_pbr_colour_reads_its_srgb_tag() {
+    // PBR colour is _SRGB under cs (UNORM is blocked there), so the tag reads "_SRGB".
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    m.decide(KEY, Answer::Subtype(engine::config::Subtype::PbrAlbedo));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    set(&mut m, &[("encoder.effort", json!("veryslow"))]);
+    assert_eq!(
+        sum(&m, PanelGroup::Compression).text,
+        "_SRGB, Effort Very slow"
+    );
+}
+
+#[test]
+fn a_locked_part_is_left_out() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    // The brief's `set_field("format", "bc6h_uf16")` pairs BC6H with the diffuse's UNORM tag, which `format_write_ok`
+    // refuses (Note JG2), so the pair goes in through `set_format`: color.tag locked, "BC6H has no _SRGB form".
+    m.set_format(KEY, Format::Bc6hUf16, ColorTag::NotApplicable);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let text = sum(&m, PanelGroup::Compression).text;
+    assert!(text.starts_with("Effort "), "{text}");
+}
+
+#[test]
+fn a_colour_texture_has_its_normal_map_group_not_used() {
+    let d = tempfile::tempdir().unwrap();
+    let m = rock(d.path());
+    let s = sum(&m, PanelGroup::NormalMap);
+    assert!(s.all_locked);
+    assert_eq!(s.text, "not used for this texture");
+    // Baked in is left out by hidden_reason; the other two rows share "normal maps only".
+    assert_eq!(
+        s.hover.as_deref(),
+        Some("Every row here: normal maps only.")
+    );
+}
+
+#[test]
+fn rows_with_different_reasons_point_at_the_rows() {
+    // The rule alone, on two views built by hand: no fixture locks every row of one group with two reasons today.
+    let v = |field, lock| FieldView {
+        field,
+        label: "x",
+        value: json!(null),
+        provenance: "builtin".into(),
+        edited: false,
+        lock: Some(lock),
+    };
+    let views = [
+        v("mips.normal", "normal maps only"),
+        v("mips.normal_base", "another reason"),
+    ];
+    let d = tempfile::tempdir().unwrap();
+    let m = rock(d.path());
+    let s = summary(
+        PanelGroup::NormalMap,
+        &views,
+        Target::Cs,
+        &job(&m, KEY).profile,
+        &E,
+    );
+    assert!(s.all_locked);
+    assert_eq!(
+        s.hover.as_deref(),
+        Some("Each row below says why it is not used.")
+    );
+}
+
+#[test]
+fn a_pending_plan_does_not_lock_a_group() {
+    // The panel's edit_off is `fix_off()`, "Wait for the plan to finish" while a plan is in flight. It lives in Ctx, not
+    // in FieldView.lock, so views and summary are unchanged.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    let before = sum(&m, PanelGroup::Mipmaps);
+    m.replan();
+    assert_eq!(m.fix_off().as_deref(), Some("Wait for the plan to finish"));
+    let after = sum(&m, PanelGroup::Mipmaps);
+    assert_eq!(
+        (before.text, before.all_locked),
+        (after.text, after.all_locked)
+    );
+}
+
+#[test]
+fn a_cube_map_size_says_it_has_no_effect() {
+    let d = tempfile::tempdir().unwrap();
+    let m = cube_model(d.path(), CUBE);
+    let j = job(&m, CUBE);
+    let s = summary(
+        PanelGroup::Size,
+        &panel_views(m.target, j),
+        m.target,
+        &j.profile,
+        &E,
+    );
+    assert_eq!(s.text, "no effect on a cubemap: Face size sizes it");
+}
+
+#[test]
+fn changed_covers_every_row_source() {
+    use PanelGroup::*;
+    for (writes, g) in [
+        (vec![("resize", json!("half"))], Size),
+        (vec![("mips.filter", json!("box"))], Mipmaps), // filter_view
+        (vec![("mips.edge", json!("clamp"))], Mipmaps), // edge_view
+        (vec![("mips.levels", json!(4))], Mipmaps),     // levels_view
+        // By name: WEIGHTING_OPTIONS[1] is "perceptual", a value of encoder.perceptual, not of encoder.bc7_weights.
+        (vec![("encoder.bc7_weights", json!("alpha4"))], Compression), // weighting_view
+        // "bc3" (lowercase serde name); Bc1Search is only default or fast (engine config.rs:172).
+        (
+            vec![
+                ("format", json!("bc3")),
+                ("encoder.bc1_search", json!("fast")),
+            ],
+            Compression,
+        ), // effort_view, BC3 search
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = rock(d.path());
+        assert!(!sum(&m, g).changed, "{writes:?} before");
+        set(&mut m, &writes);
+        assert!(sum(&m, g).changed, "{writes:?}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    m.set_field(CUBE, "cubemap.yaw", json!(90.0));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let j = job(&m, CUBE);
+    let s = summary(Cubemap, &panel_views(m.target, j), m.target, &j.profile, &E);
+    assert!(s.changed);
+}

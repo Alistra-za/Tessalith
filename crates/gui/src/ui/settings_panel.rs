@@ -267,7 +267,7 @@ pub fn alpha_hint(policy: AlphaPolicy) -> &'static str {
 }
 
 /// Options for the fields that pick from a list; `None` for the checkboxes and the slider.
-pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
+pub(crate) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
     Some(match field {
         "subtype" => subtype_groups(|s| s == p.subtype || offered(target, s))
             .into_iter()
@@ -442,6 +442,20 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         ],
         _ => return None,
     })
+}
+
+/// The label `options_of` gives `value` for `field`, or `None` for a field with no list or a value not in it. It builds
+/// the whole list, so a caller runs it only when its inputs change (the panel's summary cache), never per frame.
+pub(crate) fn option_label(
+    field: &str,
+    target: Target,
+    p: &Profile,
+    value: &Value,
+) -> Option<String> {
+    options_of(field, target, p)?
+        .into_iter()
+        .find(|(v, _)| v == value)
+        .map(|(_, label)| label)
 }
 
 /// Note JI4, Note LI: Fast and Default, then (with `slow`) Slowest and Max, the search fields' choices in that order.
