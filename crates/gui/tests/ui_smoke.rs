@@ -856,6 +856,8 @@ fn the_settings_strip_is_compact() {
     let mut model = opened(d.path());
     model.expand("landscape/rock01_rmaos");
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    // The groups start closed (Note LQ5): open them, so the absences below are the strip's filter, not a closed group.
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     // At 1280×800 the settings start open (Note FC8, supersedes CE16's strip there).
