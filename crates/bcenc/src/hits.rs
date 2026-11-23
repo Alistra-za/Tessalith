@@ -29,6 +29,9 @@ hits! {
     // Best::try_pair
     PairEarlyOut,
     PairImproved,
+    // bc4 Batch::push: the lower bound's verdict on a pair
+    BoundSkip,
+    BoundPass,
     // v0
     V0Solid,
     V0EqualEnds,
