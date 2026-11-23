@@ -14,14 +14,14 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Modified for Tessalith (sdc patch 0001, 2026-10-31, patches/0001-bc6h-peak-mode.patch): BC6H peak-preserving mode,
 // on when a bc6h_enc_settings has both slow_mode and fast_mode set (no upstream profile does). Every upstream
-// profile encodes as before. Changes are marked "sdc patch 0001".
+// profile encoded as before (until patch 0004). Changes are marked "sdc patch 0001".
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Modified for Tessalith (sdc patch 0003, 2026-11-14, patches/0003-bc6h-only.patch): with SDC_BC6H_ONLY defined, only
 // the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
 // marked "sdc patch 0003". Without the define the file compiles as before.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by
-// an audit. Changes are marked "sdc patch 0004". They change BC6H bytes.
+// an audit. Changes are marked "sdc patch 0004". #5, #1, #3 and #2 change BC6H bytes; #6 and #7 do not.
 // #6 bc6h_bounds' rgb_span holds three floats.
 // #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
 // #5 get_span returns the float span (it truncated through an int).
