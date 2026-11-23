@@ -16,7 +16,7 @@ pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The newest released engine version. The release commit sets it to [`ENGINE_VERSION`]; the encode-version guard
 /// accepts a changed hash only for an arm bumped in the current, unreleased cycle.
-pub const RELEASED_ENGINE_VERSION: &str = "3.0.0";
+pub const RELEASED_ENGINE_VERSION: &str = "3.1.0";
 
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
@@ -607,9 +607,9 @@ mod tests {
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
-            // 3.0.1 changes kept normal lengths, XY bases and the angular variance bake (LA).
+            // 3.1.0 changes kept normal lengths, XY bases and the angular variance bake (LA).
             // SkinWet stays at 3.0.0 because every writable format stores XYZ.
-            // 3.0.1 also changes BC6H bytes (ISPC TC patch 0004, Note LO).
+            // 3.1.0 also changes BC6H bytes (ISPC TC patch 0004, Note LO).
             let want = if matches!(
                 st,
                 Subtype::Diffuse

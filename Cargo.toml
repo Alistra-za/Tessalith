@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp", "crates/texcore", "crates/bcenc"]
 
 [workspace.package]
-version = "3.0.1"
+version = "3.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 publish = false

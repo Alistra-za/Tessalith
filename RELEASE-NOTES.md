@@ -1,4 +1,4 @@
-## Unreleased
+## 3.1.0
 
 - BC1, BC3, BC4 and BC5 encode more than four times as fast, with the same files byte for byte: 300 textures as BC1 take about 14 seconds where 3.0.0 took over a minute.
 - BC7 and BC6H encode about 1.5 times as fast on CPUs with AVX-512. Their bytes differ a little from an AVX2 CPU's, at the same quality. On CPUs without AVX2 they are slower than before.
