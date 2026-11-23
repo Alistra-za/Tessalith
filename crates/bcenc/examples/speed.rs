@@ -23,7 +23,7 @@
 //! `--no-ref`); rgbcx goes first in even runs and `bcenc` in odd ones, so neither always meets the colder caches. With
 //! no PNG the blocks are `gen::colour_classes(1, 200)`, so the example runs without owner data.
 //!
-//! One line per row run on stdout: `format  cpp_med_us  rust_med_us  rust/cpp  same_bytes`. The two times are the
+//! Without `--no-ref`, one line per row run on stdout: `format  cpp_med_us  rust_med_us  rust/cpp  same_bytes`. The two times are the
 //! median (of an even count, the upper middle one) over the runs of one whole pass over all blocks, in
 //! microseconds. `same_bytes` compares a 64-bit FNV-1a
 //! hash over every output block of the first pass of each encoder (`yes` or `NO`). The process exits with status 1
