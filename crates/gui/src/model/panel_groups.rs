@@ -295,6 +295,12 @@ pub fn is_panel_problem(p: &Problem) -> bool {
 
 /// The panel field a problem code is about, `(code, field)`: the row a problem's group opens on. A code Plan 3a classes
 /// as a Note is not here (it never opens a group), and SET-BAKE-RATIO is never raised (Note HD2).
+///
+/// Every field here is drawn by a row that follows `settings_panel::focus_if` (`field_row`, the Filter row, the Levels
+/// row, the cube rows), and Go to focuses it. Where no control can take the focus the group still opens: a locked or
+/// disabled row (a plan pending) and `cubemap.layout` of a six-file cube (a plain label, "Six face files") scroll into
+/// view and take the request with nothing focused; a row the panel leaves out (`fields::hidden_reason`, for example
+/// `alpha.exact_opaque` outside `_msn`) has nothing to scroll to, and the request expires after `REVEAL_FIELD_PASSES`.
 pub const FIX_FIELDS: &[(&str, &str)] = &[
     ("LOSS-ALPHA-DATA", "format"),
     ("FMT-BC1-ALPHA", "format"),

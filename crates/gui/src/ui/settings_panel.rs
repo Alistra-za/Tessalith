@@ -1139,18 +1139,28 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<A
 }
 
 /// A Go to waiting for `field` (only the centre's `Ctx` holds one): focus its control, scroll it to the middle and tell
-/// the model it was taken. A `Option` test and one `&str` compare per row per frame.
+/// the model it was taken. An `Option` test and one `&str` compare per row per frame.
 pub(super) fn take_field_focus(
     cx: &Ctx,
     field: &str,
     r: &egui::Response,
     actions: &mut Vec<Action>,
 ) {
-    if cx.reveal.is_some_and(|q| q.field == field) {
-        r.request_focus();
-        r.scroll_to_me(Some(egui::Align::Center));
+    if focus_if(cx.reveal, field, r) {
         actions.push(Action::RevealTaken);
     }
+}
+
+/// The one rule every row that can be a `FIX_FIELDS` target follows (the field rows, the Filter row, the cube rows):
+/// when the waiting Go to names `field`, focus `r` (a disabled control keeps no focus; the group is open and the row
+/// scrolled to all the same) and scroll it to the middle. True when the request was for this row, so it is taken.
+pub(super) fn focus_if(reveal: Option<&RevealField>, field: &str, r: &egui::Response) -> bool {
+    let hit = reveal.is_some_and(|q| q.field == field);
+    if hit {
+        r.request_focus();
+        r.scroll_to_me(Some(egui::Align::Center));
+    }
+    hit
 }
 
 /// A row's hint, cut to the room left with the whole text on one tooltip (Note FI12, rule 3.4).

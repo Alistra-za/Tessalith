@@ -2445,6 +2445,25 @@ fn a_new_selection_drops_a_waiting_reveal() {
 #[test]
 fn go_to_another_texture_wins_over_the_scroll_reset() {
     // JO8: the reset to the top and the reveal's scroll land on one frame, and the reveal wins.
+    const HEIGHT: f32 = 500.0;
+    // The premise of the conflict: with the cube's panel at the top, Levels is below the centre's bottom edge, so only
+    // the reveal's scroll can bring it in.
+    {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, key) = cube_without_mips(d.path());
+        for g in PanelGroup::ALL {
+            panel_groups::set_open(&mut m.settings, g, true);
+        }
+        m.select_item(&key);
+        m.open_problems(None);
+        let h = harness(m, 1280.0, HEIGHT);
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        let levels = h.get_by_role_and_label(Role::ComboBox, "Levels");
+        assert!(
+            levels.rect().max.y > centre.max.y,
+            "premise: Levels is below the centre at the top of the panel"
+        );
+    }
     let d = tempfile::tempdir().unwrap();
     let (mut m, key) = cube_without_mips(d.path());
     for g in PanelGroup::ALL {
@@ -2454,7 +2473,7 @@ fn go_to_another_texture_wins_over_the_scroll_reset() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.select_item(FLAT);
     m.open_problems(None);
-    let mut h = harness(m, 1280.0, 800.0);
+    let mut h = harness(m, 1280.0, HEIGHT);
     h.run();
     let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
     h.hover_at(centre.center());
@@ -2501,6 +2520,84 @@ fn go_to_keeps_its_latch_through_the_next_selection_check() {
     m.go_to_field(&key, "mips.levels", 0);
     m.observe_panel_selection();
     assert!(m.panel_forced.groups.contains(&PanelGroup::Mipmaps));
+}
+
+/// Ask the panel for `field` of the selected cube the way the Problems handler does, and let it draw.
+fn go_to_in_the_panel(h: &mut Harness<'static, AppModel>, key: &str, field: &'static str) {
+    let pass = h.ctx.cumulative_pass_nr();
+    h.state_mut().go_to_field(key, field, pass);
+    h.run_steps(3);
+}
+
+#[test]
+fn go_to_the_filter_row_focuses_it_and_takes_the_request() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, key) = cube_without_mips(d.path());
+    let mut h = harness(m, 1280.0, 800.0);
+    go_to_in_the_panel(&mut h, &key, "mips.filter");
+    assert!(h
+        .get_by_role_and_label(Role::ComboBox, "Filter")
+        .is_focused());
+    assert!(h.state().nav.reveal_field.is_none(), "taken once");
+}
+
+#[test]
+fn go_to_a_cube_row_focuses_it_and_takes_the_request() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, key) = cube_without_mips(d.path());
+    let mut h = harness(m, 1280.0, 800.0);
+    go_to_in_the_panel(&mut h, &key, "cubemap.layout");
+    assert!(h
+        .get_by_role_and_label(Role::ComboBox, "Cubemap layout")
+        .is_focused());
+    assert!(
+        h.state().nav.reveal_field.is_none(),
+        "taken, or it would pull the focus back for {REVEAL_FIELD_PASSES} passes"
+    );
+}
+
+#[test]
+fn go_to_a_field_the_panel_leaves_out_opens_the_group_and_expires() {
+    // The table's stated limit (`FIX_FIELDS`): a row `hidden_reason` leaves out has no control to focus. The group
+    // still opens, nothing is focused, and the request is dropped by the ageing.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Alpha, false);
+    let mut h = harness(m, 1280.0, 800.0);
+    go_to_in_the_panel(&mut h, KEY, "alpha.parallax"); // Enable parallax: complex material only
+    assert!(
+        h.query_by_label_contains("Alpha, expanded").is_some(),
+        "the group opened"
+    );
+    assert!(
+        h.state().nav.reveal_field.is_some(),
+        "premise: no row drew the field, so none took it"
+    );
+    let pass = h.ctx.cumulative_pass_nr();
+    while h.ctx.cumulative_pass_nr() <= pass + REVEAL_FIELD_PASSES + 1 {
+        h.step();
+    }
+    assert!(h.state().nav.reveal_field.is_none(), "expired");
+}
+
+#[test]
+fn the_latch_fill_after_go_to_adds_to_its_group() {
+    // The fill (`filled: false` after a Go to on another item) unions the problems' groups with the group Go to wrote.
+    // The rock has no problem on Size, so only Go to can keep it open.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
+    m.select_item("landscape/leaf.png");
+    m.select_item(KEY);
+    m.go_to_field(KEY, "resize", 0);
+    assert!(!m.panel_forced.filled, "premise: the fill is still to come");
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run_steps(3);
+    assert!(h.state().panel_forced.filled, "the fill ran");
+    assert!(
+        h.query_by_label_contains("Size, expanded").is_some(),
+        "Go to's group survived the fill"
+    );
 }
 
 #[test]

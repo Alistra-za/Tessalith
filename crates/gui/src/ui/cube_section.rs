@@ -190,9 +190,7 @@ impl Cx<'_> {
         });
         let (mut edit, r) = scope.inner;
         // A waiting Go to for this field (the centre only): focus the control, scroll it to the middle, report it taken.
-        if self.reveal.is_some_and(|q| q.field == f.field) {
-            r.request_focus();
-            r.scroll_to_me(Some(egui::Align::Center));
+        if super::settings_panel::focus_if(self.reveal, f.field, &r) {
             self.taken.set(true);
         }
         if let Some(why) = f.lock.map(str::to_string).or(self.ro.clone()) {
