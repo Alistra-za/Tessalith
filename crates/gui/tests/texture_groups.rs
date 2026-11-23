@@ -3579,7 +3579,8 @@ fn e22_control_kinds_report() {
         }),
     ];
     for (name, make) in cases {
-        for open in [false, true] {
+        // Open: tall windows, so no row scrolls out of the centre; the same count at two heights shows it is exact.
+        for (open, height) in [(false, 800.0), (true, 2400.0), (true, 4800.0)] {
             let d = tempfile::tempdir().unwrap();
             let mut m = make(d.path());
             if open {
@@ -3587,12 +3588,14 @@ fn e22_control_kinds_report() {
             } else {
                 m = all_closed(m);
             }
-            // Open: a tall window, so no row scrolls out of the centre and the count is the whole panel.
-            let mut h = harness(m, 1280.0, if open { 2400.0 } else { 800.0 });
+            let mut h = harness(m, 1280.0, height);
             h.run();
             let kinds = support::control_kinds(&h, sdc_gui::ui::centre_rect(&h.ctx).unwrap());
             let state = if open { "open" } else { "closed" };
-            eprintln!("{name} ({state}): {} control kinds: {kinds:?}", kinds.len());
+            eprintln!(
+                "{name} ({state}, {height} high): {} control kinds: {kinds:?}",
+                kinds.len()
+            );
         }
     }
 }
