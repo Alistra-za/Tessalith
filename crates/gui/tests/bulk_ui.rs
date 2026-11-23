@@ -461,8 +461,9 @@ fn the_bulk_panel_has_size_and_dds_header_rows() {
     let mut m = opened(d.path());
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
-    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
-                                 // Tall enough that the Size group is on screen.
+    // Groups default to closed; this test reads rows inside them.
+    open_texture_groups(&mut m);
+    // Tall enough that the Size group is on screen.
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
