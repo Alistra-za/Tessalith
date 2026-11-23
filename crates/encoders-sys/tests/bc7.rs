@@ -391,12 +391,10 @@ fn mode7_candidate(i: u32) -> ([[u8; 4]; 16], u16) {
 /// candidate's bytes do not depend on its neighbours in an ISPC gang), raw (no post-fix).
 fn mode7_solid_errors(ids: &[u32], p: Bc7Params, target: IspcTarget) -> Vec<u8> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk = ids.len().div_ceil(threads).max(1);
     let mut errs = vec![0u8; ids.len()];
     std::thread::scope(|sc| {
-        for (ids, errs) in ids
-            .chunks(ids.len().div_ceil(threads).max(1))
-            .zip(errs.chunks_mut(ids.len().div_ceil(threads).max(1)))
-        {
+        for (ids, errs) in ids.chunks(chunk).zip(errs.chunks_mut(chunk)) {
             sc.spawn(move || {
                 for (i, e) in ids.iter().zip(errs) {
                     let (block, mask) = mode7_candidate(*i);
@@ -422,25 +420,51 @@ fn mode7_solid_errors(ids: &[u32], p: Bc7Params, target: IspcTarget) -> Vec<u8> 
 /// `search_mode7_witnesses` (indices 0 to 56), kept where the fixed kernel passes (Note LR, LR7).
 const MODE7_WITNESSES: &[u32] = &[1, 4, 8, 23, 41, 48, 49];
 
-/// Patch 0005, Q1 and Q4: mode 7's one-colour candidate (`pack_mode7_to_one_color`) was scored by interpolating the
-/// 6-bit endpoint codes as if they were 8-bit values (Q1), so its error was wrong (far too high except near black) and
-/// a solid subset could lose to a worse fit; and its table kept the best pair found under earlier p-bits (Q4), so an
-/// entry could hold endpoints that decode off under its own p-bits. Each witness's solid subset now decodes within 3
-/// per channel at basic and veryslow on every path (Note LR, LR7).
-#[test]
-fn mode7_takes_its_solid_subset() {
+/// Every witness, level (basic and veryslow) and path whose solid texels decode more than 3 off in some channel.
+fn mode7_solid_failures(witnesses: &[u32]) -> Vec<String> {
     let mut bad = vec![];
     for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
         let p = Bc7Params { level, ..U5 };
         for target in paths() {
-            let errs = mode7_solid_errors(MODE7_WITNESSES, p, target);
-            for (i, e) in MODE7_WITNESSES.iter().zip(errs) {
+            let errs = mode7_solid_errors(witnesses, p, target);
+            for (i, e) in witnesses.iter().zip(errs) {
                 if e > 3 {
                     bad.push(format!("candidate {i} {level:?} {target:?}: {e}"));
                 }
             }
         }
     }
+    bad
+}
+
+/// Patch 0005, Q1 and Q4: mode 7's one-colour candidate (`pack_mode7_to_one_color`) was scored by interpolating the
+/// 6-bit endpoint codes as if they were 8-bit values (Q1), so its error was wrong (far too high except near black) and
+/// a solid subset could lose to a worse fit; and its table kept the best pair found under earlier p-bits (Q4), so an
+/// entry could hold endpoints that decode off under its own p-bits. Each witness's solid subset now decodes within 3
+/// per channel at basic and veryslow on every path. These witnesses pass with Q1 alone, so they guard Q1; Q4 has its
+/// own witnesses below (Note LR, LR7).
+#[test]
+fn mode7_takes_its_solid_subset() {
+    let bad = mode7_solid_failures(MODE7_WITNESSES);
+    assert!(
+        bad.is_empty(),
+        "solid texels decoded more than 3 off:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// The `mode7_candidate` indices whose solid texels decode more than 3 off at veryslow on the AVX2 path before patch
+/// 0005's Q1 and Q4 and with Q1 alone, and within 3 at basic and veryslow with both: the first 8 of the 6516 such
+/// indices below 2^20 (a scan on AVX2 of each kernel). With Q1 alone each also fails on every path, and with both each
+/// passes on every path (Note LR, LR7).
+const MODE7_Q4_WITNESSES: &[u32] = &[332, 442, 722, 891, 1008, 1135, 1220, 1307];
+
+/// Patch 0005, Q4: with Q1 in, mode 7's one-colour candidate wins more often, and a table entry holding a pair found
+/// under other p-bits decodes a solid subset more than 3 off. These witnesses fail with Q1 alone and pass with Q4 too,
+/// at basic and veryslow on every path (Note LR, LR7).
+#[test]
+fn mode7_table_keeps_each_p_bit_pairs_own_best() {
+    let bad = mode7_solid_failures(MODE7_Q4_WITNESSES);
     assert!(
         bad.is_empty(),
         "solid texels decoded more than 3 off:\n{}",
