@@ -799,7 +799,10 @@ impl<'a> JobIndex<'a> {
 
 /// `pick` for one set at plan time (spec §4): pass-1 `jobs` give the member sub-types (packing inputs excluded),
 /// `mesh` the scanned votes keyed by `mesh_key`, `gras` the GRAS slot-0 diffuses (`grass::path_key` keys), `cs_txst` whether the set has a texture-set block.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one set's plan-time pick inputs, each from a different owner: the resolve context, the set and its files, the pass-1 job index, the explicit shader, and the request's mesh and GRAS tables plus the texture-set flag"
+)]
 pub fn pick_for_set(
     ctx: &crate::policy::ResolveCtx,
     set: &crate::group::TextureSet,
@@ -1242,7 +1245,10 @@ mod tests {
         use Subtype::*;
         let none = sx(&[]);
         let p = vec!["textures/a/b.png"];
-        #[allow(clippy::type_complexity)]
+        #[allow(
+            clippy::type_complexity,
+            reason = "a test table read row by row; a named tuple type would sit far from its only use"
+        )]
         let cases: Vec<(
             Target,
             BTreeSet<String>,

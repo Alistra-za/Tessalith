@@ -303,7 +303,7 @@ impl AppModel {
         let todo = std::mem::take(&mut c.pending);
         c.running = true;
         c.reads += todo.len() as u32;
-        c.inflight = todo.clone();
+        c.inflight.clone_from(&todo);
         let read = c.reader.unwrap_or(source_dims);
         crate::worker::spawn_guarded(self.tx.clone(), "dims", move |tx| {
             let dims = todo

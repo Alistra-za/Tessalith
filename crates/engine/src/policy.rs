@@ -5,6 +5,8 @@
 //! DECISIONS AP10) → analysis facts → the project config's
 //! `[files]` entries (DECISIONS N2) → `--set` (unscoped, then sub-type-scoped, then file-scoped, each in
 //! command-line order).
+use std::fmt::Write as _;
+
 use crate::analyse::{Analysis, NORMAL_LEN_TOL};
 use crate::codes::{Code, Severity, Warning};
 use crate::config::*;
@@ -1667,7 +1669,8 @@ fn gray_pick_problem(pick: GraySource, a: &Analysis, has_alpha: bool) -> Option<
             } else {
                 format!("; {} varies", s.label())
             };
-            why += &format!(
+            let _ = write!(
+                why,
                 "{lead} (channels.grayscale_source = \"{}\")",
                 s.label().to_lowercase()
             );
@@ -2313,7 +2316,7 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
         .flatten();
     match role {
         Some(crate::helper::HelperRole::Raw(r)) => {
-            return packing_input_job(ctx, f, &r.id(), r, true)
+            return packing_input_job(ctx, f, r.id(), r, true)
         }
         Some(crate::helper::HelperRole::NotHelper) => {
             if gras_diffuse {

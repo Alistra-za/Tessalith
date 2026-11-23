@@ -180,7 +180,7 @@ impl AppModel {
             let keeps = r5_of(&k).is_some_and(|v| new_of(&v).is_some_and(|st| !tangent(st)));
             if keeps {
                 if held == Subtype::PbrNormal {
-                    plan.marker_off.push(k.clone());
+                    plan.marker_off.push(k);
                 }
             } else {
                 drop_r5.push(k.clone());

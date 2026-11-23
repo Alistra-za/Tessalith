@@ -573,6 +573,34 @@ fn skips_stay_out_of_the_rate_but_count_as_done() {
     assert!(p.eta(40, 100, at(t0, 4000)).is_none(), "no ETA from skips");
 }
 
+/// Note LG10: a check in place reads and decodes a DDS, so it is work for the rate and the ETA, though it ends as
+/// an up-to-date skip. A passed and a failed check both count; a plain skip beside them does not (the control above).
+#[test]
+fn checks_in_place_count_as_work_in_the_rate() {
+    use engine::api::{CHECKED_IN_PLACE, CHECKED_IN_PLACE_FAILED};
+    let t0 = Instant::now();
+    let mut x = ExportModel::default();
+    x.pace = Some(Pace::new(t0));
+    let reasons = [
+        format!("up to date; {CHECKED_IN_PLACE}"),
+        format!("up to date; {CHECKED_IN_PLACE_FAILED}"),
+        "up to date".to_string(),
+    ];
+    for (i, reason) in reasons.into_iter().enumerate() {
+        let (job, png) = (format!("a/{i}.dds"), format!("a/{i}.png"));
+        let kind = EventKind::FileSkipped {
+            kind: SkipKind::UpToDate,
+            code: None,
+            reason,
+        };
+        x.on_event_at(ev(i as u64, &job, &png, kind), at(t0, 100 * i as u64));
+    }
+    let p = x.pace.as_ref().unwrap();
+    // Two checks in the 2 s so far: 1 file/s.
+    assert!((p.rate(at(t0, 2000)) - 1.0).abs() < 1e-9);
+    assert!(p.eta(3, 100, at(t0, 2000)).is_some());
+}
+
 /// Audit 2026-10-15 item 6: pack-source skips drop the raw maps' rows (paths compared with `\` and `/` equal) and
 /// later events still reach the right rows; the paths keep the engine's spelling.
 #[test]

@@ -5,13 +5,14 @@
   py -3.13 -I tools\\decisions-archive.py --comments-only --base <git-ref> [--exclude <path>...] [--root <repo>]
   py -3.13 -I tools\\decisions-archive.py --self-test
 """
-import argparse, csv, pathlib, re, subprocess, sys, tempfile
+import argparse, contextlib, csv, io, pathlib, re, subprocess, sys, tempfile
 
 DEC = ".claude/DECISIONS.md"
 ARC = ".claude/DECISIONS-ARCHIVE.md"
 FROZEN = ".claude/DECISIONS-1.x.md"  # 1.x, frozen at 2.0: live part, then 1.x archive under FROZEN_ARCHIVED
 FROZEN_ARCHIVED = "# Archived"
 DEC_BEFORE_MOVE = "docs/" + "DECISIONS.md"  # where a --base before the move into .claude/ holds it
+DEFAULT_DATE = "2026-10-31"  # a row with no date column is archived under this date
 RESEARCH = "docs/research"  # a `research` row is moved by hand into its format's page there (DOCUMENTATION.md)
 
 
@@ -103,7 +104,7 @@ def find_span(lines, row):
 
 def archived_line(row):
     sup = " and ".join(f"Note {s.strip()}" for s in row.get("superseder", "").split(",") if s.strip())
-    date = row.get("date") or "2026-10-31"
+    date = row.get("date") or DEFAULT_DATE
     if row["class"] == "partial":
         return f"ARCHIVED (wording before the edit; superseded in part by {sup}, {date})"
     if not sup:
@@ -169,12 +170,18 @@ def apply(root, rows):
     for r in rows:
         if r["class"] not in ("archive-item", "archive-note", "partial", "research"):
             continue
+        if r["class"] == "partial" and is_section(r):  # a partial row edits an item or a paragraph, never a whole section
+            raise LookupError2(f"{r['id']}: a partial row names an item or a paragraph, not a section")
+        if r["class"] == "partial" and not r.get("superseder", "").replace(",", "").strip():
+            raise LookupError2(f"{r['id']}: a partial row needs a superseder")
         if "¶" in r["id"] and r["id"].split("¶")[0] in moved_sections:
             raise LookupError2(f"{r['id']}: its section is moved whole ({r['id'].split('¶')[0]})")
         sp = find_span(live, r)
         if sp is None:
             if r["class"] != "research" and not any(archived_already(d, r) for d in done):
                 raise LookupError2(f"{r['id']}: not found in DECISIONS.md and not archived")
+            if r["class"] != "research":
+                print(f"skipped {r['id']}: not in DECISIONS.md, already archived", file=sys.stderr)
             continue
         if r["class"] == "research":
             raise LookupError2(f"{r['id']}: a research row is moved by hand into its format's page under {RESEARCH}")
@@ -197,9 +204,11 @@ def apply(root, rows):
             continue
         heading = live[next(i for i in range(a, -1, -1) if live[i].startswith("## "))]
         block = [archived_line(r), *live[a:b]]
-        # A partial row's live text was edited after its old wording was archived: archiving it again would file
-        # the current wording as "before the edit" (T8-a). A whole move still archives whatever is live now.
-        if r["class"] == "partial" and any(archived_already(d, r) for d in done):
+        # A partial row whose own entry (same superseders and date) is already archived was applied before; its live
+        # text has been edited since, and archiving it again would file the current wording as "before the edit"
+        # (T8-a). An ID archived earlier under another superseder gets a further entry. A whole move archives what is live now.
+        if r["class"] == "partial" and any(partial_done(d, r) for d in done):
+            print(f"skipped {r['id']}: its entry for this row is already archived", file=sys.stderr)
             continue
         if not contains(arc, live[a:b]):
             add_block(arc, heading, block)
@@ -217,6 +226,29 @@ def archived_already(arc, r):
         return find_span(arc, r) is not None
     except LookupError2:  # more than one match: archived (at least once)
         return True
+
+
+def partial_done(arc, r):
+    """True when `arc` holds this partial row's own entry for its ID: an ARCHIVED line naming each superseder and the
+    date (one `archived_line(r)` wrote, or a hand-written one), with the ID's text on the next line."""
+    sups = [s.strip() for s in r.get("superseder", "").split(",") if s.strip()]
+    if not sups:
+        return False
+    note, _, prefix = r["id"].partition("¶")
+    rng = section_range(arc, note if prefix else r["note"])
+    if rng is None:
+        return False
+    head = re.compile(rf"^\s*- (?:\*\*{re.escape(r['id'])}(?![0-9A-Za-z-])|{re.escape(r['id'])}\.)")
+    date = r.get("date") or DEFAULT_DATE
+
+    def names_row(line):
+        return (line.startswith("ARCHIVED") and date in line
+                and all(re.search(rf"Note {re.escape(s)}(?![0-9A-Za-z])", line) for s in sups))
+
+    for i in range(rng[0] + 1, rng[1] - 1):
+        if names_row(arc[i]) and (arc[i + 1].strip().startswith(prefix) if prefix else head.match(arc[i + 1])):
+            return True
+    return False
 
 
 def deleted_lines(old, new):
@@ -381,6 +413,14 @@ ROWS = [
 ]
 
 
+def raises(exc, fn, *args):
+    try:
+        fn(*args)
+    except exc:
+        return True
+    return False
+
+
 def self_test():
     passed = 0
 
@@ -418,7 +458,60 @@ def self_test():
         apply(root, ROWS)
         ok("re-applying a partial row after its live text was edited leaves the archive alone (T8-a)",
            (root / ARC).read_bytes() == before[1] and (root / DEC).read_bytes() == edited)
+        # An ID already archived once and partly superseded again: the replaced wording is a further entry (same
+        # format, same note heading), and a rerun of that table after another edit archives nothing more.
+        again = [{"id": "DU2", "note": "DU", "class": "partial", "superseder": "DW1", "date": "2026-11-01"}]
+        apply(root, again)
+        arc2 = (root / ARC).read_bytes().decode().replace("\r\n", "\n")
+        first = "ARCHIVED (wording before the edit; superseded in part by Note DV4, 2026-10-28)\n- DU2. **Two.** text\n"
+        second = ("ARCHIVED (wording before the edit; superseded in part by Note DW1, 2026-11-01)\n"
+                  "- DU2. **Two.** edited to the current rule\n")
+        ok("a repeated ID: the replaced wording is a further entry under the same heading (T8-b)",
+           arc2.count("- DU2. **Two.**") == 2 and arc2.index(first) < arc2.index(second)
+           and arc2.index("## Note DU ") < arc2.index(first) and arc2.count("## Note DU ") == 1
+           and (root / DEC).read_bytes() == edited)
+        kept = ((root / DEC).read_bytes(), (root / ARC).read_bytes())
+        (root / DEC).write_bytes(edited.replace(b"edited to the current rule", b"edited a third time"))
+        with contextlib.redirect_stderr(io.StringIO()):
+            apply(root, again)
+        ok("a rerun after a further edit archives no new text and changes nothing (T8-c)",
+           (root / ARC).read_bytes() == kept[1]
+           and (root / DEC).read_bytes() == edited.replace(b"edited to the current rule", b"edited a third time"))
+        h2 = arc2.index("## Note DU ")
+        ok("a repeated ID's further entry sits under the same heading: no other heading between them",
+           "\n## " not in arc2[h2 + 1:arc2.index(second)])
+        # A row with two superseders: apply, edit, rerun is done on its exact ARCHIVED line (not re-archived).
+        two = {"id": "DU1", "note": "DU", "class": "partial", "superseder": "DX1,DX2", "date": "2026-11-02"}
+        apply(root, [two])
+        arc3 = (root / ARC).read_bytes().decode().replace("\r\n", "\n")
+        ok("a two-superseder row archives the live wording once, with both notes named",
+           "ARCHIVED (wording before the edit; superseded in part by Note DX1 and Note DX2, 2026-11-02)\n- DU1. **One.** text\n" in arc3)
+        live_now = (root / DEC).read_bytes()
+        (root / DEC).write_bytes(live_now.replace(b"- DU1. **One.** text", b"- DU1. **One.** reworded"))
+        kept = (root / DEC).read_bytes(), (root / ARC).read_bytes()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            apply(root, [two])
+        ok("rerunning a two-superseder row after an edit archives nothing and says it skipped the row (T8-d)",
+           (root / ARC).read_bytes() == kept[1] and (root / DEC).read_bytes() == kept[0] and "skipped DU1" in err.getvalue())
+        # The same superseders on another date, and another superseder on the same date, are new rows.
+        apply(root, [{**two, "date": "2026-11-03"}])
+        ok("the same superseders on a different date are a further entry (T8-e)",
+           "superseded in part by Note DX1 and Note DX2, 2026-11-03)\n- DU1. **One.** reworded\n"
+           in (root / ARC).read_bytes().decode().replace("\r\n", "\n"))
+        (root / DEC).write_bytes((root / DEC).read_bytes().replace(b"reworded", b"reworded twice"))
+        apply(root, [{**two, "superseder": "DX3", "date": "2026-11-03"}])
+        ok("another superseder on the same date is a further entry (T8-f)",
+           "superseded in part by Note DX3, 2026-11-03)\n- DU1. **One.** reworded twice\n"
+           in (root / ARC).read_bytes().decode().replace("\r\n", "\n"))
+        ok("a row with no superseder is never done, and a duplicated archive heading is an error, not a crash",
+           not partial_done(arc2.split("\n"), {"id": "DU2", "note": "DU", "class": "partial", "superseder": "", "date": "2026-11-01"})
+           and raises(LookupError2, partial_done, ["## Note DU", "", "## Note DU"], two))
+        ok("a partial row with no superseder is refused",
+           raises(LookupError2, apply, root, [{**two, "superseder": " "}]))
+        ok("a partial row that names a section is refused",
+           raises(LookupError2, apply, root, [{"id": "Scope clarification", "note": "", "class": "partial", "superseder": "X", "date": "2026-11-04"}]))
         (root / DEC).write_bytes(before[0])
+        (root / ARC).write_bytes(before[1])
         (root / FROZEN).write_bytes(b"# DECISIONS 1.x (frozen)\n\n## Note Q - q\n\n- **Q1 Live.** x\n\n"
                                     b"# Archived\n\n## Note Q - q\n\nARCHIVED (superseded by Note R, 2026-10-11)\n"
                                     b"- **Q2 Old.** y\n")
@@ -476,7 +569,8 @@ def main():
     g.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
-        return self_test()
+        with contextlib.redirect_stderr(io.StringIO()):  # the skipped-row lines of the cases below
+            return self_test()
     root = pathlib.Path(a.root)
     git = lambda *args: subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=True).stdout.decode("utf-8")
     try:

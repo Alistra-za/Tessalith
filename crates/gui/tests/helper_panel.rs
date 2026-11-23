@@ -519,7 +519,7 @@ fn a_packed_target_is_named_by_its_output() {
 /// Review pictures of the helper panel at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a GPU and
 /// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helper_panel::shots -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and SDC_SHOTS_DIR"]
 fn shots() {
     let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
         return;

@@ -8,7 +8,7 @@ use super::slot_commands::SlotCmdState;
 use super::status::{shared_stroke, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
-use crate::model::bulk::MenuAction;
+use crate::model::bulk::{MenuAction, MenuEntry};
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files, ItemKind, TextureItem};
 use crate::model::labels::{set_slot_label, subtype_name, type_info, AUTO_SHADER_FIRST, LEGEND};
@@ -17,8 +17,9 @@ use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
     badge_text, chip_letter, fill_proposals, is_shareable_helper, kind_text, member_tail,
-    shader_options, slot_shown, view_row, BorrowOccupant, BorrowOutcome, DropChoice, DropOutcome,
-    FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink, SlotShown,
+    shader_options, shows_json_panel, slot_shown, view_row, BorrowOccupant, BorrowOutcome,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
+    SlotShown, EDIT_MATCH_OFF,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -29,6 +30,7 @@ use engine::codes::Warning;
 use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 /// Drag payload: a texture, by item key.
@@ -341,6 +343,8 @@ enum Act {
     Shader(String, Option<Shader>),
     /// A pill click with its modifiers (F3a D1).
     Click(String, bool, bool),
+    /// The card menu's Edit match…: select the set and open its Matching group on the first match.
+    EditMatch(String),
     RightClick(String),
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
@@ -707,7 +711,7 @@ pub fn pill_hover(model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) -
     for r in &v.recipes {
         let mut l = format!("{}: {}", subtype_name(r.subtype), status_text(r.status).0);
         if let Some(reason) = &r.reason {
-            l.push_str(&format!(" ({reason})"));
+            let _ = write!(l, " ({reason})");
         }
         lines.push(l);
     }
@@ -935,7 +939,10 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetVi
 }
 
 /// A member's thumbnail, with the slot menu and an optional extra line on hover.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, member key, slot kind and remove flag, the drag and note of one chip, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
+)]
 fn member_chip(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1126,7 +1133,10 @@ fn slot_box_menu(
 }
 
 /// A card thumbnail opens its set unless Shift is held. A row in the overflow list opens its texture directly.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the model and card, the member key, slot kind, remove flag and drag of one chip, its response, and the act queue and menu flag the menu writes; they are the chip's own locals in the caller, so a struct would be built per chip only to be taken apart here"
+)]
 fn member_acts(
     model: &AppModel,
     card: Option<&SetView>,
@@ -1214,7 +1224,10 @@ fn paint_helper(
 }
 
 /// Note JW7: a helper that has no dock gets a BADGE thumbnail in a BADGE_HIT square with no painted tag.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the helper's key and role, the selection, and the act queue and menu flag it writes; they come from the card loop's own locals, so a struct would be built per tile only to be taken apart here"
+)]
 fn helper_tile(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1403,7 +1416,10 @@ fn plan_dock<'a>(
 
 /// Note HP: clamps every dock hit rect of one card at once (they must not meet each other, a chip, a tile or the
 /// combo, nor leave the card), then draws the docks. Returns after the chips, so badges sit on top.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the dock plans with the fixed and card rects they are placed against, the selection, and the act queue and menu flag; they come from the card's own locals, so a struct would be built per card only to be taken apart here"
+)]
 fn draw_docks(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1434,7 +1450,10 @@ fn draw_docks(
 /// Note HN: the helpers that fill one chip, drawn on its top corners. A badge is the helper's thumbnail with the
 /// member behaviours (JX1-JX3). `+K` lists the folded helpers.
 /// `hits` are the clamped hit rects of `plan.cells`, in order.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, one dock plan with its hit rects, the selection, and the act queue and menu flag; they come from the card's own locals, so a struct would be built per dock only to be taken apart here"
+)]
 fn draw_dock(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -2564,6 +2583,23 @@ pub fn draw(
             Act::Click(id, ctrl, shift) => after_card_commit(&ctx, model, id, move |m, target| {
                 m.click_set(target, ctrl, shift)
             }),
+            // Every step runs in the deferred callback, against the card as it is after a focused field commits.
+            Act::EditMatch(id) => {
+                let c = ctx.clone();
+                after_card_commit(&ctx, model, id, move |m, t| {
+                    m.select_target(t);
+                    let v = m.resolved_selection().view().cloned();
+                    // The field's commit may have left the set without a Matching group: nothing to ask for then.
+                    if let Some(v) = v.filter(|v| shows_json_panel(v, m.target)) {
+                        super::set_editor::focus_set_field(
+                            &c,
+                            m,
+                            &v.id,
+                            &crate::model::sets::edit_match_field(&v),
+                        );
+                    }
+                });
+            }
             Act::RightClick(id) => after_card_commit(&ctx, model, id, AppModel::right_click_set),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
@@ -2992,7 +3028,10 @@ fn insertion_y(from: usize, to: usize, r: egui::Rect) -> Option<f32> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the warnings, the Ui, model and thumbnail cache, the flagged and folded state, the set view with its index and count, the editing state, status and look of one pill, the selection, and the act queue; each comes from a different owner per frame, so a struct would be built per pill only to be taken apart here"
+)]
 fn pill(
     unused: &crate::model::sets::WarningsBySet,
     ui: &mut egui::Ui,
@@ -3425,7 +3464,10 @@ fn pill(
 /// Review E1: the chip of a slot that holds a link: the linked item's thumbnail, or a filled letter box when no item
 /// is known (a typed path); `link_mark` sits at its top centre. `cell` is the slot's kind, letter and link.
 /// Returns the chip's rect.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view, the linked slot's cell, the selection, the act queue and menu flag, and the set of chipped paths it adds to; they come from the card loop's own locals, so a struct would be built per chip only to be taken apart here"
+)]
 fn linked_chip<'a>(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -3507,7 +3549,10 @@ fn chip_link_mark(ui: &egui::Ui, rect: egui::Rect) {
 /// Note JW1: the chip row of a card: one chip per displayed fill or clear, the missing entries, then the
 /// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
 /// (`fixed` comes in holding the combo's).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the model and thumbnail cache, the set view and its docked members, the folded and editing state, the selection, the act queue and menu flag, and the fixed rects it extends; they come from the card's own locals, so a struct would be built per row only to be taken apart here"
+)]
 fn chip_row<'a>(
     ui: &mut egui::Ui,
     model: &'a AppModel,
@@ -3886,7 +3931,8 @@ fn combo_w(ui: &egui::Ui, shown: &str) -> (f32, f32) {
 }
 
 /// The Rename submenu of a set's menu: label, one-line hover text, and what it does. F3b D5 for the last two.
-/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1).
+/// Rename outputs is absent, not greyed, on a set that does not rename its outputs (Note HJ1). Rename inputs is not
+/// here: it is a Textures-view command (Note LJ3).
 fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> {
     let mut v = vec![(
         "Rename…".to_string(),
@@ -3900,12 +3946,27 @@ fn rename_entries(set: &str, outputs: bool) -> Vec<(String, &'static str, Act)> 
             Act::Bulk(MenuAction::RenameOutputs),
         ));
     }
-    v.push((
-        "Rename inputs…".to_string(),
-        "Read the source files under other names; the files on disk keep theirs",
-        Act::Bulk(MenuAction::RenameInputs),
-    ));
     v
+}
+
+/// One model menu entry as a card-menu button: off with its own reason on hover when `own_reason` (the entry's reason is
+/// the one to read), otherwise through `tip` (the read-only reason on a disabled `ui`); a click pushes its action.
+fn entry_button(
+    ui: &mut egui::Ui,
+    entry: &MenuEntry,
+    own_reason: bool,
+    tip: impl Fn(egui::Response) -> egui::Response,
+    acts: &mut Vec<Act>,
+) {
+    let r = ui.add_enabled(entry.disabled.is_none(), egui::Button::new(&entry.label));
+    let r = match &entry.disabled {
+        Some(why) if own_reason => r.on_disabled_hover_text(why),
+        _ => tip(r),
+    };
+    if r.clicked() {
+        acts.push(Act::Bulk(entry.action.clone()));
+        ui.close();
+    }
 }
 
 fn menu(
@@ -3952,6 +4013,8 @@ fn menu(
         acts.push(Act::ExportSet(v.key.clone(), v.id.clone()));
         ui.close();
     }
+    // It only reads (the clipboard is not the document), so it sits above the disable and shows its own reason.
+    entry_button(ui, &model.copy_clip_entry(), true, |r| r, acts);
     if !editing.on {
         ui.disable();
     }
@@ -3972,10 +4035,21 @@ fn menu(
         }
     });
     tip(rename.response);
-    if tip(ui.button("Edit match…")).clicked() {
-        acts.push(Act::Click(v.id.clone(), false, false));
+    // Off on a set the editor draws no Matching group for; the reason sits on the disabled entry.
+    let on = shows_json_panel(v, model.target);
+    let r = ui.add_enabled(on, egui::Button::new("Edit match…"));
+    let r = if on {
+        tip(r)
+    } else {
+        r.on_disabled_hover_text(EDIT_MATCH_OFF)
+    };
+    if r.clicked() {
+        acts.push(Act::EditMatch(v.id.clone()));
         ui.close();
     }
+    // The same entry as the sets menu: with one set selected it reads "to 0 selected…" and says why it is off.
+    entry_button(ui, &model.copy_json_entry(), editing.on, tip, acts);
+    entry_button(ui, &model.paste_clip_entry(), editing.on, tip, acts);
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());
@@ -4325,8 +4399,12 @@ fn fill_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
                         *tick = on;
                         let mut what = format!("→ {}", r.slot.label());
                         match (&r.blocked, &r.replaces) {
-                            (Some(why), _) => what.push_str(&format!(" · {why}")),
-                            (None, Some(cur)) => what.push_str(&format!(" · replaces {cur}")),
+                            (Some(why), _) => {
+                                let _ = write!(what, " · {why}");
+                            }
+                            (None, Some(cur)) => {
+                                let _ = write!(what, " · replaces {cur}");
+                            }
                             _ => {}
                         }
                         ui.label(what);

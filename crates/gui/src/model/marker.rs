@@ -92,7 +92,7 @@ impl AppModel {
                 format!("Could not write the marker cube: {e}"),
             ),
         };
-        self.status_line = text.clone();
+        self.status_line.clone_from(&text);
         self.marker_note = (sev != Severity::Info).then(|| (sev, text.clone()));
         self.messages.notify(sev, text);
     }

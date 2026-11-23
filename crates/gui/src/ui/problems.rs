@@ -215,7 +215,7 @@ fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
         all,
         filter: f,
         name_kind: kind,
-        hidden_kinds: hidden_kinds.clone(),
+        hidden_kinds,
         rows,
         checks,
         hidden,
@@ -1344,13 +1344,7 @@ fn apply_fix(ctx: &egui::Context, model: &mut AppModel, fix: Fix, at: At) {
             let active = model.resolved_selection();
             let id = active.view().map(|v| v.id.clone());
             if let Some(id) = id {
-                if model.settings.set_view_3d {
-                    model.settings.set_view_3d = false;
-                    model.save_settings();
-                }
-                super::set_editor::show_main_tab(ctx);
-                let at = ctx.cumulative_pass_nr();
-                ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
+                super::set_editor::focus_set_field(ctx, model, &id, &field);
             }
         }
         Fix::UndoLast => model.undo(),

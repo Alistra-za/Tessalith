@@ -46,6 +46,7 @@ pub mod rename;
 pub mod review;
 pub mod sections;
 pub mod set_groups;
+pub mod set_json_copy;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
@@ -146,6 +147,16 @@ impl PlanCause {
             PlanCause::Edit => "Re-checking after your change:",
             PlanCause::Other => "Re-checking",
         }
+    }
+}
+
+/// Note JI4: an undo step's label for a field write: every field the Effort row writes reads "Effort", as the bulk
+/// panel's step does (`bulk.rs`), not the raw config key.
+fn field_step_label(verb: &str, field: &str) -> String {
+    if fields::EFFORT_FIELDS.contains(&field) {
+        format!("{verb} Effort")
+    } else {
+        format!("{verb} {field}")
     }
 }
 
@@ -398,6 +409,13 @@ pub enum Dialog {
         to: Vec<String>,
         fields: Vec<(String, bool)>,
     },
+    /// Copy (or paste) the ticked JSON settings of set `source` (its card name) to the sets `to` (document ids).
+    CopySetJson {
+        source: String,
+        paste: bool,
+        to: Vec<String>,
+        rows: Vec<(set_json_copy::JsonRow, bool)>,
+    },
     /// F3a D4: remove the `[files]` settings of these textures, once confirmed.
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
@@ -433,13 +451,12 @@ pub enum Answer {
     Acknowledge(Code),
 }
 
-/// What a plan takes from the sets: `set_edits`, `output_paths`, and the shared roughness slots and borrowed
-/// normals that gate the bake (DECISIONS R7, Note R M4-final-1). All four settle the two-pass planning.
+/// Inputs compared between planning passes, including roughness slot groups and their resolved normals (Note LE).
 #[derive(Debug, Clone, PartialEq)]
 struct EngineInputs {
     set_edits: Vec<engine::sets::SetEdit>,
     output_paths: std::collections::BTreeMap<engine::sets::OutputKey, PathBuf>,
-    shared_roughness: std::collections::BTreeSet<String>,
+    shared_roughness: Vec<engine::api::SharedRoughness>,
     borrowed_normal: std::collections::BTreeMap<String, String>,
     set_shaders: std::collections::BTreeMap<String, engine::shader::Shader>,
     pinned_files: std::collections::BTreeSet<String>,
@@ -968,6 +985,8 @@ pub struct AppModel {
     pub marker_note: Option<(messages::Severity, String)>,
     /// F3b D4: the rename dialog's last applied recipe, offered again on the next open (this session only).
     pub last_recipe: rename::Recipe,
+    /// The Copy JSON settings clipboard (SM-R1): kept across opening another project, never saved.
+    pub json_clip: Option<set_json_copy::JsonClip>,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
     /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
@@ -1359,6 +1378,7 @@ impl AppModel {
             marker: Default::default(),
             marker_note: None,
             last_recipe: Default::default(),
+            json_clip: None,
             expanded: None,
             export: export::ExportModel::default(),
             reencode_all: false,
@@ -1580,6 +1600,12 @@ impl AppModel {
         (self.settled_writes_now, self.settled_export_files) = (false, 0);
     }
 
+    /// Note LG: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
+    pub fn set_validate_exports(&mut self, on: bool) {
+        self.settings.validate_exports = on;
+        self.save_settings();
+    }
+
     pub fn save_settings(&mut self) {
         let Some(p) = self.settings_path.clone() else {
             return;
@@ -1736,19 +1762,19 @@ impl AppModel {
             }
             c
         });
-        req.user_config = self.user_config.clone();
-        req.user_presets = self.user_presets.clone();
+        req.user_config.clone_from(&self.user_config);
+        req.user_presets.clone_from(&self.user_presets);
         let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
-        req.shared_roughness = sets::shared_roughness(self);
+        req.shared_roughness_groups = sets::shared_roughness(self);
         req.borrowed_normal = sets::borrowed_normal(self);
         req.set_shaders = sets::set_shaders(self);
         req.pinned_files = sets::pinned_files(self);
         req.mesh_shaders = self.mesh_votes.clone();
         req.mesh_alpha = self.mesh_alpha.clone();
-        req.gras_diffuses = self.gras_diffuses.clone();
-        req.gras_all_diffuses = self.gras_all_diffuses.clone();
+        req.gras_diffuses.clone_from(&self.gras_diffuses);
+        req.gras_all_diffuses.clone_from(&self.gras_all_diffuses);
         req.cs_txst_sets = sets::cs_txst_sets(self);
         Some(req)
     }
@@ -1982,7 +2008,7 @@ impl AppModel {
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
-            shared_roughness: req.shared_roughness.clone(),
+            shared_roughness: req.shared_roughness_groups.clone(),
             borrowed_normal: req.borrowed_normal.clone(),
             set_shaders: req.set_shaders.clone(),
             pinned_files: req.pinned_files.clone(),
@@ -3353,6 +3379,7 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        req.validate = self.settings.validate_exports;
         Some(req)
     }
 
@@ -3401,6 +3428,7 @@ impl AppModel {
                 .map(|i| (i.job_key.clone(), None))
                 .collect(),
             pace: Some(export::Pace::new(Instant::now())),
+            validated: req.validate,
             outside_run,
             ..Default::default()
         };
@@ -4782,6 +4810,9 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, false);
+        // The result line of a JSON copy ("Copy JSON settings from X: 3 written, ...") describes the step just undone.
+        self.status_note
+            .take_if(|n| n.starts_with(&format!("{}:", c.label)));
         self.undo_noted(
             if self.centre_over_meshes {
                 "Undone"
@@ -5036,7 +5067,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Change {f}"), move |p| {
+        self.edit(&field_step_label("Change", field), move |p| {
             p.set_file_value(&k, &f, &value)
         });
     }
@@ -5055,7 +5086,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Reset {f}"), move |p| {
+        self.edit(&field_step_label("Reset", field), move |p| {
             p.clear_file_value(&k, &f);
             // The Format row writes the tag with the format (`set_format`), so its reset clears both.
             if f == "format" {
@@ -5390,7 +5421,10 @@ impl AppModel {
         }
         let fail = |e: std::io::Error| format!("{}: {e}", path.display());
         let mut perm = std::fs::metadata(path).map_err(fail)?.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
+        #[allow(
+            clippy::permissions_set_readonly_false,
+            reason = "the Clear read-only flag command (Note FC10) clears the flag on this project's sdc.toml or sdc-project.toml so Save can write it again; the path was checked above to be one of the open project's documents"
+        )]
         perm.set_readonly(false);
         std::fs::set_permissions(path, perm).map_err(fail)?;
         if self.unsaved() {
@@ -5764,6 +5798,7 @@ pub fn export_finished_text(result: &export::ExportResult) -> String {
 mod tests {
     use super::*;
     use engine::sets::OutputKey;
+    use std::fmt::Write as _;
     use std::path::Path;
 
     pub(super) fn bare_model() -> AppModel {
@@ -5927,8 +5962,8 @@ mod tests {
         let mut sets = String::from("[project.auto_normal]\n");
         for i in 0..2_048 {
             let key = format!("rock{i}_n.png");
-            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
-            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            let _ = write!(files, "[files.'{key}']\nsubtype = 'pbr_normal'\n");
+            let _ = writeln!(sets, "'{key}' = 'pbr_normal'");
             if i < 16 {
                 normal.save(root.join(key)).unwrap();
             }

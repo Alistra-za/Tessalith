@@ -313,8 +313,8 @@ pub fn capture(
     } else {
         vec![]
     };
-    l.filter_subtype = filter.subtype.clone();
-    l.filter_format = filter.format.clone();
+    l.filter_subtype.clone_from(&filter.subtype);
+    l.filter_format.clone_from(&filter.format);
     l.filter_set = filter.set.name().to_string();
     l.sort = prefs.sort.name().to_string();
     l.tile = prefs.tile;

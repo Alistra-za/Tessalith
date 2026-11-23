@@ -60,7 +60,6 @@ struct ReadOnly(PathBuf);
 impl ReadOnly {
     fn set(&self, on: bool) {
         let mut p = std::fs::metadata(&self.0).unwrap().permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
         p.set_readonly(on);
         std::fs::set_permissions(&self.0, p).unwrap();
     }
@@ -71,7 +70,10 @@ impl Drop for ReadOnly {
     fn drop(&mut self) {
         if let Ok(m) = std::fs::metadata(&self.0) {
             let mut p = m.permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
+            #[allow(
+                clippy::permissions_set_readonly_false,
+                reason = "the guard restores write access to the test's own temp-dir file when it drops, so a failed assert does not leave it read-only"
+            )]
             p.set_readonly(false);
             let _ = std::fs::set_permissions(&self.0, p);
         }

@@ -552,8 +552,8 @@ impl AppModel {
         }
         match classify(item) {
             Previewable::Blocked(why) => {
-                self.preview.source = SourceState::Failed(why.to_string());
-                self.set_base_notice(Some(why.to_string()));
+                self.preview.source = SourceState::Failed(why.clone());
+                self.set_base_notice(Some(why));
             }
             Previewable::Dds => {
                 let path = item.input.clone();
@@ -616,8 +616,8 @@ impl AppModel {
                     self.preview_open(&key);
                 } else {
                     // T15: the reason may have changed since the preview opened.
-                    self.preview.source = SourceState::Failed(why.to_string());
-                    self.set_base_notice(Some(why.to_string()));
+                    self.preview.source = SourceState::Failed(why.clone());
+                    self.set_base_notice(Some(why));
                 }
             }
             Previewable::Job(job) => {

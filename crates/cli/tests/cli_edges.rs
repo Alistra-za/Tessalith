@@ -150,7 +150,11 @@ fn partial_outranks_validation_failed_and_fatal_outranks_partial() {
     img(&d.path().join("in/checker.png"));
     let out = d.path().join("out");
     let run = |panic_on: Option<&str>| {
-        let mut c = convert(&d.path().join("in"), &out, &["--on-existing", "overwrite"]);
+        let mut c = convert(
+            &d.path().join("in"),
+            &out,
+            &["--on-existing", "overwrite", "--validate"],
+        );
         c.env("SDC_TEST_FAIL_VALIDATION", "checker");
         if let Some(p) = panic_on {
             c.env("SDC_TEST_PANIC_ON", p);
@@ -244,7 +248,10 @@ fn read_only_output_file_fails_at_write_alone() {
     let o = convert(&d.path().join("in"), &out, &["--on-existing", "overwrite"])
         .output()
         .unwrap();
-    #[allow(clippy::permissions_set_readonly_false)]
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "the test restores write access to its own temp file so the temp dir can be deleted"
+    )]
     perm.set_readonly(false);
     std::fs::set_permissions(&locked, perm).unwrap();
 

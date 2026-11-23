@@ -5,6 +5,7 @@ use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb, Rgba};
 use sdc_gui::model::{Answer, AppModel};
 use serde_json::json;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -4101,7 +4102,7 @@ fn emptied_borrower_with(dir: &Path, twice: bool) -> (AppModel, String) {
     if twice {
         let f = dir.join("textures/sdc-project.toml");
         let mut text = std::fs::read_to_string(&f).unwrap();
-        text.push_str(&format!("\n[[sets]]\nid = \"{id}\"\n"));
+        let _ = write!(text, "\n[[sets]]\nid = \"{id}\"\n");
         std::fs::write(&f, text).unwrap();
     }
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
@@ -4277,9 +4278,10 @@ fn a_step_walks_the_files_keys_once_per_document_state() {
     let mut toml = String::from("[files.'ARMOR/STEEL_N.PNG']\nsubtype = \"normal\"\n\n");
     let mut listed = Vec::new();
     for i in 0..4_000 {
-        toml.push_str(&format!(
+        let _ = write!(
+            toml,
             "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"data\"\n\n"
-        ));
+        );
         if i % 4 == 0 {
             listed.push(format!("\"old/f{i:04}.png\""));
         }
@@ -4491,9 +4493,10 @@ fn a_share_that_creates_the_normals_table_walks_the_keys_once_per_document_state
         .unwrap();
     let mut toml = String::new();
     for i in 0..4_000 {
-        toml.push_str(&format!(
+        let _ = write!(
+            toml,
             "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"remove\"\n\n"
-        ));
+        );
     }
     std::fs::write(t.join("sdc.toml"), toml).unwrap();
     std::fs::write(
@@ -4949,7 +4952,7 @@ fn keep_alpha_writes_one_literal_table_and_undo_restores_both_documents() {
         let mut files =
             String::from("[[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n");
         for k in &spellings {
-            files.push_str(&format!("[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n"));
+            let _ = write!(files, "[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n");
         }
         let mut m = open_saved_share(d.path(), &files, LISTED_AND_BORROWED);
         assert_eq!(
@@ -5197,7 +5200,7 @@ fn keep_alpha_refuses_a_table_that_also_names_another_input() {
              [[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n"
         );
         if let Some(table) = table {
-            files.push_str(&format!("[files.'{table}']\nsubtype = 'pbr_normal'\n"));
+            let _ = write!(files, "[files.'{table}']\nsubtype = 'pbr_normal'\n");
         }
         let mut m = open_saved_share(d.path(), &files, STEEL_BORROWS);
         assert_eq!(keep_rows(&m, IRON_N), 1);

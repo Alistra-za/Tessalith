@@ -386,6 +386,7 @@ fn a_bc_chain_down_to_one_texel_uploads_every_mip() {
     let Some(rs) = render_state() else { return };
     let mut r = PreviewRenderer::new(rs);
     if !r.supports_bc() {
+        eprintln!("skipped: this adapter has no BC texture support");
         return;
     }
     // 8x8 down to 1x1: the 2x2 and 1x1 mips are each written as a whole 4x4 block.

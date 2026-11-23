@@ -295,6 +295,7 @@ fn rows_stay_inside_the_column_at_1100() {
 // Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_texture_panel_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        eprintln!("skipped: set SDC_PANEL_SHOTS");
         return;
     };
     std::fs::create_dir_all(&out).unwrap();
@@ -339,6 +340,7 @@ fn render_texture_panel_shots() {
 // Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_helper_tick_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        eprintln!("skipped: set SDC_PANEL_SHOTS");
         return;
     };
     std::fs::create_dir_all(&out).unwrap();
@@ -807,6 +809,7 @@ fn a_no_set_image_confirms_its_alpha() {
 // Dev tooling, not a test: it asserts nothing and runs only with `SDC_PANEL_SHOTS` set.
 fn render_alpha_question_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        eprintln!("skipped: set SDC_PANEL_SHOTS");
         return;
     };
     std::fs::create_dir_all(&out).unwrap();
@@ -1176,6 +1179,7 @@ fn the_helper_tick_has_help() {
 #[test]
 fn render_help_shots() {
     let Some(out) = std::env::var_os("SDC_PANEL_SHOTS").map(std::path::PathBuf::from) else {
+        eprintln!("skipped: set SDC_PANEL_SHOTS");
         return;
     };
     std::fs::create_dir_all(&out).unwrap();

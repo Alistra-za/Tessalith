@@ -15,6 +15,9 @@ pub struct GuiSettings {
     pub recent: Vec<PathBuf>,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
     pub live_encode: bool,
+    /// Note LG: exports decode and check each DDS again (BatchRequest::validate); off on a fresh install and in a
+    /// gui.toml without the key.
+    pub validate_exports: bool,
     /// The Textures and Sets columns: shown at all (the header's checkboxes), and collapsed to a strip (the
     /// arrows on each column).
     pub textures_hidden: bool,

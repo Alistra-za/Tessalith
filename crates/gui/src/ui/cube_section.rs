@@ -40,7 +40,10 @@ fn all_cubes(model: &AppModel, key: &str) -> bool {
 /// A drag value that returns its value once per gesture (drag release or Enter), not every frame
 /// ([`super::number_input::held`]); one already sent stays on show until the re-plan lands. The engine range
 /// bounds the widget, but a value already outside it is shown as it is and never rewritten (ruling R2).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the busy flag and the widget id, then the value and its range, speed, suffix and accessible name; the caller has each one at the call site, and a struct would be built per call only to be taken apart here"
+)]
 fn num(
     ui: &mut egui::Ui,
     busy: bool,

@@ -1,13 +1,24 @@
 //! `sdc uv` end to end (Note IB): NIFs are generated here with the NIF team's test builder, so no game asset is
 //! needed. The geometry cases (conservative coverage, pad rule, 8-connected islands) are unit tests in `src/uv.rs`.
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 mod common;
-// modscan's test helpers (an uncompressed BSA builder); the rest of the module is unused here.
+#[allow(
+    dead_code,
+    clippy::allow_attributes_without_reason,
+    reason = "modscan's test helpers (the NIF team's file, whose own allows carry no reason); only the uncompressed BSA builder is used here"
+)]
 #[path = "../../modscan/tests/common/mod.rs"]
-#[allow(dead_code)]
 mod mscommon;
 // The esp crate's plugin builder, for the BSA's plugin.
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../esp/tests/common/mod.rs"]
 mod esphelp;
 

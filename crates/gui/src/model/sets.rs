@@ -208,6 +208,19 @@ pub struct SlotMatch {
     pub path: String,
 }
 
+/// Why Edit match… is off on a set the editor shows no JSON panel for (no Matching group to open).
+pub const EDIT_MATCH_OFF: &str =
+    "This set has no PGPatcher JSON settings, so it has no match rules";
+
+/// The field Edit match… focuses: the first Matching row (`match<N>`), else `match`, which no field answers to, so the
+/// group opens and nothing takes focus.
+pub fn edit_match_field(v: &SetView) -> String {
+    match slot_matches(v).0.first() {
+        Some(m) => format!("match{}", m.n),
+        None => "match".to_string(),
+    }
+}
+
 /// The Matching header of `v`: its active slot matches plus the empty rows (`matchN = ""`, N ≥ 2: added by + and not
 /// filled in yet; `match1 = ""` is the diffuse turned off), and the + menu, which offers slots 3–8 without a row. A
 /// slot the set fills starts from `slot_match_path` (DECISIONS V1); any other starts empty (owner, 2026-10-12).
@@ -1627,9 +1640,9 @@ fn key_on_disk(root: &Path, key: &str) -> bool {
 /// A set's view from its plan alone: members, shader pick, warnings, recipes and its own (unborrowed) slots.
 fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     let mut v = SetView::new(s.key.clone(), set_id(root, &s.key), s.members.clone());
-    v.shader = s.shader.clone();
-    v.set_warnings = s.warnings.clone();
-    v.recipes = s.recipes.clone();
+    v.shader.clone_from(&s.shader);
+    v.set_warnings.clone_from(&s.warnings);
+    v.recipes.clone_from(&s.recipes);
     v.slots = own_fills(m, &s.members);
     drop_supplied_missing_maps(m, &mut v);
     v
@@ -1766,8 +1779,8 @@ fn entry_view(
     v.created = e.created;
     v.settings = e.settings.clone();
     v.shader_choice = e.shader;
-    v.locks = e.lock.clone();
-    v.txst = e.txst.clone();
+    v.locks.clone_from(&e.lock);
+    v.txst.clone_from(&e.txst);
     v.output_name.clone_from(&e.output_name);
     v.cs_txst = e.cs_txst.clone().map(Box::new);
     v.cs_mato = e.cs_mato.clone().map(Box::new);
@@ -2025,7 +2038,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
-        v.short = old.short.clone();
+        v.short.clone_from(&old.short);
         rebuilt.push(v);
     }
     // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
@@ -2484,26 +2497,52 @@ pub fn check_named(name: &str, field: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Ids of every set whose Rmaos slot (`_rmaos`/`_rfaos`) holds an output another set's Rmaos slot holds too, owner
-/// and borrowers alike (M3b spec §3.3, v1 instruction; DECISIONS R7). The engine bakes no normal variance into a
-/// shared roughness and reports no missing companion for these sets. Empty off `cs`.
-pub fn shared_roughness(m: &AppModel) -> BTreeSet<String> {
+/// Local file read by this game slot, after borrows, JSON links and clears.
+fn slot_item(v: &SetView, slot: SlotKind) -> Option<&str> {
+    json_files(v).find_map(|file| match file {
+        JsonFile::Fill(kind, fill) if kind == slot => fill.item(),
+        JsonFile::Linked(n, link) if Some(n) == slot.game_slot() && link.kind == Some(slot) => {
+            link.item.as_deref()
+        }
+        _ => None,
+    })
+}
+
+/// Group the own and borrowed roughness slots. Only the normal selection follows JSON links and clears (Note LE).
+pub fn shared_roughness(m: &AppModel) -> Vec<engine::api::SharedRoughness> {
     if m.target != Target::Cs {
-        return BTreeSet::new();
+        return Vec::new();
     }
-    let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for v in views(m).iter() {
+    let views = views(m);
+    let mut groups = BTreeMap::<_, Vec<_>>::new();
+    for v in views.iter() {
         if let Some(item) = v.slots.get(&SlotKind::Rmaos).and_then(SlotFill::item) {
-            users
-                .entry(item.to_string())
-                .or_default()
-                .push(v.id.clone());
+            groups.entry(item).or_default().push(v);
         }
     }
-    users
-        .into_values()
-        .filter(|ids| ids.len() > 1)
-        .flatten()
+    let root = m.sets_root();
+    let job = |item: &str| m.item(item)?.job.as_ref();
+    groups
+        .into_iter()
+        .filter(|(_, users)| users.len() > 1)
+        .filter_map(|(item, users)| {
+            let roughness = job(item)?;
+            let users = users
+                .into_iter()
+                .map(|v| {
+                    let normal = slot_item(v, SlotKind::Normal)
+                        .and_then(job)
+                        .map(|n| (set_id(&root, &n.set_key), n.input.clone()));
+                    (v.id.clone(), normal)
+                })
+                .collect();
+            Some(engine::api::SharedRoughness {
+                producer: set_id(&root, &roughness.set_key),
+                source: roughness.pack.is_none().then(|| roughness.input.clone()),
+                subtype: roughness.profile.subtype,
+                users,
+            })
+        })
         .collect()
 }
 
@@ -4259,7 +4298,7 @@ impl AppModel {
                 "{new_id} is still the automatic set of a file; pick another name"
             ));
         }
-        let (a, b) = (v.id.clone(), new_id);
+        let (a, b) = (v.id, new_id);
         // TA31: the Also export opt-out (`[export] skip`, set ids) follows, in the same step.
         self.edit_docs(&format!("Rename {a}"), None, true, move |p, s| {
             s.rename_set(&a, &b);
@@ -5031,6 +5070,20 @@ impl AppModel {
         self.batch_edit(&format!("Change {key}"), |m| m.set_json_value(set, key, v));
     }
 
+    /// A slot path can change the shared bake even when the saved borrow stays in place.
+    /// `game_slot` uses 1-based `slotN` numbering.
+    fn replan_shared_slot(&mut self, game_slot: Option<u8>) {
+        if !self.batch
+            && game_slot == SlotKind::Normal.game_slot()
+            && self
+                .last_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.shared_roughness != shared_roughness(self))
+        {
+            self.replan();
+        }
+    }
+
     /// A JSON value of set `set`. Material values do not plan; match fields do (P7).
     pub fn set_json_value(&mut self, set: &str, key: &str, v: Option<Value>) {
         if !self.sets_editable() {
@@ -5051,6 +5104,9 @@ impl AppModel {
         self.edit_docs(&format!("Change {key}"), merge, replan, move |_, d| {
             d.set_value(&s_id, &k, v)
         });
+        if !replan {
+            self.replan_shared_slot(slot);
+        }
     }
 
     /// A slot command (spec §4.2). A path is checked first; the reason comes back when it is refused. One step each
@@ -5120,6 +5176,9 @@ impl AppModel {
         self.edit_docs(&format!("Change {key}"), None, replan, move |_, d| {
             d.set_value(&id, &key, v)
         });
+        if !replan {
+            self.replan_shared_slot(Some(slot));
+        }
         Ok(())
     }
 
@@ -5214,7 +5273,7 @@ impl AppModel {
         if moves.is_empty() {
             return Err("nothing to fill".into());
         }
-        let (id, n) = (v.id.clone(), moves.len());
+        let (id, n) = (v.id, moves.len());
         self.edit_docs(&format!("Fill {id} from names"), None, true, move |_, s| {
             for (item, slot, existing, lent) in &moves {
                 clear_slot(s, &id, Some(*slot), existing);

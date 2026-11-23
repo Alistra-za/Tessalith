@@ -14,9 +14,10 @@
 //! a tie with the least of selectors 0 to 2 unless that least is 0 (the C++ loop stops at error 0, so 3 never
 //! replaces a 0); a 3-colour block has no such rule (a later selector replaces the best only when strictly better).
 //!
-//! Three private modules: `scalar` is rgbcx's loops (the reference of every test, with a variant that takes the
+//! Four private modules: `scalar` is rgbcx's loops (the reference of every test, with a variant that takes the
 //! decoder weights and no cutoff), `portable` is the kernel's interface over those loops (correct, not tuned, with no
-//! early exit; the unit tests run it on every target, and a target without SSE2 uses it), and `sse2` is the kernel.
+//! early exit; the unit tests run it on every target, and a target without SSE2 uses it), `sse2` is the kernel, and
+//! `avx2` the same kernel in 256-bit vectors for the AVX2 path.
 //!
 //! Why the kernel is a sum of products and not of squares (measured, survey section 5): with `W = dec[0] + dec[1]`,
 //! palette values `a` (NVIDIA) and `b` (AMD) of a channel and `s = dec[0] * a + dec[1] * b`,
@@ -29,6 +30,7 @@
 use super::Ends;
 #[cfg(test)]
 use super::DUAL;
+use crate::path::Isa;
 
 /// A block's texels prepared for the searches, for one set of channel weights `w` and decoder weights `dec`.
 pub(crate) struct Texels {
@@ -46,12 +48,14 @@ pub(crate) struct Texels {
 impl Texels {
     /// Panics unless every channel weight is in 1..=256 and their sum is at most 256, and both decoder weights are
     /// at least 1 and their sum is at most 4 (the kernel's integer bounds, written beside the kernel).
+    #[inline(always)]
     pub(crate) fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self {
         Self::masked(px, w, dec, 0)
     }
 
     /// As `new`; texel i is transparent when bit i of `mask` is set (only [`find_sels3_masked`] reads the mask), and
     /// panics when a bit above the 16th is set. `new` is `masked` with mask 0.
+    #[inline(always)]
     pub(crate) fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self {
         assert!(
             mask <= 0xFFFF,
@@ -80,9 +84,16 @@ impl Texels {
 }
 
 /// The block's error under endpoints `e` with the best 4-colour selector per texel, in kernel units. Always the full
-/// total. `sels` is written only when the total is below `cutoff`.
-pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-    let total = imp::find_sels4(&t.k, e, sels, cutoff);
+/// total. `sels` is written only when the total is below `cutoff`. The kernel is the one compiled for `isa`.
+#[inline(always)]
+pub(crate) fn find_sels4(
+    isa: impl Isa,
+    t: &Texels,
+    e: &Ends,
+    sels: &mut [u8; 16],
+    cutoff: u32,
+) -> u32 {
+    let total = imp::find_sels4(isa, &t.k, e, sels, cutoff);
     #[cfg(test)]
     assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
     #[cfg(test)]
@@ -97,8 +108,15 @@ pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
 }
 
 /// [`find_sels4`] for a 3-colour block (selectors 0 low endpoint, 1 high endpoint, 2 midpoint).
-pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-    let total = imp::find_sels3(&t.k, e, sels, cutoff);
+#[inline(always)]
+pub(crate) fn find_sels3(
+    isa: impl Isa,
+    t: &Texels,
+    e: &Ends,
+    sels: &mut [u8; 16],
+    cutoff: u32,
+) -> u32 {
+    let total = imp::find_sels3(isa, &t.k, e, sels, cutoff);
     #[cfg(test)]
     assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
     #[cfg(test)]
@@ -112,8 +130,9 @@ pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
 
 /// [`find_sels3`] with no cutoff, for a block built with [`Texels::masked`]: all 16 selectors are written, and a
 /// transparent texel gets selector 3 and adds no error. Returns the opaque texels' error in kernel units.
-pub(crate) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-    let total = imp::find_sels3_masked(&t.k, e, sels);
+#[inline(always)]
+pub(crate) fn find_sels3_masked(isa: impl Isa, t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    let total = imp::find_sels3_masked(isa, &t.k, e, sels);
     #[cfg(test)]
     if t.dec == DUAL {
         let mut want = [0xEEu8; 16];
@@ -150,6 +169,9 @@ fn check_against_scalar(
 // workspace's target, always), the portable one elsewhere.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2;
+// The AVX2 path's kernels, which `sse2`'s searches call when they hold the `Avx2` token.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod avx2;
 #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
 use portable as imp;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
@@ -250,7 +272,6 @@ mod scalar {
     /// strictly better; every texel whose bit is set in `mask` gets selector 3 (transparent black) and adds no error.
     /// No cutoff: all 16 selectors are written. Returns the summed error of the opaque texels. Tests only.
     #[cfg(test)]
-    #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
     pub(super) fn find_sels3_masked(
         px: &[[u8; 4]; 16],
         mask: u32,
@@ -349,7 +370,6 @@ mod scalar {
     }
 
     /// [`find_sels3_masked`]'s loop with the decoder weights `dec`.
-    #[allow(clippy::needless_range_loop)] // As `find_sels3_masked`.
     pub(super) fn find_sels3_masked_dec(
         px: &[[u8; 4]; 16],
         mask: u32,
@@ -388,6 +408,7 @@ mod scalar {
 mod portable {
     use super::super::Ends;
     use super::scalar;
+    use crate::path::Isa;
 
     pub(super) struct Texels {
         px: [[u8; 4]; 16],
@@ -410,12 +431,24 @@ mod portable {
     // The products below fit `u32`: a `_dec` total is at most 16 texels x 256 (the channel weights' sum) x 4 (the
     // decoder weights' sum) x 255^2 = 1,065,369,600, and times the decoder weights' sum again 4,261,478,400 < 2^32.
     // `Texels::masked` refuses weights above those sums.
-    pub(super) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    // The searches take the code path as the SSE2 ones do, and ignore it: there is no wider portable code.
+    pub(super) fn find_sels3_masked(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+    ) -> u32 {
         scalar::find_sels3_masked_dec(&t.px, t.mask, t.w, t.dec, e, sels)
             * (t.dec[0] + t.dec[1]) as u32
     }
 
-    pub(super) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    pub(super) fn find_sels4(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+        cutoff: u32,
+    ) -> u32 {
         let mut local = [0u8; 16];
         let total =
             scalar::find_sels4_dec(&t.px, t.w, t.dec, e, &mut local) * (t.dec[0] + t.dec[1]) as u32;
@@ -425,7 +458,13 @@ mod portable {
         total
     }
 
-    pub(super) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    pub(super) fn find_sels3(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+        cutoff: u32,
+    ) -> u32 {
         let mut local = [0u8; 16];
         let total =
             scalar::find_sels3_dec(&t.px, t.w, t.dec, e, &mut local) * (t.dec[0] + t.dec[1]) as u32;

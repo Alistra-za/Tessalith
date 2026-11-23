@@ -29,6 +29,42 @@ fn an_input_rename_moves_the_skip_entry() {
     assert!(!m.also_skipped(ROCK_SET), "no skip left on the old id");
 }
 
+const EXPORT_COMMENT: &str = "# rocks stay out of Vanilla";
+
+/// Writes `EXPORT_COMMENT` above `skip` inside `[export]`, through the document's public text and restore.
+fn comment_the_export_table(m: &mut AppModel) {
+    m.edit_docs("Comment [export]", None, false, |p, _| {
+        let text = p.text();
+        let at = text.find("skip").expect("an [export] skip line");
+        let mut seeded = text.clone();
+        seeded.insert_str(at, &format!("{EXPORT_COMMENT}\n"));
+        p.restore(&seeded);
+    });
+}
+
+/// SM-O6: moving the opt-out edits the `skip` array in place, so a comment inside `[export]` survives.
+#[test]
+fn an_input_rename_keeps_the_export_comments() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_skip_also(ROCK_SET, true);
+    idle(&mut m);
+    comment_the_export_table(&mut m);
+    idle(&mut m);
+    assert!(m.also_skipped(ROCK_SET));
+    assert!(m.project.as_ref().unwrap().text().contains(EXPORT_COMMENT));
+    m.set_input_name(ROCK_SET, "textures/landscape/rock02")
+        .unwrap();
+    idle(&mut m);
+    assert!(m.also_skipped("landscape/rock02"), "the skip follows");
+    assert!(!m.also_skipped(ROCK_SET), "no skip left on the old id");
+    assert!(
+        m.project.as_ref().unwrap().text().contains(EXPORT_COMMENT),
+        "the [export] comment survives: {}",
+        m.project.as_ref().unwrap().text()
+    );
+}
+
 /// Note HC3: the box shows the name without the diffuse's own suffix, as every member keeps its suffix under any
 /// name. The owner's `body_albedo` showed whole, so typing `body_albedo-` wrote `body_albedo-_albedo`.
 #[test]

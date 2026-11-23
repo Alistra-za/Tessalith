@@ -69,8 +69,8 @@ impl SdcApp {
         );
         meshes.v3 = crate::model::viewport3d::Viewport3d::new();
         let mut set3d = crate::model::set_preview::SetPreview::from_settings(model.scan_db.clone());
-        meshes.v3.cache_dir = model.shader_cache.clone();
-        set3d.v3.cache_dir = model.shader_cache.clone();
+        meshes.v3.cache_dir.clone_from(&model.shader_cache);
+        set3d.v3.cache_dir.clone_from(&model.shader_cache);
         // The saved arrangement: filters, preview channel and layout, and both 3D looks (AG17).
         let layout = model.settings.layout.clone();
         crate::layout::restore_model(

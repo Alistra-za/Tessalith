@@ -49,7 +49,7 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <text x="488.4" y="179.0" class="s" text-anchor="start">47.74</text>
 <rect x="235.0" y="182.0" width="271.5" height="10" class="f1"/>
 <text x="511.5" y="191.0" class="s" text-anchor="start">49.39</text>
-<text x="10.0" y="218.0" class="" text-anchor="start">w4 (study only)</text>
+<text x="10.0" y="218.0" class="" text-anchor="start">Alpha ×4 (w4)</text>
 <rect x="235.0" y="204.0" width="239.8" height="10" class="f0"/>
 <text x="479.8" y="213.0" class="s" text-anchor="start">47.13</text>
 <rect x="235.0" y="216.0" width="287.8" height="10" class="f1"/>
@@ -64,12 +64,12 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <text x="466.4" y="281.0" class="s" text-anchor="start">46.17</text>
 <rect x="235.0" y="284.0" width="307.0" height="10" class="f1"/>
 <text x="547.0" y="293.0" class="s" text-anchor="start">51.93</text>
-<text x="10.0" y="320.0" class="" text-anchor="start">w32 (study only)</text>
+<text x="10.0" y="320.0" class="" text-anchor="start">Alpha ×32 (w32)</text>
 <rect x="235.0" y="306.0" width="221.8" height="10" class="f0"/>
 <text x="461.8" y="315.0" class="s" text-anchor="start">45.84</text>
 <rect x="235.0" y="318.0" width="311.2" height="10" class="f1"/>
 <text x="551.2" y="327.0" class="s" text-anchor="start">52.23</text>
-<text x="10.0" y="354.0" class="" text-anchor="start">w64 (study only)</text>
+<text x="10.0" y="354.0" class="" text-anchor="start">Alpha ×64 (w64)</text>
 <rect x="235.0" y="340.0" width="218.1" height="10" class="f0"/>
 <text x="458.1" y="349.0" class="s" text-anchor="start">45.58</text>
 <rect x="235.0" y="352.0" width="313.3" height="10" class="f1"/>
@@ -104,7 +104,7 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <text x="335.1" y="545.0" class="s" text-anchor="start">36.79</text>
 <rect x="235.0" y="548.0" width="129.9" height="10" class="f1"/>
 <text x="369.9" y="557.0" class="s" text-anchor="start">39.28</text>
-<text x="10.0" y="584.0" class="" text-anchor="start">w4 (study only)</text>
+<text x="10.0" y="584.0" class="" text-anchor="start">Alpha ×4 (w4)</text>
 <rect x="235.0" y="570.0" width="84.0" height="10" class="f0"/>
 <text x="324.0" y="579.0" class="s" text-anchor="start">36.00</text>
 <rect x="235.0" y="582.0" width="159.5" height="10" class="f1"/>
@@ -119,12 +119,12 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <text x="303.4" y="647.0" class="s" text-anchor="start">34.53</text>
 <rect x="235.0" y="650.0" width="209.4" height="10" class="f1"/>
 <text x="449.4" y="659.0" class="s" text-anchor="start">44.96</text>
-<text x="10.0" y="686.0" class="" text-anchor="start">w32 (study only)</text>
+<text x="10.0" y="686.0" class="" text-anchor="start">Alpha ×32 (w32)</text>
 <rect x="235.0" y="672.0" width="55.3" height="10" class="f0"/>
 <text x="295.3" y="681.0" class="s" text-anchor="start">33.95</text>
 <rect x="235.0" y="684.0" width="224.3" height="10" class="f1"/>
 <text x="464.3" y="693.0" class="s" text-anchor="start">46.02</text>
-<text x="10.0" y="720.0" class="" text-anchor="start">w64 (study only)</text>
+<text x="10.0" y="720.0" class="" text-anchor="start">Alpha ×64 (w64)</text>
 <rect x="235.0" y="706.0" width="48.9" height="10" class="f0"/>
 <text x="288.9" y="715.0" class="s" text-anchor="start">33.49</text>
 <rect x="235.0" y="718.0" width="233.0" height="10" class="f1"/>
@@ -158,7 +158,7 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <rect x="235.0" y="903.0" width="305.1" height="10" class="f1"/>
 <text x="545.1" y="912.0" class="s" text-anchor="start">51.79</text>
 <text x="707.0" y="905.0" class="" text-anchor="start">67.7%</text>
-<text x="10.0" y="939.0" class="" text-anchor="start">w4 (study only)</text>
+<text x="10.0" y="939.0" class="" text-anchor="start">Alpha ×4 (w4)</text>
 <rect x="235.0" y="925.0" width="204.7" height="10" class="f0"/>
 <text x="444.7" y="934.0" class="s" text-anchor="start">44.62</text>
 <rect x="235.0" y="937.0" width="327.0" height="10" class="f1"/>
@@ -176,13 +176,13 @@ text{fill:var(--ink);font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-w
 <rect x="235.0" y="1005.0" width="365.0" height="10" class="f1"/>
 <text x="605.0" y="1014.0" class="s" text-anchor="start">56.07</text>
 <text x="707.0" y="1007.0" class="" text-anchor="start">73.1%</text>
-<text x="10.0" y="1041.0" class="" text-anchor="start">w32 (study only)</text>
+<text x="10.0" y="1041.0" class="" text-anchor="start">Alpha ×32 (w32)</text>
 <rect x="235.0" y="1027.0" width="186.5" height="10" class="f0"/>
 <text x="426.5" y="1036.0" class="s" text-anchor="start">43.32</text>
 <rect x="235.0" y="1039.0" width="382.3" height="10" class="f1"/>
 <text x="622.3" y="1048.0" class="s" text-anchor="start">57.31</text>
 <text x="707.0" y="1041.0" class="" text-anchor="start">73.4%</text>
-<text x="10.0" y="1075.0" class="" text-anchor="start">w64 (study only)</text>
+<text x="10.0" y="1075.0" class="" text-anchor="start">Alpha ×64 (w64)</text>
 <rect x="235.0" y="1061.0" width="178.8" height="10" class="f0"/>
 <text x="418.8" y="1070.0" class="s" text-anchor="start">42.77</text>
 <rect x="235.0" y="1073.0" width="399.1" height="10" class="f1"/>

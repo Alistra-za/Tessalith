@@ -23,6 +23,7 @@ use encoders_sys::{
     IspcTarget,
 };
 use std::error::Error;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
@@ -361,10 +362,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         if targets.is_some() {
             let mut line = format!("ISPC {name} blocks={blocks}");
             for (t, (us, h)) in run_set.iter().zip(&res) {
-                line += &format!(" {}={us:.4} {h:016x}", t.name());
+                let _ = write!(line, " {}={us:.4} {h:016x}", t.name());
             }
             for (t, (us, _)) in run_set.iter().zip(&res).skip(1) {
-                line += &format!(" {}/{}={:.3}", t.name(), run_set[0].name(), us / res[0].0);
+                let _ = write!(
+                    line,
+                    " {}/{}={:.3}",
+                    t.name(),
+                    run_set[0].name(),
+                    us / res[0].0
+                );
             }
             println!("{line}");
         } else {

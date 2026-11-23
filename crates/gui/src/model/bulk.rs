@@ -18,6 +18,7 @@ use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
 use engine::sets::{fold_id, same_id};
 use serde_json::Value;
+use std::fmt::Write as _;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
 /// only while it holds two or more keys and the active entry (`AppModel::selection`) is one of them; otherwise the
@@ -341,11 +342,18 @@ impl AppModel {
         let mut s = format!("{} selected", keys.len());
         match (hidden, in_fold) {
             (0, 0) => {}
-            (h, 0) => s.push_str(&format!(" ({h} hidden by filter)")),
-            (0, f) => s.push_str(&format!(" ({f} in the collapsed Helpers group)")),
-            (h, f) => s.push_str(&format!(
-                " ({h} hidden by filter, {f} in the collapsed Helpers group)"
-            )),
+            (h, 0) => {
+                let _ = write!(s, " ({h} hidden by filter)");
+            }
+            (0, f) => {
+                let _ = write!(s, " ({f} in the collapsed Helpers group)");
+            }
+            (h, f) => {
+                let _ = write!(
+                    s,
+                    " ({h} hidden by filter, {f} in the collapsed Helpers group)"
+                );
+            }
         }
         Some(s)
     }
@@ -900,7 +908,7 @@ fn report(label: &str, plan: &[(String, Change)]) -> String {
     }
     let mut s = format!("{label}: written to {written} of {n}");
     for (r, k) in skipped {
-        s.push_str(&format!("; locked on {k} of {n}: {r}"));
+        let _ = write!(s, "; locked on {k} of {n}: {r}");
     }
     s
 }
@@ -1182,7 +1190,7 @@ impl AppModel {
         if changed || !why.is_empty() {
             let mut s = label;
             for (r, n) in why {
-                s.push_str(&format!("; locked on {n} of {total}: {r}"));
+                let _ = write!(s, "; locked on {n} of {total}: {r}");
             }
             self.bulk.report = Some(s);
         }
@@ -1251,6 +1259,12 @@ pub fn kind_chips(m: &AppModel, set_keys: &[String]) -> Vec<KindChip> {
 pub enum MenuAction {
     EditSettings,
     CopyFromActive,
+    /// The sets menus' Copy JSON settings from the active set to the other selected sets (the dialog opens).
+    CopyJsonFromActive,
+    /// The sets menus' Copy JSON settings: the active set's rows go on the session clipboard.
+    CopyJsonToClip,
+    /// The sets menus' Paste JSON settings: the clipboard's rows to the selected sets (the dialog opens).
+    PasteJson,
     ResetAll,
     SelectMembersOfKind(Option<SlotKind>),
     /// F3a Task 8: a Slot commands window command on slot `n` of set `set` (an id), through the same model call.
@@ -1508,7 +1522,7 @@ impl AppModel {
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
-                disabled: locked.clone(),
+                disabled: locked,
             },
         ]
         .into_iter()
@@ -1580,8 +1594,9 @@ impl AppModel {
             ),
             disabled: project,
         });
+        // Note LJ3: the Sets view renames outputs only; Rename inputs is a Textures-view command.
         let mut v = if sets {
-            outputs.into_iter().chain([inputs]).collect::<Vec<_>>()
+            outputs.into_iter().collect::<Vec<_>>()
         } else {
             [inputs].into_iter().chain(outputs).collect()
         };
@@ -1612,6 +1627,9 @@ impl AppModel {
                 label: format!("Edit settings for {n} selected"),
                 disabled: None,
             },
+            self.copy_json_entry(),
+            self.copy_clip_entry(),
+            self.paste_clip_entry(),
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
@@ -1755,7 +1773,7 @@ impl AppModel {
                     } else {
                         format!("From {host}")
                     },
-                    disabled: off.clone(),
+                    disabled: off,
                 },
             );
         }
@@ -1787,7 +1805,7 @@ impl AppModel {
         {
             menu.push(MenuEntry {
                 action: MenuAction::PgpLock {
-                    set: id.clone(),
+                    set: id,
                     n,
                     on: !on,
                 },
@@ -2009,6 +2027,9 @@ impl AppModel {
                 self.bulk.kind = None;
             }
             MenuAction::CopyFromActive => self.open_copy_settings(),
+            MenuAction::CopyJsonFromActive => self.open_copy_set_json(),
+            MenuAction::CopyJsonToClip => self.copy_json_to_clip(),
+            MenuAction::PasteJson => self.open_paste_json(),
             MenuAction::ResetAll => self.ask_reset_all(),
             MenuAction::SelectMembersOfKind(k) => self.select_members_of_kind(k),
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),
@@ -2076,7 +2097,7 @@ impl AppModel {
     /// 08f-8: it was dropped).
     pub fn menu_picked(&mut self, a: MenuAction) {
         if let Some(e) = self.run_menu(a) {
-            self.status_line = e.clone();
+            self.status_line.clone_from(&e);
             self.messages.notify(super::messages::Severity::Warning, e);
         }
     }

@@ -112,6 +112,7 @@ After you change anything under `crates\encoders-sys\vendor`, run `.\tools\hash-
 
 - Licence: GPL-3.0-or-later. By contributing you agree your change is under it. Do not copy code from projects without a compatible licence.
 - Design decisions are recorded in [.claude/DECISIONS.md](.claude/DECISIONS.md) as numbered notes. A change that alters behaviour adds or amends a note, and updates the wiki pages it touches.
+- Line endings: on Windows, keep git's `core.autocrlf=true` (the Git for Windows default), so the working copy is CRLF. `rustfmt.toml` sets `newline_style = "Native"`, and with an LF working copy `cargo fmt --check` fails.
 - Output changes: a change that alters written bytes needs a line in [CHANGELOG.md](CHANGELOG.md) (and [docs/presets-changelog.md](docs/presets-changelog.md) for presets).
 - A pub item in `sdc-gui` (or a counter it reads) that only tests use goes behind `#[cfg(feature = "test-hooks")]`; the crate's own dev-dependency turns the feature on for tests, and a release build never does. `encoders-sys` has the same feature: in a test build it keeps BC7 and BC6H on the AVX2 path at most, and `SDC_TEST_AVX512=1` lifts that.
 - A new GUI test file, `crates/gui/tests/<name>.rs`, gets its `#[path]` and `mod` lines in `crates/gui/tests/it/main.rs`. That file's header says when a test file needs a `[[test]]` entry in `crates/gui/Cargo.toml` instead.

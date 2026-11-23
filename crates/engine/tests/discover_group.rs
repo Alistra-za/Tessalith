@@ -150,6 +150,7 @@ fn skips_sdc_and_output_root_and_unknown_extensions() {
 #[test]
 fn output_root_match_is_case_insensitive_on_windows() {
     if !cfg!(windows) {
+        eprintln!("skipped: Windows only (case-insensitive output root)");
         return;
     }
     let d = tempfile::tempdir().unwrap();

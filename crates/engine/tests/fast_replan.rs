@@ -772,7 +772,7 @@ fn a_derive_request_needs_a_full_plan() {
 
 /// The sanity timing (not a gate): `cargo test -p engine --release --test fast_replan -- --ignored --nocapture`.
 #[test]
-#[ignore]
+#[ignore = "timing, not a gate; run with --release -- --ignored --nocapture"]
 fn replan_timing() {
     let (_fx, session, base_req) = planned_session();
     let cancel = CancelToken::default();

@@ -450,6 +450,21 @@ ARCHIVED (wording before the edit; superseded in part by Note HF, 2026-11-09)
 ARCHIVED (wording before the edit; superseded in part by Note HI, 2026-11-09)
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH
 
+ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LK, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH
+
+ARCHIVED (wording before the edit; superseded in part by Note LL, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK
+
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX, HY, HZ, JB, JC, JT, JZ, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LN, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI
+
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB
 
@@ -476,6 +491,24 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX, HY, HZ, JA, JB, JL, JP, JQ, JT, JU, JS, JZ, JY, LA, LB, LE, LF, LG, LH, LI, LK
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB, HY, JG, JT, JR, JS, JY, LA, LI
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY, LG
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY, LB, LC, LD, LE, LF, LG, LI, LJ
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LG, LI, LN
+
+ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LF, LH, LK, LL
 
 ## Digest
 
@@ -872,6 +905,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 ARCHIVED (wording before the edit; superseded in part by Note JR, 2026-11-18)
 - A set card uses a one-row heading only when the name gets at least 80 px, or its whole width when that is less (HP12). [FI13, HP12]
 
+ARCHIVED (wording before the edit; superseded in part by Note LN1, 2026-11-22)
+- BC7 weighting is a dropdown with a stated precedence; inherited values are overridable; RMAOS weighting R4 G1 B2 A1 was dropped. [CP1, CP3, CP9, CP12]
+
 ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 - "(auto)" in the Sub-type row means the decision came from evidence, with the reason on hover. [U4]
 
@@ -1085,8 +1121,17 @@ ARCHIVED (wording before the edit; superseded in part by Note HY9, 2026-11-13)
 ARCHIVED (wording before the edit; superseded in part by Note HY13, 2026-11-13)
 - **HY1 `bcenc` holds the Rust BC4-family search; the C++ is the reference.** `crates/bcenc` has no dependencies, and `unsafe` only to call its two SSE2 kernels (HY9 for BC1, HY11 for BC4). `bcenc::bc4` is the BC4 search that lived in `encoders-sys/tests/support/bc4ref.rs` (moved; behaviour unchanged, branch counters added), and `bc4_encode_block`, `bc5_encode_block` and `bc4_encode_alpha` (BC3's alpha half, with the cut) wrap it. They are proven byte-equal to `encoders_sys` on generated block classes at radii 4, 5 and 10 (`crates/bcenc/tests/bc4.rs`) and, in the `#[ignore]` test, on 20.02 million blocks at radius 5 (57.9 s on 16 threads, 0 mismatches). The vendored C++ stays the specification and is never edited. A `hit!` counter marks each branch and compiles to nothing outside the crate's unit tests; `every_ported_branch_is_taken` fails if a generator stops reaching one.
 
+ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
+- **HY1 `bcenc` holds the Rust BC4-family search; the C++ is the reference.** `crates/bcenc` has no dependencies, and `unsafe` only to call its three SSE2 kernels (HY9 and HY13 for BC1, HY11 for BC4). `bcenc::bc4` is the BC4 search that lived in `encoders-sys/tests/support/bc4ref.rs` (moved; behaviour unchanged, branch counters added), and `bc4_encode_block`, `bc5_encode_block` and `bc4_encode_alpha` (BC3's alpha half, with the cut) wrap it. They are proven byte-equal to `encoders_sys` on generated block classes at radii 4, 5 and 10 (`crates/bcenc/tests/bc4.rs`) and, in the `#[ignore]` test, on 20.02 million blocks at radius 5 (57.9 s on 16 threads, 0 mismatches). The vendored C++ stays the specification and is never edited. A `hit!` counter marks each branch and compiles to nothing outside the crate's unit tests; `every_ported_branch_is_taken` fails if a generator stops reaching one.
+
 ARCHIVED (wording before the edit; superseded in part by Note JI4, 2026-11-15)
 - **HY17 `encoder.bc1_search` (`default` | `fast`) picks the BC1 search depth; `fast-preview` sets `fast`.** `default` is rgbcx level 18 with today's bytes; `fast` is HY16's level for BC1, BC3's colour half and the fully opaque blocks of one-bit-alpha BC1 (rgbcx's `encode_bc1_alpha` passes its level only there). Blocks with a transparent texel, BC4, BC5, BC7, BC6H and uncompressed formats ignore it without a warning, as BC1 ignores `bc45_search_radius`; the GUI locks the row there. Not serialised at `default`, so no profile hash, encode-input hash or `encode_version` arm moves; a project or preset that sets `fast` cannot be read by 3.0.0 (`deny_unknown_fields`). `fast-preview` profiles now carry it: their `profile_sha256` pins changed and nothing else did. This is the setting through which the engine reaches a level other than 18 (HY15's port of levels 10 to 15).
+
+ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
+- **HY7 The engine encodes BC1, BC3, BC4 and BC5 with `bcenc`; no output byte changes, so `versions()` and `encode_version` do not either.** `crates/engine/src/encode.rs` takes the five block functions from `bcenc`; rgbcx stays in `encoders-sys` as the reference the `bcenc` tests compare with, and its source hash stays in the manifest (`rgbcx_patch`) as the name of the algorithm the bytes follow. A change to `bcenc` that alters a byte is an engine change like any other: it sets the type's `encode_version` arm (Note DM). A format moves to `bcenc` only when its bytes equal rgbcx's and its median time is not above rgbcx's; all moved at once: on 1,048,576 blocks of 16 textures, one thread, five alternating runs, a block took 0.69 to 0.70 of rgbcx's time for BC1 (plain, perceptual, one-bit alpha) and BC3, and 0.81 to 0.82 for BC4 and BC5, with equal bytes. `bcenc::bc3_encode_block` takes the alpha cut as a `NonZeroU8` (owner, 2026-11-13): rgbcx's flags read a cut of 0 as 128, `encode::alpha_cut` gives 1..=255, and `encode::bc3_cut` maps a 0 to that same 128, so no input changes its bytes; `bc3_encode_block_raw_cut` keeps the flags' form for the tests that compare every value with rgbcx. End to end, `sdc convert` of a 300-PNG slice with the 3.0.0 build and with this one wrote the same bytes (SHA-256) for every DDS, all with mips, in 13 configurations: forced BC1 (251 files), BC1 perceptual (75), BC1 cutout with one-bit alpha plain (294) and perceptual (113), BC3 (278), BC3 perceptual (75), BC3 cutout at threshold 200 (294), BC4 (124), BC5 (124) and three presets; the forced BC1 and BC3 runs took about 28% less wall time, BC4 and BC5 about 16%.
+
+ARCHIVED (wording before the edit; superseded in part by Note HY21, 2026-11-15)
+- **HY1 `bcenc` holds the Rust BC4-family search; the C++ is the reference.** `crates/bcenc` has no dependencies, and `unsafe` only to call its three SSE2 kernels (HY9 and HY13 for BC1, HY11 for BC4). `bcenc::bc4` is the BC4 search that lived in `encoders-sys/tests/support/bc4ref.rs` (moved; behaviour unchanged, branch counters added), and `bc4_encode_block`, `bc5_encode_block` and `bc4_encode_alpha` (BC3's alpha half, with the cut) wrap it. They are proven byte-equal to `encoders_sys` on generated block classes at radii 4, 5 and 10 (`crates/bcenc/tests/bc4.rs`) and, in the `#[ignore]` test, on 20.02 million blocks at radius 5 (57.9 s on 16 threads, 0 mismatches). The vendored C++ stays the specification and is never edited. A `hit!` counter marks each branch and compiles to nothing outside the crate's unit tests; `every_ported_branch_is_taken` fails if a generator stops reaching one.
 
 ## Note HR — seven OPEN items closed (main team, 2026-11-09)
 
@@ -1180,6 +1225,15 @@ ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
 ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
 - **JA11 This plan's additions beyond the request.** `OnExisting::Reencode` (serde `reencode`) encodes every output that has a record again and keeps one without (`OUT-UNKNOWN-EXISTING`); the Also export treats it as `IfChanged` (the twin was just encoded, so its copy is redone). It backs the GUI's one-shot "Re-encode every output" item in the Export to ▾ menu (JA12), which does not use `Overwrite` because that replaces files Tessalith did not write. The CLI has no value for it; `--encoder-version` is a visible alias of `--ev`.
 
+ARCHIVED (wording before the edit; superseded in part by Note LG, 2026-11-21)
+- **JA1 The rule.** Under `--on-existing if-changed` (`api::currency`) an existing output with a manifest record is encoded again when its source, recorded sources, pack roles or output file changed, its validation failed, a settings field other than a quality target changed, or a quality target rose. It is kept, its record untouched, when only its encode version differs and `--ev` does not cover it (JA2), or a quality target fell (JA5). Otherwise it is current. The engine version and `isa` are not compared.
+
+ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
+- **JA1 The rule.** Under `--on-existing if-changed` (`api::currency`) an existing output with a manifest record is encoded again when its source, recorded sources, pack roles or output file changed, its validation failed (a record not validated, `validation.skipped`, has not failed; a validating run checks it in place, LG10), a settings field other than a quality target changed, or a quality target rose. It is kept, its record untouched, when only its encode version differs and `--ev` does not cover it (JA2), or a quality target fell (JA5); a check in place never touches such an output (LG10, LG11). Otherwise it is current, and a validating run may append its record again with only `validation` and `ts` changed (LG10). The engine version and `isa` are not compared.
+
+ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
+- **JA5 Quality targets: `encoder.effort`, `encoder.bc45_search_radius`, `encoder.bc1_search`.** When the profile hashes differ, the record's own profile (`raw["profile"]`, which must hash to the record's `profile_sha256`) with the job's three targets copied in must hash as the job's profile, else the output is stale (format, weighting, size, alpha, mips or any field added later). Then per field, for the job's format: effort on BC7 by bc7e level (`ultrafast` to `max`) and on BC6H by ISPC level in the order `veryfast`, `fast`, `basic`, `slow`, `veryslow`, peak (no effort reaches `slow` today) (`slowest` and `max` are one level); the radius on BC3, BC4 and BC5 by its value (`fast` 4 < `default` 5 < `max` 10, not the declared order); `bc1_search` on BC1 and BC3 (`fast` < `default`). A field the format does not read never differs. Any rise is stale; else any fall keeps. `bc7_weights` unset against `linear` re-encodes: equal bytes, different settings.
+
 ## Note JI — Settings tab, and no Advanced drawer (owner, 2026-11-15)
 
 ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
@@ -1209,6 +1263,21 @@ ARCHIVED (wording before the edit; superseded in part by Note JY, 2026-11-20)
   - **Header width.** Settings… is narrower than the two eyes: the header is one row from 1210 pt (measured in 1 pt steps), where CD2 said 1280.
   - Amends BH15 (the eyes are the Columns ticks), FB7 (Settings is a third tab), FS5 (a docked Settings tab owns the keys), CD2 (1210 pt), HV2 (Cache lives here), FM25 and FM26 (Preview and Checks are groups here) and JF3 (the sentence). Tests in `crates/gui/tests/settings_tab.rs`; `header_layout::the_header_is_one_row_from_1280`.
 
+ARCHIVED (wording before the edit; superseded in part by Note LG, 2026-11-21)
+- **JI1 A Settings tab (owner; layout accepted 2026-11-15).** `CentreTab::Settings` is a third centre-column tab with Pop out, beside Presets and the TruePBR JSON editor (FB7). The header's **Settings…** opens it (`AppModel::open_settings_tab`); it sits after the view tabs, where the column eyes were, and stays outside ⋯, also with no folder and in the Meshes view (JY13).
+  - **This project.** Heading "This project: saved in this folder's sdc.toml and sdc-project.toml", then Mode (moved whole from the Presets tab, which now only edits presets), Preset (a combo built from the header's menu body, `header::preset_entries`, accessible `Preset (this project): {value}`) and Export folder (the path cut in the middle at 48 characters, whole on hover and in the accessible name, with **Choose…** and **Open**). Mode and Preset save with Save and are off while `sdc.toml` is read-only; neither waits for a plan, as in the header. The export folder saves as `set_export_folder` does (at once while `sdc-project.toml` is clean, else on Save); Choose… and the header share `header::export_folder_off`. The Export without review row follows the folder row (JY3). With no project the section reads "No project open" and holds no controls.
+  - **App settings.** Heading "App settings: these apply to every project", then four groups in this order, each saved to `gui.toml` at once: Preview (Live encode, accessible "Live encode setting"; the preview toolbar and the command palette keep their copies), Checks (Low detail, Green direction, Parallax), Cache (Analysis cache limit, HV2) and Columns (ticks "Textures" and "Sets", ticked = shown, keeping BH15's accessible names "Textures column" / "Sets column").
+  - **Names and text.** The tab's Open is named `Settings: Open export folder`, so it differs from Export to ▾'s "Open export folder" (rule 8.4; agent ruling over the plan's fixed name). The header's Preset hover ends "Change the mode in Settings…", and the CFG-UNAVAILABLE sentence says "change the mode in Settings…". `open_export_folder()` errors are discarded alike in the header, the Files tab and this tab. The popped-out tab's heading "Settings" can share the screen with the expanded preview's collapsed settings strip, so the strip's button is named `Preview settings` (rule 8.1); its painted text stays "Settings".
+  - **Header width.** Settings… stays visible on the 1055 px row when optional controls move into ⋯ (JY13).
+  - Amends BH15 (the eyes are the Columns ticks), FB7 (Settings is a third tab), FS5 (a docked Settings tab owns the keys), CD2 (header width, JY13), HV2 (Cache lives here), FM25 and FM26 (Preview and Checks are groups here) and JF3 (the sentence). Tests in `crates/gui/tests/settings_tab.rs`; `header_layout::the_header_is_one_row_from_1280`.
+
+ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
+- **JI4 Effort drives the search fields (owner: "should be driven by the existing controls").** The Compression group's Effort row writes the field the texture's format reads (`fields::effort_field`): `encoder.effort` on BC7 and BC6H (the seven levels), `encoder.bc45_search_radius` on BC4 and BC5 (Fast, Default, Max), `encoder.bc1_search` on BC1 (Fast, Default), and both on BC3 (`BC3_CHOICES`: Fast = both `fast`, Default = both `default`, Max = radius `max` with search `default`) in one undo step "Change Effort" / "Reset Effort". A single-texture edit on the other formats names its key in the undo step (`Change encoder.bc1_search`); a bulk edit says "Effort" on every format. On other formats the row is greyed with "this format has no search setting". Provenance and ↺ follow the field the format reads; the separate "BC4/BC5 search radius" and "BC1/BC3 search" rows are gone.
+  - **BC3's mixed pair.** A pair no choice names shows a read-only entry `Custom: search {bc1}, radius {radius}` (hover "Mixed values from a preset or [files]; pick Fast, Default or Max to set both"); its provenance is the radius's when the radius is not `default`, else the search's when that is not, else the radius's.
+  - **Before.** On BC1, BC3, BC4 and BC5 the row wrote `encoder.effort`, which those encoders ignore (correction 11); it now writes the search field there, the same key the old drawer rows wrote. An `encoder.effort` already pinned on such a file stays, still ignored, and a value written for another format stays in `sdc.toml`.
+  - **Bulk.** When every selected texture reads the same field (BC1 and BC3 count as different), the row offers that field's choices; otherwise it reads "Formats differ: edit one format at a time". A texture in a locked slot or with no search does not count, so BC7 plus an uncompressed texture edits `encoder.effort` and skips the uncompressed one with "this format has no search setting", before the per-field format locks; Clear is not blocked. Two BC3 textures with different Custom pairs read "— mixed". Every bulk combo is `labelled_by` its row label (review finding 16). A bulk write of any `EFFORT_FIELDS` member is named "Effort" on every format: one step "Change Effort on {n} textures" / "Reset Effort on …", and the report "Effort: written to …". `field_label` keeps the search fields' own names for Copy settings and the inspector.
+  - Amends HY17 (the GUI row). Tests in `crates/gui/tests/effort_search.rs`.
+
 ## Note JV - One selection per set, key or no key (F11, controller, 2026-11-18)
 
 ARCHIVED (JV1 wording before the F11 final wave, superseded in part by Note JV, 2026-11-19)
@@ -1228,6 +1297,9 @@ ARCHIVED (JV5 wording before the F11 final wave, superseded in part by Note JV, 
 
 ARCHIVED (JV6 wording before the F11 final wave, superseded in part by Note JV, 2026-11-19)
 - **JV6 Ctrl+A and Shift+click ranges skip folded groups.** Both follow the Sets column's display order and take only keyed cards that pass the filter and are outside a folded group (HF6). Folding a group keeps its existing selections. The `sets_filter` tests are `ctrl_a_skips_folded_groups`, `shift_range_skips_folded_groups` and `folded_groups_keep_existing_selection`.
+
+ARCHIVED (wording before the edit; superseded in part by Note LJ, 2026-11-22)
+- **JV1 One selection names one set.** A keyed selection holds its engine key. A key-less selection holds its document id in `Selection::SetId`, including an empty id. A known id resolves by folded id even when it spells another set's key. The card, editor, group and slot reveal, Rename inputs/outputs and navigation use that identity. A card click, Edit match…, a Problems row's set link and Go to set open their source set. Go to set outlines the named slot or member when the 2D editor draws its row. The 3D editor consumes the request without an outline (JO8). A deferred card click follows the source document id to its current key or id after the field commits, and clears selection if the card disappeared. Show opens the set that owns the written JSON entry in the main Textures editor, including from popped JSON over Meshes. Fix path opens the owning field in the main 2D Material editor, expands its groups and focuses it even with JSON popped. The editor reads reasons from the resolved view. Clicking a row reason passes the card's typed target to Problems so Problems shows its own row and applies JO7's focus rule, even for an empty id or one identical to another card's key. The row list, filter chip and Checks/Notes pills keep that distinction. The editor's Slot reason uses a keyed plan warning. A "from set" link goes to the set that owns the planned member output.
 
 ## Note JO — Problems and Notes, Mark as intended, readiness (review E, plan 3a; controller for the owner, 2026-11-16)
 
@@ -1766,6 +1838,43 @@ ARCHIVED (wording before the edit; superseded in part by Note LM, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LC, 2026-11-20)
 - **JY13 One header row down to 1055 px (3c-3, 145, 147).** Move Tools, then MO2…, then Preset into `⋯`, measuring the destination at its normal display width before eliding it. Settings… stays outside. Wrap the destination, Save and Export together only when the fixed controls cannot fit. Size each Undo/Redo slot to the view's longest label, caching on view, labels, font, scale and padding. In Meshes the short label is **Undo NIF edit** or **Redo NIF edit**. Both directions keep the full step in the hover and accessible name. Tools and Preset are keyboard-accessible submenus through `look::menu_button_036`. Preset shares `preset_entries` with the regular picker. The submenu and Review's Choose preset popup scroll in short windows. Any enabled choice closes either picker, including the current value. Test `header_layout::the_1055_header_fits_long_fields_pending_nif_edits_and_launch`.
+
+## Note JT — Checks for rules that were prose only (main team, 2026-11-18)
+
+ARCHIVED (superseded by Note LH, 2026-11-22)
+- **JT9 Each check and where it runs.**
+  - `cargo test` (the gate's test step and CI):
+    - `sdc-gui` lib, `crates/gui/src/look.rs`: `look::tests::status_colours_are_defined_in_ui_status_only` (`const RED`, `AMBER`, `GREEN` or their RGB values under `crates/gui/src` outside `ui/status.rs`) and `look::tests::scroll_bars_use_thin_scroll` (a scroll preset outside `look.rs`, a whole scroll style set to anything but `look::thin_scroll()`).
+    - `sdc-gui` test binary `it`, `crates/gui/tests/it/main.rs`: `no_it_module_changes_process_state` and `process_state_needles_match_the_files_kept_apart` (JT8), `kittest_checks_are_never_switched_off` (`with_accessibility_check(` or `allow_missing_glyphs(` in `crates/gui/tests` or `crates/gui/src`); `crates/gui/tests/accessible_names.rs` through `audit_names` (JT5).
+    - `engine` test binary `schemas`, `crates/engine/tests/schemas.rs`: JT4's test, its matcher pinned by `the_unit_enum_matcher_sees_the_mixed_shape_and_not_data_enums`.
+  - Clippy with `-D warnings` (the gate's two clippy steps and CI): `clippy::exit` and `clippy::undocumented_unsafe_blocks` from the root `Cargo.toml` (JT2), and `disallowed-methods` from `crates/gui/clippy.toml` (JT3).
+  - `tools/doc-lint.py` (the gate's `doc-lint` step and CI; by hand `py -3.13 -I tools\doc-lint.py`): history words over README.md, docs/gui.md and docs/wiki (JT7); "as above" and "as below" in docs/wiki; the `###` headings of each released CHANGELOG section (Main first, then Engine, GUI, CLI, Common; 0.8.0-alpha.1 allowlisted); wiki page budgets and `_Sidebar.md` coverage; at most two IMPORTANT lines a wiki page; over README.md, docs/gui.md and docs/wiki, no byte-order mark and no image with empty alt text. Six or more top-level bullets in a row print a warning and do not fail.
+  - `.githooks/pre-commit` (at each commit where `core.hooksPath` is `.githooks`; neither the gate nor CI runs it), on the staged change, beside fmt, control bytes and duplicate note headings: a `.dds`, `.bsa`, `.ba2`, `.esp`, `.esm` or `.esl` outside `crates/render3d/shaders/cs/`; with `core.autocrlf=true`, a staged `.rs` whose working copy is LF (not one marked `-text` or `eol=lf`) and a CR byte in a staged text blob not marked `-text`; a `## Note` letter missing from the `## Index` block of `.claude/DECISIONS.md`; a `.claude/mistakes/*.md` entry not in the `- YYYY-MM-DD <what> → <instead> (<where>)` form.
+
+## Note LF — Allocation budgets (main team, 2026-11-21)
+
+ARCHIVED (superseded by Note LH, 2026-11-22)
+Three tests count allocation calls against a budget: a warm full plan and a one-edit re-plan (engine), and one settled frame of the demo project in the real app (GUI). A change that makes any of them allocate far more fails a test; the plan changes no encoded byte.
+
+- **LF1 Plan allocation budgets.** `crates/engine/tests/alloc_budget.rs` counts allocation calls with a process-wide counting allocator, for a warm full plan and for one `replan_sets` edit of the fast fixture, and fails above `WARM_PLAN_CALLS` or `REPLAN_CALLS`. Every request runs with `jobs = 1` so the count is the same from run to run. Each const is the largest of 5 measured runs times 1.10 (owner, 2026-11-21: 10 % headroom, since the counts repeat exactly), rounded up to two significant figures; to raise one, re-measure 5 runs with `--nocapture`, apply that rule, and give the reason in the commit.
+
+- **LF3 Splits without allocating.** `group::split_suffix` and `group::split_vocab` compare bytes through a private `cut_tail` and allocate only the returned base (and suffix), and `sets::no_set_paths` builds its `KeyIndex` only when an edit is a `SetEdit::NoSet`; every result is unchanged. The budgets were lowered to the new counts: `WARM_PLAN_CALLS` 130,000 (measured 112683), `REPLAN_CALLS` 31,000 (27376), `FRAME_CALLS` 3,100 (2744).
+
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LF3 Splits without allocating.** `group::split_suffix` and `group::split_vocab` compare bytes through a private `cut_tail` and allocate only the returned base (and suffix), and `sets::no_set_paths` builds its `KeyIndex` only when an edit is a `SetEdit::NoSet`; every result is unchanged. The budgets were lowered to `WARM_PLAN_CALLS` 130,000, `REPLAN_CALLS` 31,000 and `FRAME_CALLS` 3,100; LH4 and LH5 give the latest measured counts.
+
+## Note HJ — Rename outputs through slots (main team, 2026-11-09)
+
+ARCHIVED (wording before the edit; superseded in part by Note LJ, 2026-11-22)
+- **HJ1 Rename outputs is for PGPatcher PBR sets only (owner).** `AppModel::renames_outputs` (`v.pbr` on the Community Shaders target, the old `record_ignored`) decides it. The Outputs entry is absent, not greyed, from the set menu, the texture menu and the palette when no selected set qualifies; a mixed selection lists the qualifying sets with their count in the label. F2 on a selection with no qualifying set opens Inputs mode, and the dialog's mode switch hides Outputs then. `set_output_name` refuses a name on any other set ("output names are for PGPatcher PBR sets"); only `None` clears.
+
+## Note LH - Rust audit follow-ups (main team, 2026-11-22)
+
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LH4 Enum ids are names.** `RawMap::id`, `Subtype::id` and `Format::id` return the serde name as a `&'static str` from a `match` (as `PackRecipe::id` does), not a `String` serialised through `serde_json`; the generic `serde_id` is gone. `config::tests::ids_are_the_serde_names_of_every_variant` reads every name from the schema and compares, and `alloc_budget::enum_ids_do_not_allocate` pins that an id allocates nothing. No allocation budget moved under the LF1 rule (measured 2026-11-22 after Task 10: warm plan 106921, re-plan 25691, frame 2738; measured again after Task 11 and the merge of main, 5 runs each with `--exact`: warm plan 106931, frame 2738 in all five frames of all five runs).
+
+ARCHIVED (wording before the edit; superseded in part by Note LK1, 2026-11-22)
+- **LH5 The re-plan shares what it does not change.** `Prepared`'s `registry`, `user_config`, `files`, `grouped`, `joined`, `sets`, `hand`, `typed`, `dup_idx`, `gen_replaced` and `packed_outputs`, the skeleton's own indexes (`set_of`, `key_sets`, `pbr_sets`, `fuzz_sets`, `f_sets`) and `FileScopes::forms` are `Arc`s, so `Skeleton::patch`'s copy of the skeleton shares them with the session's skeleton; a set whose `typed` members change is rewritten through `Arc::make_mut`, which leaves the kept skeleton as it was. Copies remain: the `[files]` documents, the request and the `[files]` layer, which patch writes (a `shortcut:` in `patch`); a clone of `typed` per patch for its checks, kept in a fresh `Arc` even when no member changes; a copy of `grouped` at the join check; and a copy of `sets` in the shared-output check, with `Arc::make_mut` cloning the set vector on the first suffix write. `alloc_budget.rs` pins the patch alone at `PATCH_CALLS` 20000 (measured 17888; 20446 before). The one-edit re-plan, which goes through `patch`, measured 23132 calls (5 runs, `--exact`: 23132 four times, 23133 once; 25691 before, LH4); `REPLAN_CALLS` was not lowered: the LF1 rule gives 26,000, which is not below the old count (25691), so a lowered budget would not fail the old code (the test PATCH_CALLS passed); `fast_replan.rs` shows a partial plan still equals the full plan.
 
 ## Note GU — v3 cube sources and removed-key versions (owner, 2026-11-06)
 

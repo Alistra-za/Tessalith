@@ -632,7 +632,10 @@ fn label_of(opts: &Options, v: &Value) -> String {
 
 /// A field row: label, the value's combo, the base's (or, in a branch, the sub-type's) value as a hint, ↺ when the
 /// scope sets it.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the presets model, the row and profile being shown, the scope, field key and label of one setting, and the act queue; each comes from a different owner per frame, so a struct would be built per row only to be taken apart here"
+)]
 fn field_row(
     ui: &mut egui::Ui,
     pm: &PresetsModel,

@@ -114,11 +114,16 @@ fn export_stops_when_the_save_fails() {
 
 #[test]
 fn the_cli_command_reproduces_the_export() {
-    let c = cli_command(Path::new("C:/mods/x/textures"), Path::new("D:/out dir"));
+    let c = cli_command(
+        Path::new("C:/mods/x/textures"),
+        Path::new("D:/out dir"),
+        false,
+    );
     assert_eq!(
         c,
         r#"sdc convert "C:/mods/x/textures" --recursive -o "D:/out dir" --accept-suggestions high"#
     );
+    assert!(!c.contains("--validate"));
     assert!(
         !c.contains("--jobs"),
         "the engine's defaults are not written out"
@@ -128,10 +133,17 @@ fn the_cli_command_reproduces_the_export() {
 /// FM: the copied command carries none of the flags 2.0 removed.
 #[test]
 fn copy_cli_command_uses_no_removed_flag() {
-    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"));
+    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), false);
     for gone in ["--sidecar", "--fill", "--strict-cubemaps"] {
         assert!(!c.contains(gone), "{gone}: {c}");
     }
+}
+
+/// Note LG: the copied command validates when the switch is on.
+#[test]
+fn the_cli_command_names_validate_when_it_is_on() {
+    let c = cli_command(Path::new("C:/a"), Path::new("C:/b"), true);
+    assert!(c.ends_with(" --validate"), "{c}");
 }
 
 fn ev(seq: u64, job: &str, path: &str, kind: EventKind) -> EngineEvent {
@@ -245,6 +257,8 @@ fn packed_source_skips_make_no_row_and_cancelled_inputs_mark_their_rows() {
             skipped_intentional: 0,
             failed: 0,
             validation_failed: 0,
+            checked: 0,
+            checked_failed: 0,
             cancelled: vec!["C:/in/a/b.png".into()],
         },
     );
@@ -503,6 +517,62 @@ fn export_and_wait(m: &mut AppModel) -> engine::api::BatchSummary {
     assert!(m.export.running.is_some(), "{:?}", m.dialog);
     assert!(m.wait_idle(Duration::from_secs(120)));
     m.export.summary.clone().unwrap()
+}
+
+/// The latest record of every output under the export's textures folder (the last line per output wins).
+fn latest_records(m: &AppModel) -> Vec<(String, serde_json::Value)> {
+    engine::manifest::Manifest::at(&m.export_root().join("textures"))
+        .read()
+        .unwrap()
+        .into_iter()
+        .map(|(k, e)| (k, e.raw))
+        .collect()
+}
+
+fn skipped(rec: &serde_json::Value) -> bool {
+    rec["validation"]["skipped"].as_bool().unwrap_or(false)
+}
+
+/// Note LG: an export validates only when Validate exported DDS is on.
+#[test]
+fn an_export_validates_only_when_the_setting_is_on() {
+    for on in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        decide_all(&mut m);
+        m.settings.validate_exports = on;
+        export_and_wait(&mut m);
+        let records = latest_records(&m);
+        assert!(!records.is_empty());
+        for (k, rec) in &records {
+            assert_eq!(skipped(rec), !on, "{k} with the setting {on}: {rec}");
+        }
+        let md = m.export.to_markdown();
+        if on {
+            assert!(md.contains("validation failed 0"), "{md}");
+        } else {
+            assert!(md.contains("not validated"), "{md}");
+        }
+    }
+}
+
+/// Note LG10: turning the setting on checks the last export's outputs where they are.
+#[test]
+fn turning_validation_on_checks_the_last_export_in_place() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.settings.validate_exports = false;
+    export_and_wait(&mut m);
+    assert!(latest_records(&m).iter().all(|(_, r)| skipped(r)));
+    m.settings.validate_exports = true;
+    let s = export_and_wait(&mut m);
+    assert_eq!(s.converted, 0, "{s:?}");
+    assert!(s.checked > 0, "{s:?}");
+    assert_eq!(s.checked_failed, 0, "{s:?}");
+    for (k, rec) in latest_records(&m) {
+        assert!(!skipped(&rec), "{k}: {rec}");
+    }
 }
 
 /// Notes are rebuilt per export: a kept note of one export is gone from the next, which keeps nothing.

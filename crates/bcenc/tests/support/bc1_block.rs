@@ -1,5 +1,4 @@
 //! Readers of an encoded BC1 block for the tests that assert a block's colours and selectors.
-#![allow(dead_code)]
 
 /// The two 16-bit colours of a block: (colour 0, colour 1).
 pub fn colours(b: &[u8; 8]) -> (u16, u16) {

@@ -172,7 +172,7 @@ pub(super) fn shared_into_regular(
             let Some(next) = borrows.get(&cur) else {
                 break None;
             };
-            cur = next.clone();
+            cur.clone_from(next);
         };
         // A chain that reaches no Normal-slot file shares nothing, whatever the shaders: it is read first.
         let Some((cur, n)) = owner else {
@@ -981,6 +981,7 @@ impl AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     #[test]
     fn keep_alpha_reuses_the_single_unicode_folded_full_name() {
@@ -1088,9 +1089,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut text = String::new();
         for i in 0..10_000 {
-            text.push_str(&format!(
-                "[files.\"d/f{i:05}.png\"]\nalpha.policy = \"data\"\n"
-            ));
+            let _ = write!(text, "[files.\"d/f{i:05}.png\"]\nalpha.policy = \"data\"\n");
         }
         std::fs::write(d.path().join("sdc.toml"), text).unwrap();
         let p = ProjectDoc::open(d.path());

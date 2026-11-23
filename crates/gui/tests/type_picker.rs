@@ -111,7 +111,7 @@ fn type_picker_opens_at_its_anchor() {
     h.run();
     for st in offered_types() {
         let info = sdc_gui::model::labels::type_info(st);
-        let matches = [info.label, info.description, st.id().as_str()]
+        let matches = [info.label, info.description, st.id()]
             .iter()
             .any(|s| s.to_lowercase().replace('_', " ").contains("tint"));
         assert_eq!(

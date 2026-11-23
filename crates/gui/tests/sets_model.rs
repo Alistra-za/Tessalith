@@ -1544,10 +1544,14 @@ fn a_shared_rmaos_is_sent_to_the_engine_for_owner_and_borrower() {
     );
     idle(&mut m);
     let shared = shared_roughness(&m);
-    assert!(shared.contains("landscape/rock01"), "{shared:?}");
-    assert!(shared.contains(&id), "{shared:?}");
+    assert_eq!(shared.len(), 1);
+    assert!(
+        shared[0].users.contains_key("landscape/rock01"),
+        "{shared:?}"
+    );
+    assert!(shared[0].users.contains_key(&id), "{shared:?}");
     // Plan (`replan`) and export (`start_export`) both build their `BatchRequest` through `request()`.
-    assert_eq!(m.request().unwrap().shared_roughness, shared);
+    assert_eq!(m.request().unwrap().shared_roughness_groups, shared);
 }
 
 /// Final review I1 (DECISIONS Note R M4-final-1): `rock01_normal` shared into a set with its own `rock02_rmaos`. The
@@ -3474,7 +3478,7 @@ fn a_target_switch_replans_when_only_the_shared_roughness_changed() {
             .and_then(|i| i.job.as_ref())
             .map(|j| j.bake.is_some())
     };
-    assert_eq!(bake(&m), Some(false), "a shared rmaos never bakes");
+    assert_eq!(bake(&m), Some(false), "the borrower has no matching normal");
     m.set_target(Target::Vanilla);
     idle(&mut m);
     m.set_target(Target::Cs);

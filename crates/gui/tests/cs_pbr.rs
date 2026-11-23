@@ -37,7 +37,7 @@ fn floats_turn_every_number_into_a_float() {
 /// Every resource JSON's values equal its template's values (design §9). Reads the resource folder, read-only.
 /// `$env:SDC_PBR_RESOURCE='<PBR resource folder>'; cargo test -p sdc-gui --release --test it cs_pbr:: -- --ignored`
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_PBR_RESOURCE"]
 fn every_resource_file_equals_its_template() {
     let root = PathBuf::from(
         std::env::var("SDC_PBR_RESOURCE").expect("set SDC_PBR_RESOURCE to the resource folder"),

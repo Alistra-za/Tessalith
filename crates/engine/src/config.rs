@@ -164,7 +164,9 @@ pub(crate) fn stores_xyz(format: Format) -> bool {
 // uber 4, two least-squares passes and a quantised endpoint search); the vendored objects always carry it
 // (docs/research/bc7e-tuning.md).
 cfg_enum!(Effort, "lowercase" { Ultrafast, Veryfast, Fast, Basic, Veryslow, Slowest, Max });
-cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast });
+// BC4 search (Note LI): `fast` radius 4, `default` 5, `slowest` 10, `max` the radius-10 search then every endpoint
+// pair near the block. `//`, not `///`: a variant doc turns the schema into `oneOf`.
+cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast, Slowest });
 // BC1 search depth (Note HY17): `default` is rgbcx level 18; `fast` is bcenc's fast level. No `///` on a variant: it
 // would turn the schema into `oneOf`.
 cfg_enum!(#[derive(Default)] Bc1Search, "lowercase" { #[default] Default, Fast });
@@ -175,14 +177,17 @@ impl Bc1Search {
 }
 // BC7 linear error weights for bc7e (DECISIONS Note CP): alpha priority. `linear` is bc7e's own 1,1,1,1 (the plain
 // call): it overrides an inherited weighting.
-cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha8, Alpha16 });
+cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha4, Alpha8, Alpha16, Alpha32, Alpha64 });
 impl Bc7Weights {
     /// Every value, in order; `all_lists_every_variant` ties it to the enum.
-    pub const ALL: [Bc7Weights; 4] = [
+    pub const ALL: [Bc7Weights; 7] = [
         Bc7Weights::Linear,
         Bc7Weights::Alpha2,
+        Bc7Weights::Alpha4,
         Bc7Weights::Alpha8,
         Bc7Weights::Alpha16,
+        Bc7Weights::Alpha32,
+        Bc7Weights::Alpha64,
     ];
 
     /// The R, G, B, A weights bc7e is given.
@@ -190,8 +195,11 @@ impl Bc7Weights {
         match self {
             Bc7Weights::Linear => [1, 1, 1, 1],
             Bc7Weights::Alpha2 => [1, 1, 1, 2],
+            Bc7Weights::Alpha4 => [1, 1, 1, 4],
             Bc7Weights::Alpha8 => [1, 1, 1, 8],
             Bc7Weights::Alpha16 => [1, 1, 1, 16],
+            Bc7Weights::Alpha32 => [1, 1, 1, 32],
+            Bc7Weights::Alpha64 => [1, 1, 1, 64],
         }
     }
 }
@@ -238,8 +246,23 @@ impl RawMap {
     };
 
     /// The role id a raw map counts as after Discover (spec §4.4): `roughness`, `ao`, …
-    pub fn id(self) -> String {
-        serde_id(self)
+    pub fn id(self) -> &'static str {
+        match self {
+            RawMap::Roughness => "roughness",
+            RawMap::Metallic => "metallic",
+            RawMap::Ao => "ao",
+            RawMap::Specular => "specular",
+            RawMap::Glossiness => "glossiness",
+            RawMap::Height => "height",
+            RawMap::Opacity => "opacity",
+            RawMap::Fuzz => "fuzz",
+            RawMap::Orm => "orm",
+            RawMap::Curves => "curves",
+            RawMap::Cavity => "cavity",
+            RawMap::Rmaos => "rmaos",
+            RawMap::FuzzWeight => "fuzzweight",
+            RawMap::SubsurfaceWeight => "subsurfaceweight",
+        }
     }
 
     /// Spec §4.3 item 1, §6.4: an input that starts the cs `_rmaos`/`_rfaos` recipe, so its set is PBR.
@@ -275,15 +298,6 @@ pub enum PackRecipe {
     Auto,
     Rmaos,
     Rfaos,
-}
-
-/// The serde string a unit enum variant serialises as (its id).
-fn serde_id<T: serde::Serialize>(v: T) -> String {
-    serde_json::to_value(v)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_owned()
 }
 
 impl PackRecipe {
@@ -494,8 +508,44 @@ impl Subtype {
         matches!(self, Subtype::Rmaos | Subtype::SkinRfaos)
     }
 
-    pub fn id(self) -> String {
-        serde_id(self)
+    /// The name serde writes for this variant (Note LH4).
+    pub fn id(self) -> &'static str {
+        match self {
+            Subtype::Diffuse => "diffuse",
+            Subtype::LandscapeDiffuse => "landscape_diffuse",
+            Subtype::PbrAlbedo => "pbr_albedo",
+            Subtype::PbrEmissive => "pbr_emissive",
+            Subtype::Glow => "glow",
+            Subtype::PbrSubsurface => "pbr_subsurface",
+            Subtype::PbrFuzz => "pbr_fuzz",
+            Subtype::SubsurfaceTint => "subsurface_tint",
+            Subtype::BacklightTint => "backlight_tint",
+            Subtype::UiSky => "ui_sky",
+            Subtype::Normal => "normal",
+            Subtype::LandscapeNormal => "landscape_normal",
+            Subtype::PbrNormal => "pbr_normal",
+            Subtype::Msn => "msn",
+            Subtype::CoatNormal => "coat_normal",
+            Subtype::Envmask => "envmask",
+            Subtype::ComplexMaterial => "complex_material",
+            Subtype::Rmaos => "rmaos",
+            Subtype::SkinRfaos => "skin_rfaos",
+            Subtype::Flow => "flow",
+            Subtype::Height => "height",
+            Subtype::MsnSpecular => "msn_specular",
+            Subtype::GenericTwoChannel => "generic_two_channel",
+            Subtype::GenericData => "generic_data",
+            Subtype::HdrSky => "hdr_sky",
+            Subtype::SkinAlbedo => "skin_albedo",
+            Subtype::SkinSk => "skin_sk",
+            Subtype::SkinWet => "skin_wet",
+            Subtype::SkinDetail => "skin_detail",
+            Subtype::ComplexGrass => "complex_grass",
+            Subtype::Cubemap => "cubemap",
+            Subtype::ProjectedNoise => "projected_noise",
+            Subtype::DetailNormal => "detail_normal",
+            Subtype::Gray => "gray",
+        }
     }
 
     /// The sub-type whose [`id`](Self::id) is `s`, as `--set subtype=` and `--property` take it.
@@ -789,6 +839,28 @@ impl Profile {
 mod tests {
     use super::*;
 
+    /// Note LH4: each variant's `id()` is the name serde writes for it. The schema lists every serde name; each is read
+    /// back and its `id()` compared, so a variant the match spells differently fails.
+    #[test]
+    fn ids_are_the_serde_names_of_every_variant() {
+        fn check<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
+            id: impl Fn(T) -> &'static str,
+        ) {
+            let schema = serde_json::to_value(schemars::schema_for!(T)).unwrap();
+            let names = schema["enum"]
+                .as_array()
+                .expect("a unit enum's schema lists its names");
+            assert!(!names.is_empty());
+            for n in names {
+                let v: T = serde_json::from_value(n.clone()).unwrap();
+                assert_eq!(id(v), n.as_str().unwrap());
+            }
+        }
+        check::<RawMap>(RawMap::id);
+        check::<Subtype>(Subtype::id);
+        check::<Format>(Format::id);
+    }
+
     /// Note CP: `Bc7Weights::ALL` lists every variant once, in schema order (a new variant fails here until added).
     #[test]
     fn all_lists_every_variant() {
@@ -804,7 +876,7 @@ mod tests {
     #[test]
     fn subtype_from_id_round_trips_id() {
         for st in Subtype::ALL {
-            assert_eq!(Subtype::from_id(&st.id()), Some(st), "{st:?}");
+            assert_eq!(Subtype::from_id(st.id()), Some(st), "{st:?}");
         }
         assert_eq!(Subtype::from_id("rfaos"), None);
     }
@@ -951,7 +1023,7 @@ mod tests {
 
     #[test]
     fn subtype_ids_are_unique_and_round_trip() {
-        let mut ids: Vec<String> = Subtype::ALL.iter().map(|s| s.id()).collect();
+        let mut ids: Vec<&str> = Subtype::ALL.iter().map(|s| s.id()).collect();
         for s in Subtype::ALL {
             let back: Subtype = serde_json::from_str(&format!("\"{}\"", s.id())).unwrap();
             assert_eq!(back, s);

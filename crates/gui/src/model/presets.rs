@@ -553,10 +553,10 @@ impl PresetsModel {
         let id = st.id();
         let Some(sfx) = branch else {
             return self.edit(|t| {
-                if let Some(sub) = table_at(t, &["subtypes", id.as_str()], true) {
+                if let Some(sub) = table_at(t, &["subtypes", id], true) {
                     f(sub);
                     if sub.is_empty() {
-                        remove_at(t, &["subtypes", id.as_str()]);
+                        remove_at(t, &["subtypes", id]);
                     }
                 }
             });
@@ -577,7 +577,7 @@ impl PresetsModel {
                 .position(|r| self.branch_key(r).is_some_and(|(_, _, a)| a))
                 .map_or(rules.len(), |i| start + i)
         };
-        let rule = branch_rule(&id, sfx, alias);
+        let rule = branch_rule(id, sfx, alias);
         self.edit(move |t| {
             let rules = t
                 .entry("rules")

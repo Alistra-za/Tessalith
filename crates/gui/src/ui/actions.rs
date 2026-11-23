@@ -4,6 +4,7 @@ use crate::model::nav::{Palette, Pick};
 use crate::model::picker::PickerPurpose;
 use crate::model::AppModel;
 use eframe::egui::{self, Key, Modifiers};
+use std::fmt::Write as _;
 
 /// Where an action works; the sheet groups by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,15 +499,16 @@ pub static ACTIONS: &[Action] = &[
         Sets,
         &[key(Key::F2)],
         |m, _| {
-            use crate::model::rename::RenameMode;
-            // Note HJ1: no PGPatcher PBR set in the selection → Inputs.
-            let sets = matches!(m.selection, crate::model::Selection::Set(_) | crate::model::Selection::SetId(_))
-    && !m.rename_keys(RenameMode::Outputs).is_empty();
-            m.open_rename(if sets {
-                RenameMode::Outputs
+            use crate::model::rename::{RenameMode, INPUTS_IN_TEXTURES};
+            // Note LJ3: a set selection renames outputs (Note HJ1); with no PGPatcher PBR set in it F2 says where
+            // inputs are renamed. A texture selection renames inputs.
+            if m.inputs_rename_offered() {
+                m.open_rename(RenameMode::Inputs);
+            } else if m.rename_keys(RenameMode::Outputs).is_empty() {
+                m.status_line = INPUTS_IN_TEXTURES.into();
             } else {
-                RenameMode::Inputs
-            });
+                m.open_rename(RenameMode::Outputs);
+            }
         },
     ),
     // 3D preview (ui::viewport3d handles them)
@@ -939,11 +941,7 @@ pub fn markdown_table() -> String {
             } else {
                 (area.title(), "")
             };
-            s.push_str(&format!(
-                "| {area} | {} | {}{detail} |\n",
-                keys_text(a.id),
-                a.label
-            ));
+            let _ = writeln!(s, "| {area} | {} | {}{detail} |", keys_text(a.id), a.label);
         }
     }
     s

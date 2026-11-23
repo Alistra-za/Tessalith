@@ -205,7 +205,7 @@ fn without_a_disk_dir_nothing_is_written() {
 
 /// Load time of a real folder, cold then warm (Note DZ11). Read-only on `SDC_LOADTIME_DIR`; the store is a tempdir.
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_LOADTIME_DIR"]
 fn load_time_cold_then_warm() {
     let Some(dir) = std::env::var_os("SDC_LOADTIME_DIR") else {
         println!("skipped: SDC_LOADTIME_DIR unset");

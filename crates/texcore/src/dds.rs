@@ -57,18 +57,22 @@ pub enum HeaderForm {
     Legacy,
 }
 
-/// The serde string a unit enum variant serialises as (its id).
-fn serde_id<T: serde::Serialize>(v: T) -> String {
-    serde_json::to_value(v)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_owned()
-}
-
 impl Format {
-    pub fn id(self) -> String {
-        serde_id(self)
+    /// The name serde writes for this variant (Note LH4).
+    pub fn id(self) -> &'static str {
+        match self {
+            Format::Bc1 => "bc1",
+            Format::Bc3 => "bc3",
+            Format::Bc4 => "bc4",
+            Format::Bc5 => "bc5",
+            Format::Bc6hUf16 => "bc6h_uf16",
+            Format::Bc7 => "bc7",
+            Format::Rgba8 => "rgba8",
+            Format::Rgb8 => "rgb8",
+            Format::R8 => "r8",
+            Format::Rg8 => "rg8",
+            Format::Rgba16f => "rgba16f",
+        }
     }
     /// The DDS pixel format this format and tag are written as (DECISIONS S4: `rgba8` is B8G8R8A8; Note FM38: `rgb8` is
     /// the legacy 24-bit B8G8R8).

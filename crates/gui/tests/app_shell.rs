@@ -1,5 +1,8 @@
 mod app_harness;
-#[allow(dead_code)] // fields only the doc shots read
+#[allow(
+    dead_code,
+    reason = "this test never reads the doc-shot manifest's shot and exempt lists, the render adapter and fonts, or `Manifest::png`; the doc_shots test does"
+)]
 #[path = "doc_shots/manifest.rs"]
 mod manifest;
 mod support;

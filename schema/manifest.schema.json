@@ -106,8 +106,11 @@
       "enum": [
         "linear",
         "alpha2",
+        "alpha4",
         "alpha8",
-        "alpha16"
+        "alpha16",
+        "alpha32",
+        "alpha64"
       ],
       "type": "string"
     },
@@ -872,7 +875,8 @@
       "enum": [
         "default",
         "max",
-        "fast"
+        "fast",
+        "slowest"
       ],
       "type": "string"
     },
@@ -1116,7 +1120,11 @@
           ]
         },
         "passed": {
-          "description": "No `Error`-severity warning.",
+          "description": "No `Error`-severity warning. True when `skipped`: nothing was checked.",
+          "type": "boolean"
+        },
+        "skipped": {
+          "description": "The run did not validate this output (`BatchRequest::validate` off): nothing was checked, `passed` is true\nand `levels` is the header's mip count.",
           "type": "boolean"
         }
       },

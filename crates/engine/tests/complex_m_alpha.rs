@@ -22,11 +22,20 @@ struct Out {
 }
 
 fn convert(dir: &Path, target: Target, sets: &[&str]) -> Out {
+    convert_req(request(dir, target, sets))
+}
+
+fn request(dir: &Path, target: Target, sets: &[&str]) -> BatchRequest {
     let mut req = BatchRequest::new(vec![dir.join("in")], dir.join("out"), target);
+    req.validate = true;
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
     req.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();
     req.on_existing = OnExisting::Overwrite;
+    req
+}
+
+fn convert_req(req: BatchRequest) -> Out {
     let sink = Arc::new(VecSink::default());
     let rep = Reporter::new(sink.clone(), "complex-m");
     let e = Engine::new().unwrap();
@@ -256,6 +265,28 @@ fn a_solid_255_alpha_m_with_parallax_on_keeps_255_and_warns() {
     let w = warnings(&o);
     assert!(w.contains(&Code::ValMComplexMargin), "{w:?}");
     assert!(w.contains(&Code::SugContradiction), "{w:?}");
+}
+
+/// Note LG9: a complex `_m` is validated whatever `BatchRequest::validate` says.
+#[test]
+fn a_complex_m_is_validated_with_the_switch_off() {
+    let d = tempfile::tempdir().unwrap();
+    put_rgba(d.path(), |_, _| 255);
+    let mut req = request(
+        d.path(),
+        Target::Cs,
+        &[SUB, "file:**/iron_m.png.alpha.parallax=true"],
+    );
+    req.validate = false;
+    let root = req.output_root.clone();
+    let o = convert_req(req);
+    assert_eq!(o.summary.converted, 1, "{:?}", warnings(&o));
+    let w = warnings(&o);
+    assert!(w.contains(&Code::ValMComplexMargin), "{w:?}");
+    let records = engine::manifest::Manifest::at(&root).read().unwrap();
+    assert_eq!(records.len(), 1, "{:?}", records.keys());
+    let rec = &records.values().next().unwrap().raw;
+    assert!(rec["validation"].get("skipped").is_none(), "{rec}");
 }
 
 fn put_gray(dir: &Path, name: &str, f: impl Fn(u32, u32) -> u8) {

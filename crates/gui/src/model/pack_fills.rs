@@ -35,7 +35,7 @@ pub const RFAOS_UNBUILDABLE: &str = "RFAOS needs a roughness, glossiness or AO s
 const SHARED_FILLS: [RawMap; 3] = [RawMap::Roughness, RawMap::Ao, RawMap::Specular];
 
 fn role_name(role: RawMap) -> String {
-    role.id()
+    role.id().to_owned()
 }
 
 fn fill_field(role: RawMap) -> String {

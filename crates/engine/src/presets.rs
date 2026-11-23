@@ -882,16 +882,16 @@ impl PresetRegistry {
     pub fn chain(&self, id: &str) -> Result<Vec<&PresetFile>, PresetError> {
         let mut out: Vec<&PresetFile> = vec![];
         let mut cur = Some(id.to_string());
-        while let Some(c) = cur {
+        while let Some(c) = cur.as_deref() {
             if out.iter().any(|p| p.id == c) {
-                return Err(PresetError::Cycle(c));
+                return Err(PresetError::Cycle(c.to_owned()));
             }
             let p = self
                 .presets
-                .get(&c)
-                .ok_or_else(|| PresetError::Unknown(c.clone()))?;
+                .get(c)
+                .ok_or_else(|| PresetError::Unknown(c.to_owned()))?;
             out.push(p);
-            cur = p.base.clone();
+            cur.clone_from(&p.base);
         }
         out.reverse();
         Ok(out)

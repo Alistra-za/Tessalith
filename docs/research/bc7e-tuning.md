@@ -315,7 +315,7 @@ Per-image rows: `docs/research/bc7e-tuning/skyrim-max.csv` on branch `bench` (sc
 
 Written 2026-10-21 (commit dbf54808).
 
-Source: local study, 2026-10-21, and DECISIONS Note CP. It asks whether BC7 with a higher alpha error weight can replace BC3 for textures with delicate alpha, and keep BC7's better RGB. BC7 is the built-in bc7e at its default level (veryslow), with linear weights 1,1,1,w for w = 1, 2, 4, 8 and 16, and in a follow-up on 2026-10-22, 32 and 64. BC3 is the bundled rgbcx (level 18, `-r`). w1 is today's Linear. The dropdown offers Alpha ×2, ×8 and ×16, and Perceptual. The chart is in the [GUI guide](../wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3).
+Source: local study, 2026-10-21, and DECISIONS Note CP. It asks whether BC7 with a higher alpha error weight can replace BC3 for textures with delicate alpha, and keep BC7's better RGB. BC7 is the built-in bc7e at its default level (veryslow), with linear weights 1,1,1,w for w = 1, 2, 4, 8 and 16, and in a follow-up on 2026-10-22, 32 and 64. BC3 is the bundled rgbcx (level 18, `-r`). w1 is today's Linear. The dropdown's options, and the chart, are in the [GUI guide](../wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3).
 
 These tables copy the study's values. They leave out the 95% confidence intervals and the per-image worst cases that the study also reports. PSNR is in dB, alpha SSIM is 0 to 1, alpha max error is in codes, and exact-0 and exact-255 are the share of source texels at 0 or 255 that decode exactly. Each *Means* table is the mean over the class. Each *Where BC7 beats BC3* table counts the images where the BC7 setting beats BC3.
 
@@ -334,7 +334,7 @@ These tables copy the study's values. They leave out the 95% confidence interval
 - On `rmaos_spec` and `m_height`, BC3 still leads on alpha SSIM on 23/24 and 27/30 textures.
 - On `alpha_real`, w32 and w64 add only +0.3 and +0.45 dB of alpha over w16.
 
-The dropdown stays at ×16. w32 and w64 are in the bench only.
+Since 2026-11-22 (owner) the dropdown also offers ×4, ×32 and ×64; the measured gains above stand as written.
 
 Follow-up on `m_height`:
 
@@ -356,8 +356,8 @@ Means:
 | BC7 w4 | 47.13 | 53.17 | 50.56 | 0.9979 | 15.96 | 92.13 | 63.69 |
 | BC7 w8 | 46.60 | 52.87 | 51.40 | 0.9984 | 13.91 | 92.69 | 67.00 |
 | BC7 w16 | 46.17 | 52.53 | 51.93 | 0.9987 | 13.02 | 93.06 | 66.01 |
-| BC7 w32 (study only) | 45.84 | 52.23 | 52.23 | 0.9989 | 12.42 | 93.06 | 66.39 |
-| BC7 w64 (study only) | 45.58 | 52.00 | 52.38 | 0.9990 | 12.24 | 93.08 | 66.37 |
+| BC7 w32 | 45.84 | 52.23 | 52.23 | 0.9989 | 12.42 | 93.06 | 66.39 |
+| BC7 w64 | 45.58 | 52.00 | 52.38 | 0.9990 | 12.24 | 93.08 | 66.37 |
 | BC7 perceptual | 46.54 | 52.81 | 51.17 | 0.9983 | 14.39 | 92.70 | 65.27 |
 
 Where BC7 beats BC3:
@@ -369,8 +369,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 77/96 | 62/96 | 62/96 | +6.13 dB | 94/96 | +3.32 | +0.17 |
 | BC7 w8 | 85/96 | 77/96 | 77/96 | +5.61 dB | 88/96 | +4.16 | +0.67 |
 | BC7 w16 | 86/96 | 80/96 | 80/96 | +5.18 dB | 84/96 | +4.69 | +0.97 |
-| BC7 w32 (study only) | 87/96 | 82/96 | 82/96 | +4.84 dB | 82/96 | +4.98 | +1.14 |
-| BC7 w64 (study only) | 87/96 | 82/96 | 82/96 | +4.59 dB | 79/96 | +5.14 | +1.24 |
+| BC7 w32 | 87/96 | 82/96 | 82/96 | +4.84 dB | 82/96 | +4.98 | +1.14 |
+| BC7 w64 | 87/96 | 82/96 | 82/96 | +4.59 dB | 79/96 | +5.14 | +1.24 |
 | BC7 perceptual | 82/96 | 71/96 | 71/96 | +5.54 dB | 91/96 | +3.93 | +0.54 |
 
 ### Normal map with specular in alpha (`n_spec`, 30 textures, mip 0)
@@ -385,8 +385,8 @@ Means:
 | BC7 w4 | 2.081 | 36.00 | 41.39 | 0.9807 | 55.90 | 81.60 | 43.31 |
 | BC7 w8 | 2.308 | 35.22 | 43.36 | 0.9883 | 41.10 | 80.19 | 47.44 |
 | BC7 w16 | 2.523 | 34.53 | 44.96 | 0.9929 | 32.17 | 76.90 | 51.26 |
-| BC7 w32 (study only) | 2.706 | 33.95 | 46.02 | 0.9953 | 24.87 | 75.62 | 54.68 |
-| BC7 w64 (study only) | 2.851 | 33.49 | 46.64 | 0.9963 | 19.47 | 74.28 | 53.82 |
+| BC7 w32 | 2.706 | 33.95 | 46.02 | 0.9953 | 24.87 | 75.62 | 54.68 |
+| BC7 w64 | 2.851 | 33.49 | 46.64 | 0.9963 | 19.47 | 74.28 | 53.82 |
 
 Where BC7 beats BC3:
 
@@ -397,8 +397,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 1/30 | 0/30 | 0/30 | +0.725 ° | 29/30 | -4.67 | -15.95 |
 | BC7 w8 | 3/30 | 1/30 | 1/30 | +0.498 ° | 27/30 | -2.70 | -8.30 |
 | BC7 w16 | 10/30 | 3/30 | 3/30 | +0.283 ° | 24/30 | -1.11 | -3.70 |
-| BC7 w32 (study only) | 17/30 | 6/30 | 6/30 | +0.100 ° | 16/30 | -0.04 | -1.37 |
-| BC7 w64 (study only) | 21/30 | 13/30 | 13/30 | -0.045 ° | 11/30 | +0.58 | -0.34 |
+| BC7 w32 | 17/30 | 6/30 | 6/30 | +0.100 ° | 16/30 | -0.04 | -1.37 |
+| BC7 w64 | 21/30 | 13/30 | 13/30 | -0.045 ° | 11/30 | +0.58 | -0.34 |
 
 ### The same normal maps at mip 2 (`n_spec_mip2`, 30 textures)
 
@@ -412,8 +412,8 @@ Means:
 | BC7 w4 | 2.788 | 33.67 | 39.58 | 0.9808 | 37.60 | 92.39 | 59.13 |
 | BC7 w8 | 3.052 | 33.00 | 41.59 | 0.9886 | 25.70 | 92.56 | 54.53 |
 | BC7 w16 | 3.270 | 32.44 | 42.95 | 0.9925 | 20.23 | 94.48 | 55.51 |
-| BC7 w32 (study only) | 3.460 | 31.94 | 43.80 | 0.9946 | 15.87 | 95.81 | 57.35 |
-| BC7 w64 (study only) | 3.640 | 31.45 | 44.38 | 0.9956 | 14.40 | 94.86 | 57.27 |
+| BC7 w32 | 3.460 | 31.94 | 43.80 | 0.9946 | 15.87 | 95.81 | 57.35 |
+| BC7 w64 | 3.640 | 31.45 | 44.38 | 0.9956 | 14.40 | 94.86 | 57.27 |
 
 Where BC7 beats BC3:
 
@@ -424,8 +424,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 1/30 | 0/30 | 0/30 | +0.772 ° | 29/30 | -4.71 | -15.38 |
 | BC7 w8 | 1/30 | 1/30 | 1/30 | +0.508 ° | 25/30 | -2.70 | -7.62 |
 | BC7 w16 | 8/30 | 5/30 | 4/30 | +0.290 ° | 22/30 | -1.35 | -3.63 |
-| BC7 w32 (study only) | 13/30 | 9/30 | 9/30 | +0.100 ° | 18/30 | -0.49 | -1.59 |
-| BC7 w64 (study only) | 19/30 | 12/30 | 12/30 | -0.080 ° | 13/30 | +0.09 | -0.59 |
+| BC7 w32 | 13/30 | 9/30 | 9/30 | +0.100 ° | 18/30 | -0.49 | -1.59 |
+| BC7 w64 | 19/30 | 12/30 | 12/30 | -0.080 ° | 13/30 | +0.09 | -0.59 |
 
 ### Packed `_rmaos` with specular in alpha (`rmaos_spec`, 24 textures)
 
@@ -439,11 +439,11 @@ Means:
 | BC7 w4 | 43.39 | 51.72 | 44.08 | 44.62 | 53.36 | 0.9959 | 23.33 | 95.69 | 70.44 |
 | BC7 w8 | 43.02 | 51.05 | 43.78 | 44.25 | 54.74 | 0.9972 | 17.67 | 95.14 | 72.16 |
 | BC7 w16 | 42.58 | 50.50 | 43.42 | 43.82 | 56.07 | 0.9981 | 15.33 | 78.66 | 73.05 |
-| BC7 w32 (study only) | 42.05 | 50.09 | 43.01 | 43.32 | 57.31 | 0.9987 | 13.79 | 78.52 | 73.43 |
-| BC7 w64 (study only) | 41.47 | 49.70 | 42.57 | 42.77 | 58.51 | 0.9991 | 13.12 | 78.14 | 74.13 |
+| BC7 w32 | 42.05 | 50.09 | 43.01 | 43.32 | 57.31 | 0.9987 | 13.79 | 78.52 | 73.43 |
+| BC7 w64 | 41.47 | 49.70 | 42.57 | 42.77 | 58.51 | 0.9991 | 13.12 | 78.14 | 74.13 |
 | BC7 w8 + exact opaque | | | | 44.25 | 55.01 | 0.9973 | 17.67 | 95.14 | 91.64 |
 | BC7 w16 + exact opaque | | | | 43.82 | 56.43 | 0.9982 | 15.33 | 78.66 | 92.53 |
-| BC7 w64 + exact opaque (study only) | | | | 42.77 | 59.10 | 0.9992 | 13.12 | 78.14 | 93.60 |
+| BC7 w64 + exact opaque | | | | 42.77 | 59.10 | 0.9992 | 13.12 | 78.14 | 93.60 |
 
 Where BC7 beats BC3:
 
@@ -454,8 +454,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 2/24 | 1/24 | 1/24 | +5.98 dB | 23/24 | -5.62 | -3.61 |
 | BC7 w8 | 4/24 | 1/24 | 1/24 | +5.61 dB | 23/24 | -4.24 | -2.36 |
 | BC7 w16 | 5/24 | 1/24 | 1/24 | +5.18 dB | 22/24 | -2.91 | -1.46 |
-| BC7 w32 (study only) | 6/24 | 1/24 | 1/24 | +4.68 dB | 22/24 | -1.67 | -0.83 |
-| BC7 w64 (study only) | 11/24 | 1/24 | 1/24 | +4.13 dB | 22/24 | -0.47 | -0.42 |
+| BC7 w32 | 6/24 | 1/24 | 1/24 | +4.68 dB | 22/24 | -1.67 | -0.83 |
+| BC7 w64 | 11/24 | 1/24 | 1/24 | +4.13 dB | 22/24 | -0.47 | -0.42 |
 
 Why BC3 keeps the lead on this class, even at w64:
 
@@ -487,8 +487,8 @@ Means:
 | BC7 w4 | 42.64 | 50.32 | 42.34 | 43.41 | 48.73 | 0.9929 | 21.77 | 93.91 | 90.89 |
 | BC7 w8 | 42.03 | 49.61 | 41.62 | 42.70 | 50.27 | 0.9952 | 18.13 | 95.69 | 90.63 |
 | BC7 w16 | 41.44 | 49.13 | 40.94 | 42.02 | 51.56 | 0.9969 | 14.27 | 97.13 | 93.80 |
-| BC7 w32 (study only) | 40.94 | 48.82 | 40.33 | 41.44 | 52.46 | 0.9980 | 12.43 | 98.15 | 95.05 |
-| BC7 w64 (study only) | 40.52 | 48.41 | 39.84 | 40.95 | 52.99 | 0.9984 | 11.70 | 98.76 | 95.27 |
+| BC7 w32 | 40.94 | 48.82 | 40.33 | 41.44 | 52.46 | 0.9980 | 12.43 | 98.15 | 95.05 |
+| BC7 w64 | 40.52 | 48.41 | 39.84 | 40.95 | 52.99 | 0.9984 | 11.70 | 98.76 | 95.27 |
 | BC7 w1 + exact-opaque | 43.77 | 52.71 | 43.65 | 44.75 | 45.29 | 0.9851 | 36.13 | 74.98 | 90.99 |
 | BC7 [4,1,2,1] | 46.09 | 48.83 | 43.49 | 45.10 | 43.14 | 0.9773 | 48.03 | 67.90 | 83.16 |
 
@@ -501,8 +501,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 2/30 / 1/30 | 1/30 / 1/30 | 1/14 / 0/14 | 0/15 / 0/15 | +4.75 dB | 29/30 |
 | BC7 w8 | 4/30 / 3/30 | 1/30 / 2/30 | 1/14 / 0/14 | 0/15 / 0/15 | +4.04 dB | 29/30 |
 | BC7 w16 | 9/30 / 11/30 | 2/30 / 3/30 | 1/14 / 0/14 | 1/15 / 0/15 | +3.35 dB | 27/30 |
-| BC7 w32 (study only, rgbcx only) | 13/30 | 2/30 | — | — | +2.77 dB | 26/30 |
-| BC7 w64 (study only, rgbcx only) | 16/30 | 3/30 | 11/14 | — | +2.28 dB | 24/30 |
+| BC7 w32 (rgbcx only) | 13/30 | 2/30 | — | — | +2.77 dB | 26/30 |
+| BC7 w64 (rgbcx only) | 16/30 | 3/30 | 11/14 | — | +2.28 dB | 24/30 |
 | BC7 w1 + exact-opaque | 0/30 / 0/30 | 0/30 / 0/30 | 0/14 / 0/14 | 0/15 / 0/15 | +6.08 dB | 30/30 |
 | BC7 [4,1,2,1] | 0/30 / 0/30 | 0/30 / 0/30 | 0/14 / 0/14 | 0/15 / 0/15 | +6.43 dB | 30/30 |
 

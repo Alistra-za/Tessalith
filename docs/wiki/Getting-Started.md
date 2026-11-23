@@ -67,7 +67,7 @@ Copy the output into your mod and leave `_sdc` out. Install the JSON from `PBRNI
 
 ## Check it in game
 
-Tessalith's validation checks the files, not the game. Look at these, each with what a bad result means:
+Tessalith's validation (always on for complex `_m` and complex grass; for the rest, turn on **Validate exported DDS** or `--validate`) checks the files, not the game. Look at these, each with what a bad result means:
 
 - **Textures load.** A missing one means its output path differs from the path the mesh uses. The Meshes view shows a mesh's slots.
 - **PBR colour brightness.** Compare albedo, `_g` and `_f` with linear lighting on and off. Washed out means a `color.tag = "unorm"` override: `TAG-UNORM-PBR`. [sRGB or UNORM](Texture-Types.md#srgb-or-unorm) has the rule.

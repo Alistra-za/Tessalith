@@ -17,8 +17,8 @@ use crate::image::Rgba32F;
 use crate::load::load_image_as;
 use crate::manifest::{
     dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, recorded_sources,
-    sha256_file, EncoderVersions, Manifest, ManifestRecord, PresetRef, BC1_ENCODE_ID,
-    ENGINE_VERSION, MANIFEST_SCHEMA,
+    sha256_file, EncoderVersions, Manifest, ManifestEntry, ManifestRecord, PresetRef,
+    BC1_ENCODE_ID, ENGINE_VERSION, MANIFEST_SCHEMA,
 };
 use crate::mips::build_chain_with;
 use crate::ops::{preprocess_with, Domain, SourceTransfer};
@@ -26,7 +26,9 @@ use crate::pack::assemble::assemble;
 use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
-use crate::validate::{validate, ValidationInput, ValidationReport};
+use crate::validate::{
+    always_validated, validate, ValidationInput, ValidationReport, ValidationSummary,
+};
 use std::cell::Cell;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -482,10 +484,15 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
 /// or anything panics, `tracker.written` tells the caller to remove the output, so an output on disk has its
 /// record, except after a second Ctrl-C: that aborts the process (exit 3) and can leave `.sdc-*.tmp` files, or an
 /// output without a record (`OUT-UNKNOWN-EXISTING` on the next run). A failed validation (`passed = false`) is not a failure here: the output is written and recorded.
+/// With `req.validate` off the output is not decoded again and its record says `validation.skipped`, unless its
+/// sub-type is always validated (`validate::always_validated`, Note LG9).
 ///
 /// Check 3 (`req.low_detail`): a flagged texture is written in full and carries the warning in its report under
 /// `Warn`.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one file's whole conversion: the job, request, preset, cancel token, reporter, manifest and replace flag from the batch worker, and the tracker its caller reads after a panic, each with a different owner"
+)]
 pub fn process_file(
     job: &ResolvedJob,
     req: &BatchRequest,
@@ -550,8 +557,7 @@ pub fn process_file(
 
     enter(Stage::Compress);
     let levels = encode_levels(&prep, p, cancel, rep, &key, set, path)?;
-    // Mips per face: the header's count.
-    let total = (prep.inputs.len() / prep.faces) as u32;
+    let total = levels_per_face(&prep);
 
     enter(Stage::Write);
     let srgb = p.srgb_tag();
@@ -571,17 +577,17 @@ pub fn process_file(
     drop(levels);
 
     // Validate the exact bytes about to be written: `validate` parses them with the engine's DDS reader (spec §5.8).
-    enter(Stage::Validate);
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_mut))]
-    // only the test hook mutates the report
-    let mut report = validate(&ValidationInput {
-        bytes: &bytes,
-        profile: p,
-        encoder_input: Some(&prep.inputs),
-        base_coverage: prep.base_coverage,
-        source_peak: prep.source_peak,
-        expected_levels: Some(total),
-    });
+    // Skipped, it only reads, so the bytes written are the same.
+    let validated = req.validate || always_validated(p.subtype);
+    let mut report = if validated {
+        enter(Stage::Validate);
+        validate_prepared(&bytes, p, &prep)
+    } else {
+        ValidationReport {
+            summary: ValidationSummary::not_run(total),
+            warnings: vec![],
+        }
+    };
     // Test hook (Note DM, `test-hooks` only): record this output's encode-input hash for the encode-version guard.
     #[cfg(feature = "test-hooks")]
     if let Some(dir) = std::env::var_os("SDC_TEST_ENCODE_INPUT_DIR") {
@@ -592,8 +598,11 @@ pub fn process_file(
         std::fs::write(file, json.to_string()).expect("encode input hook");
     }
     drop(prep);
+    // Note K: the hook fails a validation, so it runs only when one ran.
     #[cfg(feature = "test-hooks")]
-    force_validation_failure_for_test(job, &mut report);
+    if validated {
+        force_validation_failure_for_test(job, &mut report);
+    }
     enter(Stage::Write);
     let mut record = ManifestRecord {
         schema: MANIFEST_SCHEMA,
@@ -641,12 +650,177 @@ pub fn process_file(
     }))
 }
 
+/// Mips per face: the header's count, and the level count validation expects, on the encode and the check path alike.
+fn levels_per_face(prep: &Prepared) -> u32 {
+    (prep.inputs.len() / prep.faces) as u32
+}
+
+fn validate_prepared(bytes: &[u8], profile: &Profile, prep: &Prepared) -> ValidationReport {
+    validate(&ValidationInput {
+        bytes,
+        profile,
+        encoder_input: Some(&prep.inputs),
+        base_coverage: prep.base_coverage,
+        source_peak: prep.source_peak,
+        expected_levels: Some(levels_per_face(prep)),
+    })
+}
+
+/// Rebuild the encoder input for a current DDS and append its verdict without writing the DDS.
+pub(crate) fn check_in_place(
+    job: &ResolvedJob,
+    entry: &ManifestEntry,
+    cancel: &CancelToken,
+    manifest: &Manifest,
+) -> Result<ValidationReport, FileError> {
+    if cancel.is_cancelled() {
+        return Err(FileError::Cancelled);
+    }
+    let bytes = std::fs::read(&job.output).map_err(|e| fail(Stage::Validate)(e.to_string()))?;
+    check_output_stamp(job, entry)?;
+    let prep =
+        prepare(job, cancel, &FileTracker::default(), Keep::Encode).map_err(|e| match e {
+            FileError::Failed(_, msg) => FileError::Failed(Stage::Validate, msg),
+            FileError::Cancelled => FileError::Cancelled,
+        })?;
+    #[cfg_attr(
+        not(feature = "test-hooks"),
+        allow(
+            unused_mut,
+            reason = "only the test hook (force_validation_failure_for_test) mutates the report"
+        )
+    )]
+    let mut report = validate_prepared(&bytes, &job.profile, &prep);
+    #[cfg(feature = "test-hooks")]
+    force_validation_failure_for_test(job, &mut report);
+    commit_check(job, entry, &report, cancel, manifest)?;
+    Ok(report)
+}
+
+fn check_output_stamp(job: &ResolvedJob, entry: &ManifestEntry) -> Result<(), FileError> {
+    if SourceStamp::of(&job.output) != entry.output_stamp {
+        return Err(FileError::Failed(
+            Stage::Validate,
+            "the output changed during the run".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn commit_check(
+    job: &ResolvedJob,
+    entry: &ManifestEntry,
+    report: &ValidationReport,
+    cancel: &CancelToken,
+    manifest: &Manifest,
+) -> Result<(), FileError> {
+    let mut record: ManifestRecord = serde_json::from_value(entry.raw.clone())
+        .map_err(|e| fail(Stage::Validate)(e.to_string()))?;
+    record.validation = report.summary.clone();
+    record.ts = now_rfc3339();
+    if cancel.is_cancelled() {
+        return Err(FileError::Cancelled);
+    }
+    check_output_stamp(job, entry)?;
+    manifest
+        .append(&record)
+        .map_err(|e| fail(Stage::Validate)(format!("manifest {}: {e}", manifest.path().display())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{AlphaCompare, ResizeMode};
     use crate::coverage::passes;
     use crate::ops::tests::{cutout_profile, sparse_cutout};
+
+    fn unchecked_output(dir: &Path) -> (ResolvedJob, Manifest, ManifestEntry) {
+        use crate::api::Engine;
+        use crate::config::Target;
+        use crate::events::VecSink;
+        let input = dir.join("textures/a/stone.png");
+        std::fs::create_dir_all(input.parent().unwrap()).unwrap();
+        ::image::RgbImage::new(32, 32).save(&input).unwrap();
+        let mut req = BatchRequest::new(vec![input], dir.join("out"), Target::Cs);
+        req.overrides
+            .push(crate::overrides::parse_set("subtype=diffuse").unwrap());
+        let rep = Reporter::new(std::sync::Arc::new(VecSink::default()), "check-guards");
+        let engine = Engine::new().unwrap();
+        let cancel = CancelToken::default();
+        let plan = engine.plan(req, &rep, &cancel).unwrap();
+        let job = plan.jobs[0].clone();
+        let manifest = Manifest::at(&plan.request.output_root);
+        assert_eq!(engine.run(plan, &rep, &cancel).unwrap().converted, 1);
+        let entry = manifest.read().unwrap().into_values().next().unwrap();
+        (job, manifest, entry)
+    }
+
+    fn line_count(manifest: &Manifest) -> usize {
+        std::fs::read_to_string(manifest.path())
+            .unwrap()
+            .lines()
+            .count()
+    }
+
+    #[test]
+    fn check_in_place_stops_at_its_entry_guards() {
+        let dir = tempfile::tempdir().unwrap();
+        let (job, manifest, mut entry) = unchecked_output(dir.path());
+        let lines = line_count(&manifest);
+        entry.output_stamp.as_mut().unwrap().size += 1;
+        // Preparing would now fail, so the error identifies the entry guard specifically.
+        std::fs::remove_file(&job.input).unwrap();
+        let cancel = CancelToken::default();
+        assert_eq!(
+            check_in_place(&job, &entry, &cancel, &manifest).unwrap_err(),
+            FileError::Failed(Stage::Validate, "the output changed during the run".into())
+        );
+        assert_eq!(line_count(&manifest), lines);
+        cancel.cancel();
+        std::fs::remove_file(&job.output).unwrap();
+        assert_eq!(
+            check_in_place(&job, &entry, &cancel, &manifest).unwrap_err(),
+            FileError::Cancelled
+        );
+        assert_eq!(line_count(&manifest), lines);
+    }
+
+    #[test]
+    fn the_final_guards_stop_the_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let (job, manifest, entry) = unchecked_output(dir.path());
+        let cancel = CancelToken::default();
+        let bytes = std::fs::read(&job.output).unwrap();
+        let modified = std::fs::metadata(&job.output).unwrap().modified().unwrap();
+        let prep = prepare(&job, &cancel, &FileTracker::default(), Keep::Encode).unwrap();
+        let report = validate_prepared(&bytes, &job.profile, &prep);
+        let lines = line_count(&manifest);
+        std::fs::write(&job.output, b"changed").unwrap();
+        let changed = commit_check(&job, &entry, &report, &cancel, &manifest);
+        assert_eq!(line_count(&manifest), lines, "changed output");
+        assert_eq!(
+            changed,
+            Err(FileError::Failed(
+                Stage::Validate,
+                "the output changed during the run".into()
+            ))
+        );
+        std::fs::write(&job.output, bytes).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&job.output)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(SourceStamp::of(&job.output), entry.output_stamp);
+        let stopped = CancelToken::default();
+        stopped.cancel();
+        let result = commit_check(&job, &entry, &report, &stopped, &manifest);
+        assert_eq!(line_count(&manifest), lines, "cancelled");
+        assert_eq!(result, Err(FileError::Cancelled));
+        commit_check(&job, &entry, &report, &cancel, &manifest).unwrap();
+        assert_eq!(line_count(&manifest), lines + 1);
+    }
 
     /// QA2: a failure reads as its message alone, as the export's Problems row shows `FileFailed`.
     #[test]

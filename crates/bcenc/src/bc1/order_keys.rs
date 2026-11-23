@@ -13,6 +13,7 @@
 
 use super::fit::OrderTables;
 use super::tables::{BEST_TOTAL_ORDERINGS3, MAX_TOTAL_ORDERINGS4};
+use crate::path::Isa;
 
 /// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
 pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
@@ -29,8 +30,12 @@ const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 /// (`params.rs` asserts it is inside the clamp). The level is a const generic so that the count is a constant in each
 /// instance.
 ///
+/// The kernel is the stamp compiled for `isa`'s path (as in [`keys3`]); the scalar code where the target lacks SSE2.
+///
 /// [`Seen`]: super::seen::Seen
+#[inline(always)]
 pub(crate) fn keys4<const LEVEL: u32>(
+    isa: impl Isa,
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u16; MAX_TOTAL_ORDERINGS4],
@@ -39,8 +44,15 @@ pub(crate) fn keys4<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS4] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) };
+        let keys = if let Some(_t) = isa.avx2() {
+            #[cfg(test)]
+            crate::path::kernel_ran(crate::path::Wide::Keys4);
+            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
+            unsafe { sse2::keys4_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        } else {
+            // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
+            unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) }
+        };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
         assert_eq!(
@@ -50,7 +62,11 @@ pub(crate) fn keys4<const LEVEL: u32>(
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys4::<LEVEL>(total, sums, row, tables, single_key);
+    let keys = {
+        // The scalar code serves every path here.
+        let _ = isa;
+        scalar::keys4::<LEVEL>(total, sums, row, tables, single_key)
+    };
     keys
 }
 
@@ -64,7 +80,9 @@ pub(crate) fn keys4<const LEVEL: u32>(
 /// 32) (`cEncodeBC1Exhaustive` is level 19 only, so the `std::min` bound is what the ported levels use).
 ///
 /// [`Seen`]: super::seen::Seen
+#[inline(always)]
 pub(crate) fn keys3<const LEVEL: u32>(
+    isa: impl Isa,
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u8; MAX_TOTAL_ORDERINGS3],
@@ -73,8 +91,15 @@ pub(crate) fn keys3<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS3] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) };
+        let keys = if let Some(_t) = isa.avx2() {
+            #[cfg(test)]
+            crate::path::kernel_ran(crate::path::Wide::Keys3);
+            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
+            unsafe { sse2::keys3_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        } else {
+            // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
+            unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) }
+        };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
         assert_eq!(
@@ -84,7 +109,11 @@ pub(crate) fn keys3<const LEVEL: u32>(
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys3::<LEVEL>(total, sums, row, tables, single_key);
+    let keys = {
+        // The scalar code serves every path here.
+        let _ = isa;
+        scalar::keys3::<LEVEL>(total, sums, row, tables, single_key)
+    };
     keys
 }
 
@@ -96,8 +125,13 @@ mod sse2;
 /// kernel's reference, and what a target without SSE2 runs.
 #[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
 mod scalar {
-    // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-    #[cfg_attr(not(test), allow(unused_imports))]
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_imports,
+            reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there; this module builds outside them only for a target without SSE2"
+        )
+    )]
     use crate::hits::{hit, Hit};
 
     use super::super::encode::round_ls;
@@ -167,6 +201,9 @@ mod tests {
     use super::super::tables::{N3, N4};
     use super::super::Ends;
     use super::*;
+    use crate::path::Base;
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    use crate::path::{avx2_tested, Avx2};
 
     /// Rows that together hold every 4-colour ordering index.
     fn rows4() -> Vec<[u16; MAX_TOTAL_ORDERINGS4]> {
@@ -230,6 +267,8 @@ mod tests {
         // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        let avx2 = avx2_tested();
         let tables = order_tables();
         let rows = rows3();
         for px in blocks() {
@@ -238,12 +277,20 @@ mod tests {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
                     // Level 18 fits the whole row.
-                    let keys = keys3::<18>(total, &sums, row, tables, SINGLE);
+                    let keys = keys3::<18>(Base, total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
                         scalar::keys3::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
+                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                    if avx2 {
+                        assert_eq!(
+                            keys3::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
+                            keys,
+                            "AVX2 stamp, {px:?} along {axis:?}"
+                        );
+                    }
                     for (q, &s) in row.iter().enumerate() {
                         if TOTAL_ORDER_3_16.contains(&(s as usize)) {
                             assert_eq!(keys[q], SINGLE, "ordering {s}");
@@ -259,6 +306,8 @@ mod tests {
         // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        let avx2 = avx2_tested();
         let axes = axes();
         let tables = order_tables();
         let rows = rows4();
@@ -268,12 +317,20 @@ mod tests {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
                     // Level 18 fits the whole row.
-                    let keys = keys4::<18>(total, &sums, row, tables, SINGLE);
+                    let keys = keys4::<18>(Base, total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
                         scalar::keys4::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
+                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                    if avx2 {
+                        assert_eq!(
+                            keys4::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
+                            keys,
+                            "AVX2 stamp, {px:?} along {axis:?}"
+                        );
+                    }
                     for (q, &s) in row.iter().enumerate() {
                         if TOTAL_ORDER_4_16.contains(&(s as usize)) {
                             assert_eq!(keys[q], SINGLE, "ordering {s}");
@@ -289,7 +346,24 @@ mod tests {
         use super::super::super::encode::round_ls;
         use super::super::super::fit::{MIDPOINT5, MIDPOINT6};
         use super::super::super::seen::Seen;
+        use super::super::keys4;
         use super::super::sse2::round_key_of;
+        use super::{avx2_tested, Avx2, MAX_TOTAL_ORDERINGS4, N3, N4};
+        use crate::bc1::fit::OrderTables;
+
+        // 41,500 is above the largest real fit: |iz| is at most 3/255 x 144 and the sums at most 12,240, two terms.
+        const CLAMP_VALUES: [f32; 10] = [
+            -41_500.0,
+            -1.0,
+            -1e-6,
+            -0.0,
+            0.0,
+            1.0,
+            1.0f32.next_up(),
+            1.02,
+            2.5,
+            41_500.0,
+        ];
 
         /// The kernel's rounding of (`xl`, `xh`) against the scalar code's.
         fn check(xl: [f32; 3], xh: [f32; 3]) {
@@ -325,21 +399,68 @@ mod tests {
             }
         }
 
+        /// The threshold, grid and clamp probes of the tests above and below, as one list.
+        fn probes() -> Vec<f32> {
+            let mut out = Vec::new();
+            for &m in MIDPOINT5[..31].iter().chain(&MIDPOINT6[..63]) {
+                out.extend([m.next_down(), m, m.next_up()]);
+            }
+            out.extend((0..=31).map(|c| c as f32 / 31.0));
+            out.extend((0..=63).map(|c| c as f32 / 63.0));
+            out.extend(CLAMP_VALUES);
+            out
+        }
+
+        /// The same probes through the AVX2 stamp of the ordering kernel (`keys4_avx2`, which `keys4` picks for the
+        /// AVX2 token), against the scalar code's rounding. Ordering 0 is [0, 8, 2, 6], so it reads the prefix sums at
+        /// positions 0, 8 and 10: with the sums of channel `c` 1 from position 10 on (a real, non-decreasing prefix
+        /// sum) and `total[c]` 1, channel `c` has q = 1 and uq = 2, and the other channels 0. Factors (0, a, b) then
+        /// give xl = a and xh = 2a + b, exactly: (0, x, -x) puts x in both, (0, x, -2x) in `xl` only, and (0, 0, x) in
+        /// `xh` only.
+        #[test]
+        fn the_avx2_stamp_rounds_the_probes_as_the_scalar_code() {
+            if !avx2_tested() {
+                eprintln!("skipped: avx2 is not among the tested paths");
+                return;
+            }
+            let t = Avx2::require();
+            let mut tables = OrderTables {
+                hash: [0; 4096],
+                factors: [[0.0; 3]; N4],
+                hash3: [0; 256],
+                factors3: [[0.0; 3]; N3],
+            };
+            let row = [0u16; MAX_TOTAL_ORDERINGS4];
+            for x in probes() {
+                for c in 0..3 {
+                    let mut sums = [[0u32; 17]; 3];
+                    sums[c][10..].fill(1);
+                    let mut total = [0; 3];
+                    total[c] = 1;
+                    let modes = [
+                        (x, 0.0, [0.0, x, -2.0 * x]),
+                        (0.0, x, [0.0, 0.0, x]),
+                        (x, x, [0.0, x, -x]),
+                    ];
+                    for (xl, xh, iz) in modes {
+                        tables.factors[0] = iz;
+                        let key = keys4::<18>(t, total, &sums, &row, &tables, 0xDEAD_BEEF)[0];
+                        let (mut l, mut h) = ([0.0f32; 3], [0.0f32; 3]);
+                        l[c] = xl;
+                        h[c] = xh;
+                        assert_eq!(
+                            key,
+                            Seen::key(&round_ls(&l, &h)),
+                            "AVX2 stamp: xl {l:?} xh {h:?}"
+                        );
+                    }
+                }
+            }
+        }
+
         #[test]
         fn out_of_range_fits_clamp_as_the_scalar_code() {
-            // 41,500 is above the largest real fit: |iz| is at most 3/255 x 144 and the sums at most 12,240, two terms.
-            let values = [
-                -41_500.0,
-                -1.0,
-                -1e-6,
-                -0.0,
-                0.0,
-                1.0,
-                1.0f32.next_up(),
-                1.02,
-                2.5,
-                41_500.0,
-            ];
+            let values = CLAMP_VALUES;
             // Positions 0..3 are xl's r, g, b and 3..6 xh's.
             let groups: [&[usize]; 9] = [
                 &[0],

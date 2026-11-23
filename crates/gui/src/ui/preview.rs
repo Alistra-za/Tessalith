@@ -543,7 +543,10 @@ fn legend(ui: &mut egui::Ui, full_scale: &mut f32, label: &str, updating: bool) 
 }
 
 /// Draws the two viewports and handles their input. True when the preview should collapse (a double-click).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the model it edits, the item info and GPU status it reads, the pane rect and the frame's requests, the preview state and the item key; each comes from a different owner per frame, so a struct would be built per frame only to be taken apart here"
+)]
 fn viewports(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -843,7 +846,6 @@ fn face_labels(ui: &egui::Ui, pic: Rect, visible: Rect) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_encoded_pane(
     ui: &mut egui::Ui,
     model: &AppModel,

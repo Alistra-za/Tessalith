@@ -534,7 +534,7 @@ fn meshes_settings_round_trip_in_gui_toml() {
 /// the model and the worker, with the database in %TEMP%, and prints what the view would show. No asserts on the
 /// machine's data. `cargo test --release -p sdc-gui --test it meshes_view::owner_meshes_view -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_ACHERUS"]
 fn owner_meshes_view() {
     let Some(root) = std::env::var_os("SDC_ACHERUS").map(PathBuf::from) else {
         println!("skipped: set SDC_ACHERUS");
@@ -2405,6 +2405,10 @@ fn the_path_filter_folds_ascii_only_like_stored_paths() {
 
 // ---- Note GH3 (review D9): the This project pill ----
 
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 

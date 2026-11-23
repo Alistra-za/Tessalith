@@ -718,10 +718,12 @@ impl AppModel {
                 }
             }
             let more = files.len().saturating_sub(3);
-            let mut listed = files[..files.len() - more].join(", ");
-            if more > 0 {
-                listed.push_str(&format!(", and {more} more"));
-            }
+            let listed = files[..files.len() - more].join(", ");
+            let listed = if more > 0 {
+                format!("{listed}, and {more} more")
+            } else {
+                listed
+            };
             let text = format!("{n} {noun}{s} set automatically: {listed}");
             self.auto_note = Some(AutoNote {
                 step: if followed.is_empty() {
