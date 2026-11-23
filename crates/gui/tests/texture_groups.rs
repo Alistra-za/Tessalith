@@ -882,18 +882,64 @@ fn rows_with_different_reasons_point_at_the_rows() {
 
 #[test]
 fn a_pending_plan_does_not_lock_a_group() {
-    // The panel's edit_off is `fix_off()`, "Wait for the plan to finish" while a plan is in flight. It lives in Ctx, not
-    // in FieldView.lock, so views and summary are unchanged.
+    // A pin of the R1-1 structure, not a behavioural test: the panel's edit_off is `fix_off()`, "Wait for the plan to
+    // finish" while a plan is in flight. It lives in Ctx, not in FieldView.lock, and `summary` takes no input that
+    // reflects it, so this holds for any implementation that keeps reading `FieldView.lock` only. It fails if a later
+    // change feeds the pending state into the views or the summary. NormalMap is the one all-locked group on this
+    // texture, so it is compared too, with its hover.
     let d = tempfile::tempdir().unwrap();
     let mut m = rock(d.path());
-    let before = sum(&m, PanelGroup::Mipmaps);
+    let state = |m: &AppModel, g| {
+        let s = sum(m, g);
+        (s.text, s.all_locked, s.hover)
+    };
+    let before = (
+        state(&m, PanelGroup::Mipmaps),
+        state(&m, PanelGroup::NormalMap),
+    );
+    assert!(before.1 .1, "premise: Normal map is all locked");
     m.replan();
     assert_eq!(m.fix_off().as_deref(), Some("Wait for the plan to finish"));
-    let after = sum(&m, PanelGroup::Mipmaps);
-    assert_eq!(
-        (before.text, before.all_locked),
-        (after.text, after.all_locked)
+    let after = (
+        state(&m, PanelGroup::Mipmaps),
+        state(&m, PanelGroup::NormalMap),
     );
+    assert_eq!(before, after);
+}
+
+#[test]
+fn a_cube_map_summary_reads_both_face_size_forms() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    let cube = |m: &AppModel| {
+        let j = job(m, CUBE);
+        summary(
+            PanelGroup::Cubemap,
+            &panel_views(m.target, j),
+            m.target,
+            &j.profile,
+            &E,
+        )
+        .text
+    };
+    m.set_field(CUBE, "cubemap.layout", json!("hstrip"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(cube(&m), "Horizontal strip, auto-sized faces");
+    m.set_field(CUBE, "cubemap.face_size", json!(512));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(cube(&m), "Horizontal strip, 512 px faces");
+}
+
+#[test]
+fn a_format_write_alone_does_not_mark_compression_changed() {
+    // The `changed_covers_every_row_source` BC3 case writes format and bc1_search together; this shows the format
+    // write is not what flips Compression, so that case proves `effort_view` feeds `changed`.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    set(&mut m, &[("format", json!("bc3"))]);
+    assert!(!sum(&m, PanelGroup::Compression).changed);
+    set(&mut m, &[("encoder.bc1_search", json!("fast"))]);
+    assert!(sum(&m, PanelGroup::Compression).changed);
 }
 
 #[test]
