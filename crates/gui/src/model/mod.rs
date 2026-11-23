@@ -35,6 +35,7 @@ mod new_set_note;
 mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
+pub mod panel_groups;
 pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
