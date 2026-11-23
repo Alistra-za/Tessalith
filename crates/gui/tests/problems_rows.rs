@@ -691,6 +691,20 @@ fn one_line_replaces_the_three_alpha_lines() {
         .find(|r| column.contains_rect(*r))
         .unwrap_or_else(|| panic!("the {name} tile, whose hover says {g:?}"))
         .center();
+    // Ruling 3d-F-9: a screen reader gets the hover without hovering: the tile's node carries the hover's lines (its
+    // key first, then the warning) as its name and its description, as egui's own hover copy did.
+    let tile = h
+        .query_all(
+            egui_kittest::kittest::by()
+                .predicate(|n| n.description().is_some_and(|d| d.contains(g))),
+        )
+        .find(|n| column.contains_rect(n.rect()))
+        .unwrap_or_else(|| panic!("a Textures node whose description says {g:?}"));
+    let tile_name = tile.accesskit_node().label().unwrap_or_default();
+    assert!(
+        tile_name.starts_with(LEAF) && tile_name.contains(g),
+        "{tile_name:?}"
+    );
     h.hover_at(at);
     h.run();
     h.run();

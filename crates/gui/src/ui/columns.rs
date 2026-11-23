@@ -425,6 +425,16 @@ fn tile(
             ui.set_max_width(ui.spacing().tooltip_width);
             ui.label(tile_tooltip(model, item, no_set));
         });
+    // Ruling 3d-F-9: egui copies an `on_hover_text` string into the node's description and, with no name, its name;
+    // `on_hover_ui` copies nothing. Do the same copy here, so a screen reader still reads the hover (key, status,
+    // warnings). The closure runs only while AccessKit builds the tree, so the hover text is not built every frame.
+    ui.ctx().accesskit_node_builder(resp.id, |b| {
+        let text = tile_tooltip(model, item, no_set);
+        if b.label().is_none_or(str::is_empty) {
+            b.set_label(text.clone());
+        }
+        b.set_description(text);
+    });
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).

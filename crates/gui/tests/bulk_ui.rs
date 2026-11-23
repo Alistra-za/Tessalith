@@ -1556,11 +1556,15 @@ fn a_packed_tile_says_what_it_is_made_from() {
     tile(&h, &key).hover();
     h.run();
     h.run();
-    assert!(h
-        .query_by_label_contains(
+    // The tile's own node carries its hover too (ruling 3d-F-9); only the drawn tooltip counts here.
+    assert_eq!(
+        shown_containing(
+            &h,
             "Packed output, made from rock01_ao.png and rock01_roughness.png. Bulk edits change unlocked settings on this output."
         )
-        .is_some());
+        .len(),
+        1
+    );
 }
 
 /// The drawn helper row named by `name`: the Button outside the Sets column.
