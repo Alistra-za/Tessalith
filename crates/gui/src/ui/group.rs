@@ -214,9 +214,26 @@ fn paint_header(
                             .truncate()
                             .selectable(false);
                         match head.summary_hover {
+                            // TPC-T2-1: an elided summary keeps its full text on hover, above the hover text.
                             Some(hover) => {
-                                ui.add(label.show_tooltip_when_elided(false))
-                                    .on_hover_text(hover);
+                                let r = ui.add(label.show_tooltip_when_elided(false));
+                                let width = r.rect.width();
+                                r.on_hover_ui(|ui| {
+                                    let natural = egui::WidgetText::from(head.summary)
+                                        .into_galley(
+                                            ui,
+                                            Some(egui::TextWrapMode::Extend),
+                                            f32::INFINITY,
+                                            egui::TextStyle::Body,
+                                        )
+                                        .size()
+                                        .x;
+                                    if natural > width + 0.5 {
+                                        ui.label(format!("{}\n{hover}", head.summary));
+                                    } else {
+                                        ui.label(hover);
+                                    }
+                                });
                             }
                             None => {
                                 ui.add(label);

@@ -350,7 +350,10 @@ fn a_long_summary_truncates_and_keeps_its_full_text() {
     );
 }
 
-/// The centre column's width in an app window `w` wide with a project open.
+/// The centre column's width in an app window `w` wide with a project open. Not `app_harness::harness`: that module
+/// is for the test binaries kept apart (it redirects `%APPDATA%` through the environment, which an `it` module may not
+/// do, and needs a GPU adapter). This is `gui_tweaks`'s harness (`draw_with`) on `support::opened`, whose model is built
+/// with `AppModel::new(.., None, ..)`: no settings path, so no settings are written anywhere.
 fn centre_width_at(w: f32) -> f32 {
     let d = tempfile::tempdir().unwrap();
     let m = support::opened(d.path());
@@ -594,6 +597,63 @@ fn a_summary_hover_replaces_the_summary_text_on_hover() {
         h.query_by_label("Every row here: normal maps only.")
             .is_some(),
         "the closed summary's hover is the summary_hover text"
+    );
+}
+
+/// TPC-T2-1: with `summary_hover` set, an elided summary keeps its full text on hover, then the hover text; a summary
+/// that fits shows the hover text alone.
+#[test]
+fn an_elided_summary_with_a_hover_shows_both_texts() {
+    const HOVER: &str = "Each row below says why it is not used.";
+    let hover_of = |w: f32, summary: String| {
+        let mut h = Harness::builder()
+            .with_context_setup(install_fonts)
+            .with_size(egui::vec2(w, 200.0))
+            .build_ui_state(
+                move |ui, open: &mut bool| {
+                    let g = collapsing_group(
+                        ui,
+                        "t",
+                        &mipmaps_head(&summary, Some(HOVER)),
+                        *open,
+                        false,
+                        |ui| ui.label("row inside"),
+                    );
+                    if g.toggled {
+                        *open = !*open;
+                    }
+                },
+                false,
+            );
+        h.run();
+        let at = h
+            .query_all_by_label_contains("Kaiser")
+            .filter(|n| n.accesskit_node().role() != Role::DisclosureTriangle)
+            .map(|n| n.rect().center())
+            .next()
+            .expect("the summary label");
+        h.hover_at(at);
+        h.run();
+        // The tooltip's text node: every non-header node carrying the hover text, with what else it says.
+        h.query_all_by_label_contains(HOVER)
+            .filter(|n| n.accesskit_node().role() != Role::DisclosureTriangle)
+            .filter_map(|n| {
+                let d = n.accesskit_node();
+                let d = d.data();
+                d.value().or(d.label()).map(str::to_owned)
+            })
+            .collect::<Vec<_>>()
+    };
+    let long = format!("Kaiser {}", "full chain, ".repeat(30));
+    let shown = hover_of(300.0, long.clone());
+    assert!(
+        shown.iter().any(|t| t == &format!("{long}\n{HOVER}")),
+        "an elided summary: the full summary, a line break, then the hover text: {shown:?}"
+    );
+    let shown = hover_of(300.0, "Kaiser".to_owned());
+    assert!(
+        shown.iter().any(|t| t == HOVER),
+        "a summary that fits: the hover text alone: {shown:?}"
     );
 }
 
