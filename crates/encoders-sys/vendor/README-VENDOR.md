@@ -72,8 +72,8 @@ solid subset of an alpha block to a worse fit on a wrong score; proof tests `tes
 mode 7, and ultrafast turns it off). XC: exact constants, the trailing params field `m_exact_mask` (R, G and B bits; 0
 at every level, set per call through the shim's tuning slot 15): when a subset's masked channel is 0 on every texel, or
 255 on every texel, a solution that does not decode it exactly scores 2^60 and a one-colour p-bit choice that misses it
-is skipped, except that with exact opaque on mode 6's one-colour choice stays in its forced p-bits (alpha 255 wins);
-proof test `tests/bc7.rs` `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask
+is skipped (a one-colour candidate with no such choice scores 2^60), except that with exact opaque on mode 6's
+one-colour choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs` `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask
 0 is every level's default and writes the bytes it wrote before). The two fields change the generated header (Note LR).
 These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
 file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.

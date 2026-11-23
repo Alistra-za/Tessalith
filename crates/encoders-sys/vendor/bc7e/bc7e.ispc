@@ -22,6 +22,7 @@
 //   every texel scores 2^60 and a one-colour p-bit choice that cannot hit a 0 or 255 is skipped, so a solution that
 //   keeps the constant wins whenever the search finds one.
 //   With exact opaque on, mode 6's one-colour p loop never leaves its forced p-bits: alpha 255 wins (BC7-C4).
+//   A one-colour candidate whose p loop finds no p that keeps a masked constant also scores 2^60.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -1095,6 +1096,14 @@ static uint64_t pack_mode1_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgb(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
+	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
+	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	if (pParams->m_exact_mask != 0)
+	{
+		if (best_err == UINT_MAX)
+			total_err = XC_BAD;
+	}
+
 	pResults->m_best_overall_err = total_err;
 
 	return total_err;
@@ -1205,6 +1214,14 @@ static uint64_t pack_mode0_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgb(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
+	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
+	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	if (pParams->m_exact_mask != 0)
+	{
+		if (best_err == UINT_MAX)
+			total_err = XC_BAD;
+	}
+
 	pResults->m_best_overall_err = total_err;
 
 	return total_err;
@@ -1266,6 +1283,14 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 	uint64_t total_err = 0;
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgba(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
+
+	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
+	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	if (pParams->m_exact_mask != 0)
+	{
+		if (best_err == UINT_MAX)
+			total_err = XC_BAD;
+	}
 
 	pResults->m_best_overall_err = total_err;
 
@@ -1329,6 +1354,14 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 	uint64_t total_err = 0;
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgba(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
+
+	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
+	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	if (pParams->m_exact_mask != 0)
+	{
+		if (best_err == UINT_MAX)
+			total_err = XC_BAD;
+	}
 
 	pResults->m_best_overall_err = total_err;
 

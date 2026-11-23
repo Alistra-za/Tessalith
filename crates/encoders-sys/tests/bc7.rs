@@ -299,14 +299,9 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 fn exact_constants_keep_a_flat_channel() {
     use encoders_sys::bc7_fixup::force_opaque_rotated;
     use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Tune};
-    // BC7-C4's waiver: exact opaque on, G 0, at the levels where opaque blocks have no exact choice left.
+    // BC7-C4's waiver: exact opaque on, G 0, at ultrafast, where opaque blocks are mode 6 alone (no exact choice left).
     let exact_g_waived = |g: u8, level: Bc7Level, exact_opaque: bool| {
-        exact_opaque
-            && g == 0
-            && matches!(
-                level,
-                Bc7Level::Ultrafast | Bc7Level::Veryfast | Bc7Level::Fast
-            )
+        exact_opaque && g == 0 && level == Bc7Level::Ultrafast
     };
     let mut bad = vec![];
     for g in [0u8, 255] {
