@@ -167,7 +167,7 @@ Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref
 
 The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Shipped as `max` (Note LI). On BC4, BC5 and BC3 at cut 128 the port in `bcenc` writes the bench's bytes (pinned against the bench code in `crates/bcenc/tests/bc4.rs`); at another alpha-test cut the BC3 guard tests that cut instead of 128, so those bytes can differ from the bench's.
 
-Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo run --offline --release -p bcenc --example max_speed -- 5 <png>...` on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), median of 5 alternating passes, one thread. Measured for the BC4 pair-search pruning (Note HY24), commits `fca6cb41` (before) and `f78c9a6b` (after), on the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, the Windows exe under Wine 11.0), with `Path::best()` (AVX2) and `max_speed 5`, 3 alternating rounds with the median of 5 passes each, on 20 PNGs (1,310,720 blocks), every round clean (no other process busy at its start or end), recorded 2026-11-22/23. Times are for whole passes; the first two columns are the median and the range over the rounds of Max over `slowest` (radius 10), the last two the minimum over the rounds of after over before:
+Time in `bcenc` for the BC4 pair-search pruning (Note HY24), complete block encoders (BC3 includes its colour half). The run: the `max_speed` example (`max_speed 5`, the Windows release exe) on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), on `Path::best()` (AVX2), at commits `fca6cb41` (before) and `f78c9a6b` (after), on the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, Wine 11.0). Each commit ran 3 alternating rounds, each round the median of 5 passes; every round was clean (no other process busy at its start or end); recorded 2026-11-22 to 2026-11-23. Times are for whole passes. The first two columns are the median and the range over the rounds of Max over `slowest` (radius 10); the last two are the minimum over the rounds of after over before:
 
 | format | max over `slowest`, before | max over `slowest`, after | `slowest` after/before | `max` after/before |
 |---|---|---|---|---|
@@ -175,7 +175,19 @@ Time in `bcenc`, complete block encoders (BC3 includes its colour half), `cargo 
 | BC4 (channel 0) | 4.902x (4.848-4.913) | 2.652x (2.648-2.654) | 0.718 | 0.388 |
 | BC5 (both channels) | 4.764x (4.754-4.774) | 2.606x (2.605-2.612) | 0.701 | 0.384 |
 
-The pruning skips an endpoint pair when a lower bound on its error is at or above the best so far, so the bytes are the same (Note HY24; per block on the 20 PNGs at cut 128 for BC4 channel 0, BC5 and BC4 alpha Max, 0 mismatches on both paths). BC4 and BC5 Max now take about 0.39 of their old time; BC3 Max 0.83, because its colour half is untouched. An older figure, about 4 times `slowest` on BC4 and 5 on BC5 from a busy machine and the base SSE2 code, is replaced by these quiet ones. Earlier quiet records elsewhere (docs/research/bcenc-max-speed-vm.md) are from older commits and other builds; do not mix them with this table. The bench's 2.4x above is its Rust reference against v4, not `bcenc`. The synthetic blocks the example generates when it gets no PNG are not texture content and are not quoted.
+The pruning skips an endpoint pair when a lower bound on its error is at or above the best so far, so the bytes are the same (Note HY24; per block on the 20 PNGs at cut 128 for BC4 channel 0, BC5 and BC4 alpha Max, 0 mismatches on both paths). BC4 and BC5 Max now take about 0.39 of their old time; BC3 Max 0.83, because its colour half is untouched. An older figure, about 4 times `slowest` on BC4 and 5 on BC5 from a busy machine and the base SSE2 code, is replaced by these quiet ones. Earlier records of Max over `slowest` are from older commits and other builds; do not mix them with this table. The bench's 2.4x above is its Rust reference against v4, not `bcenc`. The synthetic blocks the example generates when it gets no PNG are not texture content and are not quoted.
+
+The default radius, from `speed.exe` on the same VM and commits (radius 5 for BC3, BC4 and BC5, alpha cut 128, 5 runs per round, 3 alternating rounds, 16 PNGs, 1,048,576 blocks; every row `same_bytes yes`). Figure: after over before of the minimum bcenc time over the rounds:
+
+| row | `--path=base` | `--path=avx2` |
+|---|---|---|
+| bc3 (radius 5, cut 128) | 0.948 | 0.942 |
+| bc4 (radius 5) | 1.011 | 0.981 |
+| bc5 (radius 5) | 1.006 | 0.973 |
+| bc3-fast (fast colour search, alpha radius 5, cut 128) | 0.842 | 0.829 |
+| bc1, bc1p, bc1-4, bc1a, bc1-fast (untouched) | 0.997 to 1.002 | 0.998 to 1.001 |
+
+On base, BC4 and BC5 are within noise to 1% slower: building the per-block bound costs about what it saves at radius 5 without AVX2. The bound stays at every radius because no BC3, BC4, BC5 or bc3-fast row is above 1.02 on either path. Radius 4 (the `fast` effort) was not measured.
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
