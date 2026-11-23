@@ -1555,14 +1555,38 @@ fn first_screen(
 /// How many of this texture's problems the first screen lists before "+{n} more".
 const PROBLEM_ROWS: usize = 3;
 
+/// The first screen's lines under a texture's problem rows, built with the rows (`texture_problems`' slot), never per
+/// frame (Note LH7): "+{n} more" with the set it opens Problems on, and "{m} notes in Problems".
+pub struct ProblemLines {
+    /// How many rows "+{n} more" stands for; 0 draws no button.
+    more: usize,
+    more_text: Arc<egui::RichText>,
+    /// The set "+{n} more" opens Problems on (`problems_target`), or `None` for the whole list.
+    target: Option<SetTarget>,
+    notes: Option<Arc<egui::RichText>>,
+}
+
+/// The lines under `rows` problem rows and `notes` notes; `target` is read only when there are more rows than
+/// `PROBLEM_ROWS`.
+pub fn problem_lines(rows: usize, notes: usize, target: Option<SetTarget>) -> ProblemLines {
+    let more = rows.saturating_sub(PROBLEM_ROWS);
+    let plural = if notes == 1 { "note" } else { "notes" };
+    ProblemLines {
+        more,
+        more_text: Arc::new(egui::RichText::new(format!("+{more} more"))),
+        target: target.filter(|_| more > 0),
+        notes: (notes > 0)
+            .then(|| Arc::new(egui::RichText::new(format!("{notes} {plural} in Problems")).weak())),
+    }
+}
+
 /// This texture's problems on the first screen: up to `PROBLEM_ROWS` one-line rows (the full text and the code on
-/// hover), then a "+{n} more" button that opens Problems on the texture's set (`set`, or unfiltered with none), then a
-/// weak line for the `notes` the panel does not list.
+/// hover), then a "+{n} more" button that opens Problems on the texture's set (or unfiltered with none), then a weak
+/// line for the notes the panel does not list. `lines` holds the last two, built once (`problem_lines`).
 pub fn first_screen_problems(
     ui: &mut egui::Ui,
     rows: &[Problem],
-    notes: usize,
-    set: Option<&SetTarget>,
+    lines: &ProblemLines,
     actions: &mut Vec<Action>,
 ) {
     for p in rows.iter().take(PROBLEM_ROWS) {
@@ -1579,8 +1603,9 @@ pub fn first_screen_problems(
             }
         });
     }
-    if let Some(more) = rows.len().checked_sub(PROBLEM_ROWS).filter(|n| *n > 0) {
-        let r = ui.small_button(format!("+{more} more"));
+    if lines.more > 0 {
+        let more = lines.more;
+        let r = ui.small_button(lines.more_text.clone());
         // Built only while AccessKit asks for it (Note LH7).
         r.widget_info(|| {
             let plural = if more == 1 { "problem" } else { "problems" };
@@ -1590,18 +1615,17 @@ pub fn first_screen_problems(
                 format!("{more} more {plural}: open Problems"),
             )
         });
-        let hover = if set.is_some() {
+        let hover = if lines.target.is_some() {
             "Show every problem of this texture's set in Problems."
         } else {
             "Show every problem in Problems."
         };
         if r.on_hover_text(hover).clicked() {
-            actions.push(Action::OpenProblems(set.cloned()));
+            actions.push(Action::OpenProblems(lines.target.clone()));
         }
     }
-    if notes > 0 {
-        let plural = if notes == 1 { "note" } else { "notes" };
-        ui.weak(format!("{notes} {plural} in Problems"));
+    if let Some(notes) = &lines.notes {
+        ui.label(notes.clone());
     }
 }
 
@@ -1684,12 +1708,15 @@ fn panel_cache(
 /// A `texture_problems` slot: what it was built from beside what it holds.
 struct ProblemSlot {
     key: String,
+    /// Whether `key` was the selected item: `problems_target` reads the selection.
+    selected: bool,
     /// The whole list the rows were taken from; holding it keeps its address from being reused for a new list.
     source: Arc<Vec<Problem>>,
-    rows: Arc<Vec<Problem>>,
-    notes: usize,
+    rows: Vec<Problem>,
     /// `panel_groups::problem_levels(rows)`, built with them: a header reads it every frame.
-    groups: Arc<BTreeMap<PanelGroup, Level>>,
+    groups: BTreeMap<PanelGroup, Level>,
+    /// The "+{n} more" and notes lines, built with the rows.
+    lines: ProblemLines,
 }
 
 /// The codes whose first-screen widget is not the problem row: the card's low-confidence line and the green line.
@@ -1701,41 +1728,46 @@ const SAID_ELSEWHERE: [Code; 3] = [
     Code::ChkGreenGuess,
 ];
 
-/// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says), its note count and
-/// the groups those rows point at with their worst level (`problem_levels`, for the header dots and the forced-open
-/// fill), in the
-/// surface's slot. The slot is used while its key is the drawn one and its source list is
-/// `bottom::problems(model)` itself (`Arc::ptr_eq`: `problems` hands out the cached `Arc` until its key moves), so a
-/// frame does not rescan the list. `alpha_asked` is read only on a rebuild: it is a function of the item, and the list
-/// is rebuilt whenever an item changes (the list's key holds `items_rev`).
+/// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says), the groups those
+/// rows point at with their worst level (`problem_levels`, for the header dots and the forced-open fill) and the lines
+/// under the rows (`problem_lines`), in the surface's slot. The slot is used while its key is the drawn one, the
+/// selection still is (or is not) that key, and its source list is `bottom::problems(model)` itself (`Arc::ptr_eq`:
+/// `problems` hands out the cached `Arc` until its key moves), so a frame neither rescans the list nor formats a line.
+/// What a rebuild reads besides the list moves it too: `alpha_asked` and the item's set are functions of the item, and
+/// the list's key holds `items_rev`; the selected item's set view comes from the set views, which the list's key holds
+/// too.
 fn texture_problems(
     ctx: &egui::Context,
     surface: Surface,
     model: &AppModel,
     key: &str,
-) -> (Arc<Vec<Problem>>, usize, Arc<BTreeMap<PanelGroup, Level>>) {
+) -> Arc<ProblemSlot> {
     let all = crate::model::bottom::problems(model);
     let id = slot_id("panel-problems", surface);
+    let selected = matches!(&model.selection, Selection::Item(k) if k == key);
     if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<ProblemSlot>>(id)) {
-        if slot.key == key && Arc::ptr_eq(&slot.source, &all) {
-            return (slot.rows.clone(), slot.notes, slot.groups.clone());
+        if slot.key == key && slot.selected == selected && Arc::ptr_eq(&slot.source, &all) {
+            return slot;
         }
     }
     let alpha_asked = model
         .item(key)
         .is_some_and(|i| crate::model::items::alpha_asked(i).is_some());
     let (rows, notes) = panel_problem_rows(&all, key, alpha_asked);
-    let groups = Arc::new(panel_groups::problem_levels(&rows));
-    let rows = Arc::new(rows);
+    let groups = panel_groups::problem_levels(&rows);
+    let target = (rows.len() > PROBLEM_ROWS)
+        .then(|| problems_target(model, key))
+        .flatten();
     let slot = Arc::new(ProblemSlot {
         key: key.to_owned(),
+        selected,
         source: all,
-        rows: rows.clone(),
-        notes,
-        groups: groups.clone(),
+        lines: problem_lines(rows.len(), notes, target),
+        rows,
+        groups,
     });
-    ctx.data_mut(|d| d.insert_temp(id, slot));
-    (rows, notes, groups)
+    ctx.data_mut(|d| d.insert_temp(id, slot.clone()));
+    slot
 }
 
 /// The first screen's rows of texture `key` out of the whole problem list, and its note count. Left out, besides notes
@@ -2417,7 +2449,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             let pc = panel_cache(ui.ctx(), surface, model, key, job, alpha);
             // `size_of` needs `&mut model`, which `cx` below keeps shared: ask now, draw the line in its place.
             let size = (!compact).then(|| model.size_of(key));
-            let (rows, notes, problem_groups) = texture_problems(ui.ctx(), surface, model, key);
+            let problems = texture_problems(ui.ctx(), surface, model, key);
             // Rule 2 (LQ5): the selected item's first draw after its job resolves (no type or alpha question open) on a
             // settled plan adds its problems' groups, once, so a problem the answer or the plan raises opens its group.
             // Settled is `plan_wait`, not `fix_off`: a read-only `sdc.toml` keeps edits off, never navigation (LQ2).
@@ -2427,7 +2459,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 model
                     .panel_forced
                     .groups
-                    .extend(problem_groups.keys().copied());
+                    .extend(problems.groups.keys().copied());
                 model.panel_forced.filled = true;
             }
             let forced = if forced_here {
@@ -2447,7 +2479,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 surface,
                 groups: &model.settings.texture_groups,
                 forced,
-                problem_groups: &problem_groups,
+                problem_groups: &problems.groups,
                 summaries: &pc.summaries,
                 reveal: (surface == Surface::Centre)
                     .then_some(model.nav.reveal_field.as_ref())
@@ -2517,10 +2549,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             first_screen(ui, &cx, &pc.views, tick.as_ref(), !asks_type, &mut actions);
             if let Some(size) = size {
                 size_line(ui, size);
-                let set = (rows.len() > PROBLEM_ROWS)
-                    .then(|| problems_target(model, key))
-                    .flatten();
-                first_screen_problems(ui, &rows, notes, set.as_ref(), &mut actions);
+                first_screen_problems(ui, &problems.rows, &problems.lines, &mut actions);
             }
             // Panel order is `PanelGroup::ALL`; Sources is drawn last, after this closure (a jobless texture has it too).
             for g in PanelGroup::ALL {

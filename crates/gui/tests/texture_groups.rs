@@ -1000,7 +1000,7 @@ use engine::codes::Code;
 use sdc_gui::model::bottom::{At, Level, Problem};
 use sdc_gui::model::SetTarget;
 use sdc_gui::settings::GuiSettings;
-use sdc_gui::ui::settings_panel::{first_screen_problems, Action, Surface};
+use sdc_gui::ui::settings_panel::{first_screen_problems, problem_lines, Action, Surface};
 
 /// `texture_panel_layout.rs::sized_harness`, copied: the whole window, the preview and the 3D view off, so the centre
 /// is the only surface and each "{Title}, " name is unique. Fonts go in before kittest's first frame.
@@ -1297,18 +1297,18 @@ fn the_cubemap_and_sources_sections_use_the_group_header() {
         .contains(", collapsed"));
 }
 
-/// A `first_screen_problems` harness over `rows`, `notes` and `set`, its state the actions it pushed.
+/// A `first_screen_problems` harness over `rows`, `notes` and `set` (its lines built once, as the panel's slot does),
+/// its state the actions it pushed.
 fn problems_harness(
     rows: Vec<Problem>,
     notes: usize,
     set: Option<SetTarget>,
 ) -> Harness<'static, Vec<Action>> {
+    let lines = problem_lines(rows.len(), notes, set);
     let mut h = Harness::builder()
         .with_context_setup(install_fonts)
         .build_ui_state(
-            move |ui, acts: &mut Vec<Action>| {
-                first_screen_problems(ui, &rows, notes, set.as_ref(), acts)
-            },
+            move |ui, acts: &mut Vec<Action>| first_screen_problems(ui, &rows, &lines, acts),
             vec![],
         );
     h.run();
@@ -3660,13 +3660,12 @@ fn the_first_screen_needs_no_scrolling_at_1280_by_800() {
 fn five_problem_rows_draw_three_and_a_more_button() {
     // first_screen_problems drawn alone with five long Problem rows, at the centre's width
     let rows: Vec<Problem> = (0..5).map(|_| problem_row(&"x".repeat(200))).collect();
+    let lines = problem_lines(rows.len(), 0, Some(SetTarget::Key("set-a".into())));
     let mut h = Harness::builder()
         .with_context_setup(install_fonts)
         .with_size(egui::vec2(560.0, 400.0))
         .build_ui_state(
-            |ui, acts: &mut Vec<Action>| {
-                first_screen_problems(ui, &rows, 0, Some(&SetTarget::Key("set-a".into())), acts)
-            },
+            |ui, acts: &mut Vec<Action>| first_screen_problems(ui, &rows, &lines, acts),
             vec![],
         );
     h.run();
