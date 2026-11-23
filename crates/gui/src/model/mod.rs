@@ -4466,6 +4466,32 @@ impl AppModel {
         self.centre_tab = CentreTab::Selection;
         // Review E10: a Go to set the set editor has not drawn yet ends here, so it never fires later.
         self.nav.reveal_slot = None;
+        self.nav.reveal_field = None;
+    }
+
+    /// Go to on a Problems row (after `select_item(key)`): ask the centre to focus `field`, and force its group open
+    /// (`panel_forced` rule 3). The latch's `seen` is set whenever it is rewritten, or `observe_panel_selection` would
+    /// take the write for a new selection and reset it.
+    pub fn go_to_field(&mut self, key: &str, field: &'static str, pass: u64) {
+        self.nav.reveal_field = Some(nav::RevealField {
+            item: key.to_string(),
+            field,
+            pass,
+        });
+        // A first-screen field opens nothing.
+        let Some(g) = panel_groups::panel_group(field) else {
+            return;
+        };
+        if self.panel_forced.item == key {
+            self.panel_forced.groups.insert(g);
+        } else {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: key.to_string(),
+                filled: false,
+                groups: BTreeSet::from([g]),
+            };
+        }
     }
 
     /// Select one set; any multi-selection ends (F3a D1).
@@ -4485,6 +4511,7 @@ impl AppModel {
         if self.expanded.is_some() {
             self.collapse();
         }
+        self.nav.reveal_field = None;
         self.nav.reveal_slot = slot.map(|slot| nav::RevealSlot {
             set: target.clone(),
             target: slot,

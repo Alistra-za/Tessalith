@@ -24,6 +24,8 @@ pub struct Nav {
     pub reveal_set: Option<super::SetTarget>,
     /// Review E10: Go to set's slot or file, for the set editor to scroll to and outline when it next draws that set.
     pub reveal_slot: Option<RevealSlot>,
+    /// Go to on a texture row: the panel field for the centre to focus (and its group, opened by `panel_forced`).
+    pub reveal_field: Option<RevealField>,
     /// The F1 shortcut sheet is open.
     pub sheet: bool,
     /// The Ctrl+K palette, while open.
@@ -47,6 +49,19 @@ pub struct RevealSlot {
     pub set: super::SetTarget,
     pub target: SlotTarget,
 }
+
+/// A Go to waiting for the texture panel: focus `field` of texture `item`. The centre's row takes it (one-shot); one
+/// nobody takes is dropped after [`REVEAL_FIELD_PASSES`] passes by `ui::draw_with_scan`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealField {
+    pub item: String,
+    pub field: &'static str,
+    /// `Context::cumulative_pass_nr` when the request was made.
+    pub pass: u64,
+}
+
+/// How many passes a [`RevealField`] waits for its row (the Pick-a-role focus request's `FOCUS_PASSES`).
+pub const REVEAL_FIELD_PASSES: u64 = 10;
 
 /// The palette's search field and the highlighted row.
 #[derive(Debug, Clone, Default)]

@@ -199,9 +199,9 @@ fn the_section_guard_hides_a_mixed_selection() {
                     changed: false,
                     problem: None,
                 };
-                let (edits, toggled) =
-                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true, false);
-                assert!(edits.is_empty() && !toggled);
+                let (edits, toggled, taken) =
+                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true, false, None);
+                assert!(edits.is_empty() && !toggled && !taken);
             },
             m,
         );
@@ -1078,7 +1078,7 @@ fn cube_header_top_after_one_step(instant: bool) -> (f32, f32) {
                     changed: false,
                     problem: None,
                 };
-                sdc_gui::ui::cube_section::cube_section(ui, &s.0, CUBE, &head, s.1, instant);
+                sdc_gui::ui::cube_section::cube_section(ui, &s.0, CUBE, &head, s.1, instant, None);
                 ui.label("below");
             },
             (m, false),

@@ -20,6 +20,7 @@ use crate::model::labels::{
     effort_label, type_hover, RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL,
     VARIANCE_BAKE_HOVER,
 };
+use crate::model::nav::RevealField;
 use crate::model::panel_groups::{self, GroupSummary, PanelGroup, SummaryExtra};
 use crate::model::{Answer, AppModel, Selection, SetTarget};
 use crate::ui::group::{collapsing_group, GroupHead};
@@ -55,6 +56,8 @@ pub enum Action {
     SetGroupOpen(PanelGroup, bool),
     /// "+{n} more" on the first screen: open Problems on this texture's set (`Some`), or unfiltered (`None`).
     OpenProblems(Option<SetTarget>),
+    /// A row took the waiting Go to's focus: it is done.
+    RevealTaken,
 }
 
 /// Where the texture panel is drawn: the centre column, the 3D settings window, or the preview's 280 px strip.
@@ -904,6 +907,9 @@ pub struct Ctx<'a> {
     pub problem_groups: &'a BTreeMap<PanelGroup, Level>,
     /// The header summaries and marks, built with `views` (`panel_cache`).
     pub summaries: &'a [(PanelGroup, GroupSummary)],
+    /// A Go to waiting for a row of this texture: only the centre holds one, so the window and the strip never take
+    /// the focus (`model.nav.reveal_field`).
+    pub reveal: Option<&'a RevealField>,
 }
 
 /// What a field row asks of the model.
@@ -1061,8 +1067,9 @@ fn control_cell(
 }
 
 /// One grid row of a field: its label, its editor (disabled with the reason when locked), where the value came from
-/// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank.
-pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> {
+/// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank. The
+/// row's edit goes to `actions`, and a waiting Go to for this field takes the focus here.
+pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     let mut edit = None;
     let help = crate::model::fields::field_help(f.field);
     let (set, r) = control_cell(ui, cx, f.label, help, |ui| {
@@ -1078,6 +1085,7 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         .inner
     });
     let r = own_name_after_link(r, f.field);
+    take_field_focus(cx, f.field, &r, actions);
     // Note CL40: on a `normal` in a complex material set, the bake is the opt-in gloss bake, so its hover shows
     // before the choice. Elsewhere the hover (and the variance line) belongs to the active bake only.
     let bake_active = f.field == "mips.normal" && f.value == json!("renormalize_bake");
@@ -1127,7 +1135,22 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         edit = Some(RowEdit::Clear);
     }
     ui.end_row();
-    edit
+    push_edit(actions, f.field, edit);
+}
+
+/// A Go to waiting for `field` (only the centre's `Ctx` holds one): focus its control, scroll it to the middle and tell
+/// the model it was taken. A `Option` test and one `&str` compare per row per frame.
+pub(super) fn take_field_focus(
+    cx: &Ctx,
+    field: &str,
+    r: &egui::Response,
+    actions: &mut Vec<Action>,
+) {
+    if cx.reveal.is_some_and(|q| q.field == field) {
+        r.request_focus();
+        r.scroll_to_me(Some(egui::Align::Center));
+        actions.push(Action::RevealTaken);
+    }
 }
 
 /// A row's hint, cut to the room left with the whole text on one tooltip (Note FI12, rule 3.4).
@@ -1197,7 +1220,7 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, views: &[FieldView], actions: &mut 
         filter_row(ui, cx, filter, actions);
     }
     if let Some(e) = find(EDGE_FIELD.0) {
-        push_edit(actions, e.field, field_row(ui, cx, e));
+        field_row(ui, cx, e, actions);
     }
 }
 
@@ -1234,7 +1257,7 @@ fn mips_tick_and_levels(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mu
     }
     ui.end_row();
     if !cx.compact {
-        push_edit(actions, f.field, field_row(ui, cx, f));
+        field_row(ui, cx, f, actions);
     }
 }
 
@@ -1266,6 +1289,7 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Acti
             .response;
         (None, r)
     });
+    take_field_focus(cx, f.field, &r, actions);
     // Only Box is open: say why on the combo itself.
     let r = match locks[1..]
         .iter()
@@ -1457,7 +1481,7 @@ pub fn group_section(
                         !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))
                     })
                 {
-                    push_edit(actions, f.field, field_row(ui, cx, f));
+                    field_row(ui, cx, f, actions);
                 }
             });
         if g == PanelGroup::Compression {
@@ -1491,7 +1515,7 @@ fn first_screen(
                 .filter_map(|name| views.iter().find(|v| v.field == *name))
             {
                 if f.field != "subtype" {
-                    push_edit(actions, f.field, field_row(ui, cx, f));
+                    field_row(ui, cx, f, actions);
                     continue;
                 }
                 if cx.compact {
@@ -1501,7 +1525,7 @@ fn first_screen(
                 if tick.is_some_and(|t| t.on) {
                     helper_role_row(ui, cx.key, &cx.edit_off, actions);
                 } else if show_type {
-                    push_edit(actions, f.field, field_row(ui, cx, f));
+                    field_row(ui, cx, f, actions);
                 }
                 if let Some(t) = tick {
                     helper_tick_row(ui, cx.key, t, &cx.edit_off, actions);
@@ -2399,6 +2423,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 forced,
                 problem_groups: &problem_groups,
                 summaries: &pc.summaries,
+                reveal: (surface == Surface::Centre)
+                    .then_some(model.nav.reveal_field.as_ref())
+                    .flatten()
+                    .filter(|q| q.item == key),
             };
             match &status {
                 ItemStatus::Skipped(r) => {
@@ -2475,16 +2503,20 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                     PanelGroup::Cubemap if !compact => {
                         // Draws nothing unless the item is a cube map (`cube_section`'s own check).
                         let open = group_open(&cx, g);
-                        let (edits, toggled) = super::cube_section::cube_section(
+                        let (edits, toggled, taken) = super::cube_section::cube_section(
                             ui,
                             model,
                             key,
                             &group_head(&cx, g),
                             open,
                             cx.forced.contains(&g),
+                            cx.reveal,
                         );
                         if toggled {
                             actions.push(Action::SetGroupOpen(g, !open));
+                        }
+                        if taken {
+                            actions.push(Action::RevealTaken);
                         }
                         cube_edits = edits;
                     }
@@ -2557,6 +2589,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
             }
             Action::OpenProblems(Some(target)) => model.open_set_problems(target),
             Action::OpenProblems(None) => model.open_problems(None),
+            Action::RevealTaken => model.nav.reveal_field = None,
         }
     }
 }

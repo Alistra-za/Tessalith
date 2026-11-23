@@ -1921,6 +1921,7 @@ fn the_mipmaps_group_draws_the_rows_that_are_present() {
                         forced: &forced,
                         problem_groups: &std::collections::BTreeMap::new(),
                         summaries: &[],
+                        reveal: None,
                     };
                     let mut acts = vec![];
                     group_section(ui, &cx, PanelGroup::Mipmaps, views, &mut acts);
@@ -2300,4 +2301,214 @@ fn a_note_with_a_mapped_code_maps_to_no_group() {
     );
     row.intended = true;
     assert!(panel_groups::groups_with_problems(&all(&[row])).is_empty());
+}
+
+// Task 6: Go to opens the group and focuses the control.
+
+use sdc_gui::model::nav::{RevealField, REVEAL_FIELD_PASSES};
+
+/// The Link node of the row whose texture is `key` (the key also appears as text elsewhere).
+fn click_row_link(h: &mut Harness<'static, AppModel>, key: &str) {
+    h.query_all_by_label(key)
+        .find(|n| n.accesskit_node().role() == Role::Link)
+        .unwrap()
+        .click();
+}
+
+#[test]
+fn go_to_opens_the_group_and_focuses_the_control() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(FLAT); // the latch fills for FLAT, not for the cube
+    m.open_problems(None);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    click_row_link(&mut h, &key);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Mipmaps, expanded").is_some());
+    let control = h.get_by_role_and_label(Role::ComboBox, "Levels");
+    assert!(!control.accesskit_node().is_disabled());
+    assert_eq!(
+        control.accesskit_node().value().as_deref(),
+        Some("None (base level only)")
+    );
+    assert!(control.is_focused());
+    assert!(!h
+        .get_by_role_and_label(Role::CheckBox, "Mipmaps")
+        .is_focused());
+    assert!(sdc_gui::ui::centre_rect(&h.ctx)
+        .unwrap()
+        .contains_rect(control.rect()));
+    assert!(h.state().nav.reveal_field.is_none(), "taken once");
+}
+
+#[test]
+fn go_to_reopens_a_group_the_user_closed_on_the_selected_texture() {
+    // R3-1: the cube is selected, the latch has filled, the user closes Mipmaps, then clicks the row's link.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.select_item(&key);
+    m.open_problems(None);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    assert!(h.state().panel_forced.filled, "the latch filled");
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Mipmaps, collapsed").is_some(),
+        "closed by the user"
+    );
+    click_row_link(&mut h, &key);
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Mipmaps, expanded").is_some(),
+        "Go to opened it again"
+    );
+    assert!(h
+        .get_by_role_and_label(Role::ComboBox, "Levels")
+        .is_focused());
+    assert_eq!(
+        h.state().settings.texture_groups.get("mipmaps"),
+        Some(&false),
+        "a forced open is not saved"
+    );
+}
+
+#[test]
+fn a_code_without_a_field_maps_to_nothing() {
+    assert_eq!(panel_groups::fix_field("DIM-RESIZED"), None);
+    assert_eq!(
+        panel_groups::fix_field("SET-BAKE-RATIO"),
+        None,
+        "never raised; left out of the table"
+    );
+    assert_eq!(panel_groups::fix_field("CUBE-NO-MIPS"), Some("mips.levels"));
+}
+
+#[test]
+fn a_stale_focus_request_is_dropped() {
+    // counted in passes (one kittest step can run more than one pass)
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(rock(d.path()), 1280.0, 800.0);
+    h.run();
+    let pass = h.ctx.cumulative_pass_nr();
+    h.state_mut().nav.reveal_field = Some(RevealField {
+        item: "landscape/odd.png".into(),
+        field: "mips.levels",
+        pass,
+    });
+    while h.ctx.cumulative_pass_nr() < pass + REVEAL_FIELD_PASSES {
+        h.step();
+    }
+    assert!(
+        h.state().nav.reveal_field.is_some(),
+        "kept for {REVEAL_FIELD_PASSES} passes"
+    );
+    while h.ctx.cumulative_pass_nr() <= pass + REVEAL_FIELD_PASSES + 1 {
+        h.step();
+    }
+    assert!(
+        h.state().nav.reveal_field.is_none(),
+        "dropped by draw_with_scan, though odd.png was never drawn"
+    );
+}
+
+#[test]
+fn a_new_selection_drops_a_waiting_reveal() {
+    // JO8's rule for a waiting reveal: select_item and select_set drop it
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    m.nav.reveal_field = Some(RevealField {
+        item: KEY.into(),
+        field: "mips.levels",
+        pass: 0,
+    });
+    m.select_item("landscape/leaf.png");
+    assert!(m.nav.reveal_field.is_none(), "select_item drops it");
+    m.nav.reveal_field = Some(RevealField {
+        item: KEY.into(),
+        field: "mips.levels",
+        pass: 0,
+    });
+    let set = m
+        .item(KEY)
+        .and_then(|i| i.set_key.clone())
+        .expect("rock01 is in a set");
+    m.select_set(&set);
+    assert!(m.nav.reveal_field.is_none(), "select_set drops it");
+}
+
+#[test]
+fn go_to_another_texture_wins_over_the_scroll_reset() {
+    // JO8: the reset to the top and the reveal's scroll land on one frame, and the reveal wins.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, true);
+    }
+    m.decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(FLAT);
+    m.open_problems(None);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    h.hover_at(centre.center());
+    h.run();
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        source: egui::MouseWheelSource::Wheel,
+        phase: egui::TouchPhase::Move,
+        modifiers: Default::default(),
+    });
+    h.run_steps(10);
+    // The premise: the centre scrolled down, so its first rows are above its top edge.
+    let format = h.get_by_role_and_label(Role::ComboBox, "Format");
+    assert!(format.rect().min.y < centre.min.y, "the centre is scrolled");
+    click_row_link(&mut h, &key);
+    h.run_steps(3);
+    let control = h.get_by_role_and_label(Role::ComboBox, "Levels");
+    assert!(control.is_focused());
+    assert!(
+        sdc_gui::ui::centre_rect(&h.ctx)
+            .unwrap()
+            .contains_rect(control.rect()),
+        "the reveal's scroll won"
+    );
+}
+
+#[test]
+fn go_to_keeps_its_latch_through_the_next_selection_check() {
+    // The write sets `seen`; without it `observe_panel_selection` takes the write for a new selection and empties it.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    m.decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(FLAT);
+    m.observe_panel_selection();
+    m.select_item(&key); // another item: select_item clears the latch
+    m.go_to_field(&key, "mips.levels", 0);
+    m.observe_panel_selection(); // the next frame's check
+    assert_eq!(m.panel_forced.item, key);
+    assert!(m.panel_forced.groups.contains(&PanelGroup::Mipmaps));
+    // The same item: the group is added to the latch the selection already holds.
+    m.panel_forced.groups.clear();
+    m.go_to_field(&key, "mips.levels", 0);
+    m.observe_panel_selection();
+    assert!(m.panel_forced.groups.contains(&PanelGroup::Mipmaps));
+}
+
+#[test]
+fn go_to_a_first_screen_field_opens_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    m.observe_panel_selection();
+    m.go_to_field(&key, "format", 0);
+    assert!(m.panel_forced.groups.is_empty());
+    assert!(m.nav.reveal_field.is_some(), "the focus is still asked for");
 }

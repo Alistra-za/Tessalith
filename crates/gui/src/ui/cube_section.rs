@@ -6,6 +6,7 @@ use super::group::{collapsing_group, GroupHead};
 use super::settings_panel::{combo, options_of, Options};
 use crate::model::code_text::not_a_cube;
 use crate::model::fields::{cube_views, provenance_text, FieldView};
+use crate::model::nav::RevealField;
 use crate::model::AppModel;
 use eframe::egui;
 use engine::config::{CubeLayout, FaceFlip, Subtype};
@@ -144,6 +145,9 @@ struct Cx<'a> {
     job: &'a ResolvedJob,
     ro: Option<String>,
     busy: bool,
+    /// A Go to waiting for one of this texture's rows, and whether a row took it this frame.
+    reveal: Option<&'a RevealField>,
+    taken: std::cell::Cell<bool>,
 }
 
 impl Cx<'_> {
@@ -184,7 +188,13 @@ impl Cx<'_> {
                 body(ui)
             })
         });
-        let (mut edit, _) = scope.inner;
+        let (mut edit, r) = scope.inner;
+        // A waiting Go to for this field (the centre only): focus the control, scroll it to the middle, report it taken.
+        if self.reveal.is_some_and(|q| q.field == f.field) {
+            r.request_focus();
+            r.scroll_to_me(Some(egui::Align::Center));
+            self.taken.set(true);
+        }
         if let Some(why) = f.lock.map(str::to_string).or(self.ro.clone()) {
             // Over every widget of the row, not just the first (a disabled widget is still hoverable).
             explain(
@@ -246,7 +256,8 @@ fn grid<R>(ui: &mut egui::Ui, cx: &Cx, name: &str, add: impl FnOnce(&mut egui::U
 /// The cubemap section under its group header `head` (open when `open`); no edits and nothing drawn unless every
 /// selected item is a cube (a mixed selection shows no cube rows and writes no `cubemap.*` key, Note DT8). Returns
 /// the edits, and whether the header was toggled (the caller writes the open state). `instant`: the group is forced
-/// open, so it opens without sliding.
+/// open, so it opens without sliding. `reveal`: a Go to waiting for one of this texture's rows (the centre passes it);
+/// the last result is whether a row took it.
 pub fn cube_section(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -254,12 +265,13 @@ pub fn cube_section(
     head: &GroupHead<'_>,
     open: bool,
     instant: bool,
-) -> (Edits, bool) {
+    reveal: Option<&RevealField>,
+) -> (Edits, bool, bool) {
     if !all_cubes(model, key) {
-        return (vec![], false);
+        return (vec![], false, false);
     }
     let Some(job) = model.item(key).and_then(|i| i.job.clone()) else {
-        return (vec![], false);
+        return (vec![], false, false);
     };
     let views = cube_views(model.target, &job);
     let cx = Cx {
@@ -268,6 +280,8 @@ pub fn cube_section(
         // Note FK: read-only `sdc.toml`, or a plan in flight.
         ro: model.fix_off(),
         busy: model.edit_busy(),
+        reveal,
+        taken: std::cell::Cell::new(false),
     };
     let c = &job.profile.cubemap;
     // The planned layout (a six-file set is `faces`) wins over the setting, which may be unset (auto).
@@ -460,7 +474,7 @@ pub fn cube_section(
             });
         },
     );
-    (edits, r.toggled)
+    (edits, r.toggled, cx.taken.get())
 }
 
 /// One compact row per face: rotation and flip. Both fields are whole arrays, so a pick rewrites the array, and an
