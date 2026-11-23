@@ -99,7 +99,8 @@ pub fn header_name(head: &GroupHead<'_>, open: bool) -> String {
 /// widget keeps no open state: the caller passes `open` and flips it on `toggled`. The header is drawn first, so in the
 /// frame of a toggle the body already follows it (`shown = open != toggled`). Draw it outside any disabled `Ui` and
 /// disable only the body: a widget takes its `Ui`'s enabled state (egui 0.37.0 `ui.rs:966`), and navigation is never
-/// gated (FK3). `instant`, reduced motion, or a toggle from Space or Enter open and close the body without sliding.
+/// gated (FK3). `instant` (the group is held open by force), the frame after a hold ends, reduced motion, or a toggle
+/// from Space or Enter open and close the body without sliding.
 ///
 /// Runs once per header per frame (Note LH7): the AccessKit name is built inside `widget_info`, which runs only while
 /// AccessKit is on, and the summary is the caller's `&str`.
@@ -131,7 +132,13 @@ pub fn collapsing_group<R>(
     let ctx = ui.ctx().clone();
     let mut state = CollapsingState::load_with_default_open(&ctx, id, shown);
     state.set_open(shown);
-    if instant || crate::ui::motion::reduced(&ctx) || by_key {
+    // LQ8: a forced group never slides. `instant` is the hold; a hold that ended without a click (a new selection reset
+    // `panel_forced`, and the group is closed there) snaps too, so the header keeps whether it was held last frame. The
+    // flag is stored once and rewritten in place (no allocation per frame).
+    let was_held = ctx.data_mut(|d| {
+        std::mem::replace(d.get_temp_mut_or_default::<bool>(id.with("held")), instant)
+    });
+    if instant || was_held || crate::ui::motion::reduced(&ctx) || by_key {
         // Zero time: the animation lands on `shown` now, so `openness` below (the arrow's and the body's) is final.
         ctx.animate_bool_with_time_and_easing(
             state.id(),

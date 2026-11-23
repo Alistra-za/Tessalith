@@ -3888,6 +3888,117 @@ fn a_problem_the_alpha_answer_raises_opens_its_group() {
         .contains(", has a problem"));
 }
 
+/// A header whose open flag and hold are the state `(open, held)`, over a one-line body and a label below, with motion
+/// on (see `motion_harness`).
+fn held_harness() -> Harness<'static, (bool, bool)> {
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(400.0, 300.0))
+        .with_step_dt(1.0 / 120.0)
+        .with_max_steps(40)
+        .build_ui_state(
+            |ui, st: &mut (bool, bool)| {
+                let g = collapsing_group(
+                    ui,
+                    "t",
+                    &mipmaps_head("Kaiser, full chain", None),
+                    st.0,
+                    st.1,
+                    |ui| ui.label("row inside"),
+                );
+                if g.toggled {
+                    // As `set_group_open` does: the user's click ends the hold.
+                    *st = (!st.0, false);
+                }
+                ui.label("below");
+            },
+            (false, false),
+        );
+    h.ctx.all_styles_mut(|s| s.animation_time = 1.0 / 12.0);
+    sdc_gui::ui::motion::force_reduced(&h.ctx, false);
+    h.run();
+    assert!(
+        !sdc_gui::ui::motion::reduced(&h.ctx),
+        "premise: motion is on in this harness"
+    );
+    h
+}
+
+/// LQ8 and TPC-F-1 (Minor 7): a forced group never slides. A hold that ends without a click (the next selection resets
+/// `panel_forced`, and the group is closed there) snaps shut in one step, as the forced open snapped.
+#[test]
+fn a_forced_hold_that_ends_closes_without_sliding() {
+    let mut h = held_harness();
+    let below = |h: &Harness<'static, (bool, bool)>| h.get_by_label("below").rect().top();
+    let closed = below(&h);
+    *h.state_mut() = (true, true);
+    h.run();
+    assert!(
+        below(&h) > closed + 10.0,
+        "premise: the forced open shows the body"
+    );
+    *h.state_mut() = (false, false);
+    h.step();
+    let one = below(&h);
+    h.run();
+    assert_eq!(one, closed, "shut at the first step");
+    assert_eq!(one, below(&h), "and nothing slides after it");
+}
+
+/// LQ8: a mouse close of a forced group snaps too (the hold is still set in the click's frame). A pin of the old
+/// behaviour, which the brief keeps.
+#[test]
+fn a_mouse_close_of_a_forced_group_does_not_slide() {
+    let mut h = held_harness();
+    let below = |h: &Harness<'static, (bool, bool)>| h.get_by_label("below").rect().top();
+    let closed = below(&h);
+    *h.state_mut() = (true, true);
+    h.run();
+    h.get_by_role(Role::DisclosureTriangle).click();
+    h.step();
+    let one = below(&h);
+    h.run();
+    assert_eq!(*h.state(), (false, false), "premise: the click closed it");
+    assert_eq!(one, closed, "shut at the first step");
+}
+
+/// LQ8 on the panel: Mipmaps is forced open on the cube (CUBE-NO-MIPS); selecting a texture where it is closed shuts it
+/// at once, so the headers under it do not slide up.
+#[test]
+fn a_new_selection_closes_a_forced_group_without_sliding() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.decide(FLAT, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(&key);
+    // `harness`, with `motion_harness`'s short steps: kittest's default step finishes a collapse in one step.
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(1280.0, 800.0))
+        .with_step_dt(1.0 / 120.0)
+        .with_max_steps(40)
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    h.ctx.all_styles_mut(|s| s.animation_time = 1.0 / 12.0);
+    sdc_gui::ui::motion::force_reduced(&h.ctx, false);
+    h.run();
+    h.get_by_label_contains("Mipmaps, expanded");
+    assert!(
+        !sdc_gui::ui::motion::reduced(&h.ctx),
+        "premise: motion is on"
+    );
+    h.state_mut().select_item(FLAT);
+    h.step();
+    let one = h.get_by_label_contains("Normal map, ").rect().top();
+    h.run_steps(30);
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+    assert_eq!(
+        one,
+        h.get_by_label_contains("Normal map, ").rect().top(),
+        "the header under Mipmaps is in place at the first step"
+    );
+}
+
 /// LQ5: a texture selected while a plan is pending draws its last job, which may not have the plan's problems yet; the
 /// latch waits for the plan. Here the cube's `mips.levels = none` is still planning (CUBE-NO-MIPS is not on its job)
 /// when it is selected and drawn; once the plan lands, Mipmaps opens.
