@@ -170,6 +170,9 @@ const SCREENS: &[&str] = &[
     "meshes mod filter open",
     "meshes skin browse popup",
     "meshes edit browse popup",
+    "texture groups open",
+    "cube groups open",
+    "bulk normals groups open",
 ];
 
 /// Rules 8.8 and 8.4 over everything on `screen` (a checkpoint's name, one of `SCREENS`), with today's hits allowed:
@@ -360,6 +363,44 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "D",
         &["Button", "Button", "Button"],
         CHIP,
+    ),
+    // The Sets column beside the open groups, as on the textures view: the grouped rows themselves share no name.
+    (
+        "texture groups open",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    ("cube groups open", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "cube groups open",
+        "⚠ 2",
+        &["Button", "Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and three cards have two warnings",
+    ),
+    (
+        "bulk normals groups open",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "bulk normals groups open",
+        "N",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "bulk normals groups open",
+        "⚠ 1",
+        &["Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have one warning",
+    ),
+    (
+        "bulk normals groups open",
+        "⚠ 2",
+        &["Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
     ),
     (
         "meshes skin browse popup",
@@ -593,6 +634,81 @@ fn every_input_has_a_name_in_presets_and_rename() {
     h.get_by_role_and_label(Role::CheckBox, "PGPatcher JSON: Emissive: true");
     h.get_by_role_and_label(Role::CheckBox, "CS PBR texture set: Fuzz weight: 0.5");
     audit_names(&h, "copy json dialog");
+}
+
+/// `harness`, tall enough that the texture panel with every group open needs no scrolling, so every grouped row is on
+/// screen.
+fn tall_harness(m: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1600.0, 3200.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
+}
+
+/// The groups start closed (Note LQ5), so the textures-view screen reaches no grouped row: these screens open every
+/// group, on a single texture, on a cube (the Cubemap rows) and on a bulk selection of normal maps (its groups and the
+/// Green row).
+#[test]
+fn every_input_has_a_name_in_the_open_texture_groups() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01.png");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    for g in ["Alpha", "Mipmaps", "Normal map", "Size", "Compression"] {
+        h.get_by_label_contains(&format!("{g}, expanded"));
+    }
+    h.get_by_role_and_label(Role::ComboBox, "Filter");
+    audit_names(&h, "texture groups open");
+
+    let d = tempfile::tempdir().unwrap();
+    let a = d.path().join("textures/a");
+    std::fs::create_dir_all(&a).unwrap();
+    image::RgbImage::from_fn(384, 64, |x, _| image::Rgb([(x % 256) as u8, 9, 9]))
+        .save(a.join("chrome.png"))
+        .unwrap();
+    let mut m = opened(d.path());
+    m.decide(
+        "a/chrome.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Cubemap),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_item("a/chrome.png");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    h.get_by_label_contains("Cubemap, expanded");
+    h.get_by_role_and_label(Role::ComboBox, "Cubemap layout");
+    audit_names(&h, "cube groups open");
+
+    let d = tempfile::tempdir().unwrap();
+    let g = d.path().join("textures/g");
+    std::fs::create_dir_all(&g).unwrap();
+    for n in ["a_n.png", "b_n.png"] {
+        image::RgbImage::from_pixel(64, 64, image::Rgb([128u8, 128, 255]))
+            .save(g.join(n))
+            .unwrap();
+    }
+    let mut m = opened(d.path());
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        m.decide(
+            k,
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
+        );
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_item("g/a_n.png");
+    m.click_item("g/b_n.png", true, false);
+    assert!(m.in_bulk(), "premise: two normals selected");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    h.get_by_label("Treat as OpenGL (flip green)");
+    h.get_by_label_contains("Normal map, expanded");
+    audit_names(&h, "bulk normals groups open");
 }
 
 /// The Files tab's bar while an export runs (`drawer.rs`): a `ProgressIndicator`, which kittest's check does not

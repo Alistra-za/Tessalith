@@ -293,10 +293,14 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "texture panel",
         fixture: "demo",
-        open: |h| model(h).select_item("plants/fern.png"),
+        // The groups start closed (Note LQ5): open them, so the walk reaches the grouped rows too.
+        open: |h| {
+            crate::support::open_texture_groups(model(h));
+            model(h).select_item("plants/fern.png");
+        },
         steps: &[],
         act: None,
-        marker: &[has("← plants/fern"), has("Format")],
+        marker: &[has("← plants/fern"), has("Alpha threshold")],
         transient: false,
         dialog: false,
     },
