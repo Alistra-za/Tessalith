@@ -3704,8 +3704,8 @@ fn a_120_character_name_keeps_the_first_screen_on_screen() {
 }
 
 /// ui_proof's `scroll_bar_clearance` on the centre (rule 3.2): with every group open the panel scrolls, and each header
-/// on screen ends short of the floating bar's width, as ↺ does, so a click there is the header's. Only what the header
-/// senses is shortened; its text keeps the row's bound, so "● changed" keeps its place.
+/// on screen ends short of the floating bar's width, as ↺ does, so a click there is the header's. The header senses and
+/// paints in that shortened rect, so "● changed" sits left of the bar too.
 #[test]
 fn a_header_ends_before_the_centre_scroll_bar() {
     let d = tempfile::tempdir().unwrap();
