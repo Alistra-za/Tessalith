@@ -4,12 +4,19 @@
 //! to compare between runs, because both encoders run in alternating passes under the same load):
 //!
 //! ```text
-//! cargo run --offline --release -p bcenc --example speed -- [--path=<base|avx2|best>] <runs> [<png>...]
+//! cargo run --offline --release -p bcenc --example speed -- [--path=<base|avx2|best>] [--rows=<name>,...] [--no-ref] <runs> [<png>...]
 //! ```
 //!
 //! `--path` picks the code path `bcenc` runs on, through its hidden `_on` entries (default `best`, the one the public
 //! functions take on this CPU); a path this machine cannot run, or an unknown name, exits with status 2 and says why.
 //! The path goes to stderr.
+//!
+//! `--rows=` runs and prints only the named rows of the nine below (`bc1 bc1p bc1-4 bc1a bc3 bc4 bc5 bc1-fast
+//! bc3-fast`); they always print in that order, and an unknown or empty name exits with status 2. `--no-ref` does not
+//! run rgbcx at all: each line is `format  -  rust_med_us  -  <hash>`, the hash being the FNV-1a of the first pass's
+//! `bcenc` output (16 hex digits), and `reference off` goes to stderr. Options come before `<runs>`, each at most
+//! once, in any order. With `--no-ref` there is no `rust/cpp` ratio, so a before and after comparison of two builds
+//! needs interleaved runs on a quiet machine; equal hashes then mean equal output bytes over all blocks.
 //!
 //! Every 4x4 block of level 0 of the PNGs (`image::open(..).to_rgba8()`, cut by `encoders_sys::gather_blocks` as
 //! `tests/corpus.rs` does) is encoded `runs` times by each encoder in alternating passes; rgbcx goes first in even
@@ -78,11 +85,13 @@ fn median(v: &mut [f64]) -> f64 {
     v[v.len() / 2]
 }
 
-/// Time one format and print its line; true when both encoders produced the same bytes.
+/// Time one format and print its line; true when both encoders produced the same bytes (always true without the
+/// reference, which then does not run).
 fn measure<const N: usize>(
     name: &str,
     blocks: &[Block],
     runs: usize,
+    reference: bool,
     cpp: impl Fn(&Block) -> [u8; N],
     rust: impl Fn(&Block) -> [u8; N],
 ) -> bool {
@@ -92,6 +101,20 @@ fn measure<const N: usize>(
         Vec::with_capacity(blocks.len() * N),
     );
     let (mut cpp_hash, mut rust_hash) = (0, 0);
+    if !reference {
+        for run in 0..runs {
+            rust_t.push(pass(blocks, &rust, &mut rust_out));
+            if run == 0 {
+                rust_hash = fnv1a(&rust_out);
+            }
+        }
+        let r = median(&mut rust_t);
+        println!(
+            "{name:<8} {:>12} {r:>12.0} {:>8}  {rust_hash:016x}",
+            "-", "-"
+        );
+        return true;
+    }
     for run in 0..runs {
         if run % 2 == 0 {
             cpp_t.push(pass(blocks, &cpp, &mut cpp_out));
@@ -154,102 +177,180 @@ fn named_path(name: &str) -> Result<Path, String> {
     }
 }
 
+/// The nine rows, in the order they run and print.
+const ROWS: [&str; 9] = [
+    "bc1", "bc1p", "bc1-4", "bc1a", "bc3", "bc4", "bc5", "bc1-fast", "bc3-fast",
+];
+
+const USAGE: &str = "usage: speed [--path=<base|avx2|best>] [--rows=<name>,...] [--no-ref] <runs (1 or more)> [<png>...]";
+
+/// `--rows=` value to a flag per row of `ROWS`; an unknown or empty name is an error.
+fn named_rows(list: &str) -> Result<[bool; 9], String> {
+    let mut wanted = [false; 9];
+    for name in list.split(',') {
+        match ROWS.iter().position(|r| *r == name) {
+            Some(i) => wanted[i] = true,
+            None => {
+                return Err(format!(
+                    "unknown row {name}; the rows are {}",
+                    ROWS.join(", ")
+                ))
+            }
+        }
+    }
+    Ok(wanted)
+}
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let path = match args.first().and_then(|a| a.strip_prefix("--path=")) {
-        None => Path::best(),
-        Some(name) => match named_path(name) {
-            Ok(p) => {
-                args.remove(0);
-                p
-            }
-            Err(why) => {
-                eprintln!("{why}");
+    let (mut path, mut rows, mut no_ref) = (None, None, false);
+    while let Some(a) = args.first().filter(|a| a.starts_with("--")).cloned() {
+        args.remove(0);
+        if let Some(name) = a.strip_prefix("--path=") {
+            if path.is_some() {
+                eprintln!("{USAGE}");
                 return ExitCode::from(2);
             }
-        },
-    };
+            match named_path(name) {
+                Ok(p) => path = Some(p),
+                Err(why) => {
+                    eprintln!("{why}");
+                    return ExitCode::from(2);
+                }
+            }
+        } else if let Some(list) = a.strip_prefix("--rows=") {
+            if rows.is_some() {
+                eprintln!("{USAGE}");
+                return ExitCode::from(2);
+            }
+            match named_rows(list) {
+                Ok(w) => rows = Some(w),
+                Err(why) => {
+                    eprintln!("{why}");
+                    return ExitCode::from(2);
+                }
+            }
+        } else if a == "--no-ref" && !no_ref {
+            no_ref = true;
+        } else {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+    }
+    let path = path.unwrap_or_else(Path::best);
+    let rows = rows.unwrap_or([true; 9]);
+    let wanted = |name: &str| rows[ROWS.iter().position(|r| *r == name).unwrap()];
     let Some(runs) = args
         .first()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n >= 1)
     else {
-        eprintln!("usage: speed [--path=<base|avx2|best>] <runs (1 or more)> [<png>...]");
+        eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
     eprintln!("path {}", path.name());
+    if no_ref {
+        eprintln!("reference off");
+    }
     let blocks = load(&args[1..]);
     if blocks.is_empty() {
         eprintln!("no 4x4 block in the given PNGs");
         return ExitCode::from(2);
     }
     eprintln!("{} blocks, {runs} runs", blocks.len());
-    let ok = [
-        measure(
+    let r = !no_ref;
+    let mut ok = true;
+    if wanted("bc1") {
+        ok &= measure(
             "bc1",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc1_encode_block(b, true, false, false),
             |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Default),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc1p") {
+        ok &= measure(
             "bc1p",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc1_encode_block(b, true, false, true),
             |b| bcenc::bc1_encode_block_on(path, b, true, true, Bc1Search::Default),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc1-4") {
+        ok &= measure(
             "bc1-4",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc1_encode_block(b, false, false, false),
             |b| bcenc::bc1_encode_block_on(path, b, false, false, Bc1Search::Default),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc1a") {
+        ok &= measure(
             "bc1a",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc1_encode_block_alpha(b, mask(b), false),
             |b| bcenc::bc1_encode_block_alpha_on(path, b, mask(b), false, Bc1Search::Default),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc3") {
+        ok &= measure(
             "bc3",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc3_encode_block(b, RADIUS, CUT, false),
             |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Default),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc4") {
+        ok &= measure(
             "bc4",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc4_encode_block(b, 0, RADIUS),
             |b| bcenc::bc4_encode_block_on(path, b, 0, RADIUS),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc5") {
+        ok &= measure(
             "bc5",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc5_encode_block(b, RADIUS),
             |b| bcenc::bc5_encode_block_on(path, b, RADIUS),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc1-fast") {
+        ok &= measure(
             "bc1-fast",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc1_encode_block_level(b, BC1_FAST_LEVEL, true, false),
             |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Fast),
-        ),
-        measure(
+        );
+    }
+    if wanted("bc3-fast") {
+        ok &= measure(
             "bc3-fast",
             &blocks,
             runs,
+            r,
             |b| encoders_sys::bc3_encode_block_level(b, RADIUS, CUT, BC1_FAST_LEVEL, false),
             |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Fast),
-        ),
-    ];
-    if ok.iter().all(|&s| s) {
+        );
+    }
+    if ok {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
