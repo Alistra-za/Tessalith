@@ -384,6 +384,7 @@ fn straight_alpha_writes_the_key() {
     idle(h.state_mut());
     assert!(row(h.state(), |f| matches!(f, Fix::StraightAlpha(_))).is_none());
     // The texture's settings show the field in its Alpha group (only for an EXR source).
+    open_texture_groups(h.state_mut());
     h.state_mut().select_item(key);
     h.run();
     h.run();

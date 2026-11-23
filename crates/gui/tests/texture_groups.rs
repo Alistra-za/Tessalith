@@ -3499,3 +3499,128 @@ fn a_read_only_sdc_toml_keeps_the_notes_hover() {
     h.run();
     h.get_by_label_contains(&first);
 }
+
+// Task 8: the groups start closed, and the first screen fits.
+
+/// `support::opened` leaves rock01 undecided until `decide`; select it as is (64x64 RGB).
+fn undecided_rock(dir: &std::path::Path) -> AppModel {
+    let mut m = support::opened(dir);
+    m.select_item(KEY);
+    m
+}
+
+/// R3-2: the layout tests below set every group closed themselves; only `every_group_starts_closed` reads the default.
+fn all_closed(mut m: AppModel) -> AppModel {
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, false);
+    }
+    m
+}
+
+#[test]
+fn a_closed_panel_has_at_most_twelve_control_kinds() {
+    for (name, make) in [
+        ("decided colour", rock as fn(&std::path::Path) -> AppModel),
+        ("undecided type", undecided_rock),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let h = harness(all_closed(make(d.path())), 1280.0, 800.0);
+        let kinds = support::control_kinds(&h, sdc_gui::ui::centre_rect(&h.ctx).unwrap());
+        assert!(kinds.len() <= 12, "{name}: {kinds:#?}");
+    }
+}
+
+#[test]
+fn every_group_starts_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 800.0);
+    let mut seen = 0;
+    for g in PanelGroup::ALL {
+        assert!(!panel_groups::default_open(g), "{}", g.title());
+        if let Some(n) = h.query_by_label_contains(&format!("{}, ", g.title())) {
+            seen += 1;
+            assert!(
+                n.accesskit_node().label().unwrap().contains(", collapsed"),
+                "{}",
+                g.title()
+            );
+        }
+    }
+    assert!(seen >= 4, "the groups were found at all");
+}
+
+#[test]
+fn the_first_screen_needs_no_scrolling_at_1280_by_800() {
+    let d = tempfile::tempdir().unwrap();
+    let mut cases: Vec<(&str, AppModel, &str)> = vec![(
+        "decided colour",
+        rock(d.path().join("a").as_path()),
+        "Texture type",
+    )];
+    cases.push((
+        "undecided",
+        undecided_rock(d.path().join("b").as_path()),
+        "Type for this texture",
+    ));
+    let (cube, _) = cube_without_mips(d.path().join("c").as_path());
+    cases.push(("cube", cube, "Texture type"));
+    for (name, m, type_label) in cases {
+        let h = harness(all_closed(m), 1280.0, 800.0);
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        for l in [type_label, "Format"] {
+            assert!(
+                centre.contains_rect(h.get_by_role_and_label(Role::ComboBox, l).rect()),
+                "{name}: {l}"
+            ); // label and combo share the name
+        }
+        assert!(
+            centre.contains_rect(h.get_by_label_contains("Output: ").rect()),
+            "{name}"
+        );
+        assert!(
+            support::bar_rects_in(&h, centre).is_empty(),
+            "{name}: the centre scrolls"
+        );
+    }
+}
+
+#[test]
+fn five_problem_rows_draw_three_and_a_more_button() {
+    // first_screen_problems drawn alone with five long Problem rows, at the centre's width
+    let rows: Vec<Problem> = (0..5).map(|_| problem_row(&"x".repeat(200))).collect();
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(560.0, 400.0))
+        .build_ui_state(
+            |ui, acts: &mut Vec<Action>| {
+                first_screen_problems(ui, &rows, 0, Some(&SetTarget::Key("set-a".into())), acts)
+            },
+            vec![],
+        );
+    h.run();
+    assert_eq!(
+        h.query_all_by_label_contains("x".repeat(20).as_str())
+            .count(),
+        3
+    );
+    let more = h.get_by_label("2 more problems: open Problems");
+    assert!(more.rect().right() <= 560.0);
+    let bottom = h
+        .query_all_by_role(Role::Button)
+        .map(|n| n.rect().bottom())
+        .fold(0.0, f32::max);
+    assert!(
+        bottom <= 3.0 * 24.0 + 24.0 + 8.0,
+        "three rows and the button, each one line: {bottom}"
+    );
+}
+
+#[test]
+fn a_120_character_name_keeps_the_first_screen_on_screen() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, _) = long_named(d.path());
+    let h = harness(all_closed(m), 1280.0, 800.0);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    assert!(centre.contains_rect(h.get_by_label_contains("Output: ").rect()));
+    assert!(support::bar_rects_in(&h, centre).is_empty());
+}

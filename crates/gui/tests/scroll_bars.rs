@@ -72,6 +72,7 @@ fn the_texture_panel_shows_its_bar_at_rest() {
     let mut m = opened(d.path());
     m.select_item("landscape/leaf.png");
     assert!(m.wait_idle(Duration::from_secs(60)));
+    open_texture_groups(&mut m); // the test is about the bar, so the groups are open (Task 8)
     let h = harness(m, egui::vec2(1100.0, 800.0));
     assert_bar_at_rest(&h, "texture panel");
 }
@@ -85,6 +86,7 @@ fn the_bulk_panel_shows_its_bar_at_rest() {
     m.click_item("landscape/leaf.png", false, false);
     m.click_item("landscape/rock01.png", true, false);
     assert!(m.in_bulk());
+    open_texture_groups(&mut m);
     let h = harness(m, egui::vec2(1280.0, 680.0));
     h.get_by_label("2 textures selected");
     assert_bar_at_rest(&h, "bulk panel");

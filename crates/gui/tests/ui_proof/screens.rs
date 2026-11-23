@@ -296,7 +296,7 @@ pub const SCREENS: &[Screen] = &[
         open: |h| model(h).select_item("plants/fern.png"),
         steps: &[],
         act: None,
-        marker: &[has("← plants/fern"), has("Alpha threshold")],
+        marker: &[has("← plants/fern"), has("Format")],
         transient: false,
         dialog: false,
     },

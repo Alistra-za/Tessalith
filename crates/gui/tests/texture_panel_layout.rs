@@ -48,7 +48,8 @@ fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     sized_harness(m, w, 800.0)
 }
 
-fn sized_harness(m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
+fn sized_harness(mut m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
+    open_texture_groups(&mut m); // the groups start closed (Task 8)
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -893,6 +894,7 @@ fn window_harness(dir: &std::path::Path) -> H3 {
         .clone();
     m.selection = Selection::Item(item);
     m.settings.set_settings_open = true;
+    open_texture_groups(&mut m);
     let state = sdc_gui::ui::State {
         set3d: SetPreview::new(None, DEFAULT_CAP),
         ..Default::default()

@@ -81,7 +81,8 @@ fn ignored(m: &AppModel, key: &str) -> bool {
         .any(|w| w.code == Code::EncWeightsIgnored)
 }
 
-fn harness(m: AppModel) -> Harness<'static, AppModel> {
+fn harness(mut m: AppModel) -> Harness<'static, AppModel> {
+    open_texture_groups(&mut m); // the groups start closed (Task 8)
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

@@ -104,7 +104,8 @@ const FLAT: &str = "a/flat.png";
 
 /// A cube (a 6:1 strip decided as Cubemap) and a plain 2D texture, planned, with the panel drawn over `selected`.
 fn section(d: &std::path::Path, selected: &str) -> Harness<'static, AppModel> {
-    let m = cube_model(d, selected);
+    let mut m = cube_model(d, selected);
+    support::open_texture_groups(&mut m); // the groups start closed (Task 8)
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -312,7 +313,7 @@ const NOT_A_CUBE: &str = "six faces, a cross or a strip";
 fn a_square_cube_has_no_layout_combo() {
     use sdc_gui::ui::review::undecided_row;
     let d = tempfile::tempdir().unwrap();
-    let m = unclear_model(d.path());
+    let mut m = unclear_model(d.path());
     let problems = sdc_gui::model::bottom::problems(&m);
     assert!(
         problems
@@ -320,6 +321,7 @@ fn a_square_cube_has_no_layout_combo() {
             .any(|p| p.text.contains(NOT_A_CUBE) && p.text.starts_with("Undecided")),
         "{problems:#?}"
     );
+    support::open_texture_groups(&mut m);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

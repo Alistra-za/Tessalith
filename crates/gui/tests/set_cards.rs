@@ -796,6 +796,7 @@ fn a_plain_click_on_a_thumbnail_opens_its_set() {
 fn shift_click_on_a_thumbnail_opens_its_texture() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()));
+    open_texture_groups(h.state_mut()); // the groups start closed (Task 8)
     for already_selected in [false, true] {
         h.state_mut().open_presets();
         h.run();

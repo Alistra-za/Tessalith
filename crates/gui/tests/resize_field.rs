@@ -88,7 +88,8 @@ fn own(m: &AppModel, item: &str, field: &str) -> Option<serde_json::Value> {
 }
 
 /// The whole app, polled every frame as the real app does.
-fn harness(model: AppModel) -> Harness<'static, AppModel> {
+fn harness(mut model: AppModel) -> Harness<'static, AppModel> {
+    support::open_texture_groups(&mut model); // the groups start closed (Task 8)
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -194,6 +195,7 @@ fn resize_pick_waits_for_the_plan_then_writes() {
     m.set_field("up.png", "resize", serde_json::json!("half"));
     assert!(m.fix_off().is_some(), "the edit left a plan in flight");
     // Drawing only, never polled: the plan lands only at `wait_idle` below.
+    support::open_texture_groups(&mut m);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

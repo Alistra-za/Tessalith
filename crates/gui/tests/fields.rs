@@ -639,6 +639,7 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     m.decide(LEAF, sdc_gui::model::Answer::Alpha(AlphaPolicy::Cutout));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.select_item(LEAF);
+    open_texture_groups(&mut m); // the groups start closed (Task 8)
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

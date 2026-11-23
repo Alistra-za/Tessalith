@@ -11,7 +11,8 @@ const ROCK: &str = "landscape/rock01.png";
 const LEAF: &str = "landscape/leaf.png";
 
 /// A harness over `model`. The crate bundles no fonts, so the harness needs the system fonts, as the app does.
-fn harness(model: AppModel) -> Harness<'static, AppModel> {
+fn harness(mut model: AppModel) -> Harness<'static, AppModel> {
+    open_texture_groups(&mut model); // the groups start closed (Task 8)
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -429,13 +430,13 @@ fn a_bulk_row_has_a_question_mark() {
     let mut m = opened(d.path());
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
-    // The Normal map group is closed so the Compression group is on screen at 800 px.
+    let mut h = harness(m); // every group open, as before they started closed (Task 8)
+                            // The Normal map group is closed so the Compression group is on screen at 800 px.
     sdc_gui::model::panel_groups::set_open(
-        &mut m.settings,
+        &mut h.state_mut().settings,
         sdc_gui::model::panel_groups::PanelGroup::NormalMap,
         false,
     );
-    let mut h = harness(m);
     h.run();
     h.get_by_label("2 textures selected");
     let text = sdc_gui::model::fields::field_help("encoder.effort").unwrap();
@@ -455,6 +456,7 @@ fn the_bulk_panel_has_size_and_dds_header_rows() {
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
     // Tall enough that the Size group is on screen.
+    open_texture_groups(&mut m);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -1078,7 +1080,8 @@ fn reach_fixture(dir: &std::path::Path, selected: usize) -> (AppModel, Vec<Strin
 }
 
 /// A harness 1100 px wide (the narrowest width the layout promises) and tall enough for every popup.
-fn narrow_harness(m: AppModel) -> Harness<'static, AppModel> {
+fn narrow_harness(mut m: AppModel) -> Harness<'static, AppModel> {
+    open_texture_groups(&mut m);
     Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

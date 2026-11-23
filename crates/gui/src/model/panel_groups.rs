@@ -69,9 +69,8 @@ impl PanelGroup {
 }
 
 /// Whether a group is open when `gui.toml` says nothing about it.
-pub fn default_open(g: PanelGroup) -> bool {
-    // shortcut: every group but Sources starts open until Task 8 closes them, when this becomes `false` for all.
-    g != PanelGroup::Sources
+pub fn default_open(_g: PanelGroup) -> bool {
+    false
 }
 
 /// The rows that stay on the first screen, outside any group.

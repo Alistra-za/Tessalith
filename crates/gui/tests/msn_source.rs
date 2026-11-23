@@ -74,6 +74,7 @@ fn the_panel_shows_baked_in_for_an_msn() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     m.select_item(MSN);
+    support::open_texture_groups(&mut m); // the groups start closed (Task 8)
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
