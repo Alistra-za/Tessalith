@@ -1,6 +1,9 @@
 //! The texture panel's collapsible groups, which group each field sits in, and the open state kept in `gui.toml`
 //! (texture-panel-compact plan, Task 1). No egui types.
-use super::fields::CUBE_FIELDS;
+use super::fields::{
+    BC3_SEARCH, CUBE_FIELDS, EDGE_FIELD, EXR_STRAIGHT_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD,
+    MSN_SOURCE, SEARCH_FIELDS, WEIGHTING,
+};
 use crate::settings::GuiSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -67,20 +70,37 @@ pub const FIRST_SCREEN: [&str; 2] = ["subtype", "format"];
 
 /// The group a panel field sits in; `None` for a first-screen row or a key no panel lists.
 pub fn panel_group(field: &str) -> Option<PanelGroup> {
-    if CUBE_FIELDS.iter().any(|(k, _)| *k == field) {
+    let listed = |list: &[(&str, &str)]| list.iter().any(|(k, _)| *k == field);
+    if FIRST_SCREEN.contains(&field) {
+        return None;
+    }
+    if listed(&CUBE_FIELDS) {
         return Some(PanelGroup::Cubemap);
     }
-    Some(match field {
-        "channels.msn_source" | "mips.normal" | "mips.normal_base" => PanelGroup::NormalMap,
-        "mips.coverage" | "encoder.bc1_alpha" => PanelGroup::Alpha,
-        _ => match field.split('.').next().unwrap_or("") {
-            "alpha" => PanelGroup::Alpha,
-            "mips" => PanelGroup::Mipmaps,
-            "resize" | "resize_relative_to" | "resize_floor" => PanelGroup::Size,
-            "color" | "encoder" | "header" => PanelGroup::Compression,
-            _ => return None,
-        },
-    })
+    if listed(&[LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD]) {
+        return Some(PanelGroup::Mipmaps);
+    }
+    if listed(&[EXR_STRAIGHT_FIELD]) {
+        return Some(PanelGroup::Alpha);
+    }
+    // The Effort row's search fields and the BC3 Effort row are Compression rows no `FIELDS` entry lists.
+    if listed(&SEARCH_FIELDS) || field == BC3_SEARCH {
+        return Some(PanelGroup::Compression);
+    }
+    // Only a key `FIELDS` lists is placed, so a field added there without a line here has no group and the table
+    // test in `tests/texture_groups.rs` fails. Channels holds read-only lines, never a field.
+    if !listed(&FIELDS) {
+        return None;
+    }
+    match field {
+        MSN_SOURCE | "mips.normal" | "mips.normal_base" => Some(PanelGroup::NormalMap),
+        "alpha.policy" | "alpha.threshold" | "alpha.compare" | "mips.coverage"
+        | "encoder.bc1_alpha" | "alpha.exact_opaque" | "alpha.parallax" => Some(PanelGroup::Alpha),
+        "resize" | "resize_relative_to" | "resize_floor" => Some(PanelGroup::Size),
+        "color.tag" | "color.content" | "encoder.effort" | WEIGHTING | "encoder.perceptual"
+        | "header" => Some(PanelGroup::Compression),
+        _ => None,
+    }
 }
 
 pub fn is_open(settings: &GuiSettings, g: PanelGroup) -> bool {
