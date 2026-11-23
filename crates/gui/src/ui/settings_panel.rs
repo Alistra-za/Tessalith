@@ -2523,16 +2523,17 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 match g {
                     PanelGroup::Sources => {}
                     PanelGroup::Cubemap if !compact => {
-                        // Draws nothing unless the item is a cube map (`cube_section`'s own check).
+                        // Draws nothing unless the item is a cube map (`cube_section`'s own check), from the cached
+                        // views, which hold a cube's rows.
                         let open = group_open(&cx, g);
                         let (edits, toggled, taken) = super::cube_section::cube_section(
                             ui,
                             model,
-                            key,
+                            &cx,
+                            &pc.views,
                             &group_head(&cx, g),
                             open,
                             cx.forced.contains(&g),
-                            cx.reveal,
                         );
                         if toggled {
                             actions.push(Action::SetGroupOpen(g, !open));

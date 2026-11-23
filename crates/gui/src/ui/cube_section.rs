@@ -3,9 +3,9 @@
 //! `AppModel::set_field` / `clear_field`, so sdc.toml stays the only place a setting is written.
 use super::columns::RED;
 use super::group::{collapsing_group, GroupHead};
-use super::settings_panel::{combo, options_of, Options};
+use super::settings_panel::{combo, options_of, Ctx, Options};
 use crate::model::code_text::not_a_cube;
-use crate::model::fields::{cube_views, provenance_text, FieldView};
+use crate::model::fields::{provenance_text, FieldView};
 use crate::model::nav::RevealField;
 use crate::model::AppModel;
 use eframe::egui;
@@ -25,18 +25,22 @@ const FIRST_CLAMP: f64 = 4.0;
 const FIRST_BLUR: f64 = 0.35;
 const FACE_NAMES: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
 
-/// Every selected item is a cube; `key` alone when the selection is a set or empty.
+/// Every selected item is a cube; `key` alone when the selection is a set or empty. The keys `selected_items` returns,
+/// read in place: this runs every frame a texture panel is drawn (Note LH7).
 fn all_cubes(model: &AppModel, key: &str) -> bool {
-    let mut keys = model.selected_items();
-    if keys.is_empty() {
-        keys.push(key.to_string());
-    }
-    keys.iter().all(|k| {
+    let cube = |k: &str| {
         model
             .item(k)
             .and_then(|i| i.job.as_ref())
             .is_some_and(|j| j.profile.subtype == Subtype::Cubemap)
-    })
+    };
+    if model.in_bulk() && !model.multi.sets {
+        return model.multi.keys.iter().all(|k| cube(k));
+    }
+    match &model.selection {
+        crate::model::Selection::Item(k) => cube(k),
+        _ => cube(key),
+    }
 }
 
 /// A drag value that returns its value once per gesture (drag release or Enter), not every frame
@@ -251,34 +255,32 @@ fn grid<R>(ui: &mut egui::Ui, cx: &Cx, name: &str, add: impl FnOnce(&mut egui::U
         .inner
 }
 
-/// The cubemap section under its group header `head` (open when `open`); no edits and nothing drawn unless every
-/// selected item is a cube (a mixed selection shows no cube rows and writes no `cubemap.*` key, Note DT8). Returns
-/// the edits, and whether the header was toggled (the caller writes the open state). `instant`: the group is forced
-/// open, so it opens without sliding. `reveal`: a Go to waiting for one of this texture's rows (the centre passes it);
-/// the last result is whether a row took it.
+/// The cubemap section of `panel.key` under its group header `head` (open when `open`); no edits and nothing drawn
+/// unless `panel.job` is a cube and every selected item is one (a mixed selection shows no cube rows and writes no
+/// `cubemap.*` key, Note DT8). The job, the Go to waiting for one of this texture's rows (`panel.reveal`, the centre's
+/// only) and `views` are the panel's (`views` from `settings_panel::panel_cache`, which holds a cube's rows), so a
+/// frame builds nothing here (Note LH7). Returns the edits, whether the header was toggled (the caller writes the open
+/// state) and whether a row took the Go to. `instant`: the group is forced open, so it opens without sliding.
 pub fn cube_section(
     ui: &mut egui::Ui,
     model: &AppModel,
-    key: &str,
+    panel: &Ctx<'_>,
+    views: &[FieldView],
     head: &GroupHead<'_>,
     open: bool,
     instant: bool,
-    reveal: Option<&RevealField>,
 ) -> (Edits, bool, bool) {
-    if !all_cubes(model, key) {
+    let (key, job) = (panel.key, panel.job);
+    if job.profile.subtype != Subtype::Cubemap || !all_cubes(model, key) {
         return (vec![], false, false);
     }
-    let Some(job) = model.item(key).and_then(|i| i.job.clone()) else {
-        return (vec![], false, false);
-    };
-    let views = cube_views(model.target, &job);
     let cx = Cx {
         key,
-        job: &job,
-        // Note FK: read-only `sdc.toml`, or a plan in flight.
-        ro: model.fix_off(),
-        busy: model.edit_busy(),
-        reveal,
+        job,
+        // Note FK: read-only `sdc.toml`, or a plan in flight (the panel's `fix_off`).
+        ro: panel.edit_off.clone(),
+        busy: panel.busy,
+        reveal: panel.reveal,
         taken: std::cell::Cell::new(false),
     };
     let c = &job.profile.cubemap;
@@ -302,7 +304,7 @@ pub fn cube_section(
         instant,
         |ui| {
             grid(ui, &cx, "Source", |ui| {
-                let f = find(&views, "cubemap.layout");
+                let f = find(views, "cubemap.layout");
                 let e = cx.row(ui, f, |ui| {
                     if six_files {
                         let r = ui.label("Six face files");
@@ -317,7 +319,7 @@ pub fn cube_section(
                         })
                         .inner;
                     let r = if not_cube {
-                        r.on_disabled_hover_text(not_a_cube(Some(&job)))
+                        r.on_disabled_hover_text(not_a_cube(Some(job)))
                     } else {
                         r
                     };
@@ -325,7 +327,7 @@ pub fn cube_section(
                     (p.map(|v| (v != json!("auto")).then_some(v)), r)
                 });
                 put(f.field, e);
-                let f = find(&views, "cubemap.face_size");
+                let f = find(views, "cubemap.face_size");
                 let e = cx.row(ui, f, |ui| {
                     let cur = c.face_size.map_or(json!("auto"), |n| json!(n));
                     let (p, r) = named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f));
@@ -333,7 +335,7 @@ pub fn cube_section(
                 });
                 put(f.field, e);
                 if layout == Some(CubeLayout::Vcross) {
-                    let f = find(&views, "cubemap.vcross_negz_rotate");
+                    let f = find(views, "cubemap.vcross_negz_rotate");
                     let e = cx.row(ui, f, |ui| {
                         let (p, r) = checkbox(ui, c.vcross_negz_rotate, &name(f));
                         // Ticked is the default, so it drops the key rather than writing `true`.
@@ -343,7 +345,7 @@ pub fn cube_section(
                 }
             });
             grid(ui, &cx, "Orientation", |ui| {
-                let f = find(&views, "cubemap.yaw");
+                let f = find(views, "cubemap.yaw");
                 let e = cx.row(ui, f, |ui| {
                     let (p, r) = num(
                         ui,
@@ -358,7 +360,7 @@ pub fn cube_section(
                     (p.map(|v| Some(json!(v))), r)
                 });
                 put(f.field, e);
-                let f = find(&views, "cubemap.mirror");
+                let f = find(views, "cubemap.mirror");
                 let e = cx.row(ui, f, |ui| {
                     let (p, r) = checkbox(ui, c.mirror, &name(f));
                     (p.map(|on| on.then_some(json!(true))), r)
@@ -367,7 +369,7 @@ pub fn cube_section(
             });
             // Any layout is six faces to turn or flip.
             if layout.is_some() {
-                faces(ui, &cx, &views, &opts, &mut put);
+                faces(ui, &cx, views, &opts, &mut put);
             }
             grid(ui, &cx, "Colour grade", |ui| {
                 let rows: [(&str, f64, RangeInclusive<f64>, f64); 5] = [
@@ -378,7 +380,7 @@ pub fn cube_section(
                     ("cubemap.saturation", c.saturation, 0.0..=2.0, 0.01),
                 ];
                 for (field, cur, range, speed) in rows {
-                    let f = find(&views, field);
+                    let f = find(views, field);
                     let e = cx.row(ui, f, |ui| {
                         let (p, r) =
                             num(ui, cx.busy, cx.id(field), cur, range, speed, "", &name(f));
@@ -386,7 +388,7 @@ pub fn cube_section(
                     });
                     put(field, e);
                 }
-                let f = find(&views, "cubemap.tint");
+                let f = find(views, "cubemap.tint");
                 let e = cx.row(ui, f, |ui| {
                     ui.horizontal(|ui| match c.tint {
                         Some(t) => {
@@ -402,7 +404,7 @@ pub fn cube_section(
                     .inner
                 });
                 put(f.field, e);
-                let f = find(&views, "cubemap.highlight_clamp");
+                let f = find(views, "cubemap.highlight_clamp");
                 let e = cx.row(ui, f, |ui| {
                     ui.horizontal(|ui| {
                         let (tick, r) = checkbox(ui, c.highlight_clamp.is_some(), &name(f));
@@ -427,14 +429,14 @@ pub fn cube_section(
                 put(f.field, e);
             });
             grid(ui, &cx, "Look", |ui| {
-                let f = find(&views, "cubemap.style");
+                let f = find(views, "cubemap.style");
                 let e = cx.row(ui, f, |ui| {
                     let cur = c.style.map_or(json!("none"), |s| json!(s));
                     let (p, r) = named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f));
                     (p.map(|v| (v != json!("none")).then_some(v)), r)
                 });
                 put(f.field, e);
-                let f = find(&views, "cubemap.blur");
+                let f = find(views, "cubemap.blur");
                 // Blur the engine fills (a style, a preset) cannot be unticked: clearing the key changes
                 // nothing, so the tick is disabled with the reason (Note DT13).
                 let inherited = c.blur.is_some() && !f.edited;

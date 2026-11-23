@@ -178,6 +178,44 @@ fn mixed_selection_hides_the_cube_section() {
     assert!(!text.contains("cubemap."), "{text}");
 }
 
+/// `CUBE`'s cube section drawn alone, as the texture panel calls it: its `Ctx` and its cached views, built here each
+/// frame (the panel builds the views once per input change).
+fn cube_section_alone(
+    ui: &mut eframe::egui::Ui,
+    m: &AppModel,
+    open: bool,
+    instant: bool,
+) -> (sdc_gui::ui::cube_section::Edits, bool, bool) {
+    use sdc_gui::ui::settings_panel::{Ctx, Surface};
+    let job = m.item(CUBE).and_then(|i| i.job.as_ref()).expect("a job");
+    let views = sdc_gui::model::panel_groups::panel_views(m.target, job);
+    let (groups, forced, problems) = Default::default();
+    let cx = Ctx {
+        key: CUBE,
+        job,
+        target: m.target,
+        busy: m.edit_busy(),
+        compact: false,
+        alpha_asked: false,
+        edit_off: m.fix_off(),
+        warnings: &[],
+        surface: Surface::Centre,
+        groups: &groups,
+        forced: &forced,
+        problem_groups: &problems,
+        summaries: &[],
+        reveal: None,
+    };
+    let head = sdc_gui::ui::group::GroupHead {
+        title: "Cubemap",
+        summary: "",
+        summary_hover: None,
+        changed: false,
+        problem: None,
+    };
+    sdc_gui::ui::cube_section::cube_section(ui, m, &cx, &views, &head, open, instant)
+}
+
 /// The section's own guard, drawn with no bulk panel in front of it: the active item is a cube but the selection is
 /// not all cubes, so nothing shows and nothing is written. Fails when `all_cubes` is removed.
 #[test]
@@ -193,15 +231,7 @@ fn the_section_guard_hides_a_mixed_selection() {
         .with_size(eframe::egui::vec2(800.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
-                let head = sdc_gui::ui::group::GroupHead {
-                    title: "Cubemap",
-                    summary: "",
-                    summary_hover: None,
-                    changed: false,
-                    problem: None,
-                };
-                let (edits, toggled, taken) =
-                    sdc_gui::ui::cube_section::cube_section(ui, m, CUBE, &head, true, false, None);
+                let (edits, toggled, taken) = cube_section_alone(ui, m, true, false);
                 assert!(edits.is_empty() && !toggled && !taken);
             },
             m,
@@ -1073,14 +1103,7 @@ fn cube_header_top_after_one_step(instant: bool) -> (f32, f32) {
         .with_max_steps(40)
         .build_ui_state(
             move |ui, s: &mut (AppModel, bool)| {
-                let head = sdc_gui::ui::group::GroupHead {
-                    title: "Cubemap",
-                    summary: "",
-                    summary_hover: None,
-                    changed: false,
-                    problem: None,
-                };
-                sdc_gui::ui::cube_section::cube_section(ui, &s.0, CUBE, &head, s.1, instant, None);
+                cube_section_alone(ui, &s.0, s.1, instant);
                 ui.label("below");
             },
             (m, false),
