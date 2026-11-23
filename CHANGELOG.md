@@ -3,10 +3,10 @@
 ## 3.1.0
 
 ### Main
-- Faster encoding: BC1 to BC5 more than four times as fast with the same bytes, and BC7 and BC6H about 1.5 times as fast on CPUs with AVX-512.
+- Faster encoding: BC1, BC3, BC4 and BC5 more than four times as fast with the same bytes, and BC7 and BC6H about 1.5 times as fast on CPUs with AVX-512.
 - BC6H gets four encoder fixes, and BC3, BC4 and BC5 get a new **Max** search (3.0.0's `max` is `slowest`).
 - Outputs written by an older encode version are kept until you ask for them with `--ev`, and validation after encoding is off by default.
-- `_fuzz` maps and, in the GUI, normals follow their set's shader; the GUI opens Review before an export, Problems can reach zero, and a **Settings** tab and the texture panel take over the Advanced drawer.
+- `_fuzz` and `_sheen` maps and, in the GUI, normals follow their set's shader; the GUI opens Review before an export, Problems can reach zero, and the Advanced drawer's settings move to a **Settings** tab, the texture panel and the set editor.
 
 ### Engine
 - BC1, BC3, BC4 and BC5 textures encode more than four times as fast, and the files are byte for byte what 3.0.0 writes.
@@ -18,12 +18,11 @@
 - BC6H HDR textures (`hdr_sky` and TruePBR emissive) encode with four fixes in the ISPC encoder, so their bytes change at every effort.
   - A black texel beside a very bright one (brighter than about 1344.0) no longer turns the whole block grey at the slower efforts. Endpoint colours round to the value the GPU decodes, where they were sometimes one step off near black and near the top of the range. A block encoded with one pair of endpoints keeps its best refinement pass instead of the last one. At efforts `fast` and `basic`, a block whose widest colour range sits just inside what mode 2 allows can use that mode.
   - On 18 real HDR images at BC6H's default effort (`slowest`) the picture gets closer to the source by 0.069 dB on average (95 % interval ±0.018 dB, better on all 18). Efforts `veryfast` and `ultrafast` are the exception: they lose 0.003 dB on average (interval ±0.002 dB) and 0.10 dB on one test image with a sun, and I kept the fix anyway because every slower effort gains about 0.07 dB. BC6H encoding takes 2 to 5 % longer than before at every effort (5 % at `slowest`), timed on one Intel CPU. Numbers: docs/research/encoder-benchmark.md#kernel-fixes-patch-0004-2026-11-22-note-lo.
-  - Existing BC6H outputs are kept by `if-changed` and counted as older. To encode them again, run `sdc convert <project> --on-existing if-changed --ev --property bc6h_uf16`. A BC7 `pbr_emissive` is counted as written by an older encode version too, but its bytes are the same, so that command leaves it.
+  - A BC7 `pbr_emissive` is counted as written by an older encode version too, but its bytes are the same, so the command below leaves it. Existing BC6H outputs are kept by `if-changed` and counted as older. To encode them again, run `sdc convert <project> --on-existing if-changed --ev --property bc6h_uf16`.
 - `--on-existing if-changed`, the default and what every GUI export uses, keeps two kinds of output that 3.0.0 encoded again, and counts them on every run:
   - an output written by an older encode version (a Tessalith update that changed how its texture type is encoded);
-  - an output encoded at a higher quality target than the settings now ask for (`encoder.effort`, `encoder.bc45_search_radius` or `encoder.bc1_search` set lower).
-  
-  The CLI adds the counts to its `done` line, the GUI to the export's Notes, and `--json` gets the `OUT-KEPT-OLDER-ENCODE` and `OUT-KEPT-LOWER-TARGET` events. A raised target, a changed source or any other changed setting still encodes the output again. See docs/wiki/Validation-and-Output.md#re-runs-and-if-changed.
+  - an output encoded at a higher quality target than the settings now ask for (`encoder.effort`, `encoder.bc45_search_radius` or `encoder.bc1_search` set lower);
+  - the CLI adds the counts to its `done` line, the GUI to the export's Notes, and `--json` gets the `OUT-KEPT-OLDER-ENCODE` and `OUT-KEPT-LOWER-TARGET` events. A raised target, a changed source or any other changed setting still encodes the output again. See docs/wiki/Validation-and-Output.md#re-runs-and-if-changed.
 - On the `cs` target, a `_fuzz` or `_sheen` map no longer makes a set Advanced skin by itself: the set's other maps pick the shader, and with nothing else to go on the set is PBR. To keep a set skin, choose **Advanced Skin** as its shader.
   - The map is read by the set's shader. In a PBR set it is the PBR fuzz texture, colour and weight, written as `<base>_f.dds` (it turns PGPatcher's fuzz on), and the set packs `_rmaos`, not `_rfaos`; if the set has its own `_f`, that `_f` is the fuzz texture and the map is listed as unused. In an Advanced skin set the map is the greyscale mask in the `_rfaos` G channel, as before. Under any other shader it isn't converted, and Problems lists it under Notes as unused. `sdc convert` can't see a shader chosen in the GUI, so there it still converts the map.
   - Where an earlier version recorded a set's diffuse as `subtype = "skin_albedo"` in `sdc.toml` only because of a `_fuzz` or `_sheen` map, the set leaves Advanced skin when you open or reload the project (not when `sdc.toml` is read-only). A Problems row lists the changed files on hover, and **Undo this change** puts them back until you make another change; Save writes the switch. If you undo the switch and save, it runs again the next time the project opens: choose **Advanced Skin** as the set's shader to keep the set skin. `sdc convert` keeps building such a project as Advanced skin until the GUI has saved it once.
@@ -45,10 +44,10 @@
 
 ### GUI
 - New **Settings…** button in the header, which opens a **Settings** tab beside Presets. **This project** holds the Mode (moved from the Presets tab), the Preset, the export folder and **Export without review**. **App settings** holds Live encode, the three checks, the analysis cache limit and the **Textures** and **Sets** column ticks, which replace the header's eye buttons.
-- The **Advanced** drawer at the window's right edge is gone; its settings are in the **Settings** tab and the texture panel. An older `gui.toml` still loads.
+- The **Advanced** drawer at the window's right edge is gone; its settings are in the **Settings** tab, the texture panel, the set editor's **Also export** tab and a Problems row for unmatched `[files]` entries. An older `gui.toml` still loads.
 - The texture panel has the fields the Advanced drawer held: **Levels** under Mipmaps, a **Size** group (Resize, Relative to, Size floor), **DDS header** under Compression, and a folded **Where these settings come from** section. The bulk panel edits Size and DDS header too.
 - The set editor's **Advanced** tab is now **Also export**: this set's **Skip vanilla/CM for this set** tick (moved from the Material tab), the project's two **Also export as** ticks and the Vanilla recipe numbers. Review's **Recipe settings…** opens it.
-- **Effort** sets the encoder search on BC1 (Fast, Default), BC3, BC4 and BC5 (Fast, Default, Slowest, Max), where it wrote `encoder.effort`, which they ignore. The separate search rows are gone.
+- **Effort** sets the encoder search on BC1 (Fast, Default), BC3, BC4 and BC5 (Fast, Default, Slowest, Max); on those formats it used to write `encoder.effort`, which they ignore. The separate search rows are gone.
 - The set editor's RMAOS/RFAOS dropdown is gone: the set's shader and maps pick `_rmaos` or `_rfaos`, and the packed row's title shows which. `packing.recipe` still works in `sdc.toml`, presets and `--set`.
 - **Rename inputs…** is no longer in the Sets view; rename inputs from the Textures view. F2 on a set that is not a PGPatcher PBR set says so.
 - The header's **Review n files…** opens Review for the whole project, and exporting a set, group or selection opens Review for that selection. Press **Export** in Review to write the files.
@@ -59,16 +58,18 @@
 - **Re-encode every output** makes the next export encode every recorded output again; files Tessalith has no record of are still kept. The tick lasts one export.
 - Problems can reach zero: rows that only say what a default did are Notes, behind a **Notes** pill unless they have a button, and the tab reads `Problems (2) · Notes (67)`.
 - Warning and check rows have **Mark as intended**, saved in `sdc-project.toml`: the row moves to Notes and leaves the count in **Files**, and **Undo mark** brings it back.
-- A set is Ready when it and its textures have no problem row. The set editor's first line says Ready, or Not ready with up to three reasons as buttons that take you to the fix.
+- A set is Ready when it and its textures have no problem row; notes, rows marked as intended and checks don't count. The set editor's first line says Ready, or Not ready with up to three reasons as buttons that take you to the fix.
 - **Go to set** closes an expanded preview, scrolls to the file or slot the row is about and outlines it for two seconds.
-- A set with no files of its own shows its missing-file rows and "Not ready: this set has no files yet."; its **⚠ n** and **+k more in Problems** open the [set filter](docs/wiki/GUI-Problems.md#narrowing-the-list).
+- The editor for a set with no matching file shows its missing-file rows.
+- A set's **⚠ n** and **+k more in Problems** open the [set filter](docs/wiki/GUI-Problems.md#narrowing-the-list).
+- A set with no files of its own shows "Not ready: this set has no files yet." if it is empty or you marked all its problems as intended.
 - In the Sets column, Ctrl+A and Shift+click ranges skip folded groups.
 - More Problems rows have a fix button: **Change shader…**, **Set type…** (also on `CFG-UNAVAILABLE`, in place of an **Acknowledge** that changed nothing), **Turn parallax off** and **Rebuild Z**.
 - Fixes that remove or switch something off (**Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**) run on a mouse click only.
 - Hidden kinds show in the tab (`Problems (12 · 60 hidden)`), and the list says what is hidden.
 - After **Rebuild Z** the exported row says it is queued until the next export, and a row's buttons sit right after its sentence.
-- New **Clear recipe** in Problems on `cs`, for a recipe other than `auto` written on the set's own `_rmaos` or `_rfaos` that the set can't build or that names a map its shader doesn't read; it removes that recipe in one undo step.
-- A packed map the set's shader doesn't read offers **Change shader…**, not **Remove from set**.
+- New **Clear recipe** in Problems on `cs`, for a recipe other than `auto` written on the set's own `_rmaos` or `_rfaos` that the set can't build, that its two packed files disagree on, or that names a map its shader doesn't read; it removes that recipe from both files in one undo step.
+- A packed map the set's shader doesn't read offers **Change shader…**, not **Remove from set**; with such a recipe on `cs` it offers **Clear recipe** first.
 - Problems warns when a PGPatcher entry or skin material uses a borrowed slot and none of them uses the set's own DDS. Remove a share, drop the borrow, or choose **Mark as intended**.
 - Saved `[files]` entries that name no file in the current mode are one Problems row, with **Entries ▾** to remove them one at a time and **Remove all**.
 - **Export details** in **Files** and in the Markdown report lists what the export did besides converting textures.
@@ -77,7 +78,7 @@
   - a file a link displaces still converts and is listed under **Output files**; **Unlink** and **Use this file** keep any share underneath, one Undo step each;
   - a link to a local map can turn on Emissive, Parallax, Coat, Fuzz or Subsurface by its destination slot, and clearing the slot removes the feature it supplied; an explicit off still wins;
   - `CHK-PARALLAX-SCALE` compares keyed Landscape and PBR Landscape sets with an effective height;
-  - export accepts a required map a link supplies, and a partial export brings in linked lenders as it does shared files.
+  - export accepts a required map a link supplies, and a partial export brings in linked lenders as it does shared files; an excluded lender's DDS must exist at the exact output path or the entry is held.
 - Set cards:
   - empty shader slots are hidden at rest: hover the status pill to list them, or drag a texture or files over the card;
   - a slot shared from another set is outlined in the text colour with two linked rings, and its chip can be dragged onto another set to share the file there too;
@@ -89,15 +90,14 @@
 - **Edit match…** on a set card opens the set editor at its Matching group.
 - In the set editor, 2D **Output files** lists each planned DDS of the set, and **Show in Explorer** appears for files already on disk.
 - The slot rows put Slot, File, Format and the diffuse Alpha label above the controls, and the channel source pickers under a packed map line up in one column.
-- **Assign…** on an Advanced skin set's empty **Skin wet** or **Skin detail** row lists that kind of file from the set's folder, and **From another set** borrows another set's map.
 - **Match on this** on the Diffuse and Normal rows is the small link mark the cards use.
 - Coat, Emissive, Glint and Fuzz keep their on/off state in **Features**, and closed Subsurface and XPMF headers show their mode or state.
 - The diffuse row has an alpha dropdown in place of the **Opaque** toggle, with **Confirm** while the alpha is a proposal and ↺ to go back to the inherited alpha.
-- Choosing **Advanced Skin** for a set that opened as PBR makes it an Advanced skin set: the albedo becomes `skin_albedo`, an `_f` is packed into the `_rfaos` as the fuzz mask, and the export writes a `.csskin.json` and no PGPatcher JSON entry.
-- Choosing **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map writes the types `sdc convert` needs; Auto or another shader removes the ones you haven't changed since.
-- In the GUI a grey map is BC4 or R8 only, and a format a texture's type doesn't allow resets itself and says so in Problems (`FMT-CS-SKIN-LOADER` included). The CLI still writes what `sdc.toml` says.
+- Choosing **Advanced Skin** for a set that opened as PBR makes it an Advanced skin set: the albedo becomes `skin_albedo`, an `_f` is packed into the `_rfaos` as the fuzz mask, and the export writes a `.csskin.json` and no PGPatcher JSON entry. A type you picked yourself stays.
+- Choosing **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map writes the types `sdc convert` needs. Auto or a shader outside the PBR family removes the ones you haven't changed since, and one other than **Advanced Skin** turns the recorded `pbr_albedo`, `pbr_normal` and `pbr_emissive` back into `diffuse`, `normal` and `glow`.
+- In the GUI a grey map (envmask, height, model-space specular, skin `_sk`, projected noise, gray) is BC4 or R8 only, and a format a texture's type doesn't allow resets itself and says so in Problems (`FMT-CS-SKIN-LOADER` included). The CLI still writes what `sdc.toml` says.
 - Normals follow their set's shader:
-  - an untouched `_n` the GUI types `pbr_normal` (in a PBR Landscape set, the landscape normal too) drops its alpha silently by default; an `_rmaos` that starts baking re-encodes once with `sdc convert … --on-existing if-changed`;
+  - an untouched `_n` the GUI types `pbr_normal` (in a PBR Landscape set, the landscape normal too) drops its alpha silently by default and re-encodes once without it or a warning; leaving PBR can clear a `pbr_normal` an older project lists in `auto_pbr`; an `_rmaos` that starts baking re-encodes once with `sdc convert … --on-existing if-changed`;
   - a plain `normal` in a PBR, PBR Grass, PBR Landscape or Advanced Skin set can supply its roughness bake and keep its specular alpha;
   - sharing a PBR-family normal with a regular set can write `alpha.policy = "data"`, and if shared specular would be lost Problems offers **Keep alpha** ([when Share writes Data](docs/wiki/GUI-Sets-Column.md#sharing-specular-alpha));
   - Tessalith changes a following normal's settings only where its entry controls that one input, and **Keep alpha**, a shader pick, **Switch**, **Revert** and **Reset all** use the same check;
@@ -125,7 +125,6 @@
 - NIF edits are saved with the project, and export writes the edited NIF and its record to the export folder. An unexported draft from an older version moves out of that folder on your next edit.
 - The NIF edit footer shows where the draft is saved, and **Edit** is a button beside the NIF's name. Switching or closing projects ends the NIF edit session once its changes are saved.
 - The Meshes list names the scan it shows and when it was last written. The NIF editor uses **Texture wrap**, **Shader flags 1** and **Shader flags 2**.
-- Tessalith starts when Segoe UI is missing: it uses Arial or another common font, else its own built-in fonts, which Messages reports. CJK file names use a Windows font for their script.
 - The GUI runs on egui 0.37. Screen readers hear a name for every box, list and number field, and Undo and Redo say which step they undo.
 - Fixed in menus and lists:
   - a list or menu opened with a click no longer risks closing on the same click;
@@ -139,7 +138,7 @@
   - a share of a share finds the texture, and a set that shares a slot from itself keeps its own file;
   - if your project already has a slot such a share left empty, the next export fills it: its PGPatcher JSON names the texture, a vanilla set gets its copy of it, and on Community Shaders a shared normal feeds its roughness bake. If that set is a PBR set listed before the texture's other PBR sets in the Sets column, the texture's own Community Shaders PBR output moves to that set's prefix: the export writes it at the new path, leaves the old file on disk, and points the other sets' JSON lines at the new path;
   - a set that borrows its normal or packed map no longer says the shader needs that map;
-  - Replace waits for a successful plan after a type change, and Undo keeps a file that replaced a duplicate.
+  - Replace waits for a successful plan after a type change, and Undo keeps a file that replaced a duplicate with different contents while the copy was finishing.
 - Fixed in the window and panels:
   - after an edit that needs a full re-plan, the texture panel waits for that plan instead of taking edits early;
   - behind the Presets, JSON and Settings tabs, an open set editor or preview no longer keeps the Textures and Sets columns narrow;
@@ -147,11 +146,13 @@
   - a packed tile, such as an eye `_rmaos`, draws opaque instead of almost black;
   - on a high-DPI display, the starting size is at most 8192 physical pixels per side and fits the GPU's limit once known;
   - texture slots scroll above the NIF edit footer when the bottom panel is open;
-  - counts of one read in the singular ("1 file, 1 problem").
+  - counts of one read in the singular ("1 file, 1 problem");
+  - Tessalith starts when Segoe UI is missing: it uses Arial or another common font, else its own built-in fonts, which Messages reports, and CJK file names use a Windows font for their script.
 - Fixed in Problems:
   - a set's Problems filter follows it when it loses its last file or its export root changes;
   - the **Kinds ▾** hover no longer says Review lists every warning;
   - when an `_f` takes a fuzz map's output name, the unused-map Note names the file's resolved type.
+- **Assign…** on an Advanced skin set's empty **Skin wet** or **Skin detail** row works: it lists that kind of file from the set's folder, and **From another set** borrows another set's map.
 - Renaming a texture's input from the rename dialog keeps its set's Also export opt-out, and moving an opt-out keeps the comments in `[export]`.
 
 ### CLI
@@ -164,12 +165,12 @@
 - **Max** on the **Effort** row of BC3, BC4 and BC5 (`encoder.bc45_search_radius = "max"`) is a new, slower search: after the radius-10 search it tries every endpoint pair within 16 of the block's lowest and highest value, and never leaves a block with more error than **Slowest**. **Slowest** (`"slowest"`) is the radius-10 search that `max` meant in 3.0.0.
   - A project or preset that already says `max` gets the new search, so its BC3, BC4 and BC5 files may change and take longer to write; write `slowest` to keep the radius-10 search. A config that sets `slowest` can't be read by 3.0.0.
   - BC3, BC4 and BC5 files that 3.0.0 or older wrote at `max`, or whose record names no engine version, are encoded again on the next `if-changed` run; if you change `max` to `slowest` first, they are kept, as long as nothing else about them changed. Numbers: docs/research/bc4-family.md#max-near-exhaustive.
-- New setting `encoder.bc1_search` (`default` or `fast`, set by the texture panel's **Effort** row on BC1 and BC3). `fast` searches BC1 endpoints at rgbcx level 12 instead of 18, in about a third of the time for about 0.1 dB of colour PSNR. `fast-preview` sets it; a config that sets `fast` can't be read by 3.0.0.
+- New setting `encoder.bc1_search` (`default` or `fast`, set by the texture panel's **Effort** row on BC1 and BC3). `fast` searches BC1 endpoints at rgbcx level 12 instead of 18, in about a third of the time for about 0.1 dB of colour PSNR. `fast-preview` sets it. `default` writes the same bytes as before and is not saved to `sdc.toml`; a config that sets `fast` can't be read by 3.0.0.
   - Outputs `fast-preview` wrote with 3.0.0 are kept on the next run, and a run over such BC1 or BC3 outputs reports them as kept at a higher quality target every time; that is expected, not a fault. Numbers: docs/research/encoder-benchmark.md#fast-bc1-search-2026-11-14.
-- The BC7 weighting dropdown gains Alpha ×4, ×32 and ×64 (`encoder.bc7_weights` = `alpha4`, `alpha32`, `alpha64`), for the built-in BC7 encoder only; an `sdc.toml` that uses them is refused by older versions.
+- The BC7 weighting dropdown gains Alpha ×4, ×32 and ×64 (`encoder.bc7_weights` = `alpha4`, `alpha32`, `alpha64`), for the built-in BC7 encoder only. No existing output changes; an `sdc.toml` that uses them is refused by older versions.
 - The engine's and the CLI's messages say "type" where they said "sub-type", for example `unknown type 'nope'`, and `sdc inspect` prints each planned file's line as `  type pbr_albedo  format …`. Messages no longer cite spec sections or Note letters. Anything that matches the old message prose needs updating, event-stream warning text included (`--json`). The JSON schemas' descriptions are unchanged. Exported files are byte-identical.
 - `PACK-UNUSED-INPUT` tells you to remove the file, or change the set's shader or the file's type, not to change the recipe.
-- New crate `texcore` (DDS I/O, decoders, colour curves, cube maths, image loading; no C or C++): `render3d` depends on it, not `engine`, which re-exports the moved items.
+- New crate `texcore` (DDS I/O, decoders, colour curves, cube maths, image loading; no C or C++): `render3d` depends on it, not `engine`, which re-exports every moved item at its old path. No output byte changes.
 - `sdc.exe` and `tessalith.exe` are each 463 KB smaller: the ISPC Texture Compressor code holds only its BC6H encoder, with no BC6H byte changed.
 
 ## 3.0.0
