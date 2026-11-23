@@ -700,7 +700,7 @@ fn a_header_drawn_before_disabled_rows_toggles() {
 
 // Task 3: group summaries and the changed mark.
 
-use engine::config::{ColorTag, Format, Target};
+use engine::config::{ColorTag, Format, GreenConvention, Subtype, Target};
 use sdc_gui::model::fields::FieldView;
 use sdc_gui::model::panel_groups::{panel_views, summary, GroupSummary, SummaryExtra};
 use sdc_gui::model::{Answer, AppModel};
@@ -3013,8 +3013,6 @@ fn the_bulk_view_is_rebuilt_when_the_active_texture_the_target_or_a_job_changes(
 
 // Task 7a (A3): the bulk Green row.
 
-use engine::config::{GreenConvention, Subtype};
-
 /// Two tangent normals, one model-space normal and a colour texture in `textures/g`, all decided. `sdc_toml` is
 /// written to the project root before the folder opens; `bump` adds a lone `g/d_bump.png` that waits for its type.
 fn normals_in(dir: &std::path::Path, sdc_toml: Option<&str>, bump: bool) -> AppModel {
@@ -3123,8 +3121,10 @@ fn green_reaches_the_normals_that_take_it_in_one_step() {
         Some(GreenConvention::Directx),
         "unset reads DirectX"
     );
-    let keys = select(&mut m, &GREEN_KEYS); // TPC-R2: the click's keys are still selected
-                                            // A bulk Format write first: the Green write must replace its result line (the panel's one line).
+    // TPC-R2: the click's keys are still selected.
+    let keys = select(&mut m, &GREEN_KEYS);
+    // A bulk Format write next, after `select` (`select_item` resets `self.bulk`, and `apply_bulk_edit` keeps the
+    // selection): the Green write must replace its result line (the panel's one line).
     m.apply_bulk_edit(
         &keys,
         "format",
@@ -3421,4 +3421,81 @@ fn green_stays_out_of_the_copied_fields() {
     assert!(!sdc_gui::model::fields::FIELDS
         .iter()
         .any(|(f, _)| *f == "channels.green_convention"));
+}
+
+/// CODING_STANDARDS, "The fast re-plan keeps what the full plan keeps": the row reads the new convention after the
+/// fast re-plan (`apply_partial`) alone, with the full plan still out, and after the full plan.
+#[test]
+fn the_green_row_follows_the_fast_plan_and_the_full_plan_each_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let keys = select(&mut m, &["g/a_n.png", "g/b_n.png"]);
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, false);
+    }
+    m.hold_plan_results = true;
+    let mut h = harness(m, 1280.0, 1600.0);
+    h.get_by_label("Green: DirectX");
+    assert_eq!(
+        h.state_mut()
+            .decide_many_green(&keys, GreenConvention::Opengl),
+        Ok(2)
+    );
+    h.run();
+    h.get_by_label("Green: DirectX"); // the panel shows the last plan until one lands
+    let mut full = vec![];
+    land_partial(&mut h, &mut full);
+    h.run();
+    h.get_by_label("Green: OpenGL"); // the fast plan alone
+    let m = h.state_mut();
+    m.hold_plan_results = false;
+    for x in full {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    h.run();
+    h.get_by_label("Green: OpenGL"); // and after the full plan
+}
+
+/// A read-only `sdc.toml` greys the rows, but the reach notes keep their hover: the Green row's and another row's.
+#[test]
+fn a_read_only_sdc_toml_keeps_the_notes_hover() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
+    let mut h = green_panel(m, &GREEN_KEYS, true);
+    h.run();
+    let note = green_reach_note(&h, "Green: DirectX", "applies to 2 of 4");
+    h.hover_at(note.center());
+    h.run();
+    h.get_by_label_contains("locked on 1 of 4: model-space normal (_msn): no green to flip");
+    // A grouped row: open every group, then hover the note of a row that has a skip reason.
+    let m = h.state_mut();
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, true);
+    }
+    let view = m.bulk_view();
+    // A note no other row shares, so the label names one row.
+    let notes: Vec<String> = view.rows.iter().map(|r| r.note()).collect();
+    let row = view
+        .rows
+        .iter()
+        .find(|r| {
+            !r.skipped.is_empty()
+                && !r.note().is_empty()
+                && notes.iter().filter(|n| **n == r.note()).count() == 1
+        })
+        .expect("a row with a skip reason and a note of its own");
+    let (note, first) = (
+        row.note(),
+        row.skipped_text().lines().next().unwrap().to_string(),
+    );
+    h.run();
+    let r = h.get_by_label(&note).rect();
+    h.hover_at(r.center());
+    h.run();
+    h.get_by_label_contains(&first);
 }

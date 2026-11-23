@@ -17,8 +17,8 @@ use crate::model::fields::{
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::labels::{
-    effort_label, type_hover, RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL,
-    VARIANCE_BAKE_HOVER,
+    effort_label, type_hover, GREEN_TO_DIRECTX, GREEN_TO_OPENGL, RENORM_BAKE_HOVER,
+    RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL, VARIANCE_BAKE_HOVER,
 };
 use crate::model::nav::RevealField;
 use crate::model::panel_groups::{self, GroupSummary, PanelGroup, SummaryExtra};
@@ -1783,7 +1783,11 @@ fn message_of(warnings: &[Warning], code: Code) -> Option<&str> {
 }
 
 /// A small edit button that is off, with `off`'s reason on hover, while `off` is set (Note FK).
-fn waiting_button(ui: &mut egui::Ui, off: &Option<String>, text: &str) -> egui::Response {
+pub(super) fn waiting_button(
+    ui: &mut egui::Ui,
+    off: &Option<String>,
+    text: &str,
+) -> egui::Response {
     let r = ui.add_enabled(off.is_none(), egui::Button::new(text).small());
     match off {
         Some(why) => r.on_disabled_hover_text(why),
@@ -2467,7 +2471,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(format!("{m}{hint}")).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::InGreenUnstated.as_str()));
-                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, GREEN_TO_OPENGL).clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -2476,7 +2480,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(m).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::ChkGreenGuess.as_str()));
-                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, GREEN_TO_OPENGL).clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -2486,7 +2490,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                     if matches!(
                         job.provenance.get("channels.green_convention"),
                         Some(Provenance::ProjectFile | Provenance::User)
-                    ) && waiting_button(ui, &edit_off, "Treat as DirectX").clicked()
+                    ) && waiting_button(ui, &edit_off, GREEN_TO_DIRECTX).clicked()
                     {
                         actions.push(Action::Clear("channels.green_convention"));
                     }

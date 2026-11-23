@@ -4,12 +4,12 @@ use super::columns::AMBER;
 use super::group::{collapsing_group, GroupHead};
 use super::settings_panel::{
     editor, field_label, likely_buttons, offered_groups, own_name_after_link, reach_combo,
-    set_group_open, subtype_label, RowEdit,
+    set_group_open, subtype_label, waiting_button, RowEdit,
 };
 use crate::look::Combo036 as _;
 use crate::model::bulk::{is_value_dependent, BulkField, BulkOp, GreenReach};
 use crate::model::fields::{effort_field, field_help, FieldView, EFFORT_FIELDS};
-use crate::model::labels::type_hover;
+use crate::model::labels::{type_hover, GREEN_TO_DIRECTX, GREEN_TO_OPENGL};
 use crate::model::panel_groups::{self, PanelGroup};
 use crate::model::sets::SlotKind;
 use crate::model::AppModel;
@@ -27,7 +27,7 @@ enum Act {
     Reencode(Vec<String>),
     Decide(Vec<String>, Subtype),
     SetGroupOpen(PanelGroup, bool),
-    Green(Vec<String>, GreenConvention),
+    Green(GreenConvention),
 }
 
 /// "{m} other selected textures already have a type." (the card's line under Apply).
@@ -261,7 +261,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                                 }
                             }
                         });
-                    green_row(ui, model, keys, &view.green, &mut acts);
+                    green_row(ui, model, &view.green, &mut acts);
                 });
                 // Each header sits outside the disabled scope (R1-1, FK3): only its rows are greyed.
                 for (g, summary) in &view.groups {
@@ -302,7 +302,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             Act::Reencode(ks) => model.set_reencode(&ks, true),
             Act::Decide(ks, st) => model.decide_many(&ks, st),
             // The row already shows why a refusal happened (its buttons are off with the reason).
-            Act::Green(ks, g) => drop(model.decide_many_green(&ks, g)),
+            Act::Green(g) => {
+                let _ = model.decide_many_green(keys, g);
+            }
             Act::SetGroupOpen(g, open) => set_group_open(model, g, open),
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
@@ -313,13 +315,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
 /// A3: the Green row, right under Format. "Green: OpenGL", the two buttons that write a convention on every selected
 /// texture that takes green, and the reach note with the skip reasons on hover. Drawn only when some texture takes
 /// green; every string comes from the cached view (`GreenReach`).
-fn green_row(
-    ui: &mut egui::Ui,
-    model: &AppModel,
-    keys: &[String],
-    green: &GreenReach,
-    acts: &mut Vec<Act>,
-) {
+fn green_row(ui: &mut egui::Ui, model: &AppModel, green: &GreenReach, acts: &mut Vec<Act>) {
     if green.takes.is_empty() {
         return;
     }
@@ -328,20 +324,17 @@ fn green_row(
     ui.horizontal_wrapped(|ui| {
         ui.label(green.label.as_str());
         for (text, g) in [
-            ("Treat as OpenGL (flip green)", GreenConvention::Opengl),
-            ("Treat as DirectX", GreenConvention::Directx),
+            (GREEN_TO_OPENGL, GreenConvention::Opengl),
+            (GREEN_TO_DIRECTX, GreenConvention::Directx),
         ] {
-            let r = ui.add_enabled(off.is_none(), egui::Button::new(text));
-            let r = match &off {
-                Some(why) => r.on_disabled_hover_text(why),
-                None => r,
-            };
-            if r.clicked() && off.is_none() {
-                acts.push(Act::Green(keys.to_vec(), g));
+            if waiting_button(ui, &off, text).clicked() {
+                acts.push(Act::Green(g));
             }
         }
+        // The hover stays reachable when a read-only `sdc.toml` greys the row.
         ui.label(egui::RichText::new(green.note.as_str()).small().weak())
-            .on_hover_text(green.hover.as_str());
+            .on_hover_text(green.hover.as_str())
+            .on_disabled_hover_text(green.hover.as_str());
     });
 }
 
@@ -413,7 +406,8 @@ fn row(
         } else {
             format!("{text}\n{}", r.skipped_text())
         };
-        note.on_hover_text(full);
+        note.on_hover_text(full.as_str())
+            .on_disabled_hover_text(full);
     }
     if r.edited > 0
         && ui

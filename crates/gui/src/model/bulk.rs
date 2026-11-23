@@ -7,7 +7,7 @@ use super::fields::{
     LEVELS_FIELD, NOT_VALID, NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use super::items::TextureItem;
-use super::labels::UNORM_LABEL;
+use super::labels::{green_name, UNORM_LABEL};
 use super::panel_groups::{bulk_summary, panel_group, GroupSummary, PanelGroup};
 use super::set_groups::GroupTarget;
 use super::sets::{
@@ -742,14 +742,6 @@ fn skipped_lines(skipped: &[(String, usize)], total: usize) -> String {
         .map(|(r, n)| format!("locked on {n} of {total}: {r}"))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// "OpenGL" or "DirectX": the green convention as the single panel words it.
-fn green_name(g: engine::config::GreenConvention) -> &'static str {
-    match g {
-        engine::config::GreenConvention::Opengl => "OpenGL",
-        engine::config::GreenConvention::Directx => "DirectX",
-    }
 }
 
 /// The bulk panel's rows over `keys` (F3a D2). `applies` and `skipped` are the value-independent

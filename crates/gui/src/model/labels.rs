@@ -168,6 +168,18 @@ pub fn effort_label(id: &str) -> &'static str {
     }
 }
 
+/// The green-convention words, shared by the single panel and the bulk Green row.
+pub const GREEN_TO_OPENGL: &str = "Treat as OpenGL (flip green)";
+pub const GREEN_TO_DIRECTX: &str = "Treat as DirectX";
+
+/// "OpenGL" or "DirectX".
+pub fn green_name(g: engine::config::GreenConvention) -> &'static str {
+    match g {
+        engine::config::GreenConvention::Opengl => "OpenGL",
+        engine::config::GreenConvention::Directx => "DirectX",
+    }
+}
+
 /// The DDS tag choice "UNORM" and what it means for the game.
 pub const UNORM_LABEL: &str = "UNORM (as stored)";
 pub const UNORM_HOVER: &str = "The game reads the colours as stored. Right for everything except the colour maps of a PBR set under Community Shaders.";
