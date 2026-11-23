@@ -280,3 +280,207 @@ fn tuned_with_unit_weights_matches_the_plain_call() {
     // The vendored objects carry both patches: every level, both exact-opaque settings.
     assert_eq!(checked, 16);
 }
+
+/// `g_bc7_partition2` in `bc7e.ispc`, copied: the subset (0 or 1) of each texel of BC7's 64 two-subset partitions.
+const PARTITION2: [[u8; 16]; 64] = [
+    [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+    [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+    [0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1],
+    [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1],
+    [0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1],
+    [0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1],
+    [0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+    [0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1],
+    [0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0],
+    [0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0],
+    [0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1],
+    [0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0],
+    [0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0],
+    [0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0],
+    [0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0],
+    [0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+    [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+    [0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0],
+    [0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0],
+    [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0],
+    [0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+    [0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1],
+    [0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+    [0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0],
+    [0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0],
+    [0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0],
+    [0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1],
+    [0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1],
+    [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0],
+    [0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0],
+    [0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1],
+    [0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1],
+    [0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0],
+    [0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0],
+    [0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1],
+    [0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1],
+    [0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+    [0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1],
+    [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+    [0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0],
+    [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1],
+];
+
+/// The seed of the mode-7 candidates (`mode7_candidate`).
+const MODE7_SEED: u32 = 0x7007_2026;
+
+/// Candidate `i` for bc7e's mode-7 one-colour path, from an LCG seeded with `MODE7_SEED ^ i * 0x9E37_79B9`: a
+/// two-subset partition from `PARTITION2`; subset 0 one solid colour (R, G and B random, alpha 16 to 255); subset 1 a
+/// gradient between two random colours along the texel order (alpha 16 to 239) plus noise of -2 to 2 per channel.
+/// Returns the block and the mask of its solid texels (bit t = texel t).
+fn mode7_candidate(i: u32) -> ([[u8; 4]; 16], u16) {
+    let mut s = MODE7_SEED ^ i.wrapping_mul(0x9E37_79B9);
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as i32
+    };
+    let part = PARTITION2[(next() % 64) as usize];
+    let solid = [next(), next(), next(), 16 + next() % 240];
+    let ends = [
+        [next(), next(), next(), 16 + next() % 224],
+        [next(), next(), next(), 16 + next() % 224],
+    ];
+    let n = part.iter().filter(|&&s| s == 1).count() as i32;
+    let (mut k, mut mask) = (0, 0u16);
+    let block = std::array::from_fn(|t| {
+        if part[t] == 0 {
+            mask |= 1 << t;
+            return solid.map(|v| v as u8);
+        }
+        let mut px = [0u8; 4];
+        for c in 0..4 {
+            let v = ends[0][c] + (ends[1][c] - ends[0][c]) * k / (n - 1) + next() % 5 - 2;
+            let (lo, hi) = if c == 3 { (16, 239) } else { (0, 255) };
+            px[c] = v.clamp(lo, hi) as u8;
+        }
+        k += 1;
+        px
+    });
+    (block, mask)
+}
+
+/// The largest per-channel error over the solid texels of each candidate, each encoded alone (one block per call, so a
+/// candidate's bytes do not depend on its neighbours in an ISPC gang), raw (no post-fix).
+fn mode7_solid_errors(ids: &[u32], p: Bc7Params, target: IspcTarget) -> Vec<u8> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut errs = vec![0u8; ids.len()];
+    std::thread::scope(|sc| {
+        for (ids, errs) in ids
+            .chunks(ids.len().div_ceil(threads).max(1))
+            .zip(errs.chunks_mut(ids.len().div_ceil(threads).max(1)))
+        {
+            sc.spawn(move || {
+                for (i, e) in ids.iter().zip(errs) {
+                    let (block, mask) = mode7_candidate(*i);
+                    let mut out = [0u8; 16];
+                    bc7e_compress_blocks_on(&block, &mut out, p, target);
+                    *e = decode(&out)
+                        .iter()
+                        .zip(block)
+                        .enumerate()
+                        .filter(|(t, _)| (mask >> t) & 1 == 1)
+                        .flat_map(|(_, (d, s))| (0..4).map(move |c| d[c].abs_diff(s[c])))
+                        .max()
+                        .unwrap_or(0);
+                }
+            });
+        }
+    });
+    errs
+}
+
+/// The `mode7_candidate` indices whose solid texels decoded more than 3 off at veryslow on the AVX2 path before patch
+/// 0005's Q1 and Q4, and within 3 at basic and veryslow on every path after: the first 32 such candidates found by
+/// `search_mode7_witnesses` (indices 0 to 56), kept where the fixed kernel passes (Note LR, LR7).
+const MODE7_WITNESSES: &[u32] = &[1, 4, 8, 23, 41, 48, 49];
+
+/// Patch 0005, Q1 and Q4: mode 7's one-colour candidate (`pack_mode7_to_one_color`) was scored by interpolating the
+/// 6-bit endpoint codes as if they were 8-bit values (Q1), so its error was wrong (far too high except near black) and
+/// a solid subset could lose to a worse fit; and its table kept the best pair found under earlier p-bits (Q4), so an
+/// entry could hold endpoints that decode off under its own p-bits. Each witness's solid subset now decodes within 3
+/// per channel at basic and veryslow on every path (Note LR, LR7).
+#[test]
+fn mode7_takes_its_solid_subset() {
+    let mut bad = vec![];
+    for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
+        let p = Bc7Params { level, ..U5 };
+        for target in paths() {
+            let errs = mode7_solid_errors(MODE7_WITNESSES, p, target);
+            for (i, e) in MODE7_WITNESSES.iter().zip(errs) {
+                if e > 3 {
+                    bad.push(format!("candidate {i} {level:?} {target:?}: {e}"));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "solid texels decoded more than 3 off:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Step A0 of patch 0005's Q1 and Q4 (Note LR): scans `mode7_candidate` at veryslow on the AVX2 path and prints the
+/// candidates whose solid texels decode more than 3 off in some channel, up to 32.
+#[test]
+#[ignore = "search for mode-7 witnesses: run with --ignored --nocapture after a kernel change"]
+fn search_mode7_witnesses() {
+    assert!(
+        IspcTarget::Avx2.supported(),
+        "the search runs on the AVX2 path"
+    );
+    let p = Bc7Params {
+        level: Bc7Level::Veryslow,
+        ..U5
+    };
+    let start = std::time::Instant::now();
+    let (mut scanned, mut found) = (0u32, 0);
+    'scan: for base in (0..1u32 << 20).step_by(1 << 14) {
+        let ids: Vec<u32> = (base..base + (1 << 14)).collect();
+        for (i, e) in ids
+            .iter()
+            .zip(mode7_solid_errors(&ids, p, IspcTarget::Avx2))
+        {
+            scanned += 1;
+            if e > 3 {
+                println!("candidate {i}: solid error {e}");
+                found += 1;
+                if found == 32 {
+                    break 'scan;
+                }
+            }
+        }
+    }
+    println!(
+        "scanned {scanned}, found {found}, in {:.1} s",
+        start.elapsed().as_secs_f64()
+    );
+}

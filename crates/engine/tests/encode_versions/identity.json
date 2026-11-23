@@ -198,7 +198,7 @@
   "textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "d6eaca3b114275cb38c0de744d2b39a8c46f19c8794d87dbaf2132e18f5bcb6e",
+    "payload_sha256@avx2": "8472b31d37360c28a52ce42d22df3829a2e5b3f8906e9eecce1bda69217d9f7c",
     "subtype": "complex_grass",
     "width": 64
   },
@@ -471,7 +471,7 @@
   "vanilla/textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "d6eaca3b114275cb38c0de744d2b39a8c46f19c8794d87dbaf2132e18f5bcb6e",
+    "payload_sha256@avx2": "8472b31d37360c28a52ce42d22df3829a2e5b3f8906e9eecce1bda69217d9f7c",
     "subtype": "complex_grass",
     "width": 64
   },

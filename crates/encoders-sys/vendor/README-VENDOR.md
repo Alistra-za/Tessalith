@@ -64,7 +64,11 @@ measured image's hash on three paths equal; `tests/level_identity.rs` `s1_fixtur
 it. Q2t: `fixDegenerateEndpoints` spreads a channel only when its float endpoints differ by more than the new trailing
 params field `m_flat_tolerance` (0.5/255 at every level, set per call through the shim's tuning slot 14), not by any
 amount, so the refit's float noise no longer spreads a constant channel (an opaque block's rotated alpha slot decoded
-239); proof test `tests/bc7.rs` `opaque_noise_never_double_nudges_the_rotated_slot`; changes bytes. XC: the trailing
+239); proof test `tests/bc7.rs` `opaque_noise_never_double_nudges_the_rotated_slot`; changes bytes. Q1 and Q4: mode 7's
+one-colour candidate (`pack_mode7_to_one_color`) is scored on its endpoints expanded to 8 bits as the decoder reads them,
+not on the 6-bit codes (Q1), and its table resets its best endpoints per p-bit pair (Q4), so mode 7 no longer loses a
+solid subset of an alpha block to a worse fit on a wrong score; proof test `tests/bc7.rs` `mode7_takes_its_solid_subset`; changes bytes (alpha
+blocks only: opaque blocks never try mode 7, and ultrafast turns it off). XC: the trailing
 field `m_exact_mask` (slot 15) is reserved for exact constants and read by nothing yet; no byte change. The two fields
 change the generated header (Note LR). These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
 `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the

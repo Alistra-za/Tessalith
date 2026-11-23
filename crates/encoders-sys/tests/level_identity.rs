@@ -6,8 +6,8 @@
 //! and the paths do not encode bit-identically (fast-math, FMA). So the hashes are pinned per target: the test drives
 //! every target this CPU can run, up to `ispc_target()`, through `bc7e_compress_blocks_on` (the best one through the
 //! dispatcher itself). A CPU without some target skips only that target's rows; a test build caps `ispc_target()`
-//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. Before patch 0005, the SSE2 row was also what
-//! the SSE4 and AVX paths wrote until Note JB dropped them.
+//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. Until Note JB dropped them, the SSE2 row was
+//! also what the SSE4 and AVX paths wrote.
 //!
 //! The hashes are those of the patch 0005 objects (bc7enc_rdo b943862 + patches 0001, 0002 and 0005; ISPC 1.31.0, the
 //! AVX-512 row ISPC 1.32.0), recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-23 (Note LR), over four
@@ -52,22 +52,22 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "b35db938eb4cb72b43f2bfb03641d62a2fd2b2c16219ecf4b154499db7614110",
-                "270d3dbaa3e57fc77cece216e902010869251f6cf91676a66aa934bf8b72efc1",
+                "26703d28acd0bc81502c1d508daf6c175e0468c67c02d8d0c28203e0ccf17dbb",
+                "593f75ca78e1b7fadcd55bf3a038a28dfb3bd9e98844e862493a859dc9b8597b",
             ],
             [
-                "91c20e0d8a0e2d3f5ff6bc4ccb60dfda85833fa7c232ff64aec168c7a8356aa8",
-                "f0a23705301824ad291bb70ab029b07b422b338d7065dd23d2a76fc332003be8",
+                "96eb3ed4ca8e067f09613d5381ed6171ca625c56d32909898227577bbdc3110b",
+                "56ec17687d74d79d3538d8e9ee3fcbe1ee34f606ad46b226bcd84b4b0790b79d",
             ],
         ],
         [
             [
-                "9ea2fa3eee3effd3dd654271ad7ef8a1b399979fd87c852bddcc8c014a7975b4",
-                "079b152aa100d485e18c4a082667f39705cce1c3ecb93ecd7ba18dd2168be1e6",
+                "089484fd4e84bc1d5566ac9da84c5bcb73dfff249585c7d5d4d5631893b42536",
+                "aea099a5260c7991b8a2fdbe2db7c192ef87a847caf7cf4f1b6ab24ad6d31a6a",
             ],
             [
-                "91c20e0d8a0e2d3f5ff6bc4ccb60dfda85833fa7c232ff64aec168c7a8356aa8",
-                "f0a23705301824ad291bb70ab029b07b422b338d7065dd23d2a76fc332003be8",
+                "96eb3ed4ca8e067f09613d5381ed6171ca625c56d32909898227577bbdc3110b",
+                "56ec17687d74d79d3538d8e9ee3fcbe1ee34f606ad46b226bcd84b4b0790b79d",
             ],
         ],
         [
@@ -134,22 +134,22 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "a9c2b188b7fea45b8bd893afee53a8672f59efef4866f8817a322c95ad006370",
-                "a31204b10b018dd923f30aa42dff058e57f6293f6e03488986035324ac66c136",
+                "05d30775ac25f81c6a6906a6e05b8c4181647c564095007eda83f096b46da6f4",
+                "a23c4513865e0576d836c0fca893072f68895f27adeba96193f7db7120799b88",
             ],
             [
-                "33e8c2302dc306c11da150284b5615e104cfa65bd97eebdf07d4d1d8b316d2b7",
-                "90c41e6465b7a299b7f44ff04c1d54822b5cd4cfaaf1fbaea79d304ef4c7ecf0",
+                "b05416828fee9264e0193e3ec7ee728881c45849b75017666697051645093965",
+                "f167b9ea43aa94670be1d4297ea2195ca5ece15791d6956fe22cc911181850ec",
             ],
         ],
         [
             [
-                "21a9216566eb9a55ab505f6b6013ce72ebdf56c274c569099f5f7c87439d85a6",
-                "3ccdddb0f12a185f61bc72ed6c6f02148ecaa269b5a07d264a3449f3de9e8ba9",
+                "efa476b78b6ccf60021b2e5b4e82f16d2c2866dd594eb33da539ce881bfba330",
+                "99040bfef5a3900f32f21680f042a8ac8d81b038b8d5365e5cac8c0c4fc04bea",
             ],
             [
-                "33e8c2302dc306c11da150284b5615e104cfa65bd97eebdf07d4d1d8b316d2b7",
-                "90c41e6465b7a299b7f44ff04c1d54822b5cd4cfaaf1fbaea79d304ef4c7ecf0",
+                "b05416828fee9264e0193e3ec7ee728881c45849b75017666697051645093965",
+                "f167b9ea43aa94670be1d4297ea2195ca5ece15791d6956fe22cc911181850ec",
             ],
         ],
         [
@@ -216,22 +216,22 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "efa372af885b78766bbfa9d6573ab25d57056185e4693f88bdb9e9d5ab3d48e0",
-                "34af5963be2cd4f915f26f822c3bd481cb10552ff72b7cca7c61948d3a99efcb",
+                "76ebcf4b00ae1dad1c98e07765d59aa392c6426d118d27ba918465d94a429f52",
+                "7e5347fdb21ae527b1f8ebbbbf76b62df52130a6918a3df7753abb4a9087a4a7",
             ],
             [
-                "0ea36eca1608f209d50800d8dedc74b9fc064154a9c05197b4c5e699595a32d0",
-                "aa290f2f9a70c5afb47ecba1664b03c43df3fdd2eff7453c7406e60f24bf1591",
+                "a0bff012a9f525ebf59366f1f83447520604c09f7aa72d3a98ab75fc611dd879",
+                "ba4d7880faa857e38cdefee59afaeefe40c2b485b9f49f9051f353cdb667d3c9",
             ],
         ],
         [
             [
-                "5a368ebce84ff549660a72ec574749883a91e3a850a16197196df37281fcd22e",
-                "e995ffe1a8f680b8d0f75ce104169db200493b516f6f8383c9b797518e7b9df2",
+                "59219410906be5691dd4dfa8ff75ef42cfb755a791884b2a6e39ab18662bd2d8",
+                "633ff7c30358b3588f1013193b39a412a33da341679e824be1b40299cf30bbc1",
             ],
             [
-                "0ea36eca1608f209d50800d8dedc74b9fc064154a9c05197b4c5e699595a32d0",
-                "aa290f2f9a70c5afb47ecba1664b03c43df3fdd2eff7453c7406e60f24bf1591",
+                "a0bff012a9f525ebf59366f1f83447520604c09f7aa72d3a98ab75fc611dd879",
+                "ba4d7880faa857e38cdefee59afaeefe40c2b485b9f49f9051f353cdb667d3c9",
             ],
         ],
         [

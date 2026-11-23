@@ -13,6 +13,10 @@
 // - Q2t: fixDegenerateEndpoints spreads a channel only when its float endpoints differ by more than the params'
 //   m_flat_tolerance (0.5/255 by default, set per call), not by any amount, so the refit's float noise no longer
 //   spreads a constant channel.
+// - Q1: pack_mode7_to_one_color scores its candidate on the endpoints expanded to 8 bits as the decoder reads them,
+//   not on the 6-bit codes, so mode 7's one-colour candidate is no longer rejected on a wrong error.
+// - Q4: the mode 7 one-colour table resets its best endpoints per p-bit pair, so no entry keeps a pair found under
+//   other p-bits.
 // - XC: bc7e_compress_block_params::m_exact_mask is reserved for exact constants, read from patch 0005 XC on.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
@@ -647,15 +651,16 @@ export void bc7e_compress_block_init()
 	// Mode 7: 555.1 2-bit indices 
 	for (uniform int c = 0; c < 256; c++)
 	{
-		uniform endpoint_err best;
-		best.m_error = (uint16_t)UINT16_MAX;
-		best.m_lo = 0;
-		best.m_hi = 0;
 
 		for (uniform uint32_t hp = 0; hp < 2; hp++)
 		{
 			for (uniform uint32_t lp = 0; lp < 2; lp++)	
 			{
+				// sdc patch 0005 (Q4): reset best per p-bit pair, as the mode 0 and mode 6 tables do
+				uniform endpoint_err best;
+				best.m_error = (uint16_t)UINT16_MAX;
+				best.m_lo = 0;
+				best.m_hi = 0;
 				for (uniform uint32_t l = 0; l < 32; l++)
 				{
 					uniform uint32_t low = ((l << 1) | lp) << 2;
@@ -680,9 +685,9 @@ export void bc7e_compress_block_init()
 
 				g_bc7_mode_7_optimal_endpoints[c][hp][lp] = best;
 			
-			} // hp
+			} // lp
 
-		} // lp
+		} // hp
 
 	} // c
 
@@ -1218,6 +1223,9 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 		uint32_t low = (pResults->m_low_endpoint.m_c[i] << 1) | pResults->m_pbits[0];
 		uint32_t high = (pResults->m_high_endpoint.m_c[i] << 1) | pResults->m_pbits[1];
 		
+		// sdc patch 0005 (Q1): expand 5+1 bits to 8 as the decoder does (the table builder above and scale_color do)
+		low <<= 2; low |= (low >> 6);
+		high <<= 2; high |= (high >> 6);
 		p.m_c[i] = (low * (64 - g_bc7_weights2[BC7E_MODE_7_OPTIMAL_INDEX]) + high * g_bc7_weights2[BC7E_MODE_7_OPTIMAL_INDEX] + 32) >> 6;
 	}
 

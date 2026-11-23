@@ -167,7 +167,8 @@ fn random_rotated_blocks_decode_opaque_with_rgb_unchanged() {
 
 /// The review's probe: bc7e (perceptual off, exact-opaque flag as built) on opaque noise emitted rotated mode 4/5
 /// blocks whose alpha decoded below 255 until bc7e patch 0005 (Q2t), which leaves none on this input at veryslow,
-/// basic, slowest and max (Note LR6). The fix still makes every rotated block it touches decode 255 with RGB bit-identical.
+/// basic, slowest and max (Note LR6). The fix still makes every rotated block it touches decode 255 with RGB
+/// bit-identical.
 #[test]
 fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
     if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
