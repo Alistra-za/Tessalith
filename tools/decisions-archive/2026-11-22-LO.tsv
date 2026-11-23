@@ -1,0 +1,5 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Index¶- Encoders:	Index	15	back	LO		partial	2026-11-22		goes: the line without LO (LO: the BC6H kernel fixes note); archived by hand
+Index¶- Manifest and outputs:	Index	20	back	LO		partial	2026-11-22		goes: the line without LO (LO5: the BC6H sub-types' encode version); archived by hand
+Digest¶- The BC6H peak mode is a field value	Digest	162	back	LO		partial	2026-11-22		goes: the wording `five upstream levels` (LO: they are the ISPC TC levels, patch 0004 bytes); archived by hand
+Digest¶- OPEN: `tests/bc6h.rs` hash-checks	Digest	168	back	LO		partial	2026-11-22		goes: the wording `five upstream levels` (LO); archived by hand

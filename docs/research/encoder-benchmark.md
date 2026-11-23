@@ -644,6 +644,8 @@ Published:
 - Ludicon's 2026 chart (27 HDR images, SSIMULACRA2, values read from an image, made by a competitor): Oodle about 91.0, Spark GPU about 90.5, ISPC TC about 88.6, Basis about 87.6, the "NVIDIA" series about 85.2.
 - Unsigned BC6H (UF16) should be used for data that is never negative.
 
+Round 2 and Round 3 measured upstream ISPC TC, before patch 0004 ([what changed](#kernel-fixes-patch-0004-2026-11-22-note-lo)).
+
 Round 2 (4 real HDR images):
 
 | Encoder | mPSNR (dB) | RMSLE ×1000 | Worst peak ratio | s per Mpix |
@@ -673,6 +675,8 @@ Round 3, n = 18, against ISPC `bc6h_veryslow`:
 
 **The mode.** `Bc6hLevel::VeryslowPeak` (ISPC TC patch 0001) changes only highlight blocks: blocks whose brightest texel is at least 32× the block's geometric-mean luminance. In those blocks it keeps that texel at 0.9 or more of its source luminance whenever some candidate can. Every other block encodes exactly as veryslow.
 
+These rows measured upstream ISPC TC plus patch 0001, before patch 0004 ([kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo)).
+
 Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `.ref.npy` the Python bench used), n = 18 real images:
 
 | Image | Peak ratio (veryslow → peak) | mPSNR Δ (dB) | RMSLE ×1000 (veryslow → peak) |
@@ -694,6 +698,63 @@ Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `
 - The RMSLE bar ("not worse") is missed by that small, non-significant margin. The cost sits in moonless_golf and satara_night, where keeping the peak forces a two-region block to give up its dim texels.
 - **Through the Python bench (2026-10-31),** as `bc6_ispc_veryslow_peak` beside the other BC6H rows (same texconv decode, scored against `.ref.npy`), n = 18 real images against `bc6h_veryslow`: peak ratio +0.078 [±0.090] (4 up, 0 down), mPSNR −0.061 dB [±0.086], RMSLE 0.00003 worse [±0.00012] (3 images better, 6 worse). That reproduces the small, non-significant RMSLE miss above. Against NVTT Production it keeps +2.32 dB [±0.96] mPSNR (17/18) and ties on RMSLE and peak ratio. The 4 `hdr_grad` images score identically to veryslow.
 - Without the 32× contrast gate (first attempt), the guard re-encodes many ordinary blocks: mean mPSNR −0.168 dB and RMSLE +0.00023. Other effort levels do not use this mode.
+
+### Kernel fixes (patch 0004, 2026-11-22, Note LO)
+
+I audited the vendored ISPC TC BC6H kernel and fixed what reproduced, in patch 0004 (`crates/encoders-sys/vendor/ispctc/patches/0004-bc6h-kernel-fixes.patch`). Every BC6H row above, and the peak-mode numbers, measured upstream ISPC TC, before this patch.
+
+**Fixed.** Each fix has a test that failed on the kernel before it and passes after (or, for #6 and #7, pins that stay byte for byte equal).
+- #5, `get_span` returned its span through an `int`: a block whose widest channel spans 204.39 UF16 units was kept out of mode 2 at Fast and Basic, because 204.8 became 204. Changes bytes.
+- #1, `block_quant` kept each texel's float error in an `int`: above 2^31 (a black texel beside one brighter than about 1344.0) it overflowed, and the overflowed value beat every honest candidate. Slow, Veryslow and VeryslowPeak turned such a block grey. Changes bytes.
+- #3, the one-region encode submitted its last refinement pass, which can be worse than its first quantisation: it submits the best now. Changes bytes at Basic and slower.
+- #2, endpoints rounded by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds a code at (q + 0.5) * 65536 / 2^bits: the code could be one too high near 0 and one too low near the top. They take the code the decoder rebuilds nearest now. Changes bytes, and carries most of the mPSNR gain below (+0.066 of +0.069 dB).
+- #6, `rgb_span` was declared with no elements and used with three: it has three now. No byte moves.
+- #7, `bc6h_enc_2p` could read past its 32 partitions: it clamps. No profile asks for more, so no byte moves.
+
+**Out of scope, not tested.** #4, negative and non-finite halves read as large values: Tessalith's `clamp_half` clamps every BC6H input first, so the kernel never sees them.
+
+**Method.** `crates/encoders-sys/examples/bc6h_quality.rs` encodes the 18 `hdr_real` images (Poly Haven, 1024x512) and the 4 synthetic `hdr_grad` images at all six levels, one 4-row strip per call, decodes with `bcdec_rs`, and scores mPSNR, RMSLE and the peak ratio against the input as the engine sends it (every channel through `clamp_half`). The base is the kernel before patch 0004, the final is the kernel after it, both on the AVX2 path, paired per image: n = 18, 95 % Student-t intervals. Machine: Windows, Ryzen 7 9800X3D. A fix that lowered a metric's mean with an interval excluding 0 would have been dropped; only #2 trips that at Veryfast, and the owner accepted it.
+
+Base to final, mean delta (+ is better) with its 95 % half-width, and images better/worse:
+
+| Level | mPSNR dB | RMSLE x1000 | Peak ratio |
+|---|---|---|---|
+| veryfast | -0.003 ±0.002, 2/14 | -0.002 ±0.003, 5/8 | +0.004 ±0.003, 7/0 |
+| fast | +0.067 ±0.020, 16/2 | +0.006 ±0.010, 11/7 | +0.022 ±0.033, 9/2 |
+| basic | +0.069 ±0.018, 18/0 | +0.007 ±0.008, 14/4 | +0.004 ±0.004, 9/1 |
+| slow | +0.067 ±0.017, 17/1 | +0.009 ±0.008, 12/5 | +0.007 ±0.008, 9/1 |
+| veryslow | +0.069 ±0.017, 18/0 | +0.007 ±0.008, 12/4 | +0.004 ±0.010, 8/2 |
+| veryslow_peak | +0.069 ±0.018, 18/0 | +0.044 ±0.057, 14/2 | +0.014 ±0.026, 6/2 |
+
+- Fast and slower gain about 0.07 dB of mPSNR, every interval clear of 0. The RMSLE and peak-ratio intervals include 0, except Slow RMSLE (+0.009 ±0.008, better).
+- Veryfast loses 0.003 dB on average, and 0.10 dB on `sky_sun`. My guess, not checked: Veryfast does not refine, so it submits the unrefined line endpoints, and snapping those to the nearest code lowers the endpoint error without lowering the texel error. I accepted that (owner's call, "Keep it, accept Veryfast"): every slower effort gains about 0.07 dB from the same fix.
+- No VeryslowPeak image falls below a peak ratio of 0.8 (lowest 0.934, 0.923 before). Peak mode's cost is unchanged: VeryslowPeak against Veryslow is -0.060 dB mPSNR after, -0.061 before, worst image venice_sunset (-0.696 after, -0.674 before).
+
+**`hdr_grad`** (4 images, delta in mPSNR dB):
+- veryfast: dim_ramp +0.088, log_ramp_color +0.083, noise_wide_range -0.001, sky_sun -0.100.
+- fast: +0.382, +0.083, +0.075, sky_sun -0.032.
+- basic and slower: every image gains, from +0.006 to +1.803 (slow, dim_ramp), except slow's sky_sun, which is unchanged (+0.000).
+- veryslow_peak equals veryslow on all four.
+
+**Changed images.** At every level, base against final on AVX2: 0 of 18 `hdr_real` and 0 of 4 `hdr_grad` images are byte-identical, so all six levels changed all 22. Per fix, against the one before: #6 and #7 changed none; #5 changed 15 of 18 `hdr_real` images at Veryfast, 17 at Basic and all 18 at the other levels; #1 changed none at Veryfast, 17 of 18 at Fast, Basic and Slow, and every image at Veryslow and VeryslowPeak; #3 changed Basic and slower; #2 changed every image at every level.
+
+**SSE2 and AVX-512.** The same comparison on SSE2 and on AVX-512 agrees with AVX2 in direction at every level and metric, all means within 0.001 of AVX2 and the same single negative (Veryfast mPSNR, -0.003 ±0.002). The win and loss counts differ here and there.
+
+**Time.** I timed each fix on a Linux VM: an Intel i9-13900K guest with 6 vCPUs, under Wine 11.0, on the AVX2 path with one thread. Each run encodes all 22 images, and each figure is the median of 3 rounds in alternating order, with no other process running. The VM's Intel CPU writes different BC6H bytes from the Ryzen behind the quality numbers, so these runs measure time only. Each ratio is after over before (1.10 = 10 % slower):
+
+| level | #5 / base | #1 / #5 | #3 / #1 | #2 search / #3 | #2 / #3 | final / base |
+|---|---|---|---|---|---|---|
+| veryfast | 1.024 | 0.988 | 1.000 | 1.226 | 1.036 | 1.024 |
+| fast | 1.011 | 0.994 | 1.006 | 1.139 | 1.027 | 1.037 |
+| basic | 1.008 | 0.983 | 0.994 | 1.135 | 1.044 | 1.029 |
+| slow | 1.000 | 0.997 | 0.999 | 1.150 | 1.045 | 1.039 |
+| veryslow | 0.995 | 0.995 | 0.999 | 1.192 | 1.059 | 1.051 |
+| veryslow_peak | 0.993 | 1.000 | 0.997 | 1.188 | 1.064 | 1.054 |
+| total | 0.997 | 0.996 | 0.998 | 1.180 | 1.058 | 1.049 |
+
+- #5, #1 and #3 cost nothing measurable: the rounds of one build differ by up to 1.4 %.
+- #2's first form searched three candidate codes per endpoint and was 18 % slower in total. A single multiply finds the same code and writes the same bytes, so it replaced the search; #2 now costs 3 to 6 % per level. The first four columns come from one VM run and the last two from a second one.
+- Veryfast takes 0.08 to 0.10 s for all 22 images, so its ratios move in coarse steps.
 
 ## Other findings
 
@@ -824,7 +885,7 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 ## What Tessalith does because of this
 
 - **Correct format first.** The design ranks correct format and tag per map type first, then correct mips, then the best encoder at a practical speed ([Design overview](design-overview.md)).
-- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H**, vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
+- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H** (with patches 0001, 0003 and 0004; [0004's kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo)), vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
 - **bc7e at `veryslow` (level 5) is the default BC7 level.** Level 5 matches level 6 at 1.5× the speed. Level 4 is not offered, because level 3 beats it on gradients. The levels are in [`crates/engine/src/encode.rs`](../../crates/engine/src/encode.rs) and the default in [`presets/sdc-base.toml`](../../presets/sdc-base.toml). The `fast-preview` preset uses `fast`.
 - <a id="vendored-encoders-reproduce-the-bench"></a>**The vendored encoders reproduce the bench.** Spike S3 (2026-10-08) built the workspace without ISPC on the path and matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB against 50.977, largest per-image Δ 0.000000 dB over all 10 BC7 sets, 39 of 39 block payloads byte-identical) and rgbcx BC4 on `mask_real` (7 of 7 bit-exact). The Phase 0 gates (2026-10-09) added rgbcx BC1, BC3, BC4 and BC5 bit-exact (14, 25, 12 and 11 images; transparent black off on 14 of 14), ISPC BC6H `veryslow` at 51.4995 dB with 8 of 8 payloads byte-identical, and ISPC objects that regenerate byte for byte.
 - **rgbcx runs at level 18, its highest.** BC1 and the colour half of BC3 encode with rgbcx Dual, which scores NVIDIA and AMD decoder error together; there is no decoder setting (Note FM17). BC3 is never picked to save space, because it is the same size as BC7.
