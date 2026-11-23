@@ -787,7 +787,8 @@ fn unticking_a_helper_writes_none() {
         Some(json!("none"))
     );
     assert_eq!(
-        in_centre(&h, Role::ComboBox, "Texture type").len(),
+        // TPC-T4-1: an undecided texture asks its type in the card, so the Texture type row is not drawn too.
+        in_centre(&h, Role::ComboBox, "Type for this texture").len(),
         1,
         "the texture panel"
     );

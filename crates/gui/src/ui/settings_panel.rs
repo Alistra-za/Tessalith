@@ -4,7 +4,7 @@ use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
 use crate::look::Combo036 as _;
-use crate::model::bottom::{At, Problem};
+use crate::model::bottom::{At, Level, Problem};
 use crate::model::code_text::{
     alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube,
 };
@@ -1185,15 +1185,21 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
 
 /// The basic Mipmaps rows: the on/off tick box, the level count (Note JI3; not in the strip), then the filter.
 fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, views: &[FieldView], actions: &mut Vec<Action>) {
-    // `panel_views` always carries the three Mipmaps rows, and reads the profile once for all of them.
+    // Each row is drawn when `panel_views` carries it (a profile may hide one); the cached views were read once.
     let find = |field: &str| views.iter().find(|v| v.field == field);
-    let (Some(f), Some(filter), Some(e)) = (
-        find(LEVELS_FIELD.0),
-        find(FILTER_FIELD.0),
-        find(EDGE_FIELD.0),
-    ) else {
-        return;
-    };
+    if let Some(f) = find(LEVELS_FIELD.0) {
+        mips_tick_and_levels(ui, cx, f, actions);
+    }
+    if let Some(filter) = find(FILTER_FIELD.0) {
+        filter_row(ui, cx, filter, actions);
+    }
+    if let Some(e) = find(EDGE_FIELD.0) {
+        push_edit(actions, e.field, field_row(ui, cx, e));
+    }
+}
+
+/// The Mipmaps tick row and, outside the strip, the Levels row under it.
+fn mips_tick_and_levels(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     let mut on = mips_on(&f.value);
     // Note HI1: "Mipmaps" in the label column, the tick in the control column, named for the tests and a screen reader.
     let help = Some(crate::model::fields::MIPMAPS_HELP);
@@ -1225,17 +1231,7 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, views: &[FieldView], actions: &mut 
     }
     ui.end_row();
     if !cx.compact {
-        match field_row(ui, cx, f) {
-            Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
-            Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
-            None => {}
-        }
-    }
-    filter_row(ui, cx, filter, actions);
-    match field_row(ui, cx, e) {
-        Some(RowEdit::Set(v)) => actions.push(Action::Set(e.field, v)),
-        Some(RowEdit::Clear) => actions.push(Action::Clear(e.field)),
-        None => {}
+        push_edit(actions, f.field, field_row(ui, cx, f));
     }
 }
 
@@ -1417,7 +1413,7 @@ fn grouped(
 
 /// One group's rows, from `views` (`panel_cache`, built once per input change). The Cubemap, Channels and Sources
 /// groups are drawn by `cube_section`, `channels` and `inspector_section`.
-fn group_section(
+pub fn group_section(
     ui: &mut egui::Ui,
     cx: &Ctx,
     g: PanelGroup,
@@ -1428,12 +1424,15 @@ fn group_section(
         egui::Grid::new((cx.key, g.id()))
             .num_columns(3)
             .show(ui, |ui| {
+                // Mipmaps draws its own three rows first; any other field routed to it takes the generic loop.
+                let own = [LEVELS_FIELD.0, FILTER_FIELD.0, EDGE_FIELD.0];
                 if g == PanelGroup::Mipmaps {
-                    return mipmaps_rows(ui, cx, views, actions);
+                    mipmaps_rows(ui, cx, views, actions);
                 }
                 for f in views
                     .iter()
                     .filter(|f| panel_groups::panel_group(f.field) == Some(g))
+                    .filter(|f| !(g == PanelGroup::Mipmaps && own.contains(&f.field)))
                     // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
                     // nor DDS header (Note JI3).
                     .filter(|f| {
@@ -1452,13 +1451,14 @@ fn group_section(
 }
 
 /// The rows under the texture's name, before any group (Task 4): Texture type and the Helper rows (not in the strip),
-/// then Format. The Undecided card above them keeps its own type picker, and the Texture type row stays beside it, as
-/// it did in the Type group.
+/// then Format, in `FIRST_SCREEN` order. While the Undecided card asks the type (`show_type` off) it has its own picker,
+/// so the Texture type row is left out and the Helper rows stay (the card has no Helper tick; TPC-T4-1).
 fn first_screen(
     ui: &mut egui::Ui,
     cx: &Ctx,
     views: &[FieldView],
     tick: Option<&HelperTick>,
+    show_type: bool,
     actions: &mut Vec<Action>,
 ) {
     egui::Grid::new((cx.key, "first-screen"))
@@ -1468,9 +1468,9 @@ fn first_screen(
             if cx.edit_off.is_some() {
                 ui.disable();
             }
-            for f in views
+            for f in panel_groups::FIRST_SCREEN
                 .iter()
-                .filter(|f| panel_groups::FIRST_SCREEN.contains(&f.field))
+                .filter_map(|name| views.iter().find(|v| v.field == *name))
             {
                 if f.field != "subtype" {
                     push_edit(actions, f.field, field_row(ui, cx, f));
@@ -1482,7 +1482,7 @@ fn first_screen(
                 // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
                 if tick.is_some_and(|t| t.on) {
                     helper_role_row(ui, cx.key, &cx.edit_off, actions);
-                } else {
+                } else if show_type {
                     push_edit(actions, f.field, field_row(ui, cx, f));
                 }
                 if let Some(t) = tick {
@@ -1556,6 +1556,8 @@ struct PanelCache {
 struct PanelSlot {
     key: String,
     inputs: crate::model::bulk::PanelInputs,
+    /// The alpha proposal `draw` writes into the job it passes (display only): the builder reads it, so it is keyed.
+    proposal: Option<AlphaPolicy>,
     cache: Arc<PanelCache>,
 }
 
@@ -1578,11 +1580,12 @@ fn panel_cache(
     model: &AppModel,
     key: &str,
     job: &ResolvedJob,
+    proposal: Option<AlphaPolicy>,
 ) -> Arc<PanelCache> {
     let id = slot_id("panel-cache", surface);
     let inputs = model.panel_cache_inputs();
     if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<PanelSlot>>(id)) {
-        if slot.key == key && slot.inputs == inputs {
+        if slot.key == key && slot.inputs == inputs && slot.proposal == proposal {
             return slot.cache.clone();
         }
     }
@@ -1611,6 +1614,7 @@ fn panel_cache(
     let slot = Arc::new(PanelSlot {
         key: key.to_owned(),
         inputs,
+        proposal,
         cache: cache.clone(),
     });
     ctx.data_mut(|d| d.insert_temp(id, slot));
@@ -1620,53 +1624,75 @@ fn panel_cache(
 /// A `texture_problems` slot: what it was built from beside what it holds.
 struct ProblemSlot {
     key: String,
-    alpha_asked: bool,
     /// The whole list the rows were taken from; holding it keeps its address from being reused for a new list.
     source: Arc<Vec<Problem>>,
     rows: Arc<Vec<Problem>>,
     notes: usize,
 }
 
-/// This texture's problem rows (`panel_groups::is_panel_problem`) and its note count, in the surface's slot. The slot
-/// is used while its key and `alpha_asked` are the drawn ones and its source list is `bottom::problems(model)` itself
-/// (`Arc::ptr_eq`), so a frame does not rescan the list. While the alpha question is open (`alpha_asked`), a
-/// LOSS-ALPHA-DATA row is left out: the question answers it (Note FM35).
+/// The codes whose first-screen widget is not the problem row: the card's low-confidence line, the green line and the
+/// Compression HDR line.
+const SAID_ELSEWHERE: [Code; 4] = [
+    Code::SugLowConfidence,
+    Code::InGreenUnstated,
+    Code::ChkGreenGuess,
+    Code::FmtHdrSource,
+];
+
+/// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says) and its note count,
+/// in the surface's slot. The slot is used while its key is the drawn one and its source list is
+/// `bottom::problems(model)` itself (`Arc::ptr_eq`: `problems` hands out the cached `Arc` until its key moves), so a
+/// frame does not rescan the list. `alpha_asked` is read only on a rebuild: it is a function of the item, and the list
+/// is rebuilt whenever an item changes (the list's key holds `items_rev`).
 fn texture_problems(
     ctx: &egui::Context,
     surface: Surface,
     model: &AppModel,
     key: &str,
-    alpha_asked: bool,
 ) -> (Arc<Vec<Problem>>, usize) {
     let all = crate::model::bottom::problems(model);
     let id = slot_id("panel-problems", surface);
     if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<ProblemSlot>>(id)) {
-        if slot.key == key && slot.alpha_asked == alpha_asked && Arc::ptr_eq(&slot.source, &all) {
+        if slot.key == key && Arc::ptr_eq(&slot.source, &all) {
             return (slot.rows.clone(), slot.notes);
         }
     }
-    let mine = |p: &&Problem| matches!(&p.at, At::Texture(k) if k == key);
-    // The Undecided row names LOSS-ALPHA-DATA in `also`, not in `code` (`bottom::problems`).
-    let answers_alpha =
-        |p: &Problem| p.code == Some(Code::LossAlphaData) || p.also.contains(&Code::LossAlphaData);
-    let mut rows = vec![];
-    let mut notes = 0;
-    for p in all.iter().filter(mine) {
-        if !panel_groups::is_panel_problem(p) {
-            notes += 1;
-        } else if !(alpha_asked && answers_alpha(p)) {
-            rows.push(p.clone());
-        }
-    }
+    let alpha_asked = model
+        .item(key)
+        .is_some_and(|i| crate::model::items::alpha_asked(i).is_some());
+    let (rows, notes) = panel_problem_rows(&all, key, alpha_asked);
     let rows = Arc::new(rows);
     let slot = Arc::new(ProblemSlot {
         key: key.to_owned(),
-        alpha_asked,
         source: all,
         rows: rows.clone(),
         notes,
     });
     ctx.data_mut(|d| d.insert_temp(id, slot));
+    (rows, notes)
+}
+
+/// The first screen's rows of texture `key` out of the whole problem list, and its note count. Left out, besides notes
+/// (`is_panel_problem`): rows another widget of the first screen already says (TPC-T4-2, as `other_warnings` left them
+/// out), namely the Decide row (the Undecided card is it) and the `SAID_ELSEWHERE` codes; and, while the alpha question
+/// is open (`alpha_asked`), a LOSS-ALPHA-DATA row, which the question answers (Note FM35).
+pub fn panel_problem_rows(all: &[Problem], key: &str, alpha_asked: bool) -> (Vec<Problem>, usize) {
+    let has = |p: &Problem, c: Code| p.code == Some(c) || p.also.contains(&c);
+    let mut rows = vec![];
+    let mut notes = 0;
+    for p in all
+        .iter()
+        .filter(|p| matches!(&p.at, At::Texture(k) if k == key))
+    {
+        if !panel_groups::is_panel_problem(p) {
+            notes += 1;
+        } else if p.level != Level::Decide
+            && !SAID_ELSEWHERE.iter().any(|c| has(p, *c))
+            && !(alpha_asked && has(p, Code::LossAlphaData))
+        {
+            rows.push(p.clone());
+        }
+    }
     (rows, notes)
 }
 
@@ -2311,7 +2337,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
         }
         Some(job) => {
             // Once per input change, not once per frame: every row, header and summary below reads this.
-            let pc = panel_cache(ui.ctx(), surface, model, key, job);
+            let pc = panel_cache(ui.ctx(), surface, model, key, job, alpha);
             // `size_of` needs `&mut model`, which `cx` below keeps shared: ask now, draw the line in its place.
             let size = (!compact).then(|| model.size_of(key));
             // Empty until a problem or a Go to forces a group open (Task 5).
@@ -2387,43 +2413,45 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 };
                 decision_box(ui, &cx, &decisions, &warnings, alpha, &likely, &mut actions);
             }
-            first_screen(ui, &cx, &pc.views, tick.as_ref(), &mut actions);
+            let asks_type = decisions
+                .iter()
+                .any(|d| matches!(d, Decision::Subtype { .. }));
+            first_screen(ui, &cx, &pc.views, tick.as_ref(), !asks_type, &mut actions);
             if let Some(size) = size {
                 size_line(ui, size);
-                let (rows, notes) = texture_problems(ui.ctx(), surface, model, key, alpha.is_some());
+                let (rows, notes) = texture_problems(ui.ctx(), surface, model, key);
                 let set = (rows.len() > PROBLEM_ROWS)
                     .then(|| problems_target(model, key))
                     .flatten();
                 first_screen_problems(ui, &rows, notes, set.as_ref(), &mut actions);
             }
-            let groups: &[PanelGroup] = if compact {
-                &STRIP_GROUPS
-            } else {
-                &[
-                    PanelGroup::Alpha,
-                    PanelGroup::Mipmaps,
-                    PanelGroup::NormalMap,
-                    PanelGroup::Size,
-                    PanelGroup::Compression,
-                ]
-            };
-            for g in groups {
-                group_section(ui, &cx, *g, &pc.views, &mut actions);
-            }
-            if !compact {
-                // Draws nothing unless the item is a cube map (`cube_section`'s own check).
-                let g = PanelGroup::Cubemap;
-                let open = group_open(&cx, g);
-                let (edits, toggled) =
-                    super::cube_section::cube_section(ui, model, key, &group_head(&cx, g), open);
-                if toggled {
-                    actions.push(Action::SetGroupOpen(g, !open));
-                }
-                cube_edits = edits;
-                if kind == ItemKind::Packed {
-                    grouped(ui, &cx, PanelGroup::Channels, &mut actions, |ui, _| {
-                        channels(ui, job)
-                    });
+            // Panel order is `PanelGroup::ALL`; Sources is drawn last, after this closure (a jobless texture has it too).
+            for g in PanelGroup::ALL {
+                match g {
+                    PanelGroup::Sources => {}
+                    PanelGroup::Cubemap if !compact => {
+                        // Draws nothing unless the item is a cube map (`cube_section`'s own check).
+                        let open = group_open(&cx, g);
+                        let (edits, toggled) = super::cube_section::cube_section(
+                            ui,
+                            model,
+                            key,
+                            &group_head(&cx, g),
+                            open,
+                        );
+                        if toggled {
+                            actions.push(Action::SetGroupOpen(g, !open));
+                        }
+                        cube_edits = edits;
+                    }
+                    PanelGroup::Channels if !compact && kind == ItemKind::Packed => {
+                        grouped(ui, &cx, g, &mut actions, |ui, _| channels(ui, job));
+                    }
+                    PanelGroup::Cubemap | PanelGroup::Channels => {}
+                    g if !compact || STRIP_GROUPS.contains(&g) => {
+                        group_section(ui, &cx, g, &pc.views, &mut actions);
+                    }
+                    _ => {}
                 }
             }
         }

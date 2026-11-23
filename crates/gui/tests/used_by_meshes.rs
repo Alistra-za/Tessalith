@@ -841,7 +841,8 @@ fn used_by_sits_under_the_heading() {
         .map(|n| n.rect())
         .find(|r| centre.x_range().contains(r.center().x))
         .expect("loaded two-copy header");
-    let row = rect("Texture type").expect("type field row");
+    // leaf.png is undecided: the card's picker stands where the Texture type row would (TPC-T4-1).
+    let row = rect("Type for this texture").expect("type picker");
     assert!(
         job.bottom() <= head.top() && head.top() < row.top(),
         "job {job:?}, Used by {head:?}, type {row:?}"

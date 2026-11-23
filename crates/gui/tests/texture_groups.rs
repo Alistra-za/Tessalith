@@ -1701,6 +1701,237 @@ fn a_closed_header_follows_the_fast_plan_and_the_full_plan_each_alone() {
     );
 }
 
+/// TPC-T4-1: while the Undecided card asks the type it has its own picker, so the first screen drops the Texture type
+/// row; the Helper row (the card has none) stays.
+#[test]
+fn the_undecided_card_replaces_the_texture_type_row_and_keeps_the_helper_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path()); // nothing decided: rock01 is undecided
+    m.select_item(KEY);
+    let h = harness(m, 1280.0, 1600.0);
+    h.get_by_role_and_label(Role::ComboBox, "Type for this texture");
+    assert!(
+        h.query_by_role_and_label(Role::ComboBox, "Texture type")
+            .is_none(),
+        "the type is asked once"
+    );
+    h.get_by_role_and_label(Role::CheckBox, "Helper");
+    // Decided, the card is gone and the row is back.
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 800.0);
+    h.get_by_role_and_label(Role::ComboBox, "Texture type");
+    assert!(h
+        .query_by_role_and_label(Role::ComboBox, "Type for this texture")
+        .is_none());
+}
+
+/// The first screen reads Texture type, then Format (`FIRST_SCREEN` order), then the Output line.
+#[test]
+fn texture_type_comes_before_format() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 800.0);
+    let top = |l: &str| h.get_by_role_and_label(Role::ComboBox, l).rect().top();
+    assert!(top("Texture type") < top("Format"));
+    assert!(top("Format") < h.get_by_label_contains("Output: ").rect().top());
+}
+
+/// TPC-T4-2: an undecided texture shows the card, not also its "Undecided: ..." row from the problem list.
+#[test]
+fn an_undecided_texture_shows_the_card_and_no_undecided_problem_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.select_item(KEY);
+    let row = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .find(|p| p.at == At::Texture(KEY.into()) && p.level == Level::Decide)
+        .map(|p| p.text.clone())
+        .expect("premise: the list has the Undecided row");
+    assert!(row.starts_with("Undecided: "), "{row}");
+    let h = harness(m, 1280.0, 1600.0);
+    h.get_by_label("Undecided"); // the card's title
+    assert_eq!(
+        h.query_all_by_label_contains("Undecided: ")
+            .filter(|n| n.accesskit_node().role() == Role::Label)
+            .count(),
+        0,
+        "no first-screen row repeats the card"
+    );
+}
+
+/// The row filter alone, on hand-built rows: notes are counted, never listed; the Decide row and each code another
+/// widget says are left out (by `code` or `also`); LOSS-ALPHA-DATA only while the alpha question is open.
+#[test]
+fn the_first_screen_leaves_out_what_another_widget_says() {
+    use sdc_gui::ui::settings_panel::panel_problem_rows;
+    let kept = problem_row("kept");
+    let mut decide = problem_row("Undecided: x");
+    decide.level = Level::Decide;
+    let mut note = problem_row("note");
+    note.level = Level::Info;
+    let mut other = problem_row("other texture");
+    other.at = At::Texture("other.png".into());
+    let coded = |c: Code, also: bool| {
+        let mut p = problem_row("coded");
+        if also {
+            p.also = vec![c];
+        } else {
+            p.code = Some(c);
+        }
+        p
+    };
+    let mut all = vec![kept.clone(), decide, note, other];
+    for c in [
+        Code::SugLowConfidence,
+        Code::InGreenUnstated,
+        Code::ChkGreenGuess,
+        Code::FmtHdrSource,
+    ] {
+        all.push(coded(c, false));
+        all.push(coded(c, true));
+    }
+    let (rows, notes) = panel_problem_rows(&all, KEY, false);
+    assert_eq!(rows, vec![kept.clone()]);
+    // A note is any row of this texture that is not a panel problem (the Info row, and the coded rows whose code
+    // is a note by `row_class`): counted, never listed.
+    let this = |p: &&Problem| p.at == At::Texture(KEY.into());
+    let want = all
+        .iter()
+        .filter(this)
+        .filter(|p| !panel_groups::is_panel_problem(p))
+        .count();
+    assert!(want >= 1);
+    assert_eq!(notes, want);
+    // LOSS-ALPHA-DATA: listed while no question is open, left out while it is, by `code` or `also`.
+    let loss = [
+        coded(Code::LossAlphaData, false),
+        coded(Code::LossAlphaData, true),
+    ];
+    assert_eq!(panel_problem_rows(&loss, KEY, false).0.len(), 2);
+    assert_eq!(panel_problem_rows(&loss, KEY, true).0.len(), 0);
+}
+
+/// `texture_problems` keeps its slot by `Arc::ptr_eq` on the problem list, which only fires if `problems` hands out the
+/// same `Arc` while nothing moved (`model::cached`).
+#[test]
+fn the_problem_list_is_one_arc_until_something_moves() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    let a = sdc_gui::model::bottom::problems(&m);
+    assert!(std::sync::Arc::ptr_eq(
+        &a,
+        &sdc_gui::model::bottom::problems(&m)
+    ));
+    m.set_field(KEY, "mips.filter", json!("box"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(!std::sync::Arc::ptr_eq(
+        &a,
+        &sdc_gui::model::bottom::problems(&m)
+    ));
+}
+
+/// TPC-T4-4: the groups draw in `PanelGroup::ALL` order.
+#[test]
+fn the_groups_draw_in_panel_order() {
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(rock(d.path()), 1280.0, 2000.0);
+    let tops: Vec<f32> = [
+        PanelGroup::Alpha,
+        PanelGroup::Mipmaps,
+        PanelGroup::NormalMap,
+        PanelGroup::Size,
+        PanelGroup::Compression,
+        PanelGroup::Sources,
+    ]
+    .iter()
+    .map(|g| {
+        h.get_by_label_contains(&format!("{}, ", g.title()))
+            .rect()
+            .top()
+    })
+    .collect();
+    assert!(tops.windows(2).all(|w| w[0] < w[1]), "{tops:?}");
+    // The table the loop follows: no group outside it is missing from `ALL`.
+    assert_eq!(PanelGroup::ALL.len(), 8);
+}
+
+/// The panel's cache builds from the job `draw` passes, which carries the open alpha question's proposal. The proposal
+/// is a function of the item, but it is keyed anyway: a change that moves no revision (here, a hand edit of the item's
+/// analysis) must not leave the Alpha header on the old proposal.
+#[test]
+fn the_cache_follows_the_alpha_proposal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let leaf = "landscape/leaf.png";
+    m.decide(leaf, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(leaf);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Alpha, false);
+    let mut h = harness(m, 1280.0, 800.0);
+    let name = |h: &Harness<'static, AppModel>| {
+        h.get_by_label_contains("Alpha, ")
+            .accesskit_node()
+            .label()
+            .unwrap()
+            .to_string()
+    };
+    assert!(name(&h).contains("Cutout"), "the proposal: {}", name(&h));
+    let i = h.state().items.iter().position(|i| i.key == leaf).unwrap();
+    h.state_mut().items[i].analysis = None; // no analysis: no proposal, the profile's own policy
+    h.run();
+    assert!(!name(&h).contains("Cutout"), "{}", name(&h));
+}
+
+/// A profile may hide one of the Mipmaps rows: the others are still drawn (and no group's rows are skipped).
+#[test]
+fn the_mipmaps_group_draws_the_rows_that_are_present() {
+    use sdc_gui::ui::settings_panel::{group_section, Ctx};
+    let d = tempfile::tempdir().unwrap();
+    let m = rock(d.path());
+    let job = job(&m, KEY).clone();
+    let all = panel_views(m.target, &job);
+    let mut groups = std::collections::BTreeMap::new();
+    groups.insert("mipmaps".to_string(), true);
+    let drawn = |dropped: &'static str| {
+        let views: Vec<FieldView> = all.iter().filter(|v| v.field != dropped).cloned().collect();
+        let mut h = Harness::builder()
+            .with_context_setup(install_fonts)
+            .with_size(egui::vec2(1280.0, 800.0))
+            .build_ui_state(
+                |ui,
+                 (job, groups, views): &mut (
+                    engine::policy::ResolvedJob,
+                    std::collections::BTreeMap<String, bool>,
+                    Vec<FieldView>,
+                )| {
+                    let forced = std::collections::BTreeSet::new();
+                    let cx = Ctx {
+                        key: "k",
+                        job,
+                        target: Target::Cs,
+                        busy: false,
+                        compact: false,
+                        alpha_asked: false,
+                        edit_off: None,
+                        warnings: &[],
+                        surface: Surface::Centre,
+                        groups,
+                        forced: &forced,
+                        summaries: &[],
+                    };
+                    let mut acts = vec![];
+                    group_section(ui, &cx, PanelGroup::Mipmaps, views, &mut acts);
+                },
+                (job.clone(), groups.clone(), views),
+            );
+        h.run();
+        ["Levels", "Filter", "Edge"].map(|l| h.query_by_role_and_label(Role::ComboBox, l).is_some())
+    };
+    assert_eq!(drawn("none"), [true, true, true], "premise: all three");
+    assert_eq!(drawn("mips.edge"), [true, true, false]);
+    assert_eq!(drawn("mips.filter"), [true, false, true]);
+    assert_eq!(drawn("mips.levels"), [false, true, true]);
+}
+
 /// "+n more" opens Problems on the selected item's set view (a key-less set by its id), or on the set key of another
 /// drawn item (the strip or the 3D window), and on no set when the texture is in none.
 #[test]
