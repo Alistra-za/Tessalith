@@ -113,7 +113,13 @@ pub fn collapsing_group<R>(
 ) -> GroupResponse<R> {
     let id = persistent_id(ui, id_salt);
     let height = HEADER_H.max(ui.spacing().interact_size.y);
-    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    // The panel's floating scroll bar senses its full width over the content's right edge (rule 3.2): the header row
+    // ends before it, as `hint_and_reset` keeps ↺ clear (ui_proof's `scroll_bar_clearance`), so a click there and
+    // "● changed" are the header's.
+    let s = &ui.spacing().scroll;
+    let reserve = s.bar_width + s.bar_outer_margin;
+    let rect = row.with_max_x((row.right() - reserve).max(row.left()));
     let header = ui.interact(rect, id, egui::Sense::click());
     let toggled = header.clicked();
     // egui turns Space or Enter on a focused click widget into a click (`context.rs`), so a key toggle is a click with

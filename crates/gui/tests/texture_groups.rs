@@ -220,12 +220,15 @@ fn an_open_header_shows_no_summary() {
 }
 
 #[test]
-fn the_header_hit_target_is_24_px_and_the_full_row() {
+fn the_header_hit_target_is_24_px_and_the_row_short_of_the_scroll_bar() {
     let h = head_harness(400.0, mipmaps());
     let r = h.get_by_label_contains("Mipmaps, ").rect();
     assert!(r.height() >= 24.0, "{r:?}");
-    // The harness keeps an 8 px margin on each side of the 400 px window: the row is the 384 px between them.
-    assert!((r.width() - 384.0).abs() < 1.0, "{r:?}");
+    // The harness keeps an 8 px margin on each side of the 400 px window: the row is the 384 px between them, less the
+    // scroll bar's width at its right end (LQ3).
+    let s = h.ctx.global_style().spacing.scroll;
+    let row = 384.0 - (s.bar_width + s.bar_outer_margin);
+    assert!((r.width() - row).abs() < 1.0, "{r:?}, want {row}");
 }
 
 /// A click at `pos`: move, press, release, then a frame.
@@ -3693,6 +3696,41 @@ fn a_120_character_name_keeps_the_first_screen_on_screen() {
     let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
     assert!(centre.contains_rect(h.get_by_label_contains("Output: ").rect()));
     assert!(support::bar_rects_in(&h, centre).is_empty());
+}
+
+/// ui_proof's `scroll_bar_clearance` on the centre (rule 3.2): with every group open the panel scrolls, and each header
+/// on screen ends short of the floating bar's width, as ↺ does, so a click there is the header's. Only what the header
+/// senses is shortened; its text keeps the row's bound, so "● changed" keeps its place.
+#[test]
+fn a_header_ends_before_the_centre_scroll_bar() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    set(&mut m, &[("mips.filter", json!("box"))]);
+    support::open_texture_groups(&mut m);
+    let h = harness(m, 1280.0, 800.0);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    let track = h
+        .query_all_by_role(Role::ScrollBar)
+        .map(|n| n.rect())
+        .find(|r| centre.contains_rect(*r))
+        .expect("premise: the open groups scroll the centre");
+    let limit = support::bar_clearance(false, track, sdc_gui::look::thin_scroll().bar_width);
+    let headers: Vec<(String, egui::Rect)> = h
+        .query_all_by_role(Role::DisclosureTriangle)
+        .map(|n| (n.accesskit_node().label().unwrap_or_default(), n.rect()))
+        .filter(|(_, r)| centre.contains_rect(*r) && r.max.y > track.min.y && r.min.y < track.max.y)
+        .collect();
+    assert!(
+        headers.len() >= 5,
+        "premise: the headers on screen: {headers:?}"
+    );
+    for (name, r) in &headers {
+        assert!(
+            r.max.x <= limit + 0.5,
+            "{name}: ends at {}, the bar's limit is {limit}",
+            r.max.x
+        );
+    }
 }
 
 // The final review's fix wave.
