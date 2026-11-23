@@ -245,9 +245,10 @@ const EXACT_SEED: u32 = 0x5C0C_2026;
 /// A 64x64 opaque image, row-major, whose G is `g` on every texel, from an LCG seeded with `seed`
 /// (`s = s * 1664525 + 1013904223`, each draw `s >> 24`). Each block k (row-major, 16 per row) draws four centres (R and
 /// B of two clusters) whose p-bit is the other one G needs: `255 - 2 * (d % 16)` (odd, 225 to 255) when `g` is 0,
-/// `2 * (d % 16)` (even, 0 to 30) when it is 255. Then per texel, by k % 4: 0 and 1 two clusters (texel columns 0-1 and
-/// 2-3), the centre plus `d % 5 - 2` on R, then on B; 2 near-solid (cluster 0's centre, R and B both plus 1 when
-/// `d % 3 == 0`); 3 solid (cluster 0's centre). Values are clamped to 0-255.
+/// `2 * (d % 16)` (even, 0 to 30) when it is 255. Then per texel, by k % 4: 0 two clusters (texel columns 0-1 and 2-3),
+/// the centre plus `d % 5 - 2` on R, then on B; 1 the same, but columns 0-1 are cluster 0's centre without noise (a
+/// solid subset of BC7's first two-subset partition beside a noisy one); 2 near-solid (cluster 0's centre, R and B both
+/// plus 1 when `d % 3 == 0`); 3 solid (cluster 0's centre; bc7e's mode 5 solid-block path). Values are clamped to 0-255.
 fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
     let mut s = seed;
     let mut next = move || {
@@ -272,6 +273,7 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
         for t in 0..16 {
             let (x, y) = (t % 4, t / 4);
             let [r, b] = match kind {
+                1 if x < 2 => c[0],
                 0 | 1 => {
                     let [r, b] = c[x / 2];
                     [r + next() % 5 - 2, b + next() % 5 - 2]
@@ -289,12 +291,12 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 }
 
 /// Patch 0005, XC: with G in `Bc7Tune::exact_constants`, a subset whose G is 0 on every texel, or 255 on every texel,
-/// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters
-/// and near-solid blocks (its solid blocks take bc7e's mode 5 solid-block path). Raw bytes, 64-block calls, the data
-/// maps' tune (T_data, exact G) at weights x16 and x1, every level, exact opaque off and on, every path. Without the
-/// one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque on, alpha decodes
-/// 255 after the post-fix in every cell, and wins over G where both cannot hold (ruling BC7-C4): mode 6's forced p-bits
-/// cannot decode G 0, so G 0 is not asserted at `exact_g_waived`'s levels (Note LR, LR12).
+/// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters,
+/// solid-beside-noisy and near-solid blocks (its solid blocks take bc7e's mode 5 solid path). Raw bytes, 64-block
+/// calls, the data maps' tune (T_data, exact G) at weights x16 and x1, every level, exact opaque off and on, every
+/// path. Without the one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque
+/// on, alpha decodes 255 after the post-fix in every cell, and wins over G where both cannot hold (ruling BC7-C4):
+/// mode 6's forced p-bits cannot decode G 0, so G 0 is not asserted in `exact_g_waived`'s cells (Note LR, LR12).
 #[test]
 fn exact_constants_keep_a_flat_channel() {
     use encoders_sys::bc7_fixup::force_opaque_rotated;
