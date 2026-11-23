@@ -3694,3 +3694,105 @@ fn a_120_character_name_keeps_the_first_screen_on_screen() {
     assert!(centre.contains_rect(h.get_by_label_contains("Output: ").rect()));
     assert!(support::bar_rects_in(&h, centre).is_empty());
 }
+
+// The final review's fix wave.
+
+/// The id and slot number of the set slot `key` fills as its own file.
+fn own_slot(m: &AppModel, key: &str) -> (String, u8) {
+    use sdc_gui::model::sets::SlotFill;
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find_map(|v| {
+            v.slots.iter().find_map(|(k, f)| match f {
+                SlotFill::Own { item } if item == key => k.slot_number().map(|n| (v.id.clone(), n)),
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| panic!("{key} fills no slot of its own"))
+}
+
+/// TPC-F-3: a normal in a locked slot takes no green, skipped with the lock's reason as every other bulk row skips it
+/// (LM11), at the row and at the click.
+#[test]
+fn a_normal_in_a_locked_slot_takes_no_green() {
+    use sdc_gui::model::bulk::{green_reach, SKIP_MSN, SKIP_NOT_NORMAL};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let (set, n) = own_slot(&m, "g/a_n.png");
+    m.set_slot_lock(&set, n, true).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        sdc_gui::model::sets::locked_items(&m)
+            .get("g/a_n.png")
+            .map(String::as_str),
+        Some("slot locked"),
+        "premise: a_n fills a locked slot of its own set"
+    );
+    let r = green_reach(&m, &green_keys());
+    assert_eq!(r.takes, ["g/b_n.png"]);
+    assert_eq!(
+        r.skipped,
+        [
+            ("slot locked".to_string(), 1),
+            (SKIP_MSN.to_string(), 1),
+            (SKIP_NOT_NORMAL.to_string(), 1)
+        ]
+    );
+    let keys = select(&mut m, &GREEN_KEYS);
+    assert_eq!(m.decide_many_green(&keys, GreenConvention::Opengl), Ok(1));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        green_of(&m, "g/a_n.png"),
+        None,
+        "the locked normal is not written"
+    );
+    assert_eq!(green_of(&m, "g/b_n.png"), Some(json!("opengl")));
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Green: OpenGL written to 1 of 4")
+    );
+    let mut h = green_panel(m, &GREEN_KEYS, false);
+    h.run();
+    let note = green_reach_note(&h, "Green: OpenGL", "applies to 1 of 4");
+    h.hover_at(note.center());
+    h.run();
+    h.get_by_label_contains("locked on 1 of 4: slot locked");
+}
+
+/// CODING_STANDARDS, "The fast re-plan keeps what the full plan keeps": the lock is a document fact, so the Green row
+/// leaves the locked normal out while the lock's own plan (a full plan; a lock has no fast one) is still out, after it,
+/// and after another edit's fast re-plan alone and its full plan.
+#[test]
+fn the_green_row_skips_a_locked_slot_after_the_fast_plan_and_the_full_plan_each_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normals_and_others(d.path());
+    let (set, n) = own_slot(&m, "g/a_n.png");
+    select(&mut m, &["g/a_n.png", "g/b_n.png"]);
+    for g in PanelGroup::ALL {
+        panel_groups::set_open(&mut m.settings, g, false);
+    }
+    let mut h = harness(m, 1280.0, 1600.0);
+    green_reach_note(&h, "Green: DirectX", "applies to 2 of 2");
+    h.state_mut().set_slot_lock(&set, n, true).unwrap();
+    assert!(h.state().plan_wait(), "premise: the lock's plan is out");
+    h.run();
+    green_reach_note(&h, "Green: DirectX", "applies to 1 of 2"); // the lock's plan still out
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    green_reach_note(&h, "Green: DirectX", "applies to 1 of 2"); // after it
+    h.state_mut().hold_plan_results = true;
+    h.state_mut()
+        .set_field("g/b_n.png", "mips.filter", json!("box"));
+    let mut full = vec![];
+    land_partial(&mut h, &mut full);
+    h.run();
+    green_reach_note(&h, "Green: DirectX", "applies to 1 of 2"); // another edit's fast plan alone
+    let m = h.state_mut();
+    m.hold_plan_results = false;
+    for x in full {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    h.run();
+    green_reach_note(&h, "Green: DirectX", "applies to 1 of 2"); // and its full plan
+}

@@ -108,7 +108,8 @@ pub const GREEN_NONE: &str = "No selected texture takes green.";
 /// A3-1, A3-4: what the bulk panel's Green row reaches. Built in `bulk_view()`'s cache, never per frame.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GreenReach {
-    /// Typed textures whose type reads `channels.green_convention` (`engine::policy::takes_green`), in order.
+    /// Typed textures in no locked slot whose type reads `channels.green_convention` (`engine::policy::takes_green`),
+    /// in order.
     pub takes: Vec<String>,
     /// (reason, count) of the other textures of `keys`, in first-seen order (the `BulkField.skipped` shape).
     pub skipped: Vec<(String, usize)>,
@@ -124,16 +125,19 @@ pub struct GreenReach {
 }
 
 /// A3-1, A3-4: `keys` split by reach: a planned job whose sub-type takes green and that is not waiting for its
-/// type (a written DirectX stays in reach).
+/// type (a written DirectX stays in reach). TPC-F-3: a texture filling a locked slot is skipped first, with the lock's
+/// reason, as `skip_of` skips it for every other bulk row.
 pub fn green_reach(m: &AppModel, keys: &[String]) -> GreenReach {
     use engine::config::GreenConvention;
     let mut r = GreenReach::default();
     let mut values: Vec<GreenConvention> = vec![];
+    let locked = locked_items(m);
     for k in keys {
-        let reason = match m.item(k) {
-            None => SKIP_NO_PLAN,
-            Some(i) if i.waiting => SKIP_UNDECIDED,
-            Some(i) => match i.job.as_ref() {
+        let reason = match (locked.get(k), m.item(k)) {
+            (Some(why), _) => why.as_str(),
+            (None, None) => SKIP_NO_PLAN,
+            (None, Some(i)) if i.waiting => SKIP_UNDECIDED,
+            (None, Some(i)) => match i.job.as_ref() {
                 None => SKIP_NO_PLAN,
                 Some(j) if j.profile.subtype == Subtype::Msn => SKIP_MSN,
                 Some(j) if !engine::policy::takes_green(j.profile.subtype) => SKIP_NOT_NORMAL,
