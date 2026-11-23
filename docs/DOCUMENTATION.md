@@ -132,7 +132,7 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
   ### Common
   - New setting `encoder.bc1_search` (`default` or `fast`), set by the texture panel's **Effort** row on BC1 and BC3.
   ```
-- **RELEASE-NOTES.md is the short version (owner, 2026-11-23).** It is what the release posts: the `nexus` job of `.github/workflows/release.yml` sends it as the Nexus Mods changelog of the version, and the `github` job makes it the body of a draft GitHub release.
+- **RELEASE-NOTES.md is the short version (owner, 2026-11-23).** It is what the release posts: the `nexus` job of `.github/workflows/release.yml` sends it as the Nexus Mods changelog of the version, and the `github` job makes it the body of the GitHub release, with the built zip attached (a draft when no release exists for the tag yet).
   - It holds one version only. The release commit replaces the whole file: `## <version>` (the tag without its `v`), then the update in bullets, then a last line `Full changelog: https://github.com/Alistra-za/Tessalith/blob/main/CHANGELOG.md`. After a release the file keeps those notes until someone starts the next draft, headed `## Unreleased`; the release jobs refuse a draft and any other version's notes.
   - The bullets paraphrase the version's Main section and its headline entries, in the author's voice: what a user gets and what they must do, not how it was built. At most twelve bullets, each a sentence or three. A command a user must run after updating stays in full.
   - `tools/doc-lint.py` checks the shape (rule `release-notes`).

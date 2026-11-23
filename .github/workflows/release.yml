@@ -91,9 +91,10 @@ jobs:
           update_mod_version: true
           changelog: ${{ steps.rel.outputs.changelog }}
 
-  # Owner 2026-11-23: every v* tag also drafts the GitHub release, with RELEASE-NOTES.md as its body and the zip and
-  # SHA256SUMS.txt attached. It stays a draft: the owner reads it and presses Publish. A release that already exists
-  # for the tag is left as it is.
+  # Owner 2026-11-23: every v* tag also puts the build on the GitHub release, with RELEASE-NOTES.md as its body and
+  # the zip and SHA256SUMS.txt attached. With no release for the tag yet it drafts one: the owner reads it and presses
+  # Publish. A release the owner already made for the tag gets the same notes and the attachments (an asset of the
+  # same name is replaced); its title and state are kept.
   github:
     needs: package
     if: startsWith(github.ref, 'refs/tags/v')
@@ -121,11 +122,17 @@ jobs:
           $zip = "dist/Tessalith-$version-win-x64.zip"
           if (-not (Test-Path $zip)) { throw "$zip is missing: the tag and the workspace version differ" }
           ./tools/release-notes.ps1 -Version $version -Out notes.md
-          gh release view $tag -R '${{ github.repository }}' *> $null
+          $repo = '${{ github.repository }}'
+          gh release view $tag -R $repo *> $null
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "::notice::A GitHub release for $tag already exists; it was left as it is."
+            # A release made by hand for this tag: give it the same notes and attach this build's zip, replacing an
+            # asset of the same name. Its title and its draft or published state stay as they are.
+            gh release edit $tag -R $repo --notes-file notes.md
+            if ($LASTEXITCODE -ne 0) { throw "gh release edit failed ($LASTEXITCODE)" }
+            gh release upload $tag -R $repo --clobber $zip dist/SHA256SUMS.txt
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed ($LASTEXITCODE)" }
             exit 0
           }
-          gh release create $tag -R '${{ github.repository }}' --draft --verify-tag --title "Tessalith $version" `
+          gh release create $tag -R $repo --draft --verify-tag --title "Tessalith $version" `
             --notes-file notes.md $zip dist/SHA256SUMS.txt
           if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)" }
