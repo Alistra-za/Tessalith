@@ -707,7 +707,7 @@ I audited the vendored ISPC TC BC6H kernel and fixed what reproduced, in patch 0
 - #5, `get_span` returned its span through an `int`: a block whose widest channel spans 204.39 UF16 units was kept out of mode 2 at Fast, because 204.8 became 204. Changes bytes.
 - #1, `block_quant` kept each texel's float error in an `int`: above 2^31 (a black texel beside one brighter than about 1344.0) it overflowed, and the overflowed value beat every honest candidate. Slow, Veryslow and VeryslowPeak turned such a block grey. Changes bytes.
 - #3, the one-region encode submitted its last refinement pass, which can be worse than its first quantisation: it submits the best now. Changes bytes at Basic and slower.
-- #2, endpoints rounded by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds a code at (q + 0.5) * 65536 / 2^bits: the code could be one too high near 0 and one too low near the top. They take the code the decoder rebuilds nearest now. Changes bytes, and carries the whole mPSNR gain below.
+- #2, endpoints rounded by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds a code at (q + 0.5) * 65536 / 2^bits: the code could be one too high near 0 and one too low near the top. They take the code the decoder rebuilds nearest now. Changes bytes, and carries most of the mPSNR gain below (+0.066 of +0.069 dB).
 - #6, `rgb_span` was declared with no elements and used with three: it has three now. No byte moves.
 - #7, `bc6h_enc_2p` could read past its 32 partitions: it clamps. No profile asks for more, so no byte moves.
 
@@ -726,7 +726,7 @@ Base to final, mean delta (+ is better) with its 95 % half-width, and images bet
 | veryslow | +0.069 ±0.017, 18/0 | +0.007 ±0.008, 12/4 | +0.004 ±0.010, 8/2 |
 | veryslow_peak | +0.069 ±0.018, 18/0 | +0.044 ±0.057, 14/2 | +0.014 ±0.026, 6/2 |
 
-- Fast and slower gain about 0.07 dB of mPSNR, every interval clear of 0. RMSLE and the peak ratio move inside their intervals.
+- Fast and slower gain about 0.07 dB of mPSNR, every interval clear of 0. The RMSLE and peak-ratio intervals include 0, except Slow RMSLE (+0.009 ±0.008, better).
 - Veryfast loses 0.003 dB on average, and 0.10 dB on `sky_sun`. My guess, not checked: Veryfast does not refine, so it submits the unrefined line endpoints, and snapping those to the nearest code lowers the endpoint error without lowering the texel error. I accepted that (owner's call, "Keep it, accept Veryfast"): every slower effort gains about 0.07 dB from the same fix.
 - No VeryslowPeak image falls below a peak ratio of 0.8 (lowest 0.934, 0.923 before). Peak mode's cost is unchanged: VeryslowPeak against Veryslow is -0.060 dB mPSNR after, -0.061 before, worst image venice_sunset (-0.696 after, -0.674 before).
 
@@ -740,7 +740,7 @@ Base to final, mean delta (+ is better) with its 95 % half-width, and images bet
 
 **SSE2 and AVX-512.** The same comparison on SSE2 and on AVX-512 agrees with AVX2 in direction at every level and metric, all means within 0.001 of AVX2 and the same single negative (Veryfast mPSNR, -0.003 ±0.002). The win and loss counts differ here and there.
 
-**Times.** Time per fix: measured on the Linux VM, see Note LM10. TIME-PLACEHOLDER: the VM run (AVX2 under Wine, base and each fix timed on the same machine) is not in yet. A loaded PC measured nothing useful, so no figure is quoted here.
+<!-- TIME-PLACEHOLDER: the follow-up writes the per-fix times here (Linux VM run, ruling BC6H-T8-1) -->
 
 ## Other findings
 

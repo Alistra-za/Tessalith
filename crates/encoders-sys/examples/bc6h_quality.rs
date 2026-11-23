@@ -10,8 +10,9 @@
 //! engine's `clamp_half` and back to half bits (alpha 1.0); the CSV column `clamped` counts channels that changed.
 //! Every level is encoded one 4-row strip per call (`bc6h_compress_rows_on`) with the strips spread over `--threads`
 //! threads (default: every available thread; later runs of a measurement chain pass the same N), decoded with
-//! `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak ratio. The metrics are ported from branch `bench` 87c5539f (`crates/bench/src/metrics.rs`, `s7b.rs`
-//! `peak`, `bc6peak.rs` `mean_ci`, `corpus.rs` `load_f16`).
+//! `bcdec_rs::bc6h_float`, and scored against the clamped input as f32: mPSNR, RMSLE and peak ratio.
+//! The metrics are ported from branch `bench` 87c5539f (`crates/bench/src/metrics.rs`, `s7b.rs` `peak`,
+//! `bc6peak.rs` `mean_ci`, `corpus.rs` `load_f16`).
 //!
 //! `compare` joins the rows of two CSVs on (set, image) and prints, per level pair (each level with itself, or
 //! `--pair a:b` for level a of the first file against level b of the second), the paired mean deltas of the 18

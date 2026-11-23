@@ -58,18 +58,18 @@ ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`,
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
 peak-preserving BC6H mode that is on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` set, a combination
 no upstream profile uses (`fast_mode` is read only when `slow_mode` is off), so the settings struct,
-`ispc_texcomp.h/.cpp` and the generated header do not change. In that mode the encoder finds each block's brightest texel and guards only highlight blocks, where that texel is at
-least 32 times the block's geometric-mean luminance; other blocks encode exactly as veryslow. In a guarded block every
-candidate is ranked by its squared error against the block, and one that decodes the brightest texel below 0.9 of its
-source luminance ranks after every candidate that keeps it. A second search then runs on a copy with every channel
-lifted to at least 2^-12 of its texel's largest channel; it is ranked against the unlifted block too, and the better of
-the two results is kept. The shim builds the
+`ispc_texcomp.h/.cpp` and the generated header do not change. In that mode the encoder finds each block's brightest
+texel and guards only highlight blocks, where that texel is at least 32 times the block's geometric-mean luminance;
+other blocks encode exactly as veryslow. In a guarded block every candidate is ranked by its squared error against the
+block, and one that decodes the brightest texel below 0.9 of its source luminance ranks after every candidate that
+keeps it. A second search then runs on a copy with every channel lifted to at least 2^-12 of its texel's largest
+channel; it is ranked against the unlifted block too, and the better of the two results is kept. The shim builds the
 profile as veryslow plus `fast_mode` (`g_bc6[5]`, `Bc6hLevel::VeryslowPeak`). The five upstream profiles encoded
 byte-identically to the pre-patch objects until patch 0004: `encoders-sys` `tests/bc6h.rs` pins their output per
-path, in three lists: `RECORDED` the AVX2 path (re-recorded from the patch 0004 objects), `RECORDED_PRE_AVX2` the SSE2
-path (the SSE4 and AVX paths of the time wrote the same bytes before patch 0004), and `RECORDED_AVX512` the AVX-512
-path, read only with the test builds' AVX2 cap lifted (`SDC_TEST_AVX512=1`). Rebuilt with `tools/regen-ispc.ps1 -Update` and
-`tools/hash-vendor.ps1`; the bc7e objects did not change and a second `regen-ispc.ps1` run matches 12/12. Why and
+path, in three lists, all re-recorded from the patch 0004 objects: `RECORDED` the AVX2 path, `RECORDED_PRE_AVX2` the
+SSE2 path (the SSE4 and AVX paths of the time wrote the same bytes before patch 0004), and `RECORDED_AVX512` the
+AVX-512 path, read only with the test builds' AVX2 cap lifted (`SDC_TEST_AVX512=1`). Rebuilt with
+`tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not change and a second `regen-ispc.ps1` run matches 12/12. Why and
 measurements: .claude/DECISIONS.md (Note FE, "BC6H peak-preserving mode") and docs/research/encoder-benchmark.md
 ("BC6H (HDR)").
 
