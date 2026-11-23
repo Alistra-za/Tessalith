@@ -2,8 +2,8 @@
 //! `SDC_BCENC_CORPUS` (read recursively, sorted by path) in 4x4 blocks and compares the bytes of both encoders per
 //! block. `SDC_BCENC_CORPUS_EVERY=n` takes every n-th file (default 1). Each format is its own test, so a run that
 //! needs only some formats names them as cargo test filters, for example
-//! `cargo test --offline --release -p bcenc --test corpus -- --ignored corpus_bc3 corpus_bc4 corpus_bc5`
-//! (a filter matches every test whose name contains it, so `corpus_bc3` also runs `corpus_bc3_equals_rgbcx_fast`).
+//! `cargo test --offline --release -p bcenc --test corpus -- --ignored corpus_bc3 corpus_bc4 corpus_bc5` (with
+//! `SDC_BCENC_CORPUS` and `SDC_BCENC_CORPUS_HASHES` set, as below, or every test prints "skipped"; a filter matches every test whose name contains it, so `corpus_bc3` also runs `corpus_bc3_equals_rgbcx_fast`).
 //! With `SDC_BCENC_CORPUS` unset a test prints "skipped" and passes. The `*_fast` tests compare `Bc1Search::Fast`
 //! with rgbcx at `BC1_FAST_LEVEL`. Every block is compared on every code path the machine has (`support/paths.rs`),
 //! through the hidden `_on` entries; a mismatch names its path.
