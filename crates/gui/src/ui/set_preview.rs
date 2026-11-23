@@ -22,6 +22,8 @@ const EMISSIVE_APPROX: &str =
 const SLSF1_EMISSIVE: u32 = 1 << 29;
 /// The width the centre pane keeps at the least.
 pub const CENTRE_MIN: f32 = 360.0;
+/// The 3D settings window's width when it has no saved rect (it can be resized narrower; egui sets no minimum).
+pub const SETTINGS_WINDOW_W: f32 = 460.0;
 /// The tallest the shape warnings above the frame get.
 const LIST_MAX: f32 = 80.0;
 
@@ -526,7 +528,10 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
         None => "TruePBR settings".to_string(),
     };
     let rect = m.settings.layout.settings_window.map_or(
-        egui::Rect::from_min_size(egui::pos2(120.0, 120.0), egui::vec2(460.0, 620.0)),
+        egui::Rect::from_min_size(
+            egui::pos2(120.0, 120.0),
+            egui::vec2(SETTINGS_WINDOW_W, 620.0),
+        ),
         |[x, y, w, h]| egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)),
     );
     let mut open = true;

@@ -453,8 +453,7 @@ fn the_settings_column_ticks_hide_columns_and_the_arrows_collapse_and_expand_the
     h.get_by_label("Textures column").click();
     h.run();
     assert!(!h.state().0.settings.textures_hidden);
-    // The Textures heading's arrow is the first ◀.
-    h.query_all_by_label("◀").next().unwrap().click();
+    h.get_by_label("Collapse Textures").click();
     h.run();
     assert!(h.state().0.settings.textures_collapsed);
     let strip = h.get_by_label("Textures");
@@ -462,6 +461,21 @@ fn the_settings_column_ticks_hide_columns_and_the_arrows_collapse_and_expand_the
     strip.click();
     h.run();
     assert!(!h.state().0.settings.textures_collapsed);
+}
+
+/// The collapse arrow's glyph is not its name (the audit in `accessible_names.rs` counts a name equal to the hover as
+/// hover-only, so the name differs from "Collapse the Textures column").
+#[test]
+fn the_collapse_arrows_have_names() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()), false);
+    h.run();
+    let arrow = h.get_by_label("Collapse Textures");
+    assert_eq!(
+        egui_kittest::kittest::NodeT::accesskit_node(&arrow).role(),
+        egui::accesskit::Role::Button
+    );
+    assert!(h.query_by_label("◀").is_none(), "the glyph is not the name");
 }
 
 #[test]

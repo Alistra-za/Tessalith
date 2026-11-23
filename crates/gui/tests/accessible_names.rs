@@ -236,8 +236,6 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
 /// Inputs named only by their hover text today: none.
 const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
 
-const COLLAPSE: &str =
-    "column-collapse small_button: the glyph is the name, the hover names the column";
 const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
 const GROUP_ROW: &str =
@@ -247,12 +245,6 @@ const SUBTYPE_ROWS: &str = "two open type rows draw the same tree with fixed lab
 /// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
 /// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
 const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
-    (
-        "textures view with filters",
-        "◀",
-        &["Button", "Button"],
-        COLLAPSE,
-    ),
     (
         "textures view with filters",
         "D",
@@ -271,14 +263,12 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["CheckBox", "DisclosureTriangle"],
         GROUP_ROW,
     ),
-    ("settings tab", "◀", &["Button", "Button"], COLLAPSE),
     (
         "settings tab",
         "D",
         &["Button", "Button", "Button"],
         CHIP,
     ),
-    ("set editor", "◀", &["Button", "Button"], COLLAPSE),
     ("set editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "set editor",
@@ -298,7 +288,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["CheckBox", "SpinButton"],
         "CS PBR's texture-set tick and PGPatcher's number box, one key label",
     ),
-    ("json editor", "◀", &["Button", "Button"], COLLAPSE),
     ("json editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "json editor",
@@ -371,7 +360,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["DisclosureTriangle", "DisclosureTriangle"],
         SUBTYPE_ROWS,
     ),
-    ("rename dialog", "◀", &["Button", "Button"], COLLAPSE),
     (
         "rename dialog",
         "⚠ 2",
@@ -392,7 +380,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         GROUP_ROW,
     ),
     // The copy dialog's own rows are named apart; these three are the Sets column behind it, as for the rename dialog.
-    ("copy json dialog", "◀", &["Button", "Button"], COLLAPSE),
     (
         "copy json dialog",
         "D",

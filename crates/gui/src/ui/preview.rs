@@ -15,7 +15,8 @@ use engine::config::Format;
 use engine::cube::layout::HCROSS;
 use std::sync::Arc;
 
-pub(crate) const SETTINGS_WIDTH: f32 = 280.0;
+/// The width of the preview's settings panel, the narrowest surface a group header is drawn on.
+pub const SETTINGS_WIDTH: f32 = 280.0;
 /// The narrowest the viewports get (A10): below it the settings collapse to a strip.
 pub const PREVIEW_MIN: f32 = 480.0;
 /// From this window width the settings start open (Note FC8).
