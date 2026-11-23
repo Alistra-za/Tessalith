@@ -55,6 +55,14 @@ pub fn target_name(t: Target) -> &'static str {
     }
 }
 
+/// A mode as the Settings Mode combo reads it: its plain name, then its `sdc.toml` name.
+pub fn target_label(t: Target) -> &'static str {
+    match t {
+        Target::Cs => "Community Shaders (cs)",
+        Target::Vanilla => "Base game (vanilla)",
+    }
+}
+
 /// The action sentence of `code`, one table for every code Problems or a banner can show (warnings, blockers and
 /// errors). Empty for the codes with none (most Info results; CFG-FILE-UNMATCHED's row words its own text, Note JI6): the
 /// caller then shows the row's or the engine's message.

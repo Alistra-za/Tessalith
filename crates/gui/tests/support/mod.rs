@@ -18,6 +18,13 @@ use std::time::{Duration, Instant};
 
 type RecordedSpecs = Arc<Mutex<Vec<PickerSpec>>>;
 
+pub fn instant_tips(ctx: &eframe::egui::Context) {
+    ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+}
+
 pub fn toml_has_key(text: &str, key: &str) -> bool {
     text.lines().any(|line| {
         line.split_once('=')

@@ -82,7 +82,7 @@ fn hdr_image() -> Vec<[u16; 4]> {
 }
 
 /// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
-/// (Note LM).
+/// (Note LO).
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -107,7 +107,7 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
 ];
 
 /// The SSE2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
-/// (Note LM). The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes before patch 0004.
+/// (Note LO). The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes before patch 0004.
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -132,7 +132,7 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
 ];
 
 /// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects built
-/// with ISPC 1.32.0 (Note LM). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+/// with ISPC 1.32.0 (Note LO). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -190,7 +190,7 @@ fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
     }
 }
 
-/// The five shipped levels encode byte-identically to the recorded objects (the patch 0004 objects, Note LM), on each
+/// The five shipped levels encode byte-identically to the recorded objects (the patch 0004 objects, Note LO), on each
 /// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). The paths differ, so each has its own hashes.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
@@ -198,7 +198,7 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 }
 
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
-/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LM).
+/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LO).
 const RECORDED_PEAK: [&str; 3] = [
     "a2b6930bf3296db9b4caeff929581d32ed18da0ea2cbe4a27805dafff1336252",
     "303e36d9d646693463545040a814a900cc45bf9506b4101d2066400d1a502a7f",
@@ -857,8 +857,9 @@ fn nearest_code_equals_the_exhaustive_search() {
 /// nearest code near both ends of the range: one too high near 0, one too low near the top.
 ///
 /// Only G and B are tested. A channel that is constant over the block gets endpoints close to the channel's mean, not
-/// exactly at it: the PCA axis is renormalised with a fast-math reciprocal square root, which can move the endpoints
-/// by several UF16 units along the varying channel and a little in the others. So R varies only to force mode 10 (its
+/// exactly at it: the PCA axis comes from an f32 covariance built from raw moments (`covar_from_stats`), whose rounding
+/// tilts the axis so it gains a small component in a constant channel (and the renormalisation with a fast-math
+/// reciprocal square root can move the endpoints by several UF16 units along R). So R varies only to force mode 10 (its
 /// span is far beyond mode 11's 7782.3 UF16 units, so Veryfast writes mode 10: 10-bit absolute endpoints), and G and B
 /// are each constant. The test holds because that mode's 10-bit step is 64 UF16 units, and every input is at least 4
 /// units from an edge between two codes, so a small shift of the endpoint cannot change the nearest code.

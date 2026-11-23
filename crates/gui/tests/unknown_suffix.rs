@@ -230,14 +230,14 @@ fn assigning_a_type_brings_the_card() {
     let node = h
         .query_all_by_role(Role::ComboBox)
         .min_by_key(|n| (n.rect().min.y - confirm_y).abs() as i64)
-        .expect("the sub-type combo");
+        .expect("the type combo");
     let combo = node.rect();
     node.click();
     h.run();
     // The popup's entry (`subtype_label`) below the combo, scrolled into the popup's view first: it starts clipped.
-    entry_below(&h, "diffuse", combo).scroll_to_me();
+    entry_below(&h, "Diffuse", combo).scroll_to_me();
     h.run();
-    entry_below(&h, "diffuse", combo).click();
+    entry_below(&h, "Diffuse", combo).click();
     h.run();
     h.get_by_label("Confirm").click();
     h.run();

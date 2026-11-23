@@ -1066,7 +1066,8 @@ fn an_external_record_chip_stays_named_at_rest() {
     h.hover_at(at);
     h.run();
     h.run();
-    h.get_by_label(RECORD_NORMAL);
+    // the record's path first, then what the slot is
+    h.get_by_label(&format!("{RECORD_NORMAL}\nPBR normal"));
     h.event(egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,

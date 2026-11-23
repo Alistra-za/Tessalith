@@ -39,8 +39,8 @@ A row you must act on has its fix as a button.
 | A blocker, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …* | None: the texture failed to plan. |
 | *Undecided: …* | The type buttons and **Acknowledge** ([below](#deciding-from-the-list)). |
-| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
-| *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
+| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Types](Texture-Types.md#types-what-each-file-becomes). <!-- D:JF3 --> |
+| *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
 | Warnings on a set | **Go to set** ([below](#go-to-set)). You can export with these warnings. They still bring up Review if you've opted to skip it on clean exports. |
 | A file's export warnings, after an export | Click the file. |
@@ -120,6 +120,8 @@ An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 After planning, Tessalith records High-confidence types and mesh-derived alpha policies in memory as `[files]` entries for `sdc.toml`. Mesh scans and GRAS grass models can supply the type. Meshes that ignore alpha can give it the `remove` policy.
 
 To check which normals can follow a shader, Tessalith reads the recorded types, file entries and slot locks once for the whole pass. <!-- D:JS5 -->
+
+Each batch adds a row in **Messages**, not in Problems or Notes, that names the files it recorded: [Messages](GUI-Guide.md#messages). <!-- D:LM7 -->
 
 - Automatic types and alpha survive Undo of your edits. They have no Undo step. An established normal following its shader gets a separate step with **Undo this change** while it is last. <!-- D:JY6 -->
 - Automatic recordings alone leave **Save** off and close, open or reload without prompting. **Save** with your edits or **Export** writes them. <!-- D:JY6 -->

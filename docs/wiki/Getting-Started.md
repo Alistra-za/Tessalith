@@ -18,7 +18,7 @@ C:\Work\IronPlate\
 
 Notice:
 
-- The game path starts at the last `textures` folder, so `ironplate.png` is `textures/pbr/armor/ironplate/ironplate.png`. Rules and sub-type detection read that path.
+- The game path starts at the last `textures` folder, so `ironplate.png` is `textures/pbr/armor/ironplate/ironplate.png`. Rules and type detection read that path.
 - The five files share the base name `ironplate`, so they're one set.
 - Under `cs` the three raw maps pack into one `ironplate_rmaos.dds` (R roughness, G metallic, B AO, A specular). What makes a set PBR is on [Texture types](Texture-Types.md#suffixes).
 - The output mirrors the input tree, with `.dds` extensions.
@@ -27,7 +27,7 @@ Notice:
 
 ### Open the folder
 
-Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet. Click **Settings…** in the header: **Mode** should read `cs`.
+Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet. Click **Settings…** in the header: **Mode** should read **Community Shaders (cs)**.
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
@@ -35,7 +35,7 @@ Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or
 
 A tile with an amber border is undecided: Tessalith won't guess what it is. The **Undecided** pill above the tiles shows only those. Click a tile, and the centre column lists its settings and where each value came from. **(auto)** means Tessalith picked it; hover it for why.
 
-Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alpha dropdown and **Confirm**, **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
+Answer what the centre column asks: a type dropdown, likely-type buttons and **Confirm**, the alpha dropdown and **Confirm**, **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
 
 ![The texture settings of a fern texture in the demo project.](../img/gui/GUI-Texture-Panel/texture-panel.png)
 

@@ -116,6 +116,36 @@ fn the_options_cover_every_weighting() {
     assert_eq!(values.iter().map(|v| json!(v)).collect::<Vec<_>>(), all);
 }
 
+/// Note LN: the dropdown lists Linear, Perceptual, then Alpha x2, x4, x8, x16, x32 and x64, in that order, and picking
+/// Alpha x64 writes `bc7_weights = "alpha64"`.
+#[test]
+fn the_dropdown_lists_the_alpha_weights_in_order_and_alpha64_writes_its_value() {
+    let labels: Vec<&str> = WEIGHTING_OPTIONS.iter().map(|o| o.1).collect();
+    assert_eq!(
+        labels,
+        [
+            "Linear",
+            "Perceptual",
+            "Alpha ×2",
+            "Alpha ×4",
+            "Alpha ×8",
+            "Alpha ×16",
+            "Alpha ×32",
+            "Alpha ×64"
+        ]
+    );
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    m.select_item(ROCK);
+    let mut h = harness(m);
+    h.run();
+    pick(&mut h, "Alpha ×64");
+    let m = h.state();
+    assert_eq!(own(m, ROCK), (None, Some(json!("alpha64"))));
+    assert_eq!(row_value(m, ROCK), json!("alpha64"));
+    assert_eq!(encode_params(m, ROCK), (false, Some(Bc7Weights::Alpha64)));
+}
+
 /// Picking each option in the settings panel, with nothing inherited: Linear clears both fields, Perceptual sets
 /// perceptual and clears the weights, a weighting clears perceptual and sets the weights.
 #[test]
@@ -300,8 +330,9 @@ fn the_bc6h_effort_dropdown_still_offers_veryslow() {
         combos[0].click();
     }
     h.run();
-    h.get_by_label("Veryslow");
+    h.get_by_label("Very slow");
     assert!(h.query_all_by_label("Slowest").count() >= 1);
+    assert!(h.query_by_label("Veryslow").is_none());
 }
 
 /// FM42: on BC1 and BC3 the BC7 weighting row is hidden and a Perceptual tick edits `encoder.perceptual`; on BC7 the

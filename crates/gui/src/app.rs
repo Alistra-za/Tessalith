@@ -185,6 +185,24 @@ impl SdcApp {
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
+        // A Used-by shape link brings Meshes forward and opens there (now or once its rows are read). A copy id is
+        // local to its store, so a link from another database than Meshes reads, or with none open, only says so in
+        // Meshes' status line (the panel keeps its links off for another database, so that is only a race).
+        // `MeshesModel::store_path` is built from `AppModel::scan_db` (`SdcApp::new`) and neither is assigned again
+        // outside tests, so plain equality cannot differ by spelling.
+        if let Some(p) = model.show_mesh.take() {
+            use crate::model::meshes::{NO_STORE_LINK, OTHER_STORE_LINK};
+            model.centre_over_meshes = false;
+            crate::ui::header::set_meshes_view(ctx, true);
+            match &m.store_path {
+                Some(s) if *s == p.store => m.show_shape(p.copy_id, p.block, p.shape),
+                Some(_) => m.status = OTHER_STORE_LINK.into(),
+                None => m.status = NO_STORE_LINK.into(),
+            }
+        }
+        // Copied after the link above, so the panel's next frame sees Meshes as the link left it.
+        model.meshes_store = m.store_path.clone();
+        model.meshes_rows_loading = m.rows_loading();
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
             model.centre_over_meshes = false;

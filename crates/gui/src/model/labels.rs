@@ -1,17 +1,183 @@
-//! A8: schema keys as readable labels. The key itself stays on hover.
+//! Display names for texture types and schema keys.
 
-/// Note FC9: a sub-type as the UI names it, from one table; the id stays on hover. The id with spaces unless the
-/// table says otherwise (`skin_rfaos` is `Skin RFAOS`).
-pub fn subtype_name(st: engine::config::Subtype) -> String {
-    use engine::config::Subtype;
-    match st {
-        Subtype::SkinRfaos => "Skin RFAOS".to_string(),
-        Subtype::SkinDetail => "Skin detail".to_string(),
-        Subtype::ProjectedNoise => "Projected noise".to_string(),
-        Subtype::DetailNormal => "Detail normal".to_string(),
-        _ => st.id().replace('_', " "),
+use super::also;
+use super::sets::{SetView, SlotKind};
+use engine::config::Subtype;
+use engine::shader::Shader;
+
+pub struct TypeInfo {
+    pub label: &'static str,
+    pub description: &'static str,
+    pub suffix: &'static str,
+}
+
+pub fn type_info(st: Subtype) -> TypeInfo {
+    use Subtype::*;
+    let (label, description, suffix) = match st {
+        Diffuse => ("Diffuse", "The colour map of an ordinary (non-PBR) material.", "none, or _d"),
+        LandscapeDiffuse => ("Landscape diffuse", "A landscape colour map; its alpha is the snow or height mask.", "none, under a landscape folder"),
+        PbrAlbedo => ("PBR albedo", "The base colour of a Community Shaders PBR material.", "none, in a PBR set"),
+        PbrEmissive => ("PBR emissive", "The glow of a PBR material; a float source brighter than white becomes HDR.", "_g, in a PBR set"),
+        Glow => ("Glow", "The glow map of an ordinary material.", "_g"),
+        PbrSubsurface => ("PBR subsurface or coat colour", "The subsurface colour of a PBR material, or its coat colour.", "_s, in a PBR set"),
+        PbrFuzz => ("PBR fuzz", "The fuzz (sheen) colour of a PBR material, as on cloth.", "_f, _fuzz, _sheen in PBR; in Advanced Skin only _f beside _fuzz or _sheen stays PBR fuzz"),
+        SubsurfaceTint => ("Subsurface tint", "The subsurface colour map the vanilla shaders read. ENB users often make it black to turn the effect off. Community Shaders ignores it unless Advanced skin is on, and Advanced skin takes Skin subsurface mask instead.", "_s"),
+        BacklightTint => ("Backlight tint", "The colour that shows when light comes from behind, as through leaves.", "_b, _bl"),
+        UiSky => ("Interface or sky", "A menu or sky image, written without mipmaps.", "none, under interface or sky"),
+        SkinAlbedo => ("Skin albedo", "The skin colour of an Advanced skin set.", "none, in an Advanced skin set"),
+        ComplexGrass => ("Complex grass", "Diffuse and normal combined in one texture, because grass has no separate normal texture in the base game. For CS and ENB complex grass.", "none (picked by hand or from the GRAS record)"),
+        Cubemap => ("Cubemap", "A six-sided reflection map.", "_e, or under textures\\cubemaps"),
+        Normal => ("Normal map", "The surface bumps of an ordinary material (tangent space).", "_n"),
+        LandscapeNormal => ("Landscape normal", "The normal map of a landscape texture.", "_n, under a landscape folder"),
+        PbrNormal => ("PBR normal", "The normal map of a PBR material. The default drops specular alpha. Pick Data on the Alpha row to keep it.", "_n, in a PBR set"),
+        DetailNormal => ("Detail normal", "A landscape set's fine detail normal.", "_detail, _detailnorm, _detail_n in a Landscape or PBR Landscape set"),
+        Msn => ("Model-space normal", "A normal map baked in the model's own space, as for vanilla skin and eyes.", "_msn"),
+        CoatNormal => ("PBR coat normal", "The normal of a PBR coat layer, with the coat roughness in alpha.", "_cnr, _crn"),
+        SkinWet => ("Skin wet", "The wetness normal of an Advanced skin set.", "_wet, in an Advanced skin set"),
+        SkinDetail => ("Skin detail", "A skin detail normal with a strength mask in alpha.", "_detail, _detailnorm, _detail_n in an Advanced skin set"),
+        Envmask => ("Environment mask", "A grey mask that sets where the cubemap shines.", "_m, _em, _envmask"),
+        Height => ("Height (parallax)", "A grey height map for parallax. White is raised.", "_p"),
+        ProjectedNoise => ("Projected noise", "A grey noise map for a landscape profile's projected detail.", "_noise"),
+        MsnSpecular => ("Model-space specular", "The grey glossiness beside a model-space normal.", "_s, beside an _msn"),
+        SkinSk => ("Skin subsurface mask", "A greyscale thickness (density) map for the subsurface of an Advanced skin set.", "_sk, in an Advanced skin set"),
+        Gray => ("Grey map", "A plain grey map you pick by hand.", "none (picked by hand)"),
+        ComplexMaterial => ("Complex material", "An _m that packs four maps for complex material: env mask in red, glossiness in green, metallic in blue and parallax height in alpha.", "_m with a varying alpha"),
+        Rmaos => ("PBR RMAOS", "A PBR packed map: roughness, metallic, AO and specular in R, G, B and A.", "_rmaos"),
+        SkinRfaos => ("Skin RFAOS", "An Advanced skin packed map: roughness, fuzz, AO and specular.", "_rfaos"),
+        Flow => ("Hair flow", "The direction hair strands run, for the CS hair shader.", "_flow"),
+        GenericTwoChannel => ("Two-channel data", "A data map that only uses red and green.", "none (picked by hand)"),
+        GenericData => ("Other data", "A data map Tessalith has no type for. Stored as it is.", "none (picked by hand)"),
+        HdrSky => ("HDR sky", "A sky image brighter than white, written as BC6H.", "none, a float source under sky"),
+    };
+    TypeInfo {
+        label,
+        description,
+        suffix,
     }
 }
+
+pub const OWN_SET_HOVER: &str =
+    "A file alone under its base name becomes a set of its own once it has a type.";
+
+pub fn type_hover(st: Subtype) -> String {
+    let info = type_info(st);
+    let name = match info.suffix.strip_prefix("none ") {
+        Some(reason) => format!("No file ending gives this type {reason}"),
+        None => format!("File name: {}", info.suffix),
+    };
+    format!("{}\n{name}\n{OWN_SET_HOVER}", info.description)
+}
+
+pub fn subtype_name(st: Subtype) -> String {
+    type_info(st).label.to_string()
+}
+
+/// What a set card's chip for `kind` is, in the words of the type table: the plain label of an ordinary set, `pbr`'s
+/// PBR names, `skin`'s Advanced skin names (the three differ for the diffuse, emissive and subsurface only, and the
+/// normal reads PBR in both). `rfaos` makes the Rmaos slot the skin recipe's pack.
+pub fn slot_type_label(kind: SlotKind, pbr: bool, skin: bool, rfaos: bool) -> &'static str {
+    match kind {
+        SlotKind::Diffuse if skin => "Skin albedo",
+        SlotKind::Diffuse if pbr => "PBR albedo",
+        SlotKind::Diffuse => "Diffuse",
+        SlotKind::Normal if pbr || skin => "PBR normal",
+        SlotKind::Normal => "Normal map",
+        SlotKind::Emissive if pbr && !skin => "PBR emissive",
+        SlotKind::Emissive => "Glow",
+        SlotKind::SkinSk => "Skin subsurface mask",
+        SlotKind::Height => "Height (parallax)",
+        SlotKind::Rmaos if rfaos => "Skin RFAOS (roughness, fuzz, AO, specular)",
+        SlotKind::Rmaos => "PBR RMAOS (roughness, metallic, AO, specular)",
+        SlotKind::Coat => "PBR coat normal",
+        SlotKind::Fuzz => "PBR fuzz",
+        SlotKind::Subsurface if pbr && !skin => "PBR subsurface or coat colour",
+        SlotKind::Subsurface => "Subsurface tint",
+        SlotKind::ProjectedNoise => "Projected noise",
+        SlotKind::DetailNormal => "Detail normal",
+        SlotKind::SkinWet => "Skin wet",
+        SlotKind::SkinDetail => "Skin detail",
+    }
+}
+
+/// `slot_type_label` for `kind` on set `v`. The resolved shader decides (an Advanced skin set takes its own column);
+/// a card with no files yet reads its saved shader; only a view with neither falls back to the member flags.
+pub fn set_slot_label(v: &SetView, kind: SlotKind) -> &'static str {
+    let document_only = v.shader.is_none() && v.key.is_empty();
+    let pbr = if v.shader.is_some() {
+        also::is_pbr_set(v)
+    } else if document_only {
+        also::document_pbr_set(v)
+    } else {
+        v.pbr
+    };
+    let saved = if document_only { v.shader_choice } else { None };
+    let skin = match (v.shader.as_ref(), saved) {
+        (Some(p), _) => p.shader == Shader::AdvancedSkin,
+        (None, Some(saved)) => saved == Shader::AdvancedSkin,
+        (None, None) => v.skin,
+    };
+    slot_type_label(kind, pbr, skin, v.rfaos)
+}
+
+/// What "(auto)" on a set's shader means, once for the shader combo's hover and the legend's "(auto)" line.
+macro_rules! auto_shader_first {
+    () => {
+        "Tessalith picked this shader from the set's files."
+    };
+}
+
+/// The first sentence of an auto-picked shader combo's hover.
+pub const AUTO_SHADER_FIRST: &str = auto_shader_first!();
+
+/// The "?" legend beside the Sets heading, one line per entry, each "{name}: {meaning}".
+pub const LEGEND: [&str; 18] = [
+    "D: Diffuse, PBR albedo or Skin albedo",
+    "N: Normal map or PBR normal",
+    "G: Glow or PBR emissive",
+    "SK: Skin subsurface mask",
+    "P: Height (parallax)",
+    "RMAOS: PBR RMAOS (roughness, metallic, AO, specular)",
+    "RFAOS: Skin RFAOS (roughness, fuzz, AO, specular)",
+    "CNR: PBR coat normal",
+    "F: PBR fuzz",
+    "S: Subsurface tint, or PBR subsurface or coat colour",
+    "NOISE: Projected noise",
+    "DETAIL: Detail normal",
+    "WET: Skin wet",
+    "DETAIL_N: Skin detail",
+    "PBR → JSON: a PBR set that writes a PGPatcher JSON entry.",
+    "unused: a helper that fills no slot of this set.",
+    concat!("(auto): ", auto_shader_first!()),
+    "Empty slots: the letters shown while you drag have no file yet.",
+];
+
+/// The Effort choice for an `Effort` id (`ultrafast` ... `max`), as the combo and the presets editor show it.
+pub fn effort_label(id: &str) -> &'static str {
+    match id {
+        "ultrafast" => "Ultra fast",
+        "veryfast" => "Very fast",
+        "fast" => "Fast",
+        "basic" => "Basic",
+        "veryslow" => "Very slow",
+        "slowest" => "Slowest",
+        "max" => "Max",
+        other => {
+            debug_assert!(false, "no label for the effort id {other:?}");
+            "Unknown effort"
+        }
+    }
+}
+
+/// The DDS tag choice "UNORM" and what it means for the game.
+pub const UNORM_LABEL: &str = "UNORM (as stored)";
+pub const UNORM_HOVER: &str = "The game reads the colours as stored. Right for everything except the colour maps of a PBR set under Community Shaders.";
+
+/// The Normal handling choice that bakes the normal's lost detail into roughness or gloss.
+pub const RENORM_BAKE_LABEL: &str = "Bake normal detail into roughness or gloss";
+pub const RENORM_BAKE_HOVER: &str = "The bake reads unit directions. Where they vary, the smaller mips gain roughness. On a plain normal in a complex material set, choosing this also reduces gloss in the smaller mips of the _m green channel.";
+
+/// Shown on Normal handling while the bake is active, beside `RENORM_BAKE_HOVER`.
+pub const VARIANCE_BAKE_HOVER: &str = "Keep as authored preserves average length in smaller XYZ tangent-space base and coat normal mips. The bake uses unit directions with either base setting.";
 
 /// Words kept upper case (compared lower case).
 const INITIALISMS: [&str; 5] = ["ao", "uv", "rgb", "sss", "f0"];
@@ -56,4 +222,46 @@ pub fn readable(key: &str) -> String {
         out.push_str(&word);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine::shader::{ShaderOrigin, ShaderPick};
+
+    fn pick(shader: Shader) -> ShaderPick {
+        ShaderPick {
+            shader,
+            provenance: ShaderOrigin::Set,
+            wanted: None,
+        }
+    }
+
+    /// The label follows the resolved shader (the answer `also::is_pbr_set` gives), the saved one on a card with no
+    /// files yet, and the member flags only when neither exists: each case below disagrees with the flags.
+    #[test]
+    fn a_chip_reads_the_resolved_shader_before_the_member_flags() {
+        let mut v = SetView::new("k".into(), "s".into(), vec![]);
+        v.shader = Some(pick(Shader::Pbr));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "PBR albedo");
+        v.pbr = true;
+        v.shader = Some(pick(Shader::Default));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "Diffuse");
+        v.shader = Some(pick(Shader::AdvancedSkin));
+        assert_eq!(set_slot_label(&v, SlotKind::Diffuse), "Skin albedo");
+        assert_eq!(set_slot_label(&v, SlotKind::Emissive), "Glow");
+        // a card with no files: the saved shader, then the flags
+        let mut doc = SetView::new(String::new(), "s".into(), vec![]);
+        doc.shader_choice = Some(Shader::PbrLandscape);
+        assert_eq!(set_slot_label(&doc, SlotKind::Normal), "PBR normal");
+        doc.pbr = true;
+        doc.shader_choice = Some(Shader::Default);
+        assert_eq!(set_slot_label(&doc, SlotKind::Diffuse), "Diffuse");
+        doc.shader_choice = None;
+        assert_eq!(set_slot_label(&doc, SlotKind::Diffuse), "PBR albedo");
+        // a keyed card the plan has not picked for yet: the flags
+        let mut keyed = SetView::new("k".into(), "s".into(), vec![]);
+        keyed.skin = true;
+        assert_eq!(set_slot_label(&keyed, SlotKind::Diffuse), "Skin albedo");
+    }
 }

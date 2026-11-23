@@ -17,7 +17,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 |---|---|---|---|
 | `IN-DUPLICATE` | blocking | Two inputs would write one output (two raw maps of one name write nothing, so they don't count), or two outputs land on one path (for example two packed outputs after a raw map moved to another set). The first keeps the path. | Exclude or rename one, or change an output path. |
 | `IN-DDS-SKIPPED` | info | A DDS input isn't re-encoded by default. | Use the source, or set `reencode = true`. |
-| `IN-PACKING-INPUT` | warning | A raw map isn't packed because its recipe is off (`packing.enabled = false`). | Enable packing, or give the file a sub-type. |
+| `IN-PACKING-INPUT` | warning | A raw map isn't packed because its recipe is off (`packing.enabled = false`). | Enable packing, or give the file a type. |
 | `IN-GREEN-UNSTATED` | info | A plain `_normal`/`_nrm`/`_norm` doesn't state its green convention; it was converted as DirectX. | Set `channels.green_convention = "opengl"` if it is an OpenGL map. |
 | `IN-DECODE` | error | The source can't be read. | Fix or re-save the file. |
 | `IN-NONFINITE` | warning | NaN or infinite samples were replaced. | Fix the source. |
@@ -37,14 +37,14 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CHAN-NOT-GRAY` | warning | A grayscale sub-type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it's reported only when that channel holds one value (an `a` pick on a source with no alpha reads 255). The message names the pick and, when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the sub-type. |
-| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. On a file already exported, the row then waits as a queued note until you export again ([Problems](GUI-Problems.md#rows-and-their-fixes)). |
+| `CHAN-NOT-GRAY` | warning | A grayscale type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it's reported only when that channel holds one value (an `a` pick on a source with no alpha reads 255). The message names the pick and, when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the type. |
+| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the type. On a file already exported, the row then waits as a queued note until you export again ([Problems](GUI-Problems.md#rows-and-their-fixes)). |
 
 ## Format and tag
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](Texture-Types.md#sub-types-what-each-file-becomes)). | Use BC7. |
+| `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](Texture-Types.md#types-what-each-file-becomes)). | Use BC7. |
 | `FMT-LANDSCAPE-BC1` | blocking | BC1 on `landscape_diffuse` destroys the snow mask. | Use BC7 or BC3. |
 | `FMT-CS-SKIN-LOADER` | blocking | Community Shaders' loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on a skin map (BC5 on `skin_detail`); any other format loads as nothing. Acknowledging it doesn't lift it. | Pick a format the loader reads. |
 | `FMT-BC1-ALPHA` | blocking | BC1 with alpha kept, without `encoder.bc1_alpha` or with `data` alpha that isn't empty ([BC1 alpha](Texture-Types.md#alpha)). | Turn on `encoder.bc1_alpha`, use BC7 or BC3, or `remove`. |
@@ -52,10 +52,10 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | `FMT-PERCEPTUAL-DATA` | error | Perceptual encoding on a data map. | Turn `encoder.perceptual` off. |
 | `FMT-HDR-SOURCE` | info | Why a `pbr_emissive` is BC6H (float source above 1.0) or BC7 sRGB. | Set `format` on the file to choose. |
 | `TAG-SRGB-VANILLA` | error | `_SRGB` under `vanilla`. | UNORM ([rule](Texture-Types.md#srgb-or-unorm)). |
-| `TAG-SRGB-NONPBR` | blocking | `_SRGB` on a non-PBR sub-type under `cs`; renders darker. | Remove the `color.tag = "srgb"` override, or set the PBR sub-type ([rule](Texture-Types.md#srgb-or-unorm)). |
+| `TAG-SRGB-NONPBR` | blocking | `_SRGB` on a non-PBR type under `cs`; renders darker. | Remove the `color.tag = "srgb"` override, or set the PBR type ([rule](Texture-Types.md#srgb-or-unorm)). |
 | `TAG-UNORM-PBR` | blocking | UNORM on PBR colour; looks washed out with linear lighting off. | Remove the `color.tag = "unorm"` override ([rule](Texture-Types.md#srgb-or-unorm)). |
 | `TAG-SRGB-LOD` | blocking | `_SRGB` under a `lod` folder; LOD shaders reject it. | UNORM. |
-| `TAG-CONTENT-MISMATCH` | warning | Content and tag disagree: linear content tagged `_SRGB`, a colour sub-type with linear content, or a roughness member with sRGB content (then not variance-baked). | Check `color.content` and `color.tag`. |
+| `TAG-CONTENT-MISMATCH` | warning | Content and tag disagree: linear content tagged `_SRGB`, a colour type with linear content, or a roughness member with sRGB content (then not variance-baked). | Check `color.content` and `color.tag`. |
 
 ## Alpha
 
@@ -69,7 +69,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback, or change the sub-type or target. |
+| `CFG-UNAVAILABLE` | blocking | The type or format isn't available under the target. | Accept the fallback, or change the type or target. |
 | `CFG-INVALID` | error | A value is outside its range or settings conflict (legacy header on BC7 or `_SRGB`, bad swizzle or filter scope). A config, preset or rule with an invalid value is refused. After layering, only the affected file fails. On `normal`, `landscape_normal` or `pbr_normal`, `mips.normal_base = "keep"` conflicts with BC5, RG8, BC4 or R8 even if you acknowledge `FMT-BC5-NORMAL`. <!-- D:LA1 --> | Fix the invalid value. For Keep, choose XYZ storage such as BC7, or set `mips.normal_base = "renormalize"`. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config.md#mipmaps) this texture can't use; it uses box. | Scope the filter to colour maps, or ignore. |
@@ -104,8 +104,8 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | `SET-BAKE-RATIO` | warning | Tessalith no longer raises it. A size difference from the `_n` does not by itself prevent the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
 | `SET-SLOT-BORROWED-UNUSED` | warning | A set borrows a slot and still has its own file for it. The file is written, but the set's PGPatcher entry or skin material uses the borrowed one. | See [Slot rows](GUI-Set-Editor.md#slot-rows) for what to change or mark as intended. |
-| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
-| `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the sub-type. |
+| `SUG-LOW-CONFIDENCE` | blocking | A type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
+| `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the type. |
 
 ## Validation
 

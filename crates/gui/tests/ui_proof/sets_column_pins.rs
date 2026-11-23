@@ -1798,7 +1798,12 @@ fn labels_sit_bottom_left_on_every_tile() {
         let shapes = crate::support::shapes(&h);
         let start = shapes
             .iter()
-            .rposition(|s| matches!(s, egui::Shape::Rect(r) if r.rect == *strip))
+            // the strip holds only the letter grid (3d-T5-1); the background is that grid and the captions under it
+            .rposition(|s| {
+                matches!(s, egui::Shape::Rect(r) if r.rect.min == strip.min
+                    && r.rect.width() == strip.width()
+                    && r.rect.height() >= strip.height())
+            })
             .expect("strip background");
         let painted = &shapes[start + 1..];
         let cells: Vec<_> = painted

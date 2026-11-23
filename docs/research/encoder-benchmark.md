@@ -644,7 +644,7 @@ Published:
 - Ludicon's 2026 chart (27 HDR images, SSIMULACRA2, values read from an image, made by a competitor): Oodle about 91.0, Spark GPU about 90.5, ISPC TC about 88.6, Basis about 87.6, the "NVIDIA" series about 85.2.
 - Unsigned BC6H (UF16) should be used for data that is never negative.
 
-Round 2 and Round 3 measured upstream ISPC TC, before patch 0004 ([what changed](#kernel-fixes-patch-0004-2026-11-22-note-lm)).
+Round 2 and Round 3 measured upstream ISPC TC, before patch 0004 ([what changed](#kernel-fixes-patch-0004-2026-11-22-note-lo)).
 
 Round 2 (4 real HDR images):
 
@@ -675,7 +675,7 @@ Round 3, n = 18, against ISPC `bc6h_veryslow`:
 
 **The mode.** `Bc6hLevel::VeryslowPeak` (ISPC TC patch 0001) changes only highlight blocks: blocks whose brightest texel is at least 32× the block's geometric-mean luminance. In those blocks it keeps that texel at 0.9 or more of its source luminance whenever some candidate can. Every other block encodes exactly as veryslow.
 
-These rows measured upstream ISPC TC plus patch 0001, before patch 0004 ([kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lm)).
+These rows measured upstream ISPC TC plus patch 0001, before patch 0004 ([kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo)).
 
 Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `.ref.npy` the Python bench used), n = 18 real images:
 
@@ -699,7 +699,7 @@ Measured with `sdc-bench bc6-peak` against the `.f16` source as float (not the `
 - **Through the Python bench (2026-10-31),** as `bc6_ispc_veryslow_peak` beside the other BC6H rows (same texconv decode, scored against `.ref.npy`), n = 18 real images against `bc6h_veryslow`: peak ratio +0.078 [±0.090] (4 up, 0 down), mPSNR −0.061 dB [±0.086], RMSLE 0.00003 worse [±0.00012] (3 images better, 6 worse). That reproduces the small, non-significant RMSLE miss above. Against NVTT Production it keeps +2.32 dB [±0.96] mPSNR (17/18) and ties on RMSLE and peak ratio. The 4 `hdr_grad` images score identically to veryslow.
 - Without the 32× contrast gate (first attempt), the guard re-encodes many ordinary blocks: mean mPSNR −0.168 dB and RMSLE +0.00023. Other effort levels do not use this mode.
 
-### Kernel fixes (patch 0004, 2026-11-22, Note LM)
+### Kernel fixes (patch 0004, 2026-11-22, Note LO)
 
 I audited the vendored ISPC TC BC6H kernel and fixed what reproduced, in patch 0004 (`crates/encoders-sys/vendor/ispctc/patches/0004-bc6h-kernel-fixes.patch`). Every BC6H row above, and the peak-mode numbers, measured upstream ISPC TC, before this patch.
 
@@ -871,7 +871,7 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 ## What Tessalith does because of this
 
 - **Correct format first.** The design ranks correct format and tag per map type first, then correct mips, then the best encoder at a practical speed ([Design overview](design-overview.md)).
-- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H** (with patches 0001, 0003 and 0004; [0004's kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lm)), vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
+- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H** (with patches 0001, 0003 and 0004; [0004's kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo)), vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
 - **bc7e at `veryslow` (level 5) is the default BC7 level.** Level 5 matches level 6 at 1.5× the speed. Level 4 is not offered, because level 3 beats it on gradients. The levels are in [`crates/engine/src/encode.rs`](../../crates/engine/src/encode.rs) and the default in [`presets/sdc-base.toml`](../../presets/sdc-base.toml). The `fast-preview` preset uses `fast`.
 - <a id="vendored-encoders-reproduce-the-bench"></a>**The vendored encoders reproduce the bench.** Spike S3 (2026-10-08) built the workspace without ISPC on the path and matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB against 50.977, largest per-image Δ 0.000000 dB over all 10 BC7 sets, 39 of 39 block payloads byte-identical) and rgbcx BC4 on `mask_real` (7 of 7 bit-exact). The Phase 0 gates (2026-10-09) added rgbcx BC1, BC3, BC4 and BC5 bit-exact (14, 25, 12 and 11 images; transparent black off on 14 of 14), ISPC BC6H `veryslow` at 51.4995 dB with 8 of 8 payloads byte-identical, and ISPC objects that regenerate byte for byte.
 - **rgbcx runs at level 18, its highest.** BC1 and the colour half of BC3 encode with rgbcx Dual, which scores NVIDIA and AMD decoder error together; there is no decoder setting (Note FM17). BC3 is never picked to save space, because it is the same size as BC7.

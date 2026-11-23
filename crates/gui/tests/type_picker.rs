@@ -55,13 +55,33 @@ fn open(h: &mut Harness<'static, State>) -> egui::Rect {
     b
 }
 
-/// Every type the cs target offers, by its label.
-fn offered_labels() -> Vec<String> {
+#[test]
+fn the_type_menu_shows_descriptions_and_finds_by_them() {
+    let mut h = bare(40.0);
+    support::instant_tips(&h.ctx); // `bare` keeps egui's tooltip delay; the per-file harness keeps the default tooltip delay
+    open(&mut h);
+    let search = h.get_by_role(egui::accesskit::Role::TextInput); // the box keeps focus on open
+    search.type_text("bumps");
+    h.run();
+    assert!(h.query_by_label("Normal map").is_some());
+    assert!(h.query_by_label("Diffuse").is_none());
+    h.get_by_label("Normal map").hover();
+    h.run();
+    assert!(h.query_by_label_contains("File name: _n").is_some());
+    // the id still finds its type (a fresh harness, so the box starts empty)
+    let mut h = bare(40.0);
+    open(&mut h);
+    h.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("envmask");
+    h.run();
+    assert!(h.query_by_label("Environment mask").is_some());
+}
+
+/// Every type the cs target offers.
+fn offered_types() -> impl Iterator<Item = Subtype> {
     Subtype::ALL
         .into_iter()
         .filter(|s| engine::policy::offered(Target::Cs, *s))
-        .map(subtype_label)
-        .collect()
 }
 
 #[test]
@@ -77,9 +97,11 @@ fn type_picker_opens_at_its_anchor() {
     let search = h.get_by_role(Role::TextInput);
     assert!(search.is_focused(), "the search box has focus on open");
     // The suggestion is the first entry, above every listed type.
-    let first = h.get_by_label("subsurface tint (suggested)").rect();
+    let first = h.get_by_label("Subsurface tint (suggested)").rect();
     assert!(first.top() > search.rect().top());
-    for l in offered_labels() {
+    assert!(support::painted_in(&h, first)
+        .contains(sdc_gui::model::labels::type_info(Subtype::SubsurfaceTint).description));
+    for l in offered_types().map(subtype_label) {
         if let Some(n) = h.query_by_label(&l) {
             assert!(n.rect().top() > first.top(), "{l} above the suggestion");
         }
@@ -87,24 +109,28 @@ fn type_picker_opens_at_its_anchor() {
     // Typing narrows the list to the entries containing the text.
     h.get_by_role(Role::TextInput).type_text("tint");
     h.run();
-    for l in offered_labels() {
+    for st in offered_types() {
+        let info = sdc_gui::model::labels::type_info(st);
+        let matches = [info.label, info.description, st.id()]
+            .iter()
+            .any(|s| s.to_lowercase().replace('_', " ").contains("tint"));
         assert_eq!(
-            h.query_by_label(&l).is_some(),
-            l.contains("tint"),
-            "{l} after typing tint"
+            h.query_by_label(info.label).is_some(),
+            matches,
+            "{st:?} after typing tint"
         );
     }
-    h.get_by_label("subsurface tint (suggested)");
+    h.get_by_label("Subsurface tint (suggested)");
     // Esc closes it, and a pick returns the type and closes it.
     h.key_press(egui::Key::Escape);
     h.run();
     assert!(h.query_by_role(Role::TextInput).is_none(), "Esc closes it");
     open(&mut h);
-    h.get_by_label("diffuse");
+    h.get_by_label("Diffuse");
     // The list scrolls: narrow it so the entry is on screen, as a user would.
     h.get_by_role(Role::TextInput).type_text("back");
     h.run();
-    h.get_by_label("backlight tint").click();
+    h.get_by_label("Backlight tint").click();
     h.run();
     assert_eq!(h.state().picked, Some(Subtype::BacklightTint));
     assert!(
@@ -134,13 +160,13 @@ fn gray_is_in_the_grayscale_group() {
         assert_eq!(*name, "Grayscale maps", "{target:?}");
         assert!(members.contains(&Subtype::Height), "{target:?}");
     }
-    assert_eq!(subtype_label(Subtype::Gray), "gray");
+    assert_eq!(subtype_label(Subtype::Gray), "Grey map");
     // The picker lists it and a pick returns it.
     let mut h = bare(10.0);
     open(&mut h);
     h.get_by_role(Role::TextInput).type_text("gray");
     h.run();
-    h.get_by_label("gray").click();
+    h.get_by_label("Grey map").click();
     h.run();
     assert_eq!(h.state().picked, Some(Subtype::Gray));
 }
@@ -173,8 +199,8 @@ fn subtype_button_is_disabled_on_a_read_only_sdc_toml() {
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run();
-    let b = h.get_by_role_and_label(Role::ComboBox, "Sub-type");
-    assert!(b.accesskit_node().is_disabled(), "Sub-type is enabled");
+    let b = h.get_by_role_and_label(Role::ComboBox, "Texture type");
+    assert!(b.accesskit_node().is_disabled(), "Type is enabled");
     b.click();
     h.run();
     h.run();
@@ -203,13 +229,13 @@ fn subtype_combo_uses_the_same_picker() {
     let before = inputs(&h);
     let combo = || {
         h.query_all_by_role(Role::ComboBox)
-            .find(|n| n.value().as_deref() == Some("diffuse"))
-            .expect("the sub-type control shows the current sub-type")
+            .find(|n| n.value().as_deref() == Some("Diffuse"))
+            .expect("the type control shows the current type")
             .rect()
     };
     let at = combo();
     h.query_all_by_role(Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("diffuse"))
+        .find(|n| n.value().as_deref() == Some("Diffuse"))
         .unwrap()
         .click();
     h.run();
@@ -228,7 +254,7 @@ fn subtype_combo_uses_the_same_picker() {
     assert!(matches!(&h.state().selection, Selection::Item(k) if k == key));
     // A pick edits the field.
     h.query_all_by_role(Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("diffuse"))
+        .find(|n| n.value().as_deref() == Some("Diffuse"))
         .unwrap()
         .click();
     h.run();
@@ -238,7 +264,7 @@ fn subtype_combo_uses_the_same_picker() {
         .unwrap()
         .type_text("tint");
     h.run();
-    h.get_by_label("subsurface tint").click();
+    h.get_by_label("Subsurface tint").click();
     h.run();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     let v = h

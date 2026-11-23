@@ -479,6 +479,13 @@ fn raw_maps_are_packing_inputs_not_errors() {
             (Code::InPackingInput, Severity::Warning)
         );
         assert!(j.suggestions.is_empty());
+        assert!(
+            j.warnings[0]
+                .message
+                .contains("set a type for it to convert it alone"),
+            "{name}: {}",
+            j.warnings[0].message
+        );
     }
     let j = resolve_img("iron_roughness.png", &[], &[], &[], &grey(), &RGB8);
     assert_eq!(
@@ -543,7 +550,7 @@ fn aliases_may_not_shadow_the_vocabulary() {
     let toml = "schema_version = 1\nid = \"old\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n[suffix_aliases]\norm = \"m\"\n";
     let e = r.add_toml(toml).unwrap_err().to_string();
     assert!(
-        e.contains("orm is a built-in packing input since Note AL"),
+        e.contains("orm is a built-in packing input (AO, roughness, metallic); remove the alias"),
         "{e}"
     );
 }

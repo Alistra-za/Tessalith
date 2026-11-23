@@ -334,6 +334,8 @@ mod truepbr_cards;
 mod txst_map;
 #[path = "../type_picker.rs"]
 mod type_picker;
+#[path = "../type_words.rs"]
+mod type_words;
 #[path = "../ui_smoke.rs"]
 mod ui_smoke;
 #[path = "../unknown_suffix.rs"]

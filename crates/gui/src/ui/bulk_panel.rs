@@ -2,14 +2,17 @@
 //! model call, made after drawing.
 use super::columns::AMBER;
 use super::settings_panel::{
-    combo, editor, field_label, own_name_after_link, Options, RowEdit, GROUPS,
+    editor, field_label, likely_buttons, offered_groups, own_name_after_link, reach_combo,
+    subtype_label, RowEdit, GROUPS,
 };
-use crate::model::bulk::{BulkField, BulkOp};
+use crate::look::Combo036 as _;
+use crate::model::bulk::{is_value_dependent, BulkField, BulkOp};
 use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
+use crate::model::labels::type_hover;
 use crate::model::sets::SlotKind;
 use crate::model::{AppModel, Selection};
 use eframe::egui;
-use engine::config::Target;
+use engine::config::{Subtype, Target};
 use engine::policy::ResolvedJob;
 use serde_json::Value;
 
@@ -20,6 +23,99 @@ enum Act {
     Kind(Option<SlotKind>),
     Edit(&'static str, RowEdit),
     Reencode(Vec<String>),
+    Decide(Vec<String>, Subtype),
+}
+
+/// "{m} other selected textures already have a type." (the card's line under Apply).
+fn typed_peers_line(m: usize) -> String {
+    if m == 1 {
+        "1 other selected texture already has a type.".into()
+    } else {
+        format!("{m} other selected textures already have a type.")
+    }
+}
+
+/// Task 10 (3d-R3): the selected textures that wait for a type, asked once for all of them. `typed` counts the
+/// selected textures that already have one. Drawn only when some selected texture asks.
+fn undecided_card(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    keys: &[String],
+    typed: usize,
+    likely: &[(Subtype, String)],
+) -> Option<Act> {
+    if keys.is_empty() {
+        return None;
+    }
+    let n = keys.len();
+    ui.add_space(4.0);
+    ui.label(if n == 1 {
+        "What kind is this texture?".to_string()
+    } else {
+        format!("What kind are these {n} textures?")
+    });
+    let id = ui.scope_id().with("bulk-undecided-type");
+    // The pick belongs to this set of textures and to a type every one of them is offered: another selection, a
+    // changed target or a changed grass context shows no pick (and Apply stays off) rather than a stale one.
+    let offered_to_all = |st: Subtype| keys.iter().all(|k| model.type_offered_to(k, st));
+    let mut chosen: Option<Subtype> = ui
+        .data(|d| d.get_temp::<(Vec<String>, Subtype)>(id))
+        .filter(|(ks, st)| ks == keys && offered_to_all(*st))
+        .map(|(_, st)| st);
+    // `complex_grass` is the one type that depends on the texture, so the shared list starts from the grass one.
+    let groups: Vec<(&str, Vec<Subtype>)> = offered_groups(model.target, true)
+        .into_iter()
+        .map(|(h, ms)| (h, ms.into_iter().filter(|st| offered_to_all(*st)).collect()))
+        .filter(|(_, ms): &(&str, Vec<Subtype>)| !ms.is_empty())
+        .collect();
+    if let Some(st) = likely_buttons(ui, likely) {
+        chosen = Some(st);
+    }
+    let name = format!("Type for {n} texture{}", if n == 1 { "" } else { "s" });
+    let shown = chosen.map_or_else(|| "Choose a type".to_string(), subtype_label);
+    ui.horizontal(|ui| {
+        let r = egui::ComboBox::from_id_salt(id)
+            .selected_text(&shown)
+            .show_ui_036(ui, |ui| {
+                for (heading, members) in &groups {
+                    ui.label(egui::RichText::new(*heading).weak());
+                    for &st in members {
+                        ui.selectable_value(&mut chosen, Some(st), subtype_label(st))
+                            .on_hover_text(type_hover(st));
+                    }
+                }
+            })
+            .response;
+        super::helper_panel::named(&r, egui::Role::ComboBox, &name, Some(&shown));
+    });
+    ui.data_mut(|d| match chosen {
+        Some(c) => {
+            d.insert_temp(id, (keys.to_vec(), c));
+        }
+        None => d.remove::<(Vec<String>, Subtype)>(id),
+    });
+    let off = model.fix_off().or_else(|| {
+        chosen
+            .is_none()
+            .then(|| "Pick a type from the list first".to_string())
+    });
+    let r = ui.add_enabled(off.is_none(), egui::Button::new(format!("Apply to {n}")));
+    let r = match &off {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    let act = (r.clicked() && off.is_none())
+        .then_some(chosen)
+        .flatten()
+        .map(|st| Act::Decide(keys.to_vec(), st));
+    if typed > 0 {
+        ui.weak(typed_peers_line(typed));
+    }
+    ui.add_space(4.0);
+    if act.is_some() {
+        ui.data_mut(|d| d.remove::<(Vec<String>, Subtype)>(id));
+    }
+    act
 }
 
 /// Note FI3: re-encode the selection's skipped DDS files (the S6 `reencode` selector, a plan-time field, so not a
@@ -99,6 +195,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         ui.weak(r);
     }
     reencode_row(ui, model, &view.reencode, &mut acts);
+    if let Some(a) = undecided_card(ui, model, &view.undecided.0, view.undecided.1, &view.likely) {
+        acts.push(a);
+    }
     // Options come from the active texture's job, else the first target's (design §3.2).
     let active = match &model.selection {
         Selection::Item(k) => model.item(k).and_then(|i| i.job.clone()),
@@ -119,12 +218,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             }
             let (target, busy) = (model.target, model.edit_busy());
             let rows = &view.rows;
-            // The Format row offers the pairs every selected texture allows (`bulk_encodings`).
-            let formats: Options = view
-                .encodings
-                .iter()
-                .map(|(e, l)| (serde_json::json!(e), l.clone()))
-                .collect();
             // Slider state is per selection, not shared by every bulk selection.
             let id = format!(
                 "bulk-{}-{}",
@@ -167,9 +260,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                                                 })
                                                 .flatten();
                                             let job = reader.unwrap_or(&job);
-                                            if let Some(e) =
-                                                row(ui, &id, job, target, busy, r, &formats)
-                                            {
+                                            if let Some(e) = row(ui, &id, job, target, busy, r) {
                                                 acts.push(Act::Edit(r.field, e));
                                             }
                                         }
@@ -184,6 +275,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         match a {
             Act::Kind(k) => model.bulk.kind = k,
             Act::Reencode(ks) => model.set_reencode(&ks, true),
+            Act::Decide(ks, st) => model.decide_many(&ks, st),
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
         }
@@ -199,7 +291,6 @@ fn row(
     target: Target,
     busy: bool,
     r: &BulkField,
-    formats: &Options,
 ) -> Option<RowEdit> {
     let mut edit = None;
     let label = field_label(ui, false, r.label, field_help(r.field));
@@ -218,14 +309,22 @@ fn row(
         let (set, control) = ui
             .add_enabled_ui(r.applies > 0, |ui| {
                 let mixed = r.value.is_none() && r.applies > 0;
-                if r.field == "format" {
-                    return combo(
-                        ui,
-                        egui::Id::unique((id, r.field)),
-                        &view.value,
-                        formats,
-                        mixed,
-                    );
+                // E14: a value-dependent row lists every option with how many textures a pick reaches.
+                // With no option to list the combo is drawn off, never the editor with one texture's locks.
+                if is_value_dependent(r.field) {
+                    return ui
+                        .add_enabled_ui(!r.option_reach.is_empty(), |ui| {
+                            reach_combo(
+                                ui,
+                                egui::Id::unique((id, r.field)),
+                                r.field,
+                                &view.value,
+                                &r.option_reach,
+                                r.total,
+                                (mixed, busy),
+                            )
+                        })
+                        .inner;
                 }
                 editor(ui, id, target, job, busy, &view, mixed)
             })
@@ -237,9 +336,21 @@ fn row(
             edit = Some(RowEdit::Set(v));
         }
     }
-    let note = ui.label(egui::RichText::new(r.note()).small().weak());
-    if !r.skipped.is_empty() {
-        note.on_hover_text(r.skipped_text());
+    // E14: the note names options and counts, so it can outgrow the column: truncated, the whole text on hover with
+    // the skip reasons under it (rule 3.4).
+    let text = r.note();
+    let note = ui.add(
+        egui::Label::new(egui::RichText::new(&text).small().weak())
+            .truncate()
+            .show_tooltip_when_elided(false),
+    );
+    if !text.is_empty() {
+        let full = if r.skipped.is_empty() {
+            text
+        } else {
+            format!("{text}\n{}", r.skipped_text())
+        };
+        note.on_hover_text(full);
     }
     if r.edited > 0
         && ui

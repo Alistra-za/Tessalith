@@ -47,7 +47,7 @@ fn subtype_values_are_checked() {
 fn an_unknown_set_subtype_keeps_its_message() {
     assert_eq!(
         parse_set("subtype=nope").unwrap_err(),
-        "--set 'subtype=nope': unknown sub-type 'nope'"
+        "--set 'subtype=nope': unknown type 'nope'"
     );
 }
 
@@ -153,7 +153,7 @@ fn reencode_is_a_boolean_file_or_batch_field_never_subtype_scoped() {
     assert!(parse_set("reencode=true").is_ok());
     assert!(parse_set("file:**/old/*.dds.reencode=true").is_ok());
     let e = parse_set("subtype:diffuse.reencode=true").unwrap_err();
-    assert!(e.contains("before the sub-type"), "{e}");
+    assert!(e.contains("before the type"), "{e}");
     let e = parse_set("reencode=yes").unwrap_err();
     assert!(e.contains("true or false"), "{e}");
     assert!(FIELD_PATHS.contains(&REENCODE_FIELD));

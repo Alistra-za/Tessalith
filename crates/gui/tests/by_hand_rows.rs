@@ -324,7 +324,7 @@ fn the_review_undecided_picker_offers_complex_grass_on_the_grass_fixture() {
     assert!(m.wait_idle(WAIT));
     assert!(
         m.subtype_question(key).is_some(),
-        "the grass file asks its sub-type: {:?} {:?}",
+        "the grass file asks its type: {:?} {:?}",
         m.item(key).map(|i| (&i.status, &i.decisions)),
         m.items.iter().map(|i| &i.key).collect::<Vec<_>>()
     );

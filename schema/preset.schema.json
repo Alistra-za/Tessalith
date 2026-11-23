@@ -75,8 +75,11 @@
       "enum": [
         "linear",
         "alpha2",
+        "alpha4",
         "alpha8",
-        "alpha16"
+        "alpha16",
+        "alpha32",
+        "alpha64"
       ],
       "type": "string"
     },

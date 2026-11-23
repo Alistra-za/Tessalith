@@ -342,7 +342,7 @@ fn the_shader_locked_sub_type_is_skipped_for_a_set_but_counted() {
     m.apply_bulk_edit(&ks, "subtype", BulkOp::Set(json!("landscape_diffuse")));
     let report = m.bulk.report.clone().unwrap();
     assert!(
-        report.starts_with("Sub-type: written to 1 of 2; locked on 1 of 2: "),
+        report.starts_with("Texture type: written to 1 of 2; locked on 1 of 2: "),
         "{report}"
     );
     assert!(report.contains("Complex grass"), "{report}");

@@ -109,7 +109,7 @@ fn checks_counts_on_textures_10k() {
     for (k, n) in &codes {
         println!("{k}: {n}");
     }
-    println!("sub-types: {subtypes:?}");
+    println!("types: {subtypes:?}");
     let qs = [0.01, 0.05, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99];
     for (k, v) in dist {
         let n = v.len();

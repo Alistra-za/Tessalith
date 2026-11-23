@@ -1265,7 +1265,7 @@ fn the_long_badge_text_is_on_the_pill_hover() {
     h.run();
     h.get_by_label_contains(BADGE_PBR_LANDSCAPE_PGP_ONLY);
     // The recipe and missing-entry lines follow on the same hover.
-    h.get_by_label_contains("rmaos: run");
+    h.get_by_label_contains("PBR RMAOS: run");
     h.get_by_label_contains("no file matches landscape/notes.txt");
 }
 
@@ -1452,7 +1452,7 @@ fn a_borrowed_chip_is_outlined_neutral_and_drags_as_a_share() {
         "one hover"
     );
     // The member's name and the borrowed line are the same hover.
-    h.get_by_label_contains("rock01_normal.png\nborrowed from landscape/rock01");
+    h.get_by_label_contains("rock01_normal.png\nborrowed from landscape/rock01\nNormal map");
     assert!(
         !drags_a_texture(&mut h, at.center()),
         "a borrowed chip carries no texture payload"
@@ -2143,11 +2143,13 @@ fn chips_describe_what_their_hover_says_and_a_typed_path_box_paints_its_lock() {
         "own chip: {own:?}"
     );
     let (cleared, value, _) = desc(&h, "arch/wall", "N, cleared");
-    assert!(
-        cleared
-            .as_deref()
-            .is_some_and(|c| c.contains("wall_n.png") && c.contains("(cleared)")),
-        "cleared chip: {cleared:?}"
+    assert_eq!(
+        cleared.as_deref().map(|c| c.lines().collect::<Vec<_>>()),
+        Some(vec![
+            "Normal _n (cleared): wall_n.png",
+            "PBR normal: cleared, so the JSON leaves this slot empty"
+        ]),
+        "cleared chip: the file first, then what the clear means"
     );
     assert!(
         value.as_deref().is_none_or(|v| !v.contains("empty")),
@@ -2156,7 +2158,7 @@ fn chips_describe_what_their_hover_says_and_a_typed_path_box_paints_its_lock() {
     let (typed, _, rect) = desc(&h, "arch/leaf", "D, path x_d.dds");
     assert_eq!(
         typed.as_deref(),
-        Some(r"Diffuse linked to textures\other\x_d.dds")
+        Some("Diffuse linked to textures\\other\\x_d.dds\nPBR albedo: x_d.dds, set by path")
     );
     assert!(
         texts_in(&h, rect).iter().any(|(t, _)| t == "🔒"),
@@ -2325,7 +2327,9 @@ fn a_typed_path_link_is_a_filled_box_named_for_its_file_with_the_slot_menu() {
     chip[0].hover();
     h.run();
     h.run();
-    h.get_by_label_contains("Diffuse linked to textures\\other\\thing_d.dds");
+    h.get_by_label_contains(
+        "Diffuse linked to textures\\other\\thing_d.dds\nPBR albedo: thing_d.dds, set by path",
+    );
     on_card_of(&h, "arch/leaf", "D, path thing_d.dds")[0].click_secondary();
     h.run();
     h.get_by_label("Slot 1: Diffuse");
@@ -2395,7 +2399,9 @@ fn a_cleared_slot_over_an_own_file_draws_one_chip_that_names_the_file() {
     on_card_of(&h, "arch/wall", "N, cleared")[0].hover();
     h.run();
     h.run();
-    h.get_by_label_contains("(cleared): wall_n.png");
+    h.get_by_label_contains(
+        "(cleared): wall_n.png\nPBR normal: cleared, so the JSON leaves this slot empty",
+    );
 }
 
 #[test]
@@ -2662,6 +2668,254 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
             && shown[1].ends_with("windhelm/whiterunstonework/wallblocklarge01"),
         "each title ends with its unique tail (Task 1's `short`): {shown:?}"
     );
+}
+
+/// The one node on `id`'s card named `letter`, or "`letter`, …" (a chip with docked helpers, Note HN).
+fn chip<'a>(h: &'a Harness<'static, AppModel>, id: &str, letter: &str) -> egui_kittest::Node<'a> {
+    let card = card_of(h, id);
+    let prefix = format!("{letter}, ");
+    let own = letter.to_string();
+    let mut found: Vec<_> = h
+        .query_all(egui_kittest::kittest::by().predicate(move |n| {
+            let l = n.label().unwrap_or_default();
+            l == own || l.starts_with(&prefix)
+        }))
+        .filter(|n| card.contains_rect(n.rect()))
+        .collect();
+    assert_eq!(found.len(), 1, "one {letter} chip on {id}");
+    found.remove(0)
+}
+
+#[test]
+fn chips_say_what_their_slot_is() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened_plain(d.path())); // v.pbr; chips D, N, RMAOS, P (P empty, 157-195)
+    h.run();
+    chip(&h, ROCK, "N").hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label_contains("PBR normal").is_some(),
+        "the filled N chip names its slot"
+    );
+    let tip = h
+        .get_by_label_contains("PBR normal")
+        .accesskit_node()
+        .value()
+        .expect("the hover text");
+    assert_eq!(
+        tip.matches("Shift+click to open its settings.").count(),
+        1,
+        "{tip:?}"
+    );
+    chip(&h, ROCK, "RMAOS").hover();
+    h.run();
+    h.run();
+    // the tooltip itself, not another label that happens to carry the words: its own lines, the hint once
+    let tip = h
+        .get_by_label_contains("PBR RMAOS (roughness, metallic, AO, specular)")
+        .accesskit_node()
+        .value()
+        .expect("the hover text");
+    assert!(
+        tip.lines()
+            .any(|l| l == "PBR RMAOS (roughness, metallic, AO, specular)")
+            && tip.matches("Shift+click to open its settings.").count() == 1,
+        "{tip:?}"
+    );
+    assert!(on_card_of(&h, ROCK, "P, empty").is_empty());
+}
+
+#[test]
+fn the_legend_lists_the_letters_and_the_pills() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened_plain(d.path()));
+    h.run();
+    h.get_by_label("What the letters mean").click();
+    h.run();
+    for line in sdc_gui::model::labels::LEGEND {
+        assert!(h.query_by_label(line).is_some(), "{line}");
+    }
+    assert!(h.query_by_label("N: Normal map or PBR normal").is_some());
+}
+
+/// 3d-T5-2: a read-only card's disabled auto combo still says where the shader came from, without the fix hint.
+#[test]
+fn a_disabled_auto_shader_combo_keeps_its_first_sentence() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.save().unwrap();
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    assert!(
+        m.sets_read_only_reason().is_some(),
+        "premise: the project file is read-only"
+    );
+    let mut h = harness(m);
+    h.run();
+    h.run();
+    let shader_name = format!("Shader for {ROCK}");
+    let combo = h.get_by_role_and_label(egui::accesskit::Role::ComboBox, &shader_name);
+    assert!(
+        combo.accesskit_node().is_disabled(),
+        "premise: the combo is disabled"
+    );
+    assert!(
+        combo
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+            .ends_with(" (auto)"),
+        "premise: the shader is automatic"
+    );
+    combo.hover();
+    h.run();
+    h.run();
+    let tip = h
+        .get_by_label_contains("Tessalith picked this shader from the set's files.")
+        .accesskit_node()
+        .value()
+        .expect("the hover text");
+    assert!(!tip.contains("Pick one yourself"), "{tip:?}");
+}
+
+#[test]
+fn the_auto_shader_and_the_no_json_pill_explain_themselves() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path())); // rock01 is auto PBR Landscape (support/mod.rs:144, Note BM)
+    h.run();
+    let shader_name = format!("Shader for {ROCK}");
+    let combo = h.get_by_role_and_label(egui::accesskit::Role::ComboBox, &shader_name);
+    assert!(
+        combo
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+            .ends_with(" (auto)"),
+        "premise: the shader is automatic"
+    );
+    combo.hover();
+    h.run();
+    h.run();
+    assert!(h
+        .query_by_label_contains("Tessalith picked this shader from the set's files.")
+        .is_some());
+    // The pill's exact text is "No JSON {n}", so an exact lookup finds the summary row's pill only.
+    let pill = format!("No JSON {}", h.state().set_counts().no_json);
+    h.get_by_label(&pill).hover();
+    h.run();
+    h.run();
+    assert!(h.query_by_label("Only sets that write no JSON").is_some());
+}
+
+#[test]
+fn a_member_in_no_chip_hovers_its_description() {
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Luma([128u8]))
+        .save(root.join("landscape/rock01_em.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(root, d.path().join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut h = harness(m);
+    h.run();
+    let tail = on_card_of(&h, ROCK, "rock01_em.png, Environment mask");
+    assert_eq!(
+        tail.len(),
+        1,
+        "premise: the env mask sits in no chip of rock01's card"
+    );
+    tail[0].hover();
+    h.run();
+    h.run();
+    assert!(h
+        .query_by_label_contains("A grey mask that sets where the cubemap shines.")
+        .is_some());
+}
+
+#[test]
+fn linked_and_cleared_chips_say_where_the_file_comes_from() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 1,
+        item: "arch/wall.png".into(),
+    });
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let leaf_view = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .clone();
+    assert!(
+        leaf_view.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family()) && !leaf_view.pbr,
+        "premise: leaf has no albedo, and its resolved shader (not the member flag) says PBR: {:?} pbr {}",
+        leaf_view.shader,
+        leaf_view.pbr
+    );
+    let d_label = "PBR albedo"; // no diffuse of its own; leaf resolves as PBR
+    let n_label = "PBR normal";
+    let linked_path = sdc_gui::model::sets::member_game_path(&m, "arch/wall.png").unwrap();
+    let mut h = harness(m);
+    h.run();
+    on_card_of(&h, "arch/leaf", "D, from set arch/wall")[0].hover();
+    h.run();
+    h.run();
+    assert!(h
+        .query_by_label_contains(&format!("{d_label}, from set arch/wall"))
+        .is_some());
+    assert!(h
+        .query_by_label_contains(&format!("linked to {linked_path}"))
+        .is_some());
+    on_card_of(&h, "arch/wall", "N, cleared")[0].hover();
+    h.run();
+    h.run();
+    assert!(h.query_by_label_contains("(cleared): wall_n.png").is_some());
+    assert!(h
+        .query_by_label_contains(&format!(
+            "{n_label}: cleared, so the JSON leaves this slot empty"
+        ))
+        .is_some());
+}
+
+#[test]
+fn a_typed_path_chip_says_it_is_set_by_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    // Keep the complete stored path on the typed-path box.
+    m.set_slot_command(
+        "arch/leaf",
+        1,
+        SlotCommand::Path(r"textures\other\x.dds".into()),
+    )
+    .unwrap();
+    let leaf_view = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .clone();
+    assert!(
+        leaf_view.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family()) && !leaf_view.pbr,
+        "premise: leaf has no albedo, and its resolved shader (not the member flag) says PBR: {:?} pbr {}",
+        leaf_view.shader,
+        leaf_view.pbr
+    );
+    let d_label = "PBR albedo";
+    let mut h = harness(m);
+    h.run();
+    on_card_of(&h, "arch/leaf", "D, path x.dds")[0].hover(); // 3b's name "{letter}, path {file}"
+    h.run();
+    h.run();
+    assert!(h
+        .query_by_label_contains(r"Diffuse linked to textures\other\x.dds")
+        .is_some());
+    assert!(h
+        .query_by_label_contains(&format!("{d_label}: x.dds, set by path"))
+        .is_some());
 }
 
 // ---- Edit match... (Note LJ2) ----

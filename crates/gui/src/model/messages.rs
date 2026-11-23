@@ -38,6 +38,61 @@ pub struct Entry {
     pub time: String,
     pub severity: Severity,
     pub text: String,
+    /// A button the row draws beside its text.
+    pub action: Option<EntryAction>,
+}
+
+/// What a log row's button does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryAction {
+    /// Show: selects the set card `id` (a root-relative card ID, including a document-only card) of the project opened
+    /// from `root`. It matches only while that project is open; the card is looked up in the current list at the click.
+    ShowSet {
+        root: std::path::PathBuf,
+        id: String,
+    },
+}
+
+impl super::AppModel {
+    /// The card a row's Show names, in the current list; `None` when another project is open or the card went.
+    pub fn logged_set_target(&self, action: &EntryAction) -> Option<super::SetTarget> {
+        self.logged_set_in(&super::sets::views(self), action)
+            .map(|(_, target)| target)
+    }
+
+    /// [`Self::logged_set_target`] over a list the caller already holds (`sets::views` is cached by revision, but a
+    /// row per frame should not rebuild the `Arc` each), with the card's index in it.
+    pub fn logged_set_in(
+        &self,
+        views: &[super::sets::SetView],
+        action: &EntryAction,
+    ) -> Option<(usize, super::SetTarget)> {
+        let EntryAction::ShowSet { root, id } = action;
+        if self.root.as_ref() != Some(root) {
+            return None;
+        }
+        let i = views
+            .iter()
+            .position(|v| engine::sets::same_id(&v.id, id))?;
+        Some((i, super::SetTarget::view(&views[i])))
+    }
+
+    /// A row's Show: leaves the Meshes overlay, selects the card and asks the Sets column to reveal it (it opens a
+    /// folded group of the card, `sets_column::open_groups_of`), clearing a Sets filter that hides it. False when the
+    /// card is no longer listed.
+    pub fn show_logged_set(&mut self, action: &EntryAction) -> bool {
+        let views = super::sets::views(self);
+        let Some((index, target)) = self.logged_set_in(&views, action) else {
+            return false;
+        };
+        if !self.visible_sets().contains(&index) {
+            self.clear_sets_filter();
+        }
+        self.centre_over_meshes = false;
+        self.go_to_target(target.clone(), None);
+        self.nav.reveal_set = Some(target);
+        true
+    }
 }
 
 /// What a toast's button does (Note FB5): the toast draws it as `Undo`.
@@ -94,10 +149,20 @@ impl Default for Messages {
 impl Messages {
     /// Only the log (a status-line note: the line itself stays).
     pub fn log(&mut self, severity: Severity, text: impl Into<String>) {
+        self.push(severity, text.into(), None);
+    }
+
+    /// [`Self::log`] with a button on the row.
+    pub fn log_with(&mut self, severity: Severity, text: impl Into<String>, action: EntryAction) {
+        self.push(severity, text.into(), Some(action));
+    }
+
+    fn push(&mut self, severity: Severity, text: String, action: Option<EntryAction>) {
         self.log.push_back(Entry {
             time: (self.clock)(),
             severity,
-            text: text.into(),
+            text,
+            action,
         });
         if self.log.len() > LOG_CAP {
             self.log.pop_front();

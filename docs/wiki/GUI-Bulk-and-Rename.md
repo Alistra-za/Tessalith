@@ -14,6 +14,22 @@ With two or more textures selected, the centre shows their settings in one panel
 
 Every bulk edit is one undo step and one plan. A read-only `sdc.toml` takes none. When the selected textures' formats read different Effort keys ([Effort](GUI-Texture-Panel.md#effort)), the Effort row reads "Formats differ: edit one format at a time"; a texture whose format has no search setting doesn't count, and the edit skips it. <!-- D:JI4 -->
 
+### Choosing a type for the undecided ones
+
+When some of the selected textures wait for a type, a card comes first: **What kind are these {n} textures?** (**What kind is this texture?** for one). It asks only about the textures you selected, whether or not they are in the current Review run. <!-- D:LM8 -->
+
+1. Click a likely-type button, or open **Type for {n} textures**, which starts on **Choose a type**. The buttons come from the same sources as a single texture's ([where they come from](GUI-Texture-Panel.md#picking-the-type)), pooled over the selection. Here a button only fills the dropdown and writes nothing; on a single texture it sets the type and moves on. The dropdown lists only types every one of those textures is offered, so no texture is skipped. <!-- D:LM8,LM9 -->
+2. Click **Apply to {n}**. Every texture on the card gets the type as one undo step and one plan.
+
+Under **Apply** a line counts the selected textures that already have a type ("{m} other selected textures already have a type."); the card leaves them alone. **Apply** is off with "Pick a type from the list first" until you pick, and while a plan runs or `sdc.toml` is read-only. It reads your selection again at the click, so a texture that decided meanwhile is not touched. <!-- D:LM8 -->
+
+### What an edit reaches
+
+A row that writes the same value to every texture says how many of the selected textures it reaches: "applies to {k} of {n}", also when k is n. Hover it for why the others are skipped. <!-- D:LM11 -->
+
+- **Rows with options that differ in reach:** the mip filter, BC7 weighting, Format and DDS tag list every option as "{option} ({k} of {n})", counting the textures a write of that value reaches. A texture that already holds the value counts. An option that reaches none is greyed ("None of the selected textures can take this"), and while an edit is running every other option is greyed too ("Wait for the plan to finish"). A read-only `sdc.toml` greys every row, and the panel says why. The row's note groups options of equal reach, widest first, two groups at most, then "others vary". <!-- D:LM11 -->
+- **A packed output** is a tile of its own, so Ctrl+A selects it, and an unlocked setting such as mip levels is written to the output's own entry. A source that feeds an output but has no job of its own is skipped. Hover either tile: the output says what it is made from, the source says "Packed into {output}: changing this file changes {output}." and, for one with no job, that bulk edits skip it. <!-- D:LM16 -->
+
 ## The right-click menu
 
 Right-clicking a selected tile or set keeps the selection; right-clicking another entry selects it alone.
