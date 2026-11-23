@@ -1585,6 +1585,9 @@ fn the_caches_follow_the_drawn_key() {
         h.query_all_by_label(&problem)
             .any(|n| n.accesskit_node().role() == Role::Label)
     };
+    // The cube's problem forces Mipmaps open (Task 5); a closed header is where the summary shows, so close it.
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run_steps(10);
     assert!(
         label(&h).ends_with("None (base level only)"),
         "the cube's summary: {}",
@@ -1916,6 +1919,7 @@ fn the_mipmaps_group_draws_the_rows_that_are_present() {
                         surface: Surface::Centre,
                         groups,
                         forced: &forced,
+                        problem_groups: &forced,
                         summaries: &[],
                     };
                     let mut acts = vec![];
@@ -1953,4 +1957,233 @@ fn the_more_button_names_the_selected_items_set_or_the_drawn_items_set_key() {
     assert_ne!(leaf_set, view.key, "premise: another set");
     assert_eq!(problems_target(&m, leaf), Some(SetTarget::Key(leaf_set)));
     assert_eq!(problems_target(&m, "no/such.png"), None);
+}
+
+// Task 5: a problem opens its group once per selection.
+
+use sdc_gui::model::Selection;
+
+/// `cube_model`'s cube with `mips.levels = none`: raises CUBE-NO-MIPS on Mipmaps. Selected.
+fn cube_without_mips(dir: &std::path::Path) -> (AppModel, String) {
+    let mut m = cube_model(dir, CUBE);
+    m.set_field(CUBE, "mips.levels", json!("none"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    (m, CUBE.to_string())
+}
+
+fn closed_mipmaps(dir: &std::path::Path) -> (Harness<'static, AppModel>, String) {
+    let (mut m, key) = cube_without_mips(dir);
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.select_item(&key);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    (h, key)
+}
+
+#[test]
+fn selecting_a_texture_with_a_problem_opens_its_group() {
+    let d = tempfile::tempdir().unwrap();
+    let (h, _) = closed_mipmaps(d.path());
+    let n = h.get_by_label_contains("Mipmaps, expanded");
+    assert!(n
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .contains(", has a problem"));
+    assert_eq!(
+        h.state().settings.texture_groups.get("mipmaps"),
+        Some(&false),
+        "nothing saved"
+    );
+}
+
+#[test]
+fn the_forced_open_ends_with_the_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = closed_mipmaps(d.path());
+    h.state_mut()
+        .decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.state_mut().select_item(FLAT);
+    h.run();
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+}
+
+#[test]
+fn closing_a_forced_group_keeps_it_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = closed_mipmaps(d.path());
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run_steps(10);
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+}
+
+#[test]
+fn a_replan_does_not_reopen_a_group_the_user_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _) = closed_mipmaps(d.path());
+    h.get_by_label_contains("Mipmaps, expanded").click();
+    h.run();
+    h.state_mut().replan();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    assert!(h.query_by_label_contains("Mipmaps, collapsed").is_some());
+}
+
+#[test]
+fn an_undo_does_not_open_a_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
+    set(&mut m, &[("resize", json!("half"))]);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.state_mut().undo();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    h.state_mut().redo();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    assert!(
+        h.query_by_label_contains("Size, collapsed").is_some(),
+        "only a click, a problem or a Go to opens a group"
+    );
+}
+
+#[test]
+fn a_late_problem_shows_its_dot_without_opening() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = (cube_model(d.path(), CUBE), CUBE.to_string()); // no problem yet
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.select_item(&key);
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run(); // the latch fills here, empty
+    h.state_mut().set_field(&key, "mips.levels", json!("none"));
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(5);
+    let n = h.get_by_label_contains("Mipmaps, collapsed");
+    assert!(n
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .contains(", has a problem"));
+}
+
+#[test]
+fn a_note_does_not_open_a_group_or_draw_a_dot() {
+    // resize = half raises DIM-RESIZED, an Info code, so `is_note()` is true under 3a
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
+    // The floor keeps a small source from being halved, so lower it for the fixture's 64 px rock.
+    set(
+        &mut m,
+        &[("resize", json!("half")), ("resize_floor", json!(8))],
+    );
+    assert!(
+        m.item_messages(KEY)
+            .iter()
+            .any(|w| w.code == Code::DimResized),
+        "the fixture still raises its Note"
+    );
+    let mut h = harness(m, 1280.0, 800.0);
+    h.run();
+    let label = h
+        .get_by_label_contains("Size, ")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_string();
+    assert!(
+        label.contains("Size, collapsed") && !label.contains("has a problem"),
+        "{label}"
+    );
+}
+
+#[test]
+fn two_surfaces_on_two_items_do_not_reopen_a_closed_group() {
+    // R2-8: the centre draws the selected cube, the strip draws FLAT in the same frame. A latch keyed on the last
+    // drawn key would flip every frame and reopen Mipmaps; one keyed on the selection does not.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, key) = cube_without_mips(d.path());
+    panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, false);
+    m.decide(FLAT, Answer::Subtype(engine::config::Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(&key);
+    let mut h = Harness::builder()
+        .with_context_setup(install_fonts)
+        .with_size(egui::vec2(1280.0, 2400.0)) // tall: no scroll area here, so every header is on screen
+        .build_ui_state(
+            |ui, m: &mut AppModel| {
+                ui.columns(2, |c| {
+                    // Two panels of the real app sit in separate panels; here each column gets its own id scope.
+                    c[0].push_id("centre", |ui| {
+                        sdc_gui::ui::settings_panel::draw(ui, m, CUBE, Surface::Centre)
+                    });
+                    c[1].push_id("strip", |ui| {
+                        sdc_gui::ui::settings_panel::draw(ui, m, FLAT, Surface::Strip)
+                    });
+                });
+            },
+            m,
+        );
+    h.run();
+    let left = |h: &Harness<'static, AppModel>| {
+        h.query_all_by_label_contains("Mipmaps, ")
+            .filter(|n| n.rect().center().x < 640.0)
+            .map(|n| n.accesskit_node().label().unwrap().to_string())
+            .next()
+            .unwrap()
+    };
+    assert!(
+        left(&h).starts_with("Mipmaps, expanded"),
+        "the problem opened the cube's group"
+    );
+    h.query_all_by_label_contains("Mipmaps, expanded")
+        .find(|n| n.rect().center().x < 640.0)
+        .unwrap()
+        .click();
+    h.run_steps(10);
+    assert!(
+        left(&h).starts_with("Mipmaps, collapsed"),
+        "closed and stays closed while two items are drawn"
+    );
+}
+
+#[test]
+fn every_mapped_code_points_at_a_panel_field_and_is_a_problem() {
+    for (code, f) in panel_groups::FIX_FIELDS {
+        assert!(
+            panel_groups::panel_group(f).is_some() || panel_groups::FIRST_SCREEN.contains(f),
+            "{code}"
+        );
+        let c = Code::parse(code).unwrap();
+        assert_eq!(
+            sdc_gui::model::code_text::row_class(c),
+            sdc_gui::model::code_text::RowClass::Problem,
+            "{code}"
+        );
+        assert_eq!(panel_groups::fix_field(code), Some(*f), "{code}");
+    }
+    assert_eq!(
+        panel_groups::fix_field("DIM-RESIZED"),
+        None,
+        "a Note maps to nothing"
+    );
+}
+
+#[test]
+fn the_sources_header_honours_a_forced_open() {
+    // Every group a task can open goes through `group_open`: Sources is drawn by hand after the rows.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock(d.path());
+    m.panel_forced = sdc_gui::model::ForcedOpen {
+        item: KEY.into(),
+        filled: true,
+        groups: [PanelGroup::Sources].into(),
+    };
+    assert!(matches!(&m.selection, Selection::Item(k) if k == KEY));
+    let h = harness(m, 1280.0, 800.0);
+    assert!(h
+        .query_by_label_contains("Where these settings come from, expanded")
+        .is_some());
 }

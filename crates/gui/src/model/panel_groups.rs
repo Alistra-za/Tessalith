@@ -12,7 +12,7 @@ use crate::ui::settings_panel::option_label;
 use engine::config::{Profile, Subtype, Target};
 use engine::policy::ResolvedJob;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PanelGroup {
@@ -291,6 +291,49 @@ pub fn is_open_in(groups: &BTreeMap<String, bool>, g: PanelGroup) -> bool {
 /// or marked as intended) and not a code Plan 3a classes as a Note.
 pub fn is_panel_problem(p: &Problem) -> bool {
     !p.is_note() && p.code.is_none_or(|c| row_class(c) == RowClass::Problem)
+}
+
+/// The panel field a problem code is about, `(code, field)`: the row a problem's group opens on. A code Plan 3a classes
+/// as a Note is not here (it never opens a group), and SET-BAKE-RATIO is never raised (Note HD2).
+pub const FIX_FIELDS: &[(&str, &str)] = &[
+    ("LOSS-ALPHA-DATA", "format"),
+    ("FMT-BC1-ALPHA", "format"),
+    ("FMT-RGB8-ALPHA", "format"),
+    ("FMT-BC5-NORMAL", "format"),
+    ("FMT-LANDSCAPE-BC1", "format"),
+    ("FMT-CS-SKIN-LOADER", "format"),
+    ("ALPHA-EXACT-OFF-M", "alpha.exact_opaque"),
+    ("ALPHA-PARALLAX-NO-ALPHA", "alpha.parallax"),
+    ("ALPHA-BC1-ONE-BIT", "encoder.bc1_alpha"),
+    ("VAL-COVERAGE", "mips.coverage"),
+    ("VAL-ALPHA-GUARANTEE", "alpha.policy"),
+    ("TAG-SRGB-VANILLA", "color.tag"),
+    ("TAG-SRGB-NONPBR", "color.tag"),
+    ("TAG-UNORM-PBR", "color.tag"),
+    ("TAG-SRGB-LOD", "color.tag"),
+    ("TAG-CONTENT-MISMATCH", "color.content"),
+    ("FMT-PERCEPTUAL-DATA", "encoder.perceptual"),
+    ("VAL-MIP-ERROR", "mips.filter"),
+    ("DIM-TOO-LARGE", "resize"),
+    ("CUBE-NO-MIPS", "mips.levels"),
+    ("CUBE-FACES", "cubemap.layout"),
+    ("VAL-HEADER", "header"),
+];
+
+/// The field `code` points at, from [`FIX_FIELDS`].
+pub fn fix_field(code: &str) -> Option<&'static str> {
+    FIX_FIELDS.iter().find(|(c, _)| *c == code).map(|(_, f)| *f)
+}
+
+/// The groups holding a field a problem row's code points at. `rows` are already filtered by [`is_panel_problem`]. A
+/// first-screen field (Format) is in no group. Allocates when a group is found, so the panel builds it once per list
+/// change and keeps it (`texture_problems`), never per frame.
+pub fn groups_with_problems(rows: &[Problem]) -> BTreeSet<PanelGroup> {
+    rows.iter()
+        .filter_map(|p| p.code)
+        .filter_map(|c| fix_field(c.as_str()))
+        .filter_map(panel_group)
+        .collect()
 }
 
 pub fn set_open(settings: &mut GuiSettings, g: PanelGroup, open: bool) {

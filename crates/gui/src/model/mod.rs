@@ -208,6 +208,16 @@ pub enum Selection {
     SetId(String),
 }
 
+/// The groups of the texture panel held open for `item`: by a problem it has (filled once per selection) or by a Go to.
+/// `settings_panel::draw` resets and fills it; `Action::SetGroupOpen(g, false)` takes a group out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForcedOpen {
+    pub item: String,
+    /// The problems' groups were added: the fill runs once per selection.
+    pub filled: bool,
+    pub groups: BTreeSet<panel_groups::PanelGroup>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SetTarget {
     Key(String),
@@ -1003,6 +1013,8 @@ pub struct AppModel {
     pub cs_pbr: cs_pbr::CsPbrScan,
     /// Keyboard navigation, the shortcut sheet and the command palette (items 5 and 19).
     pub nav: nav::Nav,
+    /// The texture panel's groups a problem (or a Go to) holds open for the selected item; never saved.
+    pub panel_forced: ForcedOpen,
     /// Explorer requests the app has not started yet (Task 5, `model::shell`).
     pub shell: Vec<shell::ShellRequest>,
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
@@ -1424,6 +1436,7 @@ impl AppModel {
             close_ready: false,
             cs_pbr: Default::default(),
             nav: Default::default(),
+            panel_forced: ForcedOpen::default(),
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
