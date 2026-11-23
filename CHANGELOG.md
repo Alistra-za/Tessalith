@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The texture panel opens on the name, type, output format and size, the meshes that use it, and its problems. Other settings sit in groups that start closed, and Tessalith remembers the ones you open, across textures and launches; each closed group says what it holds and marks the ones you changed. Problems' **Go to** opens the group at the setting.
+- New **Green** row on the bulk panel. With several textures selected, **Treat as OpenGL (flip green)** or **Treat as DirectX** sets the green convention of every selected normal map at once, as one undo step. Model-space normals, textures still waiting for their type, and other textures are left as they are.
+
 ## 3.1.0
 
 ### Main
