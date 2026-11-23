@@ -15,9 +15,9 @@
 
 use super::minmax;
 
-/// The tables of one block, on the stack of that block's search.
+/// The tables of one block, on the stack of that block's search; a solid block shares [`EMPTY`].
 pub(crate) struct Bound {
-    /// The window, both ends included; `lo > hi` for [`Bound::empty`].
+    /// The window, both ends included; `lo > hi` for [`Bound::empty`] and [`EMPTY`].
     lo: u8,
     hi: u8,
     a: [u32; 256],
@@ -25,6 +25,9 @@ pub(crate) struct Bound {
     c: [u32; 256],
     d: [u32; 256],
 }
+
+/// The bound of a solid block, shared by every search; `lb` is 0 for every pair.
+pub(crate) static EMPTY: Bound = Bound::empty();
 
 impl Bound {
     /// Exact tables over `[mn - pad, mx + pad]` clamped to 0..=255, for any block, solid ones included. `pad` is the
@@ -41,7 +44,7 @@ impl Bound {
     }
 
     /// A bound that never prunes on its own: `lb` is 0 for every pair.
-    pub(crate) fn empty() -> Bound {
+    pub(crate) const fn empty() -> Bound {
         Bound {
             lo: 1,
             hi: 0,
@@ -264,6 +267,11 @@ mod tests {
         let above = 15 + 21 * 21;
         assert_eq!(t.lb(84, 99), above);
         assert_eq!(t.lb(99, 84), above);
+        for e0 in 0..=255u8 {
+            for e1 in 0..=255u8 {
+                assert_eq!(EMPTY.lb(e0, e1), 0, "({e0}, {e1})");
+            }
+        }
         let e = Bound::empty();
         for (e0, e1) in [
             (0, 0),

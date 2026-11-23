@@ -3,10 +3,10 @@
 | Path | Upstream | Commit | Licence |
 |---|---|---|---|
 | bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
-| ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch and patches/0003-bc6h-only.patch; ispc_texcomp.cpp with patch 0003) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patches 0001, 0003 | MIT (kernel.ispc and ispc_texcomp.cpp modified; change notices at the top) |
+| ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch, patches/0003-bc6h-only.patch and patches/0004-bc6h-kernel-fixes.patch; ispc_texcomp.cpp with patch 0003) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patches 0001, 0003, 0004 | MIT (kernel.ispc and ispc_texcomp.cpp modified; change notices at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch, patches/0005-bc7e-fixes.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001, 0002 and 0005 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002, 0005 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001, 0002 and 0005, rebuilt on Windows 2026-10-18, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, rebuilt 2026-11-23 with patch 0005): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math --opt=disable-assertions`; `bc7e_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | Apache-2.0 |
-| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patches 0001 and 0003, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, trimmed to BC6H 2026-11-14 (patch 0003)): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math -DSDC_BC6H_ONLY`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
+| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patches 0001 and 0003, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, trimmed to BC6H 2026-11-14 (patch 0003), rebuilt 2026-11-22 with patch 0004): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math -DSDC_BC6H_ONLY`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
 
 All objects are produced by `tools/regen-ispc.ps1` for the three ISPC targets, with two compilers: ISPC 1.31.0
 (`-Ispc`) builds every file except the two `_avx512skx` objects, which ISPC 1.32.0 (`-Ispc512`) builds because it
@@ -61,36 +61,72 @@ change follows. S1: `handle_alpha_block_mode4` writes the end state of an alpha 
 state its passes reach) without running them; BC7 bytes unchanged: every `level_identity` hash, `identity.json` and every
 measured image's hash on three paths equal.
 
-ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes `ispctc/kernel.ispc`
-(`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a peak-preserving BC6H mode that is
-on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` set, a combination no upstream profile uses (`fast_mode`
-is read only when `slow_mode` is off), so the settings struct, `ispc_texcomp.h/.cpp` and the generated header do not change.
-In that mode the encoder finds each block's brightest texel and guards only highlight blocks, where that texel is at
-least 32 times the block's geometric-mean luminance; other blocks encode exactly as veryslow. In a guarded block every
-candidate is ranked by its squared error against the block, and one that decodes the brightest texel below 0.9 of its
-source luminance ranks after every candidate that keeps it. A second search then runs on a copy with every channel
-lifted to at least 2^-12 of its texel's largest channel; it is ranked against the unlifted block too, and the better of
-the two results is kept. The shim builds the
-profile as veryslow plus `fast_mode` (`g_bc6[5]`, `Bc6hLevel::VeryslowPeak`). The five upstream profiles encode
-byte-identically to the pre-patch objects: `encoders-sys` `tests/bc6h.rs` pins their output per path, in three lists:
-`RECORDED` the AVX2 path (recorded from the pre-patch objects), `RECORDED_PRE_AVX2` the SSE2 path (the SSE4 and AVX paths of
-the time wrote the same bytes), and `RECORDED_AVX512` the AVX-512 path, read only with the test builds' AVX2 cap
-lifted (`SDC_TEST_AVX512=1`). Rebuilt with `tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not
-change and a second `regen-ispc.ps1` run matches 12/12. Why and measurements: .claude/DECISIONS.md (Note FE, "BC6H
-peak-preserving mode") and docs/research/encoder-benchmark.md ("BC6H (HDR)").
+ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
+`ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
+peak-preserving BC6H mode that is on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` set, a combination
+no upstream profile uses (`fast_mode` is read only when `slow_mode` is off), so the settings struct,
+`ispc_texcomp.h/.cpp` and the generated header do not change. In that mode the encoder finds each block's brightest
+texel and guards only highlight blocks, where that texel is at least 32 times the block's geometric-mean luminance;
+other blocks encode exactly as veryslow. In a guarded block every candidate is ranked by its squared error against the
+block, and one that decodes the brightest texel below 0.9 of its source luminance ranks after every candidate that
+keeps it. A second search then runs on a copy with every channel lifted to at least 2^-12 of its texel's largest
+channel; it is ranked against the unlifted block too, and the better of the two results is kept. The shim builds the
+profile as veryslow plus `fast_mode` (`g_bc6[5]`, `Bc6hLevel::VeryslowPeak`). The five upstream profiles encoded
+byte-identically to the pre-patch objects until patch 0004: `encoders-sys` `tests/bc6h.rs` pins their output per
+path, in three lists, all re-recorded from the patch 0004 objects: `RECORDED` the AVX2 path, `RECORDED_PRE_AVX2` the
+SSE2 path (the SSE4 and AVX paths of the time wrote the same bytes before patch 0004), and `RECORDED_AVX512` the
+AVX-512 path, read only with the test builds' AVX2 cap lifted (`SDC_TEST_AVX512=1`). Rebuilt with
+`tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not change and a second `regen-ispc.ps1` run matches 12/12. Why and
+measurements: .claude/DECISIONS.md (Note FE, "BC6H peak-preserving mode") and docs/research/encoder-benchmark.md
+("BC6H (HDR)").
 
 ISPC TC patch 0003 "BC6H only" (`ispctc/patches/0003-bc6h-only.patch`, 2026-11-14) applies on top of patch 0001. It is
-numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 is the next number not used anywhere under `vendor/`. It
-puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use in
-`ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is moved
-or edited. Without the define the source behaves as upstream plus patch 0001. `tools/regen-ispc.ps1` passes
-`-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and `build.rs` defines it for the C++ build. BC6H bytes
-were checked equal on every path (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one
-synthetic 64x64 HDR image, and 18 Poly Haven HDR files (1024x512) at all six levels. Object sizes before and after
+numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 is the next number not used anywhere
+under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use
+in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
+moved or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (the BC7 kernels call the
+same `block_quant`, so 0004's fix #1 would also reach them there; `channel_opt_quant` keeps its own `int best_err`, as
+upstream). `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and
+`build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal on every path
+(SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one synthetic 64x64 HDR image, and 18
+Poly Haven HDR files (1024x512) at all six levels. Object sizes before and after
 (KB of 1,024 bytes): `kernel.obj` 4.9 to 2.0, `kernel_sse2.obj` 349.8 to 156.5, `kernel_avx2.obj` 326.8 to 145.1,
 `kernel_avx512skx.obj` 241.3 to 93.2. The file's own `clamp` must stay unguarded (guarded, ISPC's standard-library
 `clamp` takes its place): only the regeneration check (10 MATCH) and the real-file hashes catch that, not the synthetic
 pins (Note JB5).
+
+ISPC TC patch 0004 "BC6H kernel fixes" (`ispctc/patches/0004-bc6h-kernel-fixes.patch`, 2026-11-22) applies on top of
+patches 0001 and 0003. It is produced with
+`git diff --output=<patch> <base> -- crates/encoders-sys/vendor/ispctc/kernel.ispc` against the post-0003 kernel at
+`fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated whole, never edited by hand), and it
+is built with both compilers as before (Note LO1). Fix #6: `bc6h_bounds` declared
+`float rgb_span[0]` and wrote and read three elements; it is now `rgb_span[3]`. ISPC 1.31.0 printed no diagnostic for
+it. BC6H bytes unchanged: every pin and every measured image hash equal (Note LO2). Fix #7: `bc6h_enc_2p` clamps the
+partition count to the 32 entries of `part_list`; no profile in Tessalith asks for more than 32, so it is unreachable
+here and guards other callers. BC6H bytes unchanged (Note LO3). Fix #5: `get_span` returned a float through an `int`,
+which truncated mode 2's 204.8 to 204, so a block whose widest channel spans 99 half codes (204.39 UF16 units) was kept
+out of mode 2 at Fast and Basic; it now returns the float span. Proof test:
+`mode_2_takes_a_span_inside_its_fractional_limit`. Fix #5 changes BC6H bytes (Note LO4). Fix #1:
+`block_quant` stored each texel's float error in an `int`, which overflows above 2^31 (a black
+texel beside one brighter than about 1344.0), and the overflowed value beat every honest candidate;
+it now keeps the float. Proof test: `black_beside_bright_keeps_both` (on the pre-fix objects it failed at Slow and
+Veryslow, and at VeryslowPeak on the one-black block). Fix #3: `bc6h_enc_1p` submitted its last refinement pass, which
+can be worse than its first quantisation or an earlier pass; it still refines in upstream's order but submits the best.
+Proof test: `refinement_never_ends_worse_than_veryfast` (on the pre-fix objects Basic and Veryslow ended certainly worse
+than Veryfast on seeded blocks). Veryfast and Fast do not refine a one-region encode, so their bytes did not change.
+Fix #2: `ep_quant_bc6h` rounded an endpoint by `ep * (2^bits - 1) / 65535`, but the decoder rebuilds an interior code q
+at (q + 0.5) * 65536 / 2^bits, so the code could be one too high near 0 and one too low near the top; below 15 bits it
+now takes the code the decoder rebuilds nearest to the endpoint (16-bit mode 13 keeps upstream's rule, already nearest).
+Proof test: `one_region_endpoints_take_the_nearest_code` (mode 10 at Veryfast; on the pre-fix objects every block's G
+and B fields missed the nearest code). The code comes from one multiply (the interior code
+`ceil(ep * 2^bits / 65536) - 1`, plus one compare with an end code beside it) in place of a first three-candidate
+search, with the same bytes, because an interior code rebuilds at the centre of its cell and only the uncentred end
+codes need a compare (Note LO9). Finding #4 (negative and non-finite halves read as large values) is not fixed:
+`quantize.rs` `clamp_half` clamps every BC6H input first, so the kernel never receives them (Note LO). Fixes #5, #1, #3
+and #2 change BC6H bytes (Note LO4, LO7, LO8, LO9); #6 and #7 change none. Base against final, on AVX2, each of the six
+levels changed all 22 measured images (18 `hdr_real` and 4 `hdr_grad`: 0 identical at every level), and the pins of
+`tests/bc6h.rs` moved at #5 (15 of 18), #3 (12) and #2 (18), not at #1 (Note LO6). Quality and counts: Note LO10 and
+docs/research/encoder-benchmark.md ("Kernel fixes (patch 0004, 2026-11-22, Note LO)").
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

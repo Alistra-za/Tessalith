@@ -29,6 +29,11 @@ half.workspace = true
 image.workspace = true
 bcenc.workspace = true
 
+# The example's unit tests (metrics, CSV, compare) run with `cargo test`, so the gate covers them.
+[[example]]
+name = "bc6h_quality"
+test = true
+
 # The example's unit tests (parsing, CSV, compare) run with `cargo test`, so the gate covers them.
 [[example]]
 name = "bc7_quality"
