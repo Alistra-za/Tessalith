@@ -19,10 +19,11 @@
 //! needs interleaved runs on a quiet machine; equal hashes then mean equal output bytes over all blocks.
 //!
 //! Every 4x4 block of level 0 of the PNGs (`image::open(..).to_rgba8()`, cut by `encoders_sys::gather_blocks` as
-//! `tests/corpus.rs` does) is encoded `runs` times by each encoder in alternating passes; rgbcx goes first in even
-//! runs and `bcenc` in odd ones, so neither always meets the colder caches. With no PNG the blocks are `gen::colour_classes(1, 200)`, so the example runs without owner data.
+//! `tests/corpus.rs` does) is encoded `runs` times by each encoder in alternating passes (by `bcenc` alone with
+//! `--no-ref`); rgbcx goes first in even runs and `bcenc` in odd ones, so neither always meets the colder caches. With
+//! no PNG the blocks are `gen::colour_classes(1, 200)`, so the example runs without owner data.
 //!
-//! One line per format on stdout: `format  cpp_med_us  rust_med_us  rust/cpp  same_bytes`. The two times are the
+//! One line per row run on stdout: `format  cpp_med_us  rust_med_us  rust/cpp  same_bytes`. The two times are the
 //! median (of an even count, the upper middle one) over the runs of one whole pass over all blocks, in
 //! microseconds. `same_bytes` compares a 64-bit FNV-1a
 //! hash over every output block of the first pass of each encoder (`yes` or `NO`). The process exits with status 1
@@ -96,10 +97,7 @@ fn measure<const N: usize>(
     rust: impl Fn(&Block) -> [u8; N],
 ) -> bool {
     let (mut cpp_t, mut rust_t) = (Vec::new(), Vec::new());
-    let (mut cpp_out, mut rust_out) = (
-        Vec::with_capacity(blocks.len() * N),
-        Vec::with_capacity(blocks.len() * N),
-    );
+    let mut rust_out = Vec::with_capacity(blocks.len() * N);
     let (mut cpp_hash, mut rust_hash) = (0, 0);
     if !reference {
         for run in 0..runs {
@@ -115,6 +113,7 @@ fn measure<const N: usize>(
         );
         return true;
     }
+    let mut cpp_out = Vec::with_capacity(blocks.len() * N);
     for run in 0..runs {
         if run % 2 == 0 {
             cpp_t.push(pass(blocks, &cpp, &mut cpp_out));
@@ -177,7 +176,7 @@ fn named_path(name: &str) -> Result<Path, String> {
     }
 }
 
-/// The nine rows, in the order they run and print.
+/// The rows, in the order they run and print.
 const ROWS: [&str; 9] = [
     "bc1", "bc1p", "bc1-4", "bc1a", "bc3", "bc4", "bc5", "bc1-fast", "bc3-fast",
 ];
@@ -185,8 +184,8 @@ const ROWS: [&str; 9] = [
 const USAGE: &str = "usage: speed [--path=<base|avx2|best>] [--rows=<name>,...] [--no-ref] <runs (1 or more)> [<png>...]";
 
 /// `--rows=` value to a flag per row of `ROWS`; an unknown or empty name is an error.
-fn named_rows(list: &str) -> Result<[bool; 9], String> {
-    let mut wanted = [false; 9];
+fn named_rows(list: &str) -> Result<[bool; ROWS.len()], String> {
+    let mut wanted = [false; ROWS.len()];
     for name in list.split(',') {
         match ROWS.iter().position(|r| *r == name) {
             Some(i) => wanted[i] = true,
@@ -238,7 +237,7 @@ fn main() -> ExitCode {
         }
     }
     let path = path.unwrap_or_else(Path::best);
-    let rows = rows.unwrap_or([true; 9]);
+    let rows = rows.unwrap_or([true; ROWS.len()]);
     let wanted = |name: &str| rows[ROWS.iter().position(|r| *r == name).unwrap()];
     let Some(runs) = args
         .first()
@@ -258,98 +257,59 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     eprintln!("{} blocks, {runs} runs", blocks.len());
-    let r = !no_ref;
+    let reference = !no_ref;
     let mut ok = true;
-    if wanted("bc1") {
-        ok &= measure(
-            "bc1",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc1_encode_block(b, true, false, false),
-            |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Default),
-        );
+    // Each row's name is written once, here: it picks the row and labels its line.
+    macro_rules! row {
+        ($name:literal, $cpp:expr, $rust:expr $(,)?) => {
+            if wanted($name) {
+                ok &= measure($name, &blocks, runs, reference, $cpp, $rust);
+            }
+        };
     }
-    if wanted("bc1p") {
-        ok &= measure(
-            "bc1p",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc1_encode_block(b, true, false, true),
-            |b| bcenc::bc1_encode_block_on(path, b, true, true, Bc1Search::Default),
-        );
-    }
-    if wanted("bc1-4") {
-        ok &= measure(
-            "bc1-4",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc1_encode_block(b, false, false, false),
-            |b| bcenc::bc1_encode_block_on(path, b, false, false, Bc1Search::Default),
-        );
-    }
-    if wanted("bc1a") {
-        ok &= measure(
-            "bc1a",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc1_encode_block_alpha(b, mask(b), false),
-            |b| bcenc::bc1_encode_block_alpha_on(path, b, mask(b), false, Bc1Search::Default),
-        );
-    }
-    if wanted("bc3") {
-        ok &= measure(
-            "bc3",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc3_encode_block(b, RADIUS, CUT, false),
-            |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Default),
-        );
-    }
-    if wanted("bc4") {
-        ok &= measure(
-            "bc4",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc4_encode_block(b, 0, RADIUS),
-            |b| bcenc::bc4_encode_block_on(path, b, 0, RADIUS),
-        );
-    }
-    if wanted("bc5") {
-        ok &= measure(
-            "bc5",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc5_encode_block(b, RADIUS),
-            |b| bcenc::bc5_encode_block_on(path, b, RADIUS),
-        );
-    }
-    if wanted("bc1-fast") {
-        ok &= measure(
-            "bc1-fast",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc1_encode_block_level(b, BC1_FAST_LEVEL, true, false),
-            |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Fast),
-        );
-    }
-    if wanted("bc3-fast") {
-        ok &= measure(
-            "bc3-fast",
-            &blocks,
-            runs,
-            r,
-            |b| encoders_sys::bc3_encode_block_level(b, RADIUS, CUT, BC1_FAST_LEVEL, false),
-            |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Fast),
-        );
-    }
+    row!(
+        "bc1",
+        |b| encoders_sys::bc1_encode_block(b, true, false, false),
+        |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Default),
+    );
+    row!(
+        "bc1p",
+        |b| encoders_sys::bc1_encode_block(b, true, false, true),
+        |b| bcenc::bc1_encode_block_on(path, b, true, true, Bc1Search::Default),
+    );
+    row!(
+        "bc1-4",
+        |b| encoders_sys::bc1_encode_block(b, false, false, false),
+        |b| bcenc::bc1_encode_block_on(path, b, false, false, Bc1Search::Default),
+    );
+    row!(
+        "bc1a",
+        |b| encoders_sys::bc1_encode_block_alpha(b, mask(b), false),
+        |b| bcenc::bc1_encode_block_alpha_on(path, b, mask(b), false, Bc1Search::Default),
+    );
+    row!(
+        "bc3",
+        |b| encoders_sys::bc3_encode_block(b, RADIUS, CUT, false),
+        |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Default),
+    );
+    row!(
+        "bc4",
+        |b| encoders_sys::bc4_encode_block(b, 0, RADIUS),
+        |b| bcenc::bc4_encode_block_on(path, b, 0, RADIUS),
+    );
+    row!("bc5", |b| encoders_sys::bc5_encode_block(b, RADIUS), |b| {
+        bcenc::bc5_encode_block_on(path, b, RADIUS)
+    },);
+    row!(
+        "bc1-fast",
+        |b| encoders_sys::bc1_encode_block_level(b, BC1_FAST_LEVEL, true, false),
+        |b| bcenc::bc1_encode_block_on(path, b, true, false, Bc1Search::Fast),
+    );
+    row!(
+        "bc3-fast",
+        |b| encoders_sys::bc3_encode_block_level(b, RADIUS, CUT, BC1_FAST_LEVEL, false),
+        |b| bcenc::bc3_encode_block_raw_cut_on(path, b, RADIUS, CUT, false, Bc1Search::Fast),
+    );
     if ok {
         ExitCode::SUCCESS
     } else {
