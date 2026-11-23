@@ -678,14 +678,18 @@ fn one_line_replaces_the_three_alpha_lines() {
         .cloned()
         .unwrap();
     assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
-    // Positive control for the "gone" lines: the engine's message is a hover text (egui 0.37 copies it into a name);
-    // hovered, it shows, and the same query finds it.
+    // Positive control for the "gone" lines: the engine's message is in the leaf tile's hover; hovered, it shows, and
+    // the same query finds it. The tile builds that hover only while hovered (`on_hover_ui`, ruling 3d-R5), so egui no
+    // longer copies it into the tile's name: the tile is found by its file name in the Textures column instead.
     let g = "non-constant alpha would be discarded";
+    let column =
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures").expect("the Textures column");
+    let name = h.state().item(LEAF).unwrap().name.clone();
     let at = h
-        .query_all_by_label_contains(g)
-        .next()
-        .unwrap_or_else(|| panic!("a widget whose hover says {g:?}"))
-        .rect()
+        .query_all_by_label(&name)
+        .map(|n| n.rect())
+        .find(|r| column.contains_rect(*r))
+        .unwrap_or_else(|| panic!("the {name} tile, whose hover says {g:?}"))
         .center();
     h.hover_at(at);
     h.run();
