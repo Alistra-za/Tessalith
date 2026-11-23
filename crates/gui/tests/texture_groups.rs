@@ -3535,6 +3535,59 @@ fn a_closed_panel_has_at_most_twelve_control_kinds() {
     }
 }
 
+/// The E22 report: `support::control_kinds` of seven textures, groups closed and then open. It asserts nothing.
+#[test]
+#[ignore = "a report: run by hand with --ignored --nocapture"]
+fn e22_control_kinds_report() {
+    type Make = fn(&std::path::Path) -> AppModel;
+    let cases: [(&str, Make); 7] = [
+        ("decided colour", rock),
+        ("tangent normal map", |d| {
+            let mut m = support::opened(d);
+            let key = "landscape/rock01_normal.png";
+            m.decide(key, Answer::Subtype(Subtype::Normal));
+            assert!(m.wait_idle(Duration::from_secs(60)));
+            m.select_item(key);
+            m
+        }),
+        ("packed RMAOS", |d| {
+            let mut m = support::no_albedo_pair(d);
+            m.decide("arch/wall_rmaos.png", Answer::Subtype(Subtype::Rmaos));
+            assert!(m.wait_idle(Duration::from_secs(60)));
+            m.select_item("arch/wall_rmaos.png");
+            m
+        }),
+        ("cube", |d| cube_model(d, CUBE)),
+        ("undecided type", undecided_rock),
+        ("undecided type and alpha", |d| {
+            let mut m = support::opened(d);
+            m.select_item(LEAF);
+            m
+        }),
+        ("bulk of 4", |d| {
+            let mut m = support::opened_as_the_app(many(d, 4), d.join("export"));
+            m.select_all_visible();
+            m
+        }),
+    ];
+    for (name, make) in cases {
+        for open in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = make(d.path());
+            if open {
+                support::open_texture_groups(&mut m);
+            } else {
+                m = all_closed(m);
+            }
+            let mut h = harness(m, 1280.0, 800.0);
+            h.run();
+            let kinds = support::control_kinds(&h, sdc_gui::ui::centre_rect(&h.ctx).unwrap());
+            let state = if open { "open" } else { "closed" };
+            eprintln!("{name} ({state}): {} control kinds: {kinds:?}", kinds.len());
+        }
+    }
+}
+
 #[test]
 fn every_group_starts_closed() {
     let d = tempfile::tempdir().unwrap();
