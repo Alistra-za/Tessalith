@@ -596,15 +596,16 @@ pub(crate) fn cached<T: Clone>(
     put: impl FnOnce(&mut ViewCache, T),
     build: impl FnOnce() -> T,
 ) -> T {
-    let key = m.view_key();
     {
+        // A hit compares the stored key with the model in place (`view_key_matches`): no clone, so no allocation.
         let c = m.view_cache().borrow();
-        if c.key.as_ref() == Some(&key) {
+        if c.key.as_ref().is_some_and(|k| m.view_key_matches(k)) {
             if let Some(v) = get(&c) {
                 return v;
             }
         }
     }
+    let key = m.view_key();
     let v = build();
     let mut c = m.view_cache().borrow_mut();
     if c.key.as_ref() != Some(&key) {
@@ -635,6 +636,53 @@ pub(crate) struct ViewKey {
     target_mod_rev: u64,
     /// Note HF9: the export scope (`AppModel::scope_rev`): what `in_run` answers, so every cache here.
     scope: u64,
+}
+
+/// `AppModel::output_root()` kept with what it is worked out from, so `view_key_matches` can read it without building
+/// the path again. The inputs are the ones `review::writes_key` names for it: the Also ticks (`sdc.toml`, `project`),
+/// the Also location and the export folder (`sdc-project.toml`, `doc`), the folder names (`root`), `gui.toml`'s folder
+/// when there is no document (`settings_export`), the target, and whether either document is read-only.
+pub(crate) struct OutputMemo {
+    project: u64,
+    project_ro: bool,
+    doc: u64,
+    doc_ro: bool,
+    target: Target,
+    root: Option<PathBuf>,
+    settings_export: Option<PathBuf>,
+    path: PathBuf,
+}
+
+impl OutputMemo {
+    fn new(m: &AppModel) -> Self {
+        OutputMemo {
+            project: m
+                .project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev),
+            project_ro: m.project.as_ref().is_some_and(|p| p.read_only()),
+            doc: m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev),
+            doc_ro: m.sets_doc.as_ref().is_some_and(|d| d.read_only()),
+            target: m.target,
+            root: m.root.clone(),
+            settings_export: m.settings.export_folder.clone(),
+            path: m.output_root(),
+        }
+    }
+
+    /// Whether `path` was worked out from what the model holds now. No allocation.
+    fn current(&self, m: &AppModel) -> bool {
+        self.project
+            == m.project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev)
+            && self.project_ro == m.project.as_ref().is_some_and(|p| p.read_only())
+            && self.doc == m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev)
+            && self.doc_ro == m.sets_doc.as_ref().is_some_and(|d| d.read_only())
+            && self.target == m.target
+            && self.root == m.root
+            && self.settings_export == m.settings.export_folder
+    }
 }
 
 /// Ruling 3b-F24: everything the From another set rows' settled check (`AppModel::settled_wait`) reads, so a cached
@@ -1020,6 +1068,8 @@ pub struct AppModel {
     pub nav: nav::Nav,
     /// The texture panel's groups a problem (or a Go to) holds open for the selected item; never saved.
     pub panel_forced: ForcedOpen,
+    /// `output_root()` with its inputs (`view_key_matches`).
+    output_root_memo: std::cell::RefCell<Option<OutputMemo>>,
     /// Explorer requests the app has not started yet (Task 5, `model::shell`).
     pub shell: Vec<shell::ShellRequest>,
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
@@ -1442,6 +1492,7 @@ impl AppModel {
             cs_pbr: Default::default(),
             nav: Default::default(),
             panel_forced: ForcedOpen::default(),
+            output_root_memo: Default::default(),
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
@@ -4300,6 +4351,32 @@ impl AppModel {
     }
 
     /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).
+    /// `view_key() == *k`, compared field by field in place: no clone and, once `output_root` is remembered, no path
+    /// built. A frame's cached views and problems ask this on every hit.
+    pub(crate) fn view_key_matches(&self, k: &ViewKey) -> bool {
+        k.items == self.items_rev
+            && k.inputs == self.inputs_rev
+            && k.doc
+                == self
+                    .sets_doc
+                    .as_ref()
+                    .map_or(0, crate::sets_doc::SetsDoc::rev)
+            && k.root == self.root
+            && k.target == self.target
+            && k.scan_db == self.scan_db
+            && k.scan == self.scan_stamp
+            && k.known_rev == self.known_rev
+            && k.target_mod_rev == self.target_mod_rev
+            && k.scope == self.view_scope_rev()
+            && {
+                let mut memo = self.output_root_memo.borrow_mut();
+                if !memo.as_ref().is_some_and(|o| o.current(self)) {
+                    *memo = Some(OutputMemo::new(self));
+                }
+                memo.as_ref().is_some_and(|o| o.path == k.export_root)
+            }
+    }
+
     pub(crate) fn view_key(&self) -> ViewKey {
         ViewKey {
             items: self.items_rev,
