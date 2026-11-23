@@ -239,6 +239,102 @@ fn exact_constants_refuse_an_alpha_bit() {
     bc7e_compress_blocks_tuned(&[], &mut [], U5, tune);
 }
 
+/// The seed of `exact_constant_fixture` (Note LR, LR12).
+const EXACT_SEED: u32 = 0x5C0C_2026;
+
+/// A 64x64 opaque image, row-major, whose G is `g` on every texel, from an LCG seeded with `seed`
+/// (`s = s * 1664525 + 1013904223`, each draw `s >> 24`). Each block k (row-major, 16 per row) draws four centres (R and
+/// B of two clusters) whose p-bit is the other one G needs: `255 - 2 * (d % 16)` (odd, 225 to 255) when `g` is 0,
+/// `2 * (d % 16)` (even, 0 to 30) when it is 255. Then per texel, by k % 4: 0 and 1 two clusters (texel columns 0-1 and
+/// 2-3), the centre plus `d % 5 - 2` on R, then on B; 2 near-solid (cluster 0's centre, R and B both plus 1 when
+/// `d % 3 == 0`); 3 solid (cluster 0's centre). Values are clamped to 0-255.
+fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
+    let mut s = seed;
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as i32
+    };
+    let centre = |v: i32| {
+        if g == 0 {
+            255 - 2 * (v % 16)
+        } else {
+            2 * (v % 16)
+        }
+    };
+    let mut px = vec![[0u8, g, 0, 255]; 64 * 64];
+    for k in 0..256 {
+        let (bx, by) = (k % 16 * 4, k / 16 * 4);
+        let kind = k % 4;
+        let c = [
+            [centre(next()), centre(next())],
+            [centre(next()), centre(next())],
+        ];
+        for t in 0..16 {
+            let (x, y) = (t % 4, t / 4);
+            let [r, b] = match kind {
+                0 | 1 => {
+                    let [r, b] = c[x / 2];
+                    [r + next() % 5 - 2, b + next() % 5 - 2]
+                }
+                2 => {
+                    let up = i32::from(next() % 3 == 0);
+                    [c[0][0] + up, c[0][1] + up]
+                }
+                _ => c[0],
+            };
+            px[(by + y) * 64 + bx + x] = [r.clamp(0, 255) as u8, g, b.clamp(0, 255) as u8, 255];
+        }
+    }
+    px
+}
+
+/// Patch 0005, XC: with G in `Bc7Tune::exact_constants`, a subset whose G is 0 on every texel, or 255 on every texel,
+/// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters
+/// and near-solid blocks (its solid blocks take bc7e's mode 5 solid-block path). Raw bytes, 64-block calls, the data
+/// maps' tune (T_data, exact G) at weights x16 and x1, every level, exact opaque off and on, every path. Without the
+/// one-colour p guard only ultrafast, veryfast and fast fail, so every level runs (Note LR, LR12).
+#[test]
+fn exact_constants_keep_a_flat_channel() {
+    use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Tune};
+    let mut bad = vec![];
+    for g in [0u8, 255] {
+        let blocks = gather_blocks(&exact_constant_fixture(g, EXACT_SEED), 64, 64);
+        for (level, exact_opaque) in LEVELS.into_iter().flat_map(|l| [(l, false), (l, true)]) {
+            let p = Bc7Params {
+                level,
+                exact_opaque,
+                ..U5
+            };
+            for weights in [Some([16; 4]), None] {
+                let tune = Bc7Tune {
+                    weights,
+                    flat_tolerance: Some(Bc7FlatTolerance::Data),
+                    exact_constants: Some(0b010),
+                };
+                for target in paths() {
+                    let mut out = vec![0u8; blocks.len()];
+                    for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
+                        bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
+                    }
+                    let errs: Vec<u8> = out
+                        .chunks(16)
+                        .flat_map(decode)
+                        .map(|t| t[1].abs_diff(g))
+                        .filter(|e| *e > 0)
+                        .collect();
+                    if let Some(worst) = errs.iter().max() {
+                        bad.push(format!(
+                            "G {g} {level:?} exact={exact_opaque} weights {weights:?} {target:?}: {} texels off, worst {worst}",
+                            errs.len()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "flat G decoded off:\n{}", bad.join("\n"));
+}
+
 /// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights give the plain
 /// call's bytes at each level, and other weights reach bc7e.
 #[test]

@@ -69,10 +69,12 @@ one-colour candidate (`pack_mode7_to_one_color`) is scored on its endpoints expa
 not on the 6-bit codes (Q1), and its table resets its best endpoints per p-bit pair (Q4), so mode 7 no longer loses a
 solid subset of an alpha block to a worse fit on a wrong score; proof tests `tests/bc7.rs` `mode7_takes_its_solid_subset`
 (Q1) and `mode7_table_keeps_each_p_bit_pairs_own_best` (Q4); changes bytes (alpha blocks only: opaque blocks never try
-mode 7, and ultrafast turns it off). XC: the trailing field `m_exact_mask` (slot 15) is reserved for exact constants and
-read by nothing yet; no byte change. The two fields
-change the generated header (Note LR). These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
-`identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
+mode 7, and ultrafast turns it off). XC: exact constants, the trailing params field `m_exact_mask` (R, G and B bits; 0
+at every level, set per call through the shim's tuning slot 15): when a subset's masked channel is 0 on every texel, or
+255 on every texel, a solution that does not decode it exactly scores 2^60 and a one-colour p-bit choice that misses it
+is skipped; proof test `tests/bc7.rs` `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask
+0 is every level's default and writes the bytes it wrote before). The two fields change the generated header (Note LR).
+These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
 file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes

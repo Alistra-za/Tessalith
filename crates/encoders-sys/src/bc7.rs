@@ -123,9 +123,10 @@ pub struct Bc7Tune {
     /// The flat tolerance of patch 0005 (Q2t); `None` keeps the level's value, [`BC7_FLAT_TOLERANCE_DEFAULT`]
     /// (Note LR).
     pub flat_tolerance: Option<Bc7FlatTolerance>,
-    /// Exact constants (patch 0005 XC): bit 0 R, bit 1 G, bit 2 B; the kernel does not read it yet, so it changes no
-    /// byte. `None` keeps the level's value, 0 (Note LR). Alpha keeps bc7e's exact-opaque flag, so an alpha bit is
-    /// refused.
+    /// Exact constants (patch 0005 XC): bit 0 R, bit 1 G, bit 2 B. A subset whose masked channel is 0 on every texel,
+    /// or 255 on every texel, decodes that channel exactly wherever the kernel finds such a solution. `None` keeps the
+    /// level's value, 0, which writes the bytes the plain call writes (Note LR, LR12). Alpha keeps bc7e's exact-opaque
+    /// flag, so an alpha bit is refused.
     pub exact_constants: Option<u8>,
 }
 
