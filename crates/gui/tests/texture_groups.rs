@@ -3999,6 +3999,43 @@ fn a_new_selection_closes_a_forced_group_without_sliding() {
     );
 }
 
+/// LQ4 (Minor 8): "● changed" mirrors the resets inside the group, on both panels. A diffuse's Normal map rows are all
+/// locked ("normal maps only"); the texture's own `mips.normal` shows its ↺ on the single panel, so the header says
+/// changed. In bulk a row counts only the textures it reaches, none here, so neither the ↺ nor "changed" shows. A pin.
+#[test]
+fn changed_follows_the_resets_on_both_panels() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_alike(d.path());
+    m.set_field("a/one.png", "mips.normal", json!("renormalize_bake"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("a/one.png", "mips.normal"),
+        Some(json!("renormalize_bake")),
+        "premise: the locked row holds the texture's own value"
+    );
+    panel_groups::set_open(&mut m.settings, PanelGroup::NormalMap, true);
+    m.select_item("a/one.png");
+    let mut h = harness(m, 1280.0, 1600.0);
+    h.run();
+    h.get_by_label("Normal map, expanded, changed");
+    // The ↺ buttons between the Normal map header and the next one (Size).
+    let resets = |h: &Harness<'static, AppModel>| {
+        let top = h.get_by_label_contains("Normal map, ").rect().bottom();
+        let end = h.get_by_label_contains("Size, ").rect().top();
+        h.query_all_by_label("↺")
+            .filter(|n| n.rect().top() >= top && n.rect().bottom() <= end)
+            .count()
+    };
+    assert!(resets(&h) >= 1, "the single panel's ↺ on the locked row");
+    h.state_mut().click_item("a/two.png", true, false);
+    h.run();
+    h.get_by_label("Normal map, expanded");
+    assert_eq!(resets(&h), 0, "no bulk row reaches a texture, so no ↺");
+}
+
 /// LQ5: a texture selected while a plan is pending draws its last job, which may not have the plan's problems yet; the
 /// latch waits for the plan. Here the cube's `mips.levels = none` is still planning (CUBE-NO-MIPS is not on its job)
 /// when it is selected and drawn; once the plan lands, Mipmaps opens.

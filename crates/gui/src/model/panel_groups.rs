@@ -160,6 +160,7 @@ fn shown(v: &Value) -> String {
 
 /// The header summary of `g` over its rows in `views` (the texture panel's one-line value; the table is the plan's
 /// "Header summaries"). A locked row is left out; a group whose every row is locked reads "not used for this texture".
+/// `changed` (LQ4): some row of the group shows its ↺ (`edited`), a locked one included, as `field_row` draws it.
 pub fn summary(
     g: PanelGroup,
     views: &[FieldView],
@@ -330,7 +331,8 @@ pub fn bulk_summary_builds() -> usize {
 /// The header summary of `g` over the bulk panel's rows (`fields`: every row of the selection, any group). A row no
 /// selected texture can use (`applies == 0`) is a locked part: left out, and a group of only such rows reads "not
 /// used for these textures" (R1-9). A row whose textures hold different values reads "{Label}: mixed". `changed` is
-/// any applying row with an edited texture. `p` is the profile the panel's rows read their option labels from, and
+/// the single panel's rule (LQ4): some row of the group shows its ↺ (`edited > 0`, which counts only the textures the
+/// row reaches). `p` is the profile the panel's rows read their option labels from, and
 /// only that (TPC-T7-1): `size_no_effect` is the no-effect reason of Resize when every applying texture shares it, so
 /// one selection reads the same whichever texture is active. `g` is one of `bulk::BULK_GROUPS`.
 // shortcut: option labels (the Relative to slot names, the DDS tag list) come from one representative texture's
@@ -352,7 +354,7 @@ pub fn bulk_summary(
         .iter()
         .filter(|f| panel_group(f.field) == Some(g))
         .collect();
-    let changed = rows.iter().any(|f| f.applies > 0 && f.edited > 0);
+    let changed = rows.iter().any(|f| f.edited > 0);
     let usable: Vec<SumRow<'_>> = rows
         .iter()
         .filter(|f| f.applies > 0)
