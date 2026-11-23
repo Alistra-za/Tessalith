@@ -213,7 +213,7 @@ pub fn summary(
         })
         .collect();
     GroupSummary {
-        text: summary_text(g, &usable, target, p),
+        text: summary_text(g, &usable, target, p, no_effect_reason(p, "resize")),
         hover: None,
         changed,
         all_locked: false,
@@ -231,7 +231,13 @@ struct SumRow<'a> {
 
 /// The summary text of `g` over its unlocked `rows`, shared by the single panel (`summary`) and the bulk panel
 /// (`bulk_summary`) so the two read alike. `p` is the texture's profile (the bulk panel's representative one).
-fn summary_text(g: PanelGroup, rows: &[SumRow<'_>], target: Target, p: &Profile) -> String {
+fn summary_text(
+    g: PanelGroup,
+    rows: &[SumRow<'_>],
+    target: Target,
+    p: &Profile,
+    size_no_effect: Option<&str>,
+) -> String {
     let row = |field: &str| rows.iter().find(|v| v.field == field);
     // A row's option label, else its value as written; a mixed row says so.
     let label = |v: &SumRow<'_>| {
@@ -274,7 +280,7 @@ fn summary_text(g: PanelGroup, rows: &[SumRow<'_>], target: Target, p: &Profile)
             named("mips.normal"),
             named(MSN_SOURCE).map(|b| format!("baked in {b}")),
         ]),
-        PanelGroup::Size => match no_effect_reason(p, "resize") {
+        PanelGroup::Size => match size_no_effect {
             Some(why) => why.to_string(),
             None => match row("resize") {
                 Some(r) if !r.mixed && r.value.as_str() == Some("none") => label(r),
@@ -325,29 +331,24 @@ pub fn bulk_summary_builds() -> usize {
 /// The header summary of `g` over the bulk panel's rows (`fields`: every row of the selection, any group). A row no
 /// selected texture can use (`applies == 0`) is a locked part: left out, and a group of only such rows reads "not
 /// used for these textures" (R1-9). A row whose textures hold different values reads "{Label}: mixed". `changed` is
-/// any applying row with an edited texture. `p` is the profile the panel's rows read their option labels from.
-// shortcut: option labels (the Relative to slot names, the DDS tag list) and the cubemap Resize note come from one
-// representative texture's profile, as the bulk rows' editors do; upgrade if a selection mixing PBR and other maps
-// must name slots per texture.
+/// any applying row with an edited texture. `p` is the profile the panel's rows read their option labels from, and
+/// only that (TPC-T7-1): `size_no_effect` is the no-effect reason of Resize when every applying texture shares it, so
+/// one selection reads the same whichever texture is active. `g` is one of `bulk::BULK_GROUPS`.
+// shortcut: option labels (the Relative to slot names, the DDS tag list) come from one representative texture's
+// profile, as the bulk rows' editors do; upgrade if a selection mixing PBR and other maps must name slots per
+// texture.
 pub fn bulk_summary(
     g: PanelGroup,
     fields: &[BulkField],
     target: Target,
     p: &Profile,
+    size_no_effect: Option<&str>,
 ) -> GroupSummary {
     BULK_SUMMARY_BUILDS.with(|c| c.set(c.get() + 1));
-    let fixed = |text: String| GroupSummary {
-        text,
-        hover: None,
-        changed: false,
-        all_locked: false,
-    };
-    match g {
-        PanelGroup::Sources => return fixed(SOURCES_SUMMARY.into()),
-        // Cubemap and Channels never appear in bulk.
-        PanelGroup::Channels | PanelGroup::Cubemap => return fixed(String::new()),
-        _ => {}
-    }
+    debug_assert!(
+        super::bulk::BULK_GROUPS.contains(&g),
+        "{g:?} is never in bulk"
+    );
     let rows: Vec<&BulkField> = fields
         .iter()
         .filter(|f| panel_group(f.field) == Some(g))
@@ -387,7 +388,7 @@ pub fn bulk_summary(
         };
     }
     GroupSummary {
-        text: summary_text(g, &usable, target, p),
+        text: summary_text(g, &usable, target, p, size_no_effect),
         hover: None,
         changed,
         all_locked: false,

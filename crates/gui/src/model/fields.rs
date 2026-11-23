@@ -35,7 +35,7 @@ pub const FIELDS: [(&str, &str); 21] = [
     ("resize_floor", "Size floor"),
 ];
 
-/// The model-space normal's baker row (Note IA2), in the Type group.
+/// The model-space normal's baker row (Note IA2), in the Normal map group.
 pub const MSN_SOURCE: &str = "channels.msn_source";
 
 /// Hover text of the BC1/BC3 "Perceptual" check box (FM42).

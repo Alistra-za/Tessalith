@@ -1999,13 +1999,18 @@ fn the_offset_survives_a_replan_of_the_same_set() {
 fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
+    sdc_gui::model::panel_groups::set_open(
+        &mut m.settings,
+        sdc_gui::model::panel_groups::PanelGroup::Alpha,
+        true,
+    );
     m.select_all_visible();
     assert!(m.in_bulk());
     let mut h = short_harness(m);
     h.run();
-    // The bulk panel's first group header (Alpha, open by default, since the Type group moved to the first screen).
-    // egui 0.37 reports the header as a `DisclosureTriangle` named for the title and state (0.36.2: a `Button`).
-    let type_header_y = |h: &Harness<'static, AppModel>| {
+    // The bulk panel's first group header (Alpha; the Type group moved to the first screen). egui 0.37 reports the
+    // header as a `DisclosureTriangle` named for the title and state (0.36.2: a `Button`).
+    let first_header_y = |h: &Harness<'static, AppModel>| {
         widget(
             h,
             eframe::egui::accesskit::Role::DisclosureTriangle,
@@ -2020,7 +2025,7 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     h.run();
     h.state_mut().select_all_visible();
     h.run();
-    let top = type_header_y(&h);
+    let top = first_header_y(&h);
     rock_selected(h.state_mut());
     h.run();
     let set_top = diffuse_top(&h);
@@ -2029,9 +2034,9 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     h.state_mut().select_all_visible();
     h.run();
     assert!(
-        (type_header_y(&h) - top).abs() < 1.0,
+        (first_header_y(&h) - top).abs() < 1.0,
         "the bulk panel is at its top: {} vs {top}",
-        type_header_y(&h)
+        first_header_y(&h)
     );
     walk_scrolled_edit(h.state_mut());
 }

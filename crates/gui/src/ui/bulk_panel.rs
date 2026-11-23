@@ -4,7 +4,7 @@ use super::columns::AMBER;
 use super::group::{collapsing_group, GroupHead};
 use super::settings_panel::{
     editor, field_label, likely_buttons, offered_groups, own_name_after_link, reach_combo,
-    subtype_label, RowEdit,
+    set_group_open, subtype_label, RowEdit,
 };
 use crate::look::Combo036 as _;
 use crate::model::bulk::{is_value_dependent, BulkField, BulkOp};
@@ -12,7 +12,7 @@ use crate::model::fields::{effort_field, field_help, FieldView, EFFORT_FIELDS};
 use crate::model::labels::type_hover;
 use crate::model::panel_groups::{self, PanelGroup};
 use crate::model::sets::SlotKind;
-use crate::model::{AppModel, Selection};
+use crate::model::AppModel;
 use eframe::egui;
 use engine::config::{Subtype, Target};
 use engine::policy::ResolvedJob;
@@ -202,14 +202,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         acts.push(a);
     }
     // Options come from the active texture's job, else the first target's (design §3.2).
-    let active = match &model.selection {
-        Selection::Item(k) => model.item(k).and_then(|i| i.job.clone()),
-        _ => None,
-    };
-    let job = active.or_else(|| {
-        keys.iter()
-            .find_map(|k| model.item(k).and_then(|i| i.job.clone()))
-    });
+    let job = model.bulk_job(keys).cloned();
     match job {
         None => {
             ui.weak("None of the selected textures has settings of its own.");
@@ -306,10 +299,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
             Act::Kind(k) => model.bulk.kind = k,
             Act::Reencode(ks) => model.set_reencode(&ks, true),
             Act::Decide(ks, st) => model.decide_many(&ks, st),
-            Act::SetGroupOpen(g, open) => {
-                panel_groups::set_open(&mut model.settings, g, open);
-                model.save_settings();
-            }
+            Act::SetGroupOpen(g, open) => set_group_open(model, g, open),
             Act::Edit(f, RowEdit::Set(v)) => model.apply_bulk_edit(keys, f, BulkOp::Set(v)),
             Act::Edit(f, RowEdit::Clear) => model.apply_bulk_edit(keys, f, BulkOp::Clear),
         }

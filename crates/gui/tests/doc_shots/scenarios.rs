@@ -635,7 +635,8 @@ fn main_window(dir: &Path) -> Frame {
         (9, tl(rect_starting(&h, Role::Button, "Not ready"))),
         // The first slot chip of the first set card (a "D" button; the Textures column has none).
         (10, tl(rect_of(&h, "D")) + egui::vec2(-4.0, 0.0)),
-        (11, tl(rect_of(&h, "Type"))),
+        // The panel's first row: the groups under it carry no "Type" header any more.
+        (11, tl(rect_of(&h, "Texture type"))),
         (12, tl(rect_of(&h, "Settings…"))),
         (13, tl(rect_starting(&h, Role::Button, "Problems"))),
     ];

@@ -1401,6 +1401,16 @@ fn push_edit(actions: &mut Vec<Action>, field: &'static str, edit: Option<RowEdi
     }
 }
 
+/// A click on a group header (`Action::SetGroupOpen`), on this panel and on the bulk panel: store the state and save it.
+pub(super) fn set_group_open(model: &mut AppModel, g: PanelGroup, open: bool) {
+    panel_groups::set_open(&mut model.settings, g, open);
+    // Rule 4: the user's click ends a forced open of this group, so a closed group stays closed.
+    if !open {
+        model.panel_forced.groups.remove(&g);
+    }
+    model.save_settings();
+}
+
 /// Whether group `g` is drawn open: the user's saved state, or forced open (a problem or a Go to).
 pub(super) fn group_open(cx: &Ctx, g: PanelGroup) -> bool {
     open_with(cx.groups, cx.forced, g)
@@ -2587,14 +2597,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface
                 ui.data_mut(|d| d.remove_temp::<bool>(super::helper_panel::tick_id(key)));
                 model.set_helper_role(key, r);
             }
-            Action::SetGroupOpen(g, open) => {
-                panel_groups::set_open(&mut model.settings, g, open);
-                // Rule 4: the user's click ends a forced open of this group, so a closed group stays closed.
-                if !open {
-                    model.panel_forced.groups.remove(&g);
-                }
-                model.save_settings();
-            }
+            Action::SetGroupOpen(g, open) => set_group_open(model, g, open),
             Action::OpenProblems(Some(target)) => model.open_set_problems(target),
             Action::OpenProblems(None) => model.open_problems(None),
             Action::RevealTaken => model.nav.reveal_field = None,

@@ -361,7 +361,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["Button", "Button", "Button"],
         CHIP,
     ),
-
     (
         "meshes skin browse popup",
         "textures/white.dds",

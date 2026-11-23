@@ -2,9 +2,9 @@
 //! commands. No egui types.
 use super::fields::{
     all_fields, bc3_pair, effort_field, encoding_options, field_view, filter_option_lock,
-    hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
-    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, FILTER_OPTIONS, LEVELS_FIELD, NOT_VALID,
-    NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
+    hidden_reason, no_effect_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES,
+    BC3_CUSTOM, BC3_SEARCH, EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, FILTER_OPTIONS,
+    LEVELS_FIELD, NOT_VALID, NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use super::items::TextureItem;
 use super::labels::UNORM_LABEL;
@@ -1433,6 +1433,19 @@ impl AppModel {
         )
     }
 
+    /// The panel's representative job, which its editors and its header summaries read option labels from: the active
+    /// texture's, else the first selected one with a job (design §3.2). The one place both pick it.
+    pub(crate) fn bulk_job(&self, keys: &[String]) -> Option<&ResolvedJob> {
+        let active = match &self.selection {
+            Selection::Item(k) => self.item(k).and_then(|i| i.job.as_ref()),
+            _ => None,
+        };
+        active.or_else(|| {
+            keys.iter()
+                .find_map(|k| self.item(k).and_then(|i| i.job.as_ref()))
+        })
+    }
+
     /// `bulk_targets` and `bulk_fields`, recomputed only when the selection, the kind, the target or the item or
     /// input revisions change.
     pub fn bulk_view(&mut self) -> std::sync::Arc<BulkView> {
@@ -1452,20 +1465,29 @@ impl AppModel {
         let reencode = self.reencode_split(&keys);
         let undecided = self.type_card_split();
         let likely = super::likely::likely_types(self, &undecided.0);
-        // The panel's representative job: the active texture's, else the first selected one with a job.
-        let active = match &self.selection {
-            Selection::Item(k) => self.item(k).and_then(|i| i.job.as_ref()),
-            _ => None,
-        };
-        let job = active.or_else(|| {
-            keys.iter()
-                .find_map(|k| self.item(k).and_then(|i| i.job.as_ref()))
+        let job = self.bulk_job(&keys);
+        // TPC-T7-1: Resize has no effect only when every texture it applies to says so, whichever one is active.
+        let locked = locked_items(self);
+        let mut applying = keys
+            .iter()
+            .filter(|k| !locked.contains_key(*k))
+            .filter_map(|k| self.item(k).and_then(|i| i.job.as_ref()));
+        let size_no_effect = applying.next().and_then(|first| {
+            let why = no_effect_reason(&first.profile, "resize")?;
+            applying
+                .all(|j| no_effect_reason(&j.profile, "resize") == Some(why))
+                .then_some(why)
         });
         let groups = job.map_or_else(Vec::new, |j| {
             BULK_GROUPS
                 .into_iter()
                 .filter(|&g| rows.iter().any(|r| panel_group(r.field) == Some(g)))
-                .map(|g| (g, bulk_summary(g, &rows, self.target, &j.profile)))
+                .map(|g| {
+                    (
+                        g,
+                        bulk_summary(g, &rows, self.target, &j.profile, size_no_effect),
+                    )
+                })
                 .collect()
         });
         let view = std::sync::Arc::new(BulkView {

@@ -2850,3 +2850,163 @@ fn the_bulk_and_single_panels_share_the_open_state() {
     h.run();
     assert!(h.query_by_label_contains("Size, collapsed").is_some());
 }
+
+// Task 7 fix round 1.
+
+fn bulk_group(m: &mut AppModel, g: PanelGroup) -> panel_groups::GroupSummary {
+    let view = m.bulk_view();
+    view.groups
+        .iter()
+        .find(|(x, _)| *x == g)
+        .map(|(_, s)| s.clone())
+        .unwrap_or_else(|| panic!("no {g:?} group in the bulk view"))
+}
+
+/// TPC-T7-1: one selection reads the same whichever texture was clicked last.
+#[test]
+fn the_bulk_size_summary_does_not_depend_on_the_active_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cube_model(d.path(), CUBE);
+    m.decide(
+        "a/flat.png",
+        Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_field("a/flat.png", "resize", json!("half"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.select_item(CUBE);
+    m.click_item("a/flat.png", true, false); // the flat texture is active
+    let flat_active = bulk_group(&mut m, PanelGroup::Size).text;
+    m.select_item("a/flat.png");
+    m.click_item(CUBE, true, false); // the cube map is active
+    let cube_active = bulk_group(&mut m, PanelGroup::Size).text;
+    assert_eq!(flat_active, cube_active);
+    assert!(!cube_active.contains("no effect"), "{cube_active}");
+}
+
+fn bulk_row(
+    field: &'static str,
+    label: &'static str,
+    why: &[(&str, usize)],
+) -> sdc_gui::model::bulk::BulkField {
+    sdc_gui::model::bulk::BulkField {
+        field,
+        label,
+        value: None,
+        applies: 0,
+        edited: 0,
+        skipped: why.iter().map(|(r, n)| (r.to_string(), *n)).collect(),
+        total: 2,
+        formats_differ: false,
+        option_reach: vec![],
+    }
+}
+
+#[test]
+fn a_bulk_no_effect_reason_shows_when_the_caller_says_every_texture_shares_it() {
+    let reg = engine::presets::PresetRegistry::builtin().unwrap();
+    let p = reg.base_profile(Target::Cs, engine::config::Subtype::Diffuse);
+    let mut resize = bulk_row("resize", "Resize", &[]);
+    resize.applies = 2;
+    resize.value = Some(json!("half"));
+    let rows = [resize];
+    let shared = panel_groups::bulk_summary(
+        PanelGroup::Size,
+        &rows,
+        Target::Cs,
+        &p,
+        Some("no effect on a cubemap: Face size sizes it"),
+    );
+    assert_eq!(shared.text, "no effect on a cubemap: Face size sizes it");
+    let none = panel_groups::bulk_summary(PanelGroup::Size, &rows, Target::Cs, &p, None);
+    assert_eq!(none.text, "Half");
+}
+
+#[test]
+fn the_bulk_all_locked_hover_gives_the_shared_reason_or_points_at_the_rows() {
+    let reg = engine::presets::PresetRegistry::builtin().unwrap();
+    let p = reg.base_profile(Target::Cs, engine::config::Subtype::Diffuse);
+    let same = [
+        bulk_row("mips.normal", "Normal handling", &[("normal maps only", 2)]),
+        bulk_row(
+            "mips.normal_base",
+            "Normal base level",
+            &[("normal maps only", 2)],
+        ),
+    ];
+    let s = panel_groups::bulk_summary(PanelGroup::NormalMap, &same, Target::Cs, &p, None);
+    assert_eq!(s.text, "not used for these textures");
+    assert!(s.all_locked);
+    assert_eq!(
+        s.hover.as_deref(),
+        Some("Every row here: normal maps only.")
+    );
+    let differ = [
+        bulk_row("mips.normal", "Normal handling", &[("normal maps only", 2)]),
+        bulk_row(
+            "mips.normal_base",
+            "Normal base level",
+            &[("another reason", 1), ("normal maps only", 1)],
+        ),
+    ];
+    let s = panel_groups::bulk_summary(PanelGroup::NormalMap, &differ, Target::Cs, &p, None);
+    assert_eq!(
+        s.hover.as_deref(),
+        Some("Each row below says why it is not used.")
+    );
+}
+
+/// Review item 4: no bulk row is dropped. Every row lands on the first screen or in a group the panel draws, and the
+/// groups come in panel order.
+#[test]
+fn every_bulk_row_is_drawn_on_the_first_screen_or_in_a_bulk_group() {
+    use sdc_gui::model::bulk::BULK_GROUPS;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    let view = m.bulk_view();
+    let mut fields: Vec<&str> = view.rows.iter().map(|r| r.field).collect();
+    fields.extend(sdc_gui::model::bulk::panel_fields().iter().map(|f| f.0));
+    fields.extend(sdc_gui::model::fields::SEARCH_FIELDS.iter().map(|f| f.0));
+    fields.push(sdc_gui::model::fields::BC3_SEARCH);
+    for f in fields {
+        let ok = panel_groups::FIRST_SCREEN.contains(&f)
+            || panel_groups::panel_group(f).is_some_and(|g| BULK_GROUPS.contains(&g));
+        assert!(ok, "{f} would not be drawn in the bulk panel");
+    }
+    let drawn: Vec<PanelGroup> = view.groups.iter().map(|(g, _)| *g).collect();
+    let in_panel_order: Vec<PanelGroup> = PanelGroup::ALL
+        .into_iter()
+        .filter(|g| drawn.contains(g))
+        .collect();
+    assert_eq!(drawn, in_panel_order);
+    assert_eq!(drawn, BULK_GROUPS);
+}
+
+/// Review item 6: the bulk cache is keyed on the active texture, the target and the items' jobs.
+#[test]
+fn the_bulk_view_is_rebuilt_when_the_active_texture_the_target_or_a_job_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    m.bulk_view();
+    let n = m.bulk_computes();
+    m.bulk_view();
+    assert_eq!(m.bulk_computes(), n, "premise: equal inputs reuse the view");
+    m.selection = sdc_gui::model::Selection::Item(ROCK.into());
+    m.bulk_view();
+    assert_eq!(m.bulk_computes(), n + 1, "a new active texture");
+    m.target = if m.target == Target::Cs {
+        Target::Vanilla
+    } else {
+        Target::Cs
+    };
+    m.bulk_view();
+    assert_eq!(m.bulk_computes(), n + 2, "a new target");
+    m.set_field(LEAF, "resize", json!("half"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.bulk_view();
+    assert!(m.bulk_computes() > n + 2, "a changed job");
+}

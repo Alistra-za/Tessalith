@@ -79,7 +79,8 @@ fn field_views_mark_edited_fields() {
         .map(PanelGroup::title)
         .collect();
     groups.dedup();
-    // Note JI3: the Size rows follow DDS header in `FIELDS`; the panel draws its groups in `PanelGroup::ALL` order.
+    // A pin of `FIELDS` order, not of the order the panel draws (that is `PanelGroup::ALL`, pinned in
+    // `texture_groups.rs`): the Size rows follow DDS header (Note JI3), and the first-screen rows are in no group.
     assert_eq!(
         groups,
         vec!["Normal map", "Alpha", "Normal map", "Compression", "Size"]
