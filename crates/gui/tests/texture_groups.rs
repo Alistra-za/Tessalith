@@ -762,6 +762,13 @@ fn set(m: &mut AppModel, writes: &[(&str, serde_json::Value)]) {
         m.set_field(KEY, field, value.clone());
     }
     assert!(m.wait_idle(Duration::from_secs(60)));
+    for (field, value) in writes {
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(KEY, field),
+            Some(value.clone()),
+            "premise: {field} written"
+        );
+    }
 }
 
 fn sum(m: &AppModel, g: PanelGroup) -> GroupSummary {
