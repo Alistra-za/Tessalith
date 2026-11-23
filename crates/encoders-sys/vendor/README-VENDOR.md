@@ -4,7 +4,7 @@
 |---|---|---|---|
 | bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
 | ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch and patches/0003-bc6h-only.patch; ispc_texcomp.cpp with patch 0003) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patches 0001, 0003 | MIT (kernel.ispc and ispc_texcomp.cpp modified; change notices at the top) |
-| bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch, patches/0005-bc7e-fixes.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002, 0005 | Apache-2.0 (modified; change notices at the top of the file) |
+| bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch, patches/0005-bc7e-fixes.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001, 0002 and 0005 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002, 0005 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001, 0002 and 0005, rebuilt on Windows 2026-10-18, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, rebuilt 2026-11-23 with patch 0005): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math --opt=disable-assertions`; `bc7e_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | Apache-2.0 |
 | ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patches 0001 and 0003, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, trimmed to BC6H 2026-11-14 (patch 0003)): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math -DSDC_BC6H_ONLY`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
 
@@ -47,7 +47,7 @@ from the patched source. The patch file is `git diff --no-index --text <patch-00
 Measurements: docs/research/bc7e-tuning.md.
 
 **Objects.** The vendored `ispc-objs/bc7e/*.obj` and `bc7e_ispc.h` were rebuilt from the patch-0002 source on Windows
-(2026-10-18) with `tools/regen-ispc.ps1 -Update -Bc7eOnly` and `tools/hash-vendor.ps1`; a second `regen-ispc.ps1` run
+(2026-10-18) and again from the patch-0005 source (2026-11-23) with `tools/regen-ispc.ps1 -Update -Bc7eOnly` and `tools/hash-vendor.ps1`; a second `regen-ispc.ps1` run
 matches 12/12. `build.rs` requires both `m_exact_opaque_alpha` (patch 0001) and `m_endpoint_search` in the header and stops the
 build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encode byte-identically to the patch-0001 objects on each of the four ISPC
 targets of the time (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2 path (and the sse4 and avx paths of the time),
