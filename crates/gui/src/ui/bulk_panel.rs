@@ -9,7 +9,9 @@ use super::settings_panel::{
 use crate::look::Combo036 as _;
 use crate::model::bulk::{is_value_dependent, BulkField, BulkOp, GreenReach};
 use crate::model::fields::{effort_field, field_help, FieldView, EFFORT_FIELDS};
-use crate::model::labels::{type_hover, GREEN_TO_DIRECTX, GREEN_TO_OPENGL};
+use crate::model::labels::{
+    type_hover, GREEN_TO_DIRECTX, GREEN_TO_DIRECTX_BULK_HOVER, GREEN_TO_OPENGL,
+};
 use crate::model::panel_groups::{self, PanelGroup};
 use crate::model::sets::SlotKind;
 use crate::model::AppModel;
@@ -327,7 +329,14 @@ fn green_row(ui: &mut egui::Ui, model: &AppModel, green: &GreenReach, acts: &mut
             (GREEN_TO_OPENGL, GreenConvention::Opengl),
             (GREEN_TO_DIRECTX, GreenConvention::Directx),
         ] {
-            if waiting_button(ui, &off, text).clicked() {
+            let r = waiting_button(ui, &off, text);
+            // A3-2: the one-texture "Treat as DirectX" clears; this one writes, so it says so.
+            let r = if g == GreenConvention::Directx {
+                r.on_hover_text(GREEN_TO_DIRECTX_BULK_HOVER)
+            } else {
+                r
+            };
+            if r.clicked() {
                 acts.push(Act::Green(g));
             }
         }

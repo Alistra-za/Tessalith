@@ -171,6 +171,9 @@ pub fn effort_label(id: &str) -> &'static str {
 /// The green-convention words, shared by the single panel and the bulk Green row.
 pub const GREEN_TO_OPENGL: &str = "Treat as OpenGL (flip green)";
 pub const GREEN_TO_DIRECTX: &str = "Treat as DirectX";
+/// The bulk "Treat as DirectX" hover: unlike the one-texture button, which clears the texture's own setting, it writes
+/// DirectX (A3-2).
+pub const GREEN_TO_DIRECTX_BULK_HOVER: &str = "Writes DirectX to each of these normal maps, so it overrides OpenGL from a preset or an sdc.toml rule. On one texture, this button only removes your own OpenGL setting.";
 
 /// "OpenGL" or "DirectX".
 pub fn green_name(g: engine::config::GreenConvention) -> &'static str {

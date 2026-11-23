@@ -4036,6 +4036,17 @@ fn changed_follows_the_resets_on_both_panels() {
     assert_eq!(resets(&h), 0, "no bulk row reaches a texture, so no ↺");
 }
 
+/// LQ13 and TPC-F-1 (Minor 9): the bulk "Treat as DirectX" writes DirectX, unlike the one-texture button, and says so.
+#[test]
+fn the_bulk_directx_button_says_it_writes_directx() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = green_panel(normals_and_others(d.path()), &GREEN_KEYS, false);
+    h.run();
+    h.get_by_label("Treat as DirectX").hover();
+    h.run();
+    h.get_by_label_contains("Writes DirectX to each of these normal maps");
+}
+
 /// LQ5: a texture selected while a plan is pending draws its last job, which may not have the plan's problems yet; the
 /// latch waits for the plan. Here the cube's `mips.levels = none` is still planning (CUBE-NO-MIPS is not on its job)
 /// when it is selected and drawn; once the plan lands, Mipmaps opens.
