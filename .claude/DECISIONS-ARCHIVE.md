@@ -940,6 +940,12 @@ ARCHIVED (wording before the edit; superseded in part by Note LO, 2026-11-22)
 - The BC6H peak mode is a field value: on when a `bc6h_enc_settings` has both `slow_mode` and `fast_mode` (no upstream profile does), so no struct or ISPC header changes; the shim's `g_bc6[5]` is veryslow plus `fast_mode` (`Bc6hLevel::VeryslowPeak = 5`). `encoders-sys` `tests/bc6h.rs` pins the output of the five upstream levels and of the peak mode per ISPC path (AVX2; SSE2; AVX-512 only with the test cap lifted); the owner accepted the peak mode's +0.6 % RMSLE miss. [FE2, FE4, FE7, HZ5, JB4, JB6]
 - OPEN: `tests/bc6h.rs` hash-checks the five upstream levels and the peak mode on every path the CPU supports up to the test cap (forced SSE2 on an AVX2 CPU). Nothing has run on a CPU without AVX2. [FF7, HZ5, JB4, JB6]
 
+ARCHIVED (wording before the edit; superseded in part by Note LQ2, 2026-11-23)
+- Every edit control on the texture panel waits for its (partial) plan; navigation does not. [FK2, FK3, FL6]
+
+ARCHIVED (wording before the edit; superseded in part by Note LQ3, 2026-11-23)
+- A group header carries a value only where the state shows nowhere else (JR6): Coat, Emissive, Glint and Fuzz say no on/off (their tick shows the state when Features is open and the key is available); Subsurface says its mode (Off / Standard / Foliage) only while closed; NiAlphaProperty set/off, closed at start; Matching "{n} match(es)"; an enabled but blocked feature's group reads `{state}, blocked by {feature}` in amber whether it is open or closed. Off-state title "PGPatcher JSON settings (not written)"; titles "Coat", "Subsurface", "CS PBR records". [CC8, CC10, CC11, CC22, CC13, JR6]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)

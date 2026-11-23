@@ -1,0 +1,3 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Digest¶- Every edit control on the texture panel waits	Digest	377	back	LQ2	group headers are navigation (LQ2)	partial	2026-11-23		goes: the line without LQ2 (group headers are navigation, never gated by a pending plan); stays: edit controls wait for their (partial) plan (ruling TPC-F-6)
+Digest¶- A group header carries a value only where the state	Digest	468	back	LQ3	the texture-panel summary shows only while the group is closed (LQ3, TPC-R1)	partial	2026-11-23		goes: the line without LQ3 (the texture-panel headers follow JR6 under LQ3); stays: the rest (ruling TPC-F-6)
