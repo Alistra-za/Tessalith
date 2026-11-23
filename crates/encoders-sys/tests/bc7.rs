@@ -292,10 +292,22 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 /// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters
 /// and near-solid blocks (its solid blocks take bc7e's mode 5 solid-block path). Raw bytes, 64-block calls, the data
 /// maps' tune (T_data, exact G) at weights x16 and x1, every level, exact opaque off and on, every path. Without the
-/// one-colour p guard only ultrafast, veryfast and fast fail, so every level runs (Note LR, LR12).
+/// one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque on, alpha decodes
+/// 255 after the post-fix in every cell, and wins over G where both cannot hold (ruling BC7-C4): mode 6's forced p-bits
+/// cannot decode G 0, so G 0 is not asserted at `exact_g_waived`'s levels (Note LR, LR12).
 #[test]
 fn exact_constants_keep_a_flat_channel() {
+    use encoders_sys::bc7_fixup::force_opaque_rotated;
     use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Tune};
+    // BC7-C4's waiver: exact opaque on, G 0, at the levels where opaque blocks have no exact choice left.
+    let exact_g_waived = |g: u8, level: Bc7Level, exact_opaque: bool| {
+        exact_opaque
+            && g == 0
+            && matches!(
+                level,
+                Bc7Level::Ultrafast | Bc7Level::Veryfast | Bc7Level::Fast
+            )
+    };
     let mut bad = vec![];
     for g in [0u8, 255] {
         let blocks = gather_blocks(&exact_constant_fixture(g, EXACT_SEED), 64, 64);
@@ -316,6 +328,9 @@ fn exact_constants_keep_a_flat_channel() {
                     for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
                         bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
                     }
+                    let what = format!(
+                        "G {g} {level:?} exact={exact_opaque} weights {weights:?} {target:?}"
+                    );
                     let errs: Vec<u8> = out
                         .chunks(16)
                         .flat_map(decode)
@@ -323,16 +338,37 @@ fn exact_constants_keep_a_flat_channel() {
                         .filter(|e| *e > 0)
                         .collect();
                     if let Some(worst) = errs.iter().max() {
-                        bad.push(format!(
-                            "G {g} {level:?} exact={exact_opaque} weights {weights:?} {target:?}: {} texels off, worst {worst}",
-                            errs.len()
-                        ));
+                        if !exact_g_waived(g, level, exact_opaque) {
+                            bad.push(format!("{what}: {} texels off, worst {worst}", errs.len()));
+                        }
+                    }
+                    if exact_opaque {
+                        // The engine's opaque guarantee is after the rotated-block post-fix.
+                        let below: Vec<u8> = out
+                            .chunks_mut(16)
+                            .flat_map(|b| {
+                                force_opaque_rotated(b.try_into().unwrap());
+                                decode(b)
+                            })
+                            .map(|t| t[3])
+                            .filter(|a| *a != 255)
+                            .collect();
+                        if let Some(lowest) = below.iter().min() {
+                            bad.push(format!(
+                                "{what}: {} texels with alpha below 255, lowest {lowest}",
+                                below.len()
+                            ));
+                        }
                     }
                 }
             }
         }
     }
-    assert!(bad.is_empty(), "flat G decoded off:\n{}", bad.join("\n"));
+    assert!(
+        bad.is_empty(),
+        "flat G or exact-opaque alpha decoded off:\n{}",
+        bad.join("\n")
+    );
 }
 
 /// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights give the plain
