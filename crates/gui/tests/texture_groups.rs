@@ -3535,7 +3535,7 @@ fn a_closed_panel_has_at_most_twelve_control_kinds() {
     }
 }
 
-/// The E22 report: `support::control_kinds` of seven textures, groups closed and then open. It asserts nothing.
+/// The E22 report: `support::control_kinds` of seven cases, groups closed and then open. It asserts nothing.
 #[test]
 #[ignore = "a report: run by hand with --ignored --nocapture"]
 fn e22_control_kinds_report() {
@@ -3559,8 +3559,16 @@ fn e22_control_kinds_report() {
         }),
         ("cube", |d| cube_model(d, CUBE)),
         ("undecided type", undecided_rock),
-        ("undecided type and alpha", |d| {
+        // The engine asks the alpha meaning only once a type is chosen (bottom_panel.rs: "The alpha question only
+        // follows a sub-type"), so type and alpha are never both open: this is the alpha question on a decided type.
+        ("alpha question open (leaf decided Diffuse)", |d| {
             let mut m = support::opened(d);
+            m.decide(LEAF, Answer::Subtype(Subtype::Diffuse));
+            assert!(m.wait_idle(Duration::from_secs(60)));
+            assert!(
+                sdc_gui::model::items::alpha_asked(m.item(LEAF).unwrap()).is_some(),
+                "premise: leaf's alpha question is open"
+            );
             m.select_item(LEAF);
             m
         }),
@@ -3579,7 +3587,8 @@ fn e22_control_kinds_report() {
             } else {
                 m = all_closed(m);
             }
-            let mut h = harness(m, 1280.0, 800.0);
+            // Open: a tall window, so no row scrolls out of the centre and the count is the whole panel.
+            let mut h = harness(m, 1280.0, if open { 2400.0 } else { 800.0 });
             h.run();
             let kinds = support::control_kinds(&h, sdc_gui::ui::centre_rect(&h.ctx).unwrap());
             let state = if open { "open" } else { "closed" };
