@@ -2491,8 +2491,8 @@ void bc6h_rank_partitions(bc6h_enc_state state[])
         int bound = (int)(bound12);
         state->part_list[part] = part + bound * 64;
     }
-
-    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
+    
+    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0006 (S1): part_list holds 32 partitions; this depth must equal the one bc6h_enc_2p searches
     partial_sort_list(state->part_list, 32, n);
 }
 
