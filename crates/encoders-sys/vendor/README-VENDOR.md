@@ -164,7 +164,10 @@ widened channel in `state->q_span` and `state->q_wide` (-1 when no channel is do
 before; `bc6h_build_qbounds` builds the bounds from them (`compute_qbounds` when `q_wide` is -1, `compute_qbounds2`
 otherwise), in `bc6h_test_mode` when `enc` is set and in `CompressBlockBC6H_core` right before `bc6h_enc_2p` and before
 `bc6h_enc_1p`. The slow levels (all `enc = true`) build once per mode as before. BC6H bytes unchanged: the pins, the
-random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512.
+random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512. S3 (a BC6H `block_quant` that loads each
+region's endpoints once) was tried and dropped: a hoisted reciprocal and a per-texel division both changed BC6H bytes
+(`encode_versions`' `hdr_sky.dds` and the 22 measured images at every level, from the one-region path at Veryfast on),
+while the pins and the random strips stayed equal, so it is not in the patch (Note LT).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
