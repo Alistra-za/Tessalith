@@ -29,6 +29,10 @@
 // #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
 // #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Modified for Tessalith (sdc patch 0006, 2026-11-24, patches/0006-bc6h-speed.patch): byte-neutral BC6H work from a second
+// audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
+// R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
 //these are defined in ISPC version 1.13.0 and later
@@ -965,16 +969,17 @@ void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, unifo
 
     //float var = covar[0] + covar[4] + covar[7] + covar[9] + 256;
     float inv_var = 1.0 / (256 * 256);
+    // sdc patch 0006 (R2): covar[3], [6], [8] and [9] were read uninitialised when channels == 3
     for (uniform int k = 0; k < 10; k++)
     {
-        covar[k] *= inv_var;
+        if (channels == 4 || (k != 3 && k != 6 && k != 8 && k != 9)) covar[k] *= inv_var;
     }
 
     float eps = sq(0.001);
     covar[0] += eps;
 	covar[4] += eps;
 	covar[7] += eps;
-	covar[9] += eps;
+	if (channels == 4) covar[9] += eps; // sdc patch 0006 (R2): covar[9] was read uninitialised when channels == 3
 
 	compute_axis(axis, covar, powerIterations, channels);
 }
@@ -1036,9 +1041,10 @@ float get_pca_bound(float covar[10], uniform int channels)
     uniform const int powerIterations = 4; // quite approximative, but enough for bounding
 
     float inv_var = 1.0 / (256 * 256);
+    // sdc patch 0006 (R2): covar[3], [6], [8] and [9] were read uninitialised when channels == 3
     for (uniform int k = 0; k < 10; k++)
     {
-        covar[k] *= inv_var;
+        if (channels == 4 || (k != 3 && k != 6 && k != 8 && k != 9)) covar[k] *= inv_var;
     }
 
 	float eps = sq(0.001);
@@ -2283,8 +2289,10 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
 {
     int levels = 1 << bits;
 
-    for (uniform int i = 0; i < 8 * pairs; i++)
+    for (uniform int i = 0; i < 2 * pairs; i++)
+    for (uniform int p = 0; p < 3; p++)
     {
+        // sdc patch 0006 (R2): slot 3 of each endpoint was read uninitialised; the body indexes i * 4 + p
         // sdc patch 0004: take the code the decoder rebuilds nearest to ep, the lower one on a tie (upstream's
         // round(ep * (levels - 1) / 65535) missed it by up to one code near both ends of the range).
         // With s = 65536 / levels, unpack_to_uf16 rebuilds an interior code q (1..levels-2) at (q + 0.5) * s, so the
@@ -2299,11 +2307,11 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
         int v;
         if (bits >= 15)
         {
-            v = ((int)(ep[i] / (256 * 256f - 1) * (levels - 1) + 0.5));
+            v = ((int)(ep[i * 4 + p] / (256 * 256f - 1) * (levels - 1) + 0.5));
         }
         else
         {
-            float e = clamp(ep[i], 0.0f, 65535.0f);
+            float e = clamp(ep[i * 4 + p], 0.0f, 65535.0f);
             v = clamp((int)ceil(e * levels / 65536.0f) - 1, 1, levels - 2);
             if (v == 1)
             {
@@ -2315,14 +2323,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
                 if (d_top < abs((float)unpack_to_uf16((uint32)v, bits) - e)) v = levels - 1; // a tie keeps levels - 2
             }
         }
-        qep[i] = clamp(v, 0, levels - 1);
+        qep[i * 4 + p] = clamp(v, 0, levels - 1);
     }
 }
 
 void ep_dequant_bc6h(float ep[], int qep[], int bits, uniform int pairs)
 {
-    for (uniform int i = 0; i < 8 * pairs; i++)
-        ep[i] = unpack_to_uf16(qep[i], bits);
+    for (uniform int i = 0; i < 2 * pairs; i++)
+    for (uniform int p = 0; p < 3; p++)
+        ep[i * 4 + p] = unpack_to_uf16(qep[i * 4 + p], bits); // sdc patch 0006 (R2): slot 3 was read uninitialised
 }
 
 void ep_quant_dequant_bc6h(bc6h_enc_state state[], int qep[], float ep[], uniform int pairs)

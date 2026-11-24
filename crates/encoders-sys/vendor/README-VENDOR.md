@@ -3,10 +3,10 @@
 | Path | Upstream | Commit | Licence |
 |---|---|---|---|
 | bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
-| ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch, patches/0003-bc6h-only.patch and patches/0004-bc6h-kernel-fixes.patch; ispc_texcomp.cpp with patch 0003) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patches 0001, 0003, 0004 | MIT (kernel.ispc and ispc_texcomp.cpp modified; change notices at the top) |
+| ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch, patches/0003-bc6h-only.patch, patches/0004-bc6h-kernel-fixes.patch and patches/0006-bc6h-speed.patch; ispc_texcomp.cpp with patch 0003) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patches 0001, 0003, 0004, 0006 | MIT (kernel.ispc and ispc_texcomp.cpp modified; change notices at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002 | Apache-2.0 (modified; change notices at the top of the file) |
 | ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math --opt=disable-assertions`; `bc7e_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | Apache-2.0 |
-| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patches 0001 and 0003, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, trimmed to BC6H 2026-11-14 (patch 0003), rebuilt 2026-11-22 with patch 0004): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math -DSDC_BC6H_ONLY`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
+| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patches 0001 and 0003, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13, SSE4 and AVX dropped 2026-11-14, trimmed to BC6H 2026-11-14 (patch 0003), rebuilt 2026-11-22 with patch 0004, rebuilt 2026-11-24 with patch 0006): `-O2 --target=sse2,avx2,avx512skx-x16 --opt=fast-math -DSDC_BC6H_ONLY`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
 
 All objects are produced by `tools/regen-ispc.ps1` for the three ISPC targets, with two compilers: ISPC 1.31.0
 (`-Ispc`) builds every file except the two `_avx512skx` objects, which ISPC 1.32.0 (`-Ispc512`) builds because it
@@ -78,7 +78,9 @@ numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 
 under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use
 in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
 moved or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (the BC7 kernels call the
-same `block_quant`, so 0004's fix #1 would also reach them there; `channel_opt_quant` keeps its own `int best_err`, as
+same `block_quant`, so 0004's fix #1 would also reach them there, and 0006's R2 helper changes (`block_pca_axis` and
+`get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, value-neutral;
+`channel_opt_quant` keeps its own `int best_err`, as
 upstream). `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and
 `build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal on every path
 (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one synthetic 64x64 HDR image, and 18
@@ -120,6 +122,15 @@ and #2 change BC6H bytes (Note LO4, LO7, LO8, LO9); #6 and #7 change none. Base 
 levels changed all 22 measured images (18 `hdr_real` and 4 `hdr_grad`: 0 identical at every level), and the pins of
 `tests/bc6h.rs` moved at #5 (15 of 18), #3 (12) and #2 (18), not at #1 (Note LO6). Quality and counts: Note LO10 and
 docs/research/encoder-benchmark.md ("Kernel fixes (patch 0004, 2026-11-22, Note LO)").
+
+ISPC TC patch 0006 "BC6H speed" (`ispctc/patches/0006-bc6h-speed.patch`, 2026-11-24) applies on top of patches 0001,
+0003 and 0004. It is produced with
+`git diff --output=<patch> 8f98807a -- crates/encoders-sys/vendor/ispctc/kernel.ispc` (the patch file is always
+regenerated whole, never edited by hand), and it is built with both compilers as before. BC6H bytes do not change:
+every pin, the random strips and the 22 measured images on SSE2, AVX2 and AVX-512 hash equal. R2: `ep_quant_bc6h` and
+`ep_dequant_bc6h` loop over the three channels of each endpoint (index `i * 4 + p`) and no longer read or write slots
+3 and 7 (11 and 15 with two pairs); `block_pca_axis` scales only the covariance entries `covar_from_stats` wrote and
+adds its epsilon to `covar[9]` only for four channels; `get_pca_bound` scales only those entries (Note LT).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
