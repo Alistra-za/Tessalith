@@ -863,7 +863,8 @@ fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8
     let (mn, mx) = minmax(v);
     // A solid block, or a radius below `BOUND_MIN_RADIUS`, takes `EMPTY`; otherwise the window covers the radius plus
     // `local`'s reach of 3, and the clamp keeps the pad a byte for any radius. The two calls are on purpose: the `EMPTY`
-    // copy folds its bound checks away, while one call with a bound picked at run time kept only about half of the gain on the base path.
+    // copy folds its bound checks away, while one call with a bound picked at run time kept only about half of the gain
+    // on the base path.
     let (base, b) = if mn == mx || radius < BOUND_MIN_RADIUS {
         searched(isa, v, radius as i32, &EMPTY)
     } else {
