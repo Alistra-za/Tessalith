@@ -177,7 +177,7 @@ fn a_non_skin_shape_ignores_the_preview() {
 /// compiles for the skin shapes; on with nothing wet (a picked map, slider 0) it draws like the shape as loaded;
 /// slider 1 changes the pixels. PNGs in %TEMP%\sdc-skin-preview.
 #[test]
-#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance); GPU test, run alone"]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn bundled_cs_wetness_compiles_is_neutral_when_dry_and_shows_when_wet() {
     let root = std::path::PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");

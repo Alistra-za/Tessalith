@@ -73,7 +73,7 @@ impl Worst {
 }
 
 #[test]
-#[ignore = "needs SDC_GOLDEN (the captured golden fixtures); GPU test, run alone"]
+#[ignore = "needs SDC_GOLDEN (the captured golden fixtures)"]
 fn replay_matches_capture_per_mrt() {
     let Ok(root) = std::env::var("SDC_GOLDEN") else {
         println!("skipped: set SDC_GOLDEN");
