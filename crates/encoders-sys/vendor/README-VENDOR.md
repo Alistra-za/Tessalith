@@ -136,7 +136,11 @@ guard: `block_quant` forms `div = max(div, 1.0f)` before `proj /= div`. Every BC
 `div` is 0 only for a region whose endpoints are equal in every channel, where 0/0 gave NaN and `(int)` turned it into
 INT_MIN and the clamp into index 1; with `div >= 1` the numerator is still exactly 0, so the index is the same, without
 the NaN (BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
-AVX-512).
+AVX-512). Q6 skip-retry: `bc6h_peak_retry` sets a per-lane `lifted` flag when the lift raises any channel of a guarded
+block and runs the second search only for a lane that set it. An unlifted block would repeat the identical search from
+`best_err = 1e99`, and the retry keeps its own result on a tie, which is the same data. VeryslowPeak only (the
+retry runs once per guarded block); BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash
+equal on SSE2, AVX2 and AVX-512.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

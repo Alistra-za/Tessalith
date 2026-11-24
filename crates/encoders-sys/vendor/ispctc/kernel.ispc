@@ -33,6 +33,7 @@
 // audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
 // R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
 // zero-div block_quant never divides by a zero endpoint distance.
+// Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -3366,20 +3367,26 @@ void bc6h_peak_retry(bc6h_enc_state state[])
         uint32 data0[5];
         for (uniform int i = 0; i < 5; i++) data0[i] = state->best_data[i];
 
+        bool lifted = false; // sdc patch 0006 (Q6 skip-retry): true once the lift raises any channel, per lane
         for (uniform int k = 0; k < 16; k++)
         {
             float m = max(state->block[k], max(state->block[16 + k], state->block[32 + k]));
             float lo = m - 12 * 1024 * 64 / 31.0f;
+            for (uniform int p = 0; p < 3; p++) if (lo > state->block[p * 16 + k]) lifted = true; // sdc patch 0006 (Q6 skip-retry): compare before the max below
             for (uniform int p = 0; p < 3; p++) state->block[p * 16 + k] = max(state->block[p * 16 + k], lo);
         }
-        bc6h_bounds(state);
-        state->best_err = 1e99;
-        bc6h_search_slow(state);
-
-        if (state->best_err > err0)
+        // sdc patch 0006 (Q6 skip-retry): an unlifted block would repeat the identical search, and the retry keeps its own result on a tie, which is the same data: skip it
+        if (lifted)
         {
-            state->best_err = err0;
-            for (uniform int i = 0; i < 5; i++) state->best_data[i] = data0[i];
+            bc6h_bounds(state);
+            state->best_err = 1e99;
+            bc6h_search_slow(state);
+
+            if (state->best_err > err0)
+            {
+                state->best_err = err0;
+                for (uniform int i = 0; i < 5; i++) state->best_data[i] = data0[i];
+            }
         }
     }
 }

@@ -1,8 +1,8 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index b57fb87a..18851028 100644
+index b57fb87a..8d7829d4 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-@@ -29,6 +29,11 @@
+@@ -29,6 +29,12 @@
  // #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
  // #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -10,11 +10,12 @@ index b57fb87a..18851028 100644
 +// audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
 +// R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
 +// zero-div block_quant never divides by a zero endpoint distance.
++// Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
 +///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
  #ifndef ISPC_UINT_IS_DEFINED
  //these are defined in ISPC version 1.13.0 and later
-@@ -965,16 +970,17 @@ void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, unifo
+@@ -965,16 +971,17 @@ void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, unifo
  
      //float var = covar[0] + covar[4] + covar[7] + covar[9] + 256;
      float inv_var = 1.0 / (256 * 256);
@@ -34,7 +35,7 @@ index b57fb87a..18851028 100644
  
  	compute_axis(axis, covar, powerIterations, channels);
  }
-@@ -1036,9 +1042,10 @@ float get_pca_bound(float covar[10], uniform int channels)
+@@ -1036,9 +1043,10 @@ float get_pca_bound(float covar[10], uniform int channels)
      uniform const int powerIterations = 4; // quite approximative, but enough for bounding
  
      float inv_var = 1.0 / (256 * 256);
@@ -46,7 +47,7 @@ index b57fb87a..18851028 100644
      }
  
  	float eps = sq(0.001);
-@@ -1286,6 +1293,8 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
+@@ -1286,6 +1294,8 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
              div += sq(ep_b-ep_a);
          }
          
@@ -55,7 +56,7 @@ index b57fb87a..18851028 100644
          proj /= div;
          		
  		int q1 = (int)(proj*levels+0.5);
-@@ -2283,8 +2292,10 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -2283,8 +2293,10 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
  {
      int levels = 1 << bits;
  
@@ -67,7 +68,7 @@ index b57fb87a..18851028 100644
          // sdc patch 0004: take the code the decoder rebuilds nearest to ep, the lower one on a tie (upstream's
          // round(ep * (levels - 1) / 65535) missed it by up to one code near both ends of the range).
          // With s = 65536 / levels, unpack_to_uf16 rebuilds an interior code q (1..levels-2) at (q + 0.5) * s, so the
-@@ -2299,11 +2310,11 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -2299,11 +2311,11 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
          int v;
          if (bits >= 15)
          {
@@ -81,7 +82,7 @@ index b57fb87a..18851028 100644
              v = clamp((int)ceil(e * levels / 65536.0f) - 1, 1, levels - 2);
              if (v == 1)
              {
-@@ -2315,14 +2326,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -2315,14 +2327,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
                  if (d_top < abs((float)unpack_to_uf16((uint32)v, bits) - e)) v = levels - 1; // a tie keeps levels - 2
              }
          }
@@ -100,3 +101,37 @@ index b57fb87a..18851028 100644
  }
  
  void ep_quant_dequant_bc6h(bc6h_enc_state state[], int qep[], float ep[], uniform int pairs)
+@@ -3354,20 +3367,26 @@ void bc6h_peak_retry(bc6h_enc_state state[])
+         uint32 data0[5];
+         for (uniform int i = 0; i < 5; i++) data0[i] = state->best_data[i];
+ 
++        bool lifted = false; // sdc patch 0006 (Q6 skip-retry): true once the lift raises any channel, per lane
+         for (uniform int k = 0; k < 16; k++)
+         {
+             float m = max(state->block[k], max(state->block[16 + k], state->block[32 + k]));
+             float lo = m - 12 * 1024 * 64 / 31.0f;
++            for (uniform int p = 0; p < 3; p++) if (lo > state->block[p * 16 + k]) lifted = true; // sdc patch 0006 (Q6 skip-retry): compare before the max below
+             for (uniform int p = 0; p < 3; p++) state->block[p * 16 + k] = max(state->block[p * 16 + k], lo);
+         }
+-        bc6h_bounds(state);
+-        state->best_err = 1e99;
+-        bc6h_search_slow(state);
+-
+-        if (state->best_err > err0)
++        // sdc patch 0006 (Q6 skip-retry): an unlifted block would repeat the identical search, and the retry keeps its own result on a tie, which is the same data: skip it
++        if (lifted)
+         {
+-            state->best_err = err0;
+-            for (uniform int i = 0; i < 5; i++) state->best_data[i] = data0[i];
++            bc6h_bounds(state);
++            state->best_err = 1e99;
++            bc6h_search_slow(state);
++
++            if (state->best_err > err0)
++            {
++                state->best_err = err0;
++                for (uniform int i = 0; i < 5; i++) state->best_data[i] = data0[i];
++            }
+         }
+     }
+ }
