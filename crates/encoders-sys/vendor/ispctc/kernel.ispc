@@ -37,6 +37,7 @@
 // S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not once per mode.
 // S2 pca-once bc6h_block_cache computes the PCA endpoints once per block (and once after a lift), not once per mode.
 // 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
+// S4 prune the slow levels skip a mode whose endpoint window cannot beat the best error so far.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2597,6 +2598,42 @@ void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the boun
     else compute_qbounds2(state, state->q_span, state->q_wide);
 }
 
+// sdc patch 0006 (S4): a lower bound on the error of every candidate of the current mode: each texel channel's squared
+// distance to the unpacked qbounds window. Every endpoint a candidate uses is clamped to qbounds before it is unpacked
+// (ep_quant_dequant_bc6h), and block_quant's interpolated value lies between the two endpoints, so each decoded texel
+// channel lies inside [lo_p, hi_p] and its squared error is at least this distance.
+float bc6h_window_bound(bc6h_enc_state state[])
+{
+    float bound = 0;
+    for (uniform int p = 0; p < 3; p++)
+    {
+        float lo_p = unpack_to_uf16(state->qbounds[p], state->epb);
+        float hi_p = unpack_to_uf16(state->qbounds[4 + p], state->epb);
+        for (uniform int k = 0; k < 16; k++)
+        {
+            float v = state->block[p * 16 + k];
+            bound += sq(max(lo_p - v, 0.0f) + max(v - hi_p, 0.0f));
+        }
+    }
+    return bound;
+}
+
+// sdc patch 0006 (S4): at the slow levels a mode whose window bound exceeds the best error so far cannot win, so the
+// lane skips its encode. It is exact: the bound is below every candidate's error (bc6h_window_bound), and a candidate
+// replaces the best only on a strictly lower error, so a skipped mode would not have replaced it; the slack covers float
+// summation order. best_err starts at 1e99, infinite in float, so nothing is skipped before the first candidate. A
+// guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not apply there;
+// peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying: a skipped lane
+// is masked off, and the gang skips the call only when every lane skips.
+bool bc6h_mode_cannot_win(bc6h_enc_state state[])
+{
+    if (!state->slow_mode) return false;
+    float bound = bc6h_window_bound(state);
+    bool prune = bound > state->best_err * (1 + 1e-4f) + 1;
+    if (state->peak_mode) { if (state->peak_k >= 0) prune = false; }
+    return prune;
+}
+
 void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
 {
     uniform int mode_bits = get_mode_bits(mode);
@@ -2616,7 +2653,7 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         if (enc)
         {
             bc6h_build_qbounds(state);
-            bc6h_enc_1p(state);
+            if (!bc6h_mode_cannot_win(state)) bc6h_enc_1p(state); // sdc patch 0006 (S4): the slow levels skip a mode that cannot win
         }
     }
     else if (mode <= 1 || mode == 5 || mode == 9)
@@ -2629,7 +2666,7 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         if (enc)
         {
             bc6h_build_qbounds(state);
-            bc6h_enc_2p(state);
+            if (!bc6h_mode_cannot_win(state)) bc6h_enc_2p(state); // sdc patch 0006 (S4)
         }
     }
     else
@@ -2642,7 +2679,7 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         if (enc)
         {
             bc6h_build_qbounds(state);
-            bc6h_enc_2p(state);
+            if (!bc6h_mode_cannot_win(state)) bc6h_enc_2p(state); // sdc patch 0006 (S4)
         }
     }
 }
