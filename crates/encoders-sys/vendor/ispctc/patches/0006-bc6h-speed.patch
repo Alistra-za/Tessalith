@@ -1,5 +1,5 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index b57fb87a..c6aace86 100644
+index b57fb87a..99efb80a 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
 @@ -29,6 +29,15 @@
@@ -204,19 +204,20 @@ index b57fb87a..c6aace86 100644
  
      int qep[8];
      ep_quant_dequant_bc6h(state, qep, ep, 1);
-@@ -2555,6 +2591,11 @@ void compute_qbounds2(bc6h_enc_state state[], float span, int max_span_idx)
+@@ -2555,6 +2591,12 @@ void compute_qbounds2(bc6h_enc_state state[], float span, int max_span_idx)
      compute_qbounds(state, rgb_span);
  }
  
 +void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
 +{
-+    compute_qbounds2(state, state->q_span, state->q_wide); // q_wide -1 doubles no channel, so this equals compute_qbounds(state, q_span)
++    if (state->q_wide < 0) compute_qbounds(state, state->q_span); // no channel is doubled
++    else compute_qbounds2(state, state->q_span, state->q_wide);
 +}
 +
  void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
  {
      uniform int mode_bits = get_mode_bits(mode);
-@@ -2569,24 +2610,39 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
+@@ -2569,24 +2611,39 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
          state->epb = mode_bits;
          state->mode = mode;
  
@@ -262,7 +263,7 @@ index b57fb87a..c6aace86 100644
      }
  }
  
-@@ -3327,6 +3383,8 @@ void bc6h_setup(bc6h_enc_state state[])
+@@ -3327,6 +3384,8 @@ void bc6h_setup(bc6h_enc_state state[])
      }
  
      bc6h_bounds(state);
@@ -271,7 +272,7 @@ index b57fb87a..c6aace86 100644
  }
  
  void bc6h_search_slow(bc6h_enc_state state[])
-@@ -3354,20 +3412,27 @@ void bc6h_peak_retry(bc6h_enc_state state[])
+@@ -3354,20 +3413,27 @@ void bc6h_peak_retry(bc6h_enc_state state[])
          uint32 data0[5];
          for (uniform int i = 0; i < 5; i++) data0[i] = state->best_data[i];
  
@@ -306,7 +307,7 @@ index b57fb87a..c6aace86 100644
          }
      }
  }
-@@ -3392,6 +3457,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
+@@ -3392,6 +3458,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
              bc6h_test_mode(state, 0, false, 1 / 1.2);
              bc6h_test_mode(state, 2, false, 1);
  
@@ -314,7 +315,7 @@ index b57fb87a..c6aace86 100644
              bc6h_enc_2p(state);
              if (!state->fast_mode) bc6h_test_mode(state, 1, true, 0);
          }
-@@ -3400,6 +3466,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
+@@ -3400,6 +3467,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
          bc6h_test_mode(state, 11, false, 1);
          bc6h_test_mode(state, 12, false, 1);
          bc6h_test_mode(state, 13, false, 1);
