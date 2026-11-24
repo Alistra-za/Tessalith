@@ -1292,7 +1292,7 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
             proj += (block[k+p*16]-ep_a)*(ep_b-ep_a);
             div += sq(ep_b-ep_a);
         }
-
+        
         // sdc patch 0006 (zero-div): BC6H endpoints are integer UF16 values, so div is 0 only for a region whose endpoints are equal in every channel; there 0/0 gave NaN, which (int) turned into INT_MIN and the clamp into index 1. With div >= 1 the numerator is still exactly 0: proj = 0, q1 = clamp(0, 1, levels-1) = 1, and err0 == err1 keeps 1, the same index without the NaN.
         div = max(div, 1.0f);
         proj /= div;
