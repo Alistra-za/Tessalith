@@ -15,7 +15,7 @@
 
 use super::minmax;
 
-/// The tables of one block, on the stack of that block's search; a solid block shares [`EMPTY`].
+/// The tables of one block, on the stack of that block's search; a solid block, or a search below `BOUND_MIN_RADIUS`, shares [`EMPTY`].
 pub(crate) struct Bound {
     /// The window, both ends included; `lo > hi` for [`Bound::empty`] and [`EMPTY`].
     lo: u8,
@@ -26,7 +26,7 @@ pub(crate) struct Bound {
     d: [u32; 256],
 }
 
-/// The bound of a solid block, shared by every search; `lb` is 0 for every pair.
+/// The bound a solid block or a search below `BOUND_MIN_RADIUS` takes, shared by every search; `lb` is 0 for every pair.
 pub(crate) static EMPTY: Bound = Bound::empty();
 
 impl Bound {

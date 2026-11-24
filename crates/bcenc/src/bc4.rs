@@ -1278,6 +1278,7 @@ mod tests {
     /// distinct values, so its best never reaches error 0 and a `BoundSkip` can only come from a table.
     #[test]
     fn the_search_builds_its_bound_only_from_radius_10() {
+        const _: () = assert!(BOUND_MIN_RADIUS == 10);
         let v: [u8; 16] = std::array::from_fn(|i| (i * 8) as u8);
         on_each_path!(isa, {
             let path = path_of(isa);
@@ -1287,7 +1288,7 @@ mod tests {
                 search_on(path, &v, radius, None);
                 let after = crate::hits::counts();
                 let skips = taken(&before, &after, Hit::BoundSkip);
-                if radius < 10 {
+                if radius < BOUND_MIN_RADIUS {
                     assert_eq!(skips, 0, "path {p} radius {radius}");
                 } else {
                     assert!(skips > 0, "path {p} radius {radius}");
