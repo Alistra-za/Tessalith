@@ -36,6 +36,7 @@
 // Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
 // S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not once per mode.
 // S2 pca-once bc6h_block_cache computes the PCA endpoints once per block (and once after a lift), not once per mode.
+// 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2225,6 +2226,9 @@ struct bc6h_enc_state
     float peak_lum;     // its source luminance
     float orig[48];     // the UF16 block before bc6h_peak_retry lifts it
 
+    float q_span;       // sdc patch 0006 (7a): the span and widened channel of the last admitted selector; bounds are built once, before the encode
+    int q_wide;
+
     int part_list[32];  // sdc patch 0006 (S1): partitions ranked once per block and retry pass (bc6h_block_cache)
     float pca_ep_1p[8];   // sdc patch 0006 (S2): the one-region PCA endpoints, once per block and retry pass (bc6h_block_cache); read-only for users
     float pca_ep_2p[32 * 16]; // sdc patch 0006 (S2): rank k's two regions at [k * 16 .. k * 16 + 15], laid out as ep[16] in bc6h_enc_2p_part_fast
@@ -2509,7 +2513,7 @@ void bc6h_block_cache(bc6h_enc_state state[])
 
 void bc6h_enc_2p(bc6h_enc_state state[])
 {
-    uniform int n = bc6h_2p_depth(state); // sdc patch 0004: part_list holds 32 partitions; sdc patch 0006 (S2): the depth comes from bc6h_2p_depth
+    uniform int n = bc6h_2p_depth(state); // sdc patch 0006 (S2): the depth, and the 32-partition bound of part_list, come from bc6h_2p_depth
     bc6h_enc_2p_list(state, state->part_list, n); // sdc patch 0006 (S1): the list bc6h_block_cache ranked
 }
 
@@ -2587,6 +2591,11 @@ void compute_qbounds2(bc6h_enc_state state[], float span, int max_span_idx)
     compute_qbounds(state, rgb_span);
 }
 
+void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
+{
+    compute_qbounds2(state, state->q_span, state->q_wide); // q_wide -1 doubles no channel, so this equals compute_qbounds(state, q_span)
+}
+
 void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
 {
     uniform int mode_bits = get_mode_bits(mode);
@@ -2601,24 +2610,39 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         state->epb = mode_bits;
         state->mode = mode;
 
-        compute_qbounds(state, span);
-        if (enc) bc6h_enc_1p(state);
+        state->q_span = span; // sdc patch 0006 (7a): record, build in bc6h_build_qbounds
+        state->q_wide = -1;
+        if (enc)
+        {
+            bc6h_build_qbounds(state);
+            bc6h_enc_1p(state);
+        }
     }
     else if (mode <= 1 || mode == 5 || mode == 9)
     {
         state->epb = mode_bits;
         state->mode = mode;
 
-        compute_qbounds(state, span);
-        if (enc) bc6h_enc_2p(state);
+        state->q_span = span; // sdc patch 0006 (7a)
+        state->q_wide = -1;
+        if (enc)
+        {
+            bc6h_build_qbounds(state);
+            bc6h_enc_2p(state);
+        }
     }
     else
     {
         state->epb = mode_bits;
         state->mode = mode + max_span_idx;       
         
-        compute_qbounds2(state, span, max_span_idx);
-        if (enc) bc6h_enc_2p(state);
+        state->q_span = span; // sdc patch 0006 (7a)
+        state->q_wide = max_span_idx;
+        if (enc)
+        {
+            bc6h_build_qbounds(state);
+            bc6h_enc_2p(state);
+        }
     }
 }
 
@@ -3433,6 +3457,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
             bc6h_test_mode(state, 0, false, 1 / 1.2);
             bc6h_test_mode(state, 2, false, 1);
 
+            bc6h_build_qbounds(state); // sdc patch 0006 (7a): the bounds of the last admitted selector, built once
             bc6h_enc_2p(state);
             if (!state->fast_mode) bc6h_test_mode(state, 1, true, 0);
         }
@@ -3441,6 +3466,7 @@ inline void CompressBlockBC6H_core(bc6h_enc_state state[])
         bc6h_test_mode(state, 11, false, 1);
         bc6h_test_mode(state, 12, false, 1);
         bc6h_test_mode(state, 13, false, 1);
+        bc6h_build_qbounds(state); // sdc patch 0006 (7a)
         bc6h_enc_1p(state);
     } 
 }

@@ -157,7 +157,14 @@ Fast, and only gangs that entered a mode paid at Fast and Basic) and one one-reg
 Basic, 4 at the slow levels). Now `block_segment_core` runs 2n + 1 times per block (once more after a lift), and every
 gang pays the fill. Cost: about 32.5 KiB of state per gang on AVX-512 (520 floats x 16 lanes x 4 bytes = 33,280
 bytes). BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
-AVX-512.
+AVX-512. 7a qbounds-once: at Veryfast, Fast and Basic each admitted `enc = false` selector in `bc6h_test_mode` built
+the endpoint bounds (`compute_qbounds` or `compute_qbounds2`, an 8-value `ep_quant_bc6h`) that the next admitted
+selector overwrote, and only the last reached `bc6h_enc_2p` or `bc6h_enc_1p`. Now each branch records its span and
+widened channel in `state->q_span` and `state->q_wide` (-1 when no channel is doubled) and sets `epb` and `mode` as
+before; `bc6h_build_qbounds` builds the bounds from them, in `bc6h_test_mode` when `enc` is set and in
+`CompressBlockBC6H_core` right before `bc6h_enc_2p` and before `bc6h_enc_1p`. The slow levels (all `enc = true`) build
+once per mode as before. BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on
+SSE2, AVX2 and AVX-512.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
