@@ -77,12 +77,12 @@ ISPC TC patch 0003 "BC6H only" (`ispctc/patches/0003-bc6h-only.patch`, 2026-11-1
 numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 is the next number not used anywhere
 under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use
 in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
-moved or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (the BC7 kernels call the
-same `block_quant`, so 0004's fix #1 would also reach them there, and 0006's R2 helper changes (`block_pca_axis` and
-`get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, value-neutral, and so does 0006's zero-div guard in `block_quant` (BC7's integer
-endpoints make it value-neutral there too);
-`channel_opt_quant` keeps its own `int best_err`, as
-upstream). `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and
+moved or edited. Without the define the source behaves as upstream plus patches 0001, 0004 and 0006. The BC7 kernels
+call the same `block_quant`, so 0004's fix #1 would also reach them there. 0006's R2 helper changes (`block_pca_axis`
+and `get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, and its zero-div
+guard in `block_quant` reaches them too; by reading the code both are value-neutral there (BC7's endpoints are
+integers), but that build is neither compiled nor shipped, so the claim is not tested. `channel_opt_quant` keeps its own
+`int best_err`, as upstream. `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and
 `build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal on every path
 (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one synthetic 64x64 HDR image, and 18
 Poly Haven HDR files (1024x512) at all six levels. Object sizes before and after
