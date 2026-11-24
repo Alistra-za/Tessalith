@@ -1,5 +1,5 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index b57fb87a..99efb80a 100644
+index b57fb87a..af60d9d5 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
 @@ -29,6 +29,15 @@
@@ -210,7 +210,7 @@ index b57fb87a..99efb80a 100644
  
 +void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
 +{
-+    if (state->q_wide < 0) compute_qbounds(state, state->q_span); // no channel is doubled
++    if (state->q_wide < 0) compute_qbounds(state, state->q_span); // sdc patch 0006 (7a): no channel is doubled
 +    else compute_qbounds2(state, state->q_span, state->q_wide);
 +}
 +

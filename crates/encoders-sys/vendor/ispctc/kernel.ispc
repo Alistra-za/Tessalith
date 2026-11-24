@@ -2593,7 +2593,7 @@ void compute_qbounds2(bc6h_enc_state state[], float span, int max_span_idx)
 
 void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
 {
-    if (state->q_wide < 0) compute_qbounds(state, state->q_span); // no channel is doubled
+    if (state->q_wide < 0) compute_qbounds(state, state->q_span); // sdc patch 0006 (7a): no channel is doubled
     else compute_qbounds2(state, state->q_span, state->q_wide);
 }
 
