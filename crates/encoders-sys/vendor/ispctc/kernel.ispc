@@ -32,6 +32,7 @@
 // Modified for Tessalith (sdc patch 0006, 2026-11-24, patches/0006-bc6h-speed.patch): byte-neutral BC6H work from a second
 // audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
 // R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
+// zero-div block_quant never divides by a zero endpoint distance.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -1291,7 +1292,9 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
             proj += (block[k+p*16]-ep_a)*(ep_b-ep_a);
             div += sq(ep_b-ep_a);
         }
-        
+
+        // sdc patch 0006 (zero-div): BC6H endpoints are integer UF16 values, so div is 0 only for a region whose endpoints are equal in every channel; there 0/0 gave NaN, which (int) turned into INT_MIN and the clamp into index 1. With div >= 1 the numerator is still exactly 0: proj = 0, q1 = clamp(0, 1, levels-1) = 1, and err0 == err1 keeps 1, the same index without the NaN.
+        div = max(div, 1.0f);
         proj /= div;
         		
 		int q1 = (int)(proj*levels+0.5);

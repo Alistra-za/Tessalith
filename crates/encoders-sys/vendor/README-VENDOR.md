@@ -79,7 +79,8 @@ under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC
 in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
 moved or edited. Without the define the source behaves as upstream plus patches 0001 and 0004 (the BC7 kernels call the
 same `block_quant`, so 0004's fix #1 would also reach them there, and 0006's R2 helper changes (`block_pca_axis` and
-`get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, value-neutral;
+`get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, value-neutral, and so does 0006's zero-div guard in `block_quant` (BC7's integer
+endpoints make it value-neutral there too);
 `channel_opt_quant` keeps its own `int best_err`, as
 upstream). `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both compilers), and
 `build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal on every path
@@ -130,7 +131,12 @@ regenerated whole, never edited by hand), and it is built with both compilers as
 every pin, the random strips and the 22 measured images on SSE2, AVX2 and AVX-512 hash equal. R2: `ep_quant_bc6h` and
 `ep_dequant_bc6h` loop over the three channels of each endpoint (index `i * 4 + p`) and no longer read or write slots
 3 and 7 (11 and 15 with two pairs); `block_pca_axis` scales only the covariance entries `covar_from_stats` wrote and
-adds its epsilon to `covar[9]` only for four channels; `get_pca_bound` scales only those entries (Note LT).
+adds its epsilon to `covar[9]` only for four channels; `get_pca_bound` scales only those entries (Note LT). Zero-div
+guard: `block_quant` forms `div = max(div, 1.0f)` before `proj /= div`. Every BC6H endpoint is an integer UF16 value, so
+`div` is 0 only for a region whose endpoints are equal in every channel, where 0/0 gave NaN and `(int)` turned it into
+INT_MIN and the clamp into index 1; with `div >= 1` the numerator is still exactly 0, so the index is the same, without
+the NaN (BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
+AVX-512).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

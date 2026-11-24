@@ -1,19 +1,20 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index b57fb87a..1645ecf1 100644
+index b57fb87a..ea131036 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-@@ -29,6 +29,10 @@
+@@ -29,6 +29,11 @@
  // #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
  // #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 +// Modified for Tessalith (sdc patch 0006, 2026-11-24, patches/0006-bc6h-speed.patch): byte-neutral BC6H work from a second
 +// audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
 +// R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
++// zero-div block_quant never divides by a zero endpoint distance.
 +///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
  #ifndef ISPC_UINT_IS_DEFINED
  //these are defined in ISPC version 1.13.0 and later
-@@ -965,16 +969,17 @@ void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, unifo
+@@ -965,16 +970,17 @@ void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, unifo
  
      //float var = covar[0] + covar[4] + covar[7] + covar[9] + 256;
      float inv_var = 1.0 / (256 * 256);
@@ -33,7 +34,7 @@ index b57fb87a..1645ecf1 100644
  
  	compute_axis(axis, covar, powerIterations, channels);
  }
-@@ -1036,9 +1041,10 @@ float get_pca_bound(float covar[10], uniform int channels)
+@@ -1036,9 +1042,10 @@ float get_pca_bound(float covar[10], uniform int channels)
      uniform const int powerIterations = 4; // quite approximative, but enough for bounding
  
      float inv_var = 1.0 / (256 * 256);
@@ -45,7 +46,18 @@ index b57fb87a..1645ecf1 100644
      }
  
  	float eps = sq(0.001);
-@@ -2283,8 +2289,10 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -1285,7 +1292,9 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
+             proj += (block[k+p*16]-ep_a)*(ep_b-ep_a);
+             div += sq(ep_b-ep_a);
+         }
+-        
++
++        // sdc patch 0006 (zero-div): BC6H endpoints are integer UF16 values, so div is 0 only for a region whose endpoints are equal in every channel; there 0/0 gave NaN, which (int) turned into INT_MIN and the clamp into index 1. With div >= 1 the numerator is still exactly 0: proj = 0, q1 = clamp(0, 1, levels-1) = 1, and err0 == err1 keeps 1, the same index without the NaN.
++        div = max(div, 1.0f);
+         proj /= div;
+         		
+ 		int q1 = (int)(proj*levels+0.5);
+@@ -2283,8 +2292,10 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
  {
      int levels = 1 << bits;
  
@@ -57,7 +69,7 @@ index b57fb87a..1645ecf1 100644
          // sdc patch 0004: take the code the decoder rebuilds nearest to ep, the lower one on a tie (upstream's
          // round(ep * (levels - 1) / 65535) missed it by up to one code near both ends of the range).
          // With s = 65536 / levels, unpack_to_uf16 rebuilds an interior code q (1..levels-2) at (q + 0.5) * s, so the
-@@ -2299,11 +2307,11 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -2299,11 +2310,11 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
          int v;
          if (bits >= 15)
          {
@@ -71,7 +83,7 @@ index b57fb87a..1645ecf1 100644
              v = clamp((int)ceil(e * levels / 65536.0f) - 1, 1, levels - 2);
              if (v == 1)
              {
-@@ -2315,14 +2323,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+@@ -2315,14 +2326,15 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
                  if (d_top < abs((float)unpack_to_uf16((uint32)v, bits) - e)) v = levels - 1; // a tie keeps levels - 2
              }
          }
