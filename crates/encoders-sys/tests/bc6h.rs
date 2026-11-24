@@ -480,8 +480,56 @@ fn strip(mut block: impl FnMut() -> [[u16; 3]; 16]) -> Vec<[u16; 4]> {
 /// of up to 64 half codes, a random 8/8 texel split; (c) narrow spans; (d) black beside bright neutral texels.
 #[test]
 fn random_blocks_encode_at_every_level_on_every_path() {
+    let strips = random_strips();
+    let levels = RANDOM_STRIP_LEVELS;
+    for target in paths() {
+        for (i, px) in strips.iter().enumerate() {
+            for level in levels {
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                eprintln!("strip {i} {target:?} {level:?} survived");
+            }
+        }
+    }
+}
+
+/// The levels the random strips are encoded at, in the order `random_strip_hashes` prints them.
+const RANDOM_STRIP_LEVELS: [Bc6hLevel; 6] = [
+    Bc6hLevel::Veryfast,
+    Bc6hLevel::Fast,
+    Bc6hLevel::Basic,
+    Bc6hLevel::Slow,
+    Bc6hLevel::Veryslow,
+    Bc6hLevel::VeryslowPeak,
+];
+
+/// Prints `<path> <strip> <level> <sha256 hex of the encoded strip>` for the random strips, one line per path in
+/// `paths()`, strip (a-d) and level. It asserts nothing: run it before and after a kernel change that must keep every
+/// byte and compare the two outputs (`-- --ignored --exact random_strip_hashes --nocapture`).
+#[test]
+#[ignore = "prints the random strips' output hashes: compare them before and after a byte-neutral kernel change"]
+fn random_strip_hashes() {
+    let strips = random_strips();
+    for target in paths() {
+        for (name, px) in ["a", "b", "c", "d"].into_iter().zip(&strips) {
+            for level in RANDOM_STRIP_LEVELS {
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                println!(
+                    "{target:?} {name} {level:?} {}",
+                    hex::encode(Sha256::digest(&out))
+                );
+            }
+        }
+    }
+}
+
+/// The four random strips of `random_blocks_encode_at_every_level_on_every_path`: (a) every channel of every texel a
+/// random half; (b) two clusters, each one random colour plus noise of up to 64 half codes, a random 8/8 texel split;
+/// (c) narrow spans; (d) black beside bright neutral texels.
+fn random_strips() -> [Vec<[u16; 4]>; 4] {
     let mut r = Lcg(0x1234_5678);
-    let strips = [
+    [
         strip(|| std::array::from_fn(|_| std::array::from_fn(|_| r.range(0, MAX_UF16)))),
         {
             let mut r = Lcg(0x2345_6789);
@@ -530,24 +578,7 @@ fn random_blocks_encode_at_every_level_on_every_path() {
                 })
             })
         },
-    ];
-    let levels = [
-        Bc6hLevel::Veryfast,
-        Bc6hLevel::Fast,
-        Bc6hLevel::Basic,
-        Bc6hLevel::Slow,
-        Bc6hLevel::Veryslow,
-        Bc6hLevel::VeryslowPeak,
-    ];
-    for target in paths() {
-        for (i, px) in strips.iter().enumerate() {
-            for level in levels {
-                let mut out = vec![0u8; STRIP_BLOCKS * 16];
-                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
-                eprintln!("strip {i} {target:?} {level:?} survived");
-            }
-        }
-    }
+    ]
 }
 
 /// Bounds (E_lo, E_hi) on the encoder's own error for one encoded block, read from the output bytes alone, in half-code
