@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- BC4 and BC5 at the default `encoder.bc45_search_radius` encode faster with the same bytes: about 0.93 of their time on CPUs without AVX2 and 0.98 with it (an Intel Core i9-13900K, measured in a VM). The encoder no longer builds the pair-skipping bound at the default and `fast` radius, where it cost more than it saved. Numbers: docs/research/bc4-family.md#the-bound-per-radius-2026-11-24.
 - The texture panel opens on the name, type, output format and size, the meshes that use it, and its problems. Other settings sit in groups that start closed, and Tessalith remembers the ones you open, across textures and launches; each closed group says what it holds and marks the ones you changed. Problems' **Go to** opens the group at the setting.
 - New **Green** row on the bulk panel. With several textures selected, **Treat as OpenGL (flip green)** or **Treat as DirectX** sets the green convention of every selected normal map at once, as one undo step. Model-space normals, textures still waiting for their type, and other textures are left as they are.
 
