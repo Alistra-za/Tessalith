@@ -34,6 +34,7 @@
 // R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
 // zero-div block_quant never divides by a zero endpoint distance.
 // Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
+// S1 rank-once bc6h_rank_partitions ranks the two-region partitions once per block (and once after a lift), not once per mode.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2222,6 +2223,8 @@ struct bc6h_enc_state
     int peak_k;         // texel with the largest source luminance, -1 when the block is not guarded
     float peak_lum;     // its source luminance
     float orig[48];     // the UF16 block before bc6h_peak_retry lifts it
+
+    int part_list[32];  // sdc patch 0006 (S1): partitions ranked once per block and retry pass (bc6h_rank_partitions)
 };
 
 void bc6h_code_2p(uint32 data[5], int pqep[], uint32 qblock[2], int part_id, int mode);
@@ -2475,23 +2478,28 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     }
 }
 
-void bc6h_enc_2p(bc6h_enc_state state[])
+// sdc patch 0006 (S1): the ranking depends only on the block, so it runs once per block (bc6h_setup) and once after a lift (bc6h_peak_retry), not once per two-region mode
+void bc6h_rank_partitions(bc6h_enc_state state[])
 {
     float full_stats[15];
     compute_stats_masked(full_stats, state->block, -1, 3);
 
-    int part_list[32];
     for (uniform int part = 0; part < 32; part++)
     {
         int mask = get_pattern_mask(part, 0);
         float bound12 = block_pca_bound_split(state->block, mask, full_stats, 3);
         int bound = (int)(bound12);
-        part_list[part] = part + bound * 64;
+        state->part_list[part] = part + bound * 64;
     }
-    
+
     uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
-    partial_sort_list(part_list, 32, n);
-    bc6h_enc_2p_list(state, part_list, n);
+    partial_sort_list(state->part_list, 32, n);
+}
+
+void bc6h_enc_2p(bc6h_enc_state state[])
+{
+    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
+    bc6h_enc_2p_list(state, state->part_list, n); // sdc patch 0006 (S1): the list bc6h_rank_partitions ranked
 }
 
 void bc6h_enc_1p(bc6h_enc_state state[])
@@ -3340,6 +3348,8 @@ void bc6h_setup(bc6h_enc_state state[])
     }
 
     bc6h_bounds(state);
+
+    if (state->fastSkipTreshold > 0) bc6h_rank_partitions(state); // sdc patch 0006 (S1): once per block; Veryfast has no two-region search
 }
 
 void bc6h_search_slow(bc6h_enc_state state[])
@@ -3379,6 +3389,7 @@ void bc6h_peak_retry(bc6h_enc_state state[])
         if (lifted)
         {
             bc6h_bounds(state);
+            if (state->fastSkipTreshold > 0) bc6h_rank_partitions(state); // sdc patch 0006 (S1): the lift changed the block, rank again (lifted lanes only)
             state->best_err = 1e99;
             bc6h_search_slow(state);
 

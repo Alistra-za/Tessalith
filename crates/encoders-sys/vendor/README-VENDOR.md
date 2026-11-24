@@ -140,7 +140,13 @@ AVX-512). Q6 skip-retry: `bc6h_peak_retry` sets a per-lane `lifted` flag when th
 block and runs the second search only for a lane that set it. An unlifted block would repeat the identical search from
 `best_err = 1e99`, and the retry keeps its own result on a tie, which is the same data. VeryslowPeak only (the
 retry runs once per guarded block); BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash
-equal on SSE2, AVX2 and AVX-512.
+equal on SSE2, AVX2 and AVX-512. S1 rank-once: the two-region partition ranking (`bc6h_rank_partitions`, the body
+`bc6h_enc_2p` had, writing the new `state->part_list`) runs once per block at the end of `bc6h_setup` and once more in
+`bc6h_peak_retry` for a lifted lane, when `fastSkipTreshold > 0`; `bc6h_enc_2p` only searches the stored list. The
+ranking depends on the block alone, so each two-region mode ranked the same list before (six times at Slow, Veryslow
+and VeryslowPeak, twice at Basic, once at Fast). The `(bound, partition id)` order and `partial_sort_list` are
+unchanged; BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
+AVX-512.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
