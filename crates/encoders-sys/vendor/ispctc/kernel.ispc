@@ -2397,11 +2397,16 @@ float bc6h_peak_guard(bc6h_enc_state state[], float err, float ep[], uint32 qblo
 //////////////////////////
 // parameter estimation
 
+// sdc patch 0006 (S2): the number of ranked partitions bc6h_block_cache fills and bc6h_enc_2p searches; one helper so writer and reader cannot differ (a mismatch would read unwritten floats)
+uniform int bc6h_2p_depth(bc6h_enc_state state[])
+{
+    return min(state->fastSkipTreshold, 32); // part_list holds 32 partitions
+}
+
 float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2], int part_id, uniform int rank) // sdc patch 0006 (S2): rank indexes the cached PCA endpoints
 {
     uint32 pattern = get_pattern(part_id);
     uniform int bits = 3;
-    uniform int pairs = 2;
     uniform int channels = 3;
 
     float ep[16];
@@ -2494,7 +2499,7 @@ void bc6h_block_cache(bc6h_enc_state state[])
         state->part_list[part] = part + bound * 64;
     }
     
-    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0006 (S1): part_list holds 32 partitions; this depth must equal the one bc6h_enc_2p searches
+    uniform int n = bc6h_2p_depth(state); // sdc patch 0006 (S2): the depth bc6h_enc_2p searches, from one helper
     partial_sort_list(state->part_list, 32, n);
 
     for (uniform int k = 0; k < n; k++) // sdc patch 0006 (S2): the endpoints of the n ranked partitions, the ones bc6h_enc_2p searches
@@ -2504,7 +2509,7 @@ void bc6h_block_cache(bc6h_enc_state state[])
 
 void bc6h_enc_2p(bc6h_enc_state state[])
 {
-    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
+    uniform int n = bc6h_2p_depth(state); // sdc patch 0004: part_list holds 32 partitions; sdc patch 0006 (S2): the depth comes from bc6h_2p_depth
     bc6h_enc_2p_list(state, state->part_list, n); // sdc patch 0006 (S1): the list bc6h_block_cache ranked
 }
 

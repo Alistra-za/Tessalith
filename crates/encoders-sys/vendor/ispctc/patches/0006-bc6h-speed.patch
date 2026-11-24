@@ -1,5 +1,5 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index b57fb87a..e40f3002 100644
+index b57fb87a..b35261e6 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
 @@ -29,6 +29,14 @@
@@ -114,16 +114,22 @@ index b57fb87a..e40f3002 100644
  }
  
  void ep_quant_dequant_bc6h(bc6h_enc_state state[], int qep[], float ep[], uniform int pairs)
-@@ -2378,7 +2397,7 @@ float bc6h_peak_guard(bc6h_enc_state state[], float err, float ep[], uint32 qblo
+@@ -2378,19 +2397,20 @@ float bc6h_peak_guard(bc6h_enc_state state[], float err, float ep[], uint32 qblo
  //////////////////////////
  // parameter estimation
  
 -float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2], int part_id)
++// sdc patch 0006 (S2): the number of ranked partitions bc6h_block_cache fills and bc6h_enc_2p searches; one helper so writer and reader cannot differ (a mismatch would read unwritten floats)
++uniform int bc6h_2p_depth(bc6h_enc_state state[])
++{
++    return min(state->fastSkipTreshold, 32); // part_list holds 32 partitions
++}
++
 +float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2], int part_id, uniform int rank) // sdc patch 0006 (S2): rank indexes the cached PCA endpoints
  {
      uint32 pattern = get_pattern(part_id);
      uniform int bits = 3;
-@@ -2386,11 +2405,7 @@ float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2
+-    uniform int pairs = 2;
      uniform int channels = 3;
  
      float ep[16];
@@ -136,7 +142,7 @@ index b57fb87a..e40f3002 100644
  
      ep_quant_dequant_bc6h(state, qep, ep, 2);
  
-@@ -2417,7 +2432,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
+@@ -2417,7 +2437,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
  
          int qep[24];
          uint32 qblock[2];
@@ -145,7 +151,7 @@ index b57fb87a..e40f3002 100644
  
          if (err<best_err)
          {
-@@ -2462,29 +2477,41 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
+@@ -2462,29 +2482,41 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
      }
  }
  
@@ -169,7 +175,10 @@ index b57fb87a..e40f3002 100644
 +        state->part_list[part] = part + bound * 64;
      }
      
-+    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0006 (S1): part_list holds 32 partitions; this depth must equal the one bc6h_enc_2p searches
+-    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
+-    partial_sort_list(part_list, 32, n);
+-    bc6h_enc_2p_list(state, part_list, n);
++    uniform int n = bc6h_2p_depth(state); // sdc patch 0006 (S2): the depth bc6h_enc_2p searches, from one helper
 +    partial_sort_list(state->part_list, 32, n);
 +
 +    for (uniform int k = 0; k < n; k++) // sdc patch 0006 (S2): the endpoints of the n ranked partitions, the ones bc6h_enc_2p searches
@@ -179,9 +188,7 @@ index b57fb87a..e40f3002 100644
 +
 +void bc6h_enc_2p(bc6h_enc_state state[])
 +{
-     uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
--    partial_sort_list(part_list, 32, n);
--    bc6h_enc_2p_list(state, part_list, n);
++    uniform int n = bc6h_2p_depth(state); // sdc patch 0004: part_list holds 32 partitions; sdc patch 0006 (S2): the depth comes from bc6h_2p_depth
 +    bc6h_enc_2p_list(state, state->part_list, n); // sdc patch 0006 (S1): the list bc6h_block_cache ranked
  }
  
@@ -193,7 +200,7 @@ index b57fb87a..e40f3002 100644
  
      int qep[8];
      ep_quant_dequant_bc6h(state, qep, ep, 1);
-@@ -3327,6 +3354,8 @@ void bc6h_setup(bc6h_enc_state state[])
+@@ -3327,6 +3359,8 @@ void bc6h_setup(bc6h_enc_state state[])
      }
  
      bc6h_bounds(state);
@@ -202,7 +209,7 @@ index b57fb87a..e40f3002 100644
  }
  
  void bc6h_search_slow(bc6h_enc_state state[])
-@@ -3354,20 +3383,27 @@ void bc6h_peak_retry(bc6h_enc_state state[])
+@@ -3354,20 +3388,27 @@ void bc6h_peak_retry(bc6h_enc_state state[])
          uint32 data0[5];
          for (uniform int i = 0; i < 5; i++) data0[i] = state->best_data[i];
  

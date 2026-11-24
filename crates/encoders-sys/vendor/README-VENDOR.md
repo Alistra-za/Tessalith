@@ -140,20 +140,24 @@ AVX-512). Q6 skip-retry: `bc6h_peak_retry` sets a per-lane `lifted` flag when th
 block and runs the second search only for a lane that set it. An unlifted block would repeat the identical search from
 `best_err = 1e99`, and the retry keeps its own result on a tie, which is the same data. VeryslowPeak only (the
 retry runs once per guarded block); BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash
-equal on SSE2, AVX2 and AVX-512. S1 rank-once: the two-region partition ranking (now part of `bc6h_block_cache`, S2 renamed it from `bc6h_rank_partitions`; the body
-`bc6h_enc_2p` had, writing the new `state->part_list`) runs once per block at the end of `bc6h_setup` and once more in
+equal on SSE2, AVX2 and AVX-512. S1 rank-once: the two-region partition ranking (now part of `bc6h_block_cache`, which
+S2 renamed from `bc6h_rank_partitions`; the body `bc6h_enc_2p` had, writing the new `state->part_list`) runs once per block at the end of `bc6h_setup` and once more in
 `bc6h_peak_retry` for a lifted lane, when `fastSkipTreshold > 0`; `bc6h_enc_2p` only searches the stored list. The
 ranking depends on the block alone, so each two-region mode ranked the same list before (six times at Slow, Veryslow
 and VeryslowPeak, twice at Basic, once at Fast). The `(bound, partition id)` order and `partial_sort_list` are
 unchanged; BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
 AVX-512. S2 pca-once: `bc6h_block_cache` also fills `state->pca_ep_1p[8]` (the one-region `block_segment_core` fit, at
-every level, in `bc6h_setup` and again for a lifted lane in `bc6h_peak_retry`) and, for each of the `n = min(fastSkipTreshold, 32)`
-ranked partitions k, `state->pca_ep_2p[k * 16 ..]` (both regions' fits, when `fastSkipTreshold > 0`).
+every level, in `bc6h_setup` and again for a lifted lane in `bc6h_peak_retry`) and, for each of the
+`n = bc6h_2p_depth(state) = min(fastSkipTreshold, 32)` ranked partitions k, `state->pca_ep_2p[k * 16 ..]` (both
+regions' fits, when `fastSkipTreshold > 0`); the one helper gives the fill and `bc6h_enc_2p` the same depth.
 `bc6h_enc_2p_part_fast` (given the rank) and `bc6h_enc_1p` copy those floats into their local `ep` before
 `ep_quant_dequant_bc6h`, which overwrites it, so the cache stays immutable. The fit depends on the block alone, so each
-mode computed the same endpoints before (`n * 6` two-region fits per block at the slow levels, 4 one-region fits); now
-`n + 1` per block. Cost: 32 KB of state per gang at most on AVX-512. BC6H bytes unchanged: the pins, the random
-strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512.
+mode computed the same endpoints before: 2n fits per two-region mode (six modes at Slow and above, two at Basic, one at
+Fast, and only gangs that entered a mode paid at Fast and Basic) and one one-region fit per mode (1 at Veryfast to
+Basic, 4 at the slow levels). Now `block_segment_core` runs 2n + 1 times per block (once more after a lift), and every
+gang pays the fill. Cost: about 32.5 KiB of state per gang on AVX-512 (520 floats x 16 lanes x 4 bytes = 33,280
+bytes). BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
+AVX-512.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
