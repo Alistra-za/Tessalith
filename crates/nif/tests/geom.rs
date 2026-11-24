@@ -164,7 +164,7 @@ fn vertex_desc_stride_and_flags() {
 
 /// Opt-in real-data check: `SDC_NIF_GEOM_CORPUS=C:\a\meshes;C:\b\meshes cargo test -p nif --test geom -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "needs SDC_NIF_GEOM_CORPUS (mesh folders, separated by semicolons)"]
 fn geom_corpus() {
     let roots = std::env::var("SDC_NIF_GEOM_CORPUS").expect("set SDC_NIF_GEOM_CORPUS");
     let (mut files, mut shapes, mut ok, mut normals, mut unit) = (0, 0, 0, 0usize, 0usize);

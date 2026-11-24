@@ -628,7 +628,10 @@ fn write_shapes(
 
 /// The shader-derived columns of one shape row: `shader_kind`, `shader_type`, `slsf1`, `slsf2`, the slots stored in
 /// the texset (at most [`MAX_SLOTS`]; none for no/other shaders) and the `params` JSON (`None` without a shader).
-#[allow(clippy::type_complexity)] // one tuple shared by two row builders; a struct would only rename it
+#[allow(
+    clippy::type_complexity,
+    reason = "one tuple shared by two row builders; a struct would only rename it"
+)]
 fn shader_cols(
     s: &ShapeRow,
 ) -> (
@@ -850,7 +853,7 @@ pub(crate) fn tex_query(key: &TexKey, eff: &str) -> Option<TexQuery> {
 /// would wipe the first one's rows) and while a writable open rebuilds the schema. Windows: the file is held open
 /// with share mode 0, so the OS frees it if the process dies. shortcut: no lock off Windows (std `File::try_lock`
 /// needs Rust 1.89, workspace is 1.88); this app ships on Windows only. In-memory stores have no file and skip it.
-#[allow(dead_code)] // held only for its Drop
+#[allow(dead_code, reason = "held only for its Drop")]
 pub(crate) struct ScanLock(#[cfg(windows)] Option<std::fs::File>);
 
 impl ScanLock {

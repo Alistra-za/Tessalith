@@ -702,7 +702,7 @@ fn replay_honours_the_debug_view() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_GOLDEN (the captured golden fixtures); GPU test, run alone"]
 fn replay_real_fixture_smoke() {
     let Ok(root) = std::env::var("SDC_GOLDEN") else {
         println!("skipped: set SDC_GOLDEN");

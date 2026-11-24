@@ -9,3 +9,6 @@ rust-version.workspace = true
 [dependencies]
 flate2.workspace = true
 nif = { path = "../nif" }
+
+[lints]
+workspace = true

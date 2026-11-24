@@ -515,6 +515,7 @@ fn cs_views(gpu: &render3d::device::Gpu) -> usize {
     };
     let mut s: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
     let mut u: [Option<ID3D11UnorderedAccessView>; 8] = Default::default();
+    // SAFETY: `s` and `u` are live arrays of exactly the 20 and 8 slots asked for, which the getters fill.
     unsafe {
         gpu.ctx.CSGetShaderResources(0, Some(&mut s));
         gpu.ctx.CSGetUnorderedAccessViews(0, Some(&mut u));
@@ -653,6 +654,7 @@ fn missing_env_cube_is_not_the_dc_marker() {
     let v = render3d::textures::default_srv(&gpu, render3d::compile::SrvKind::Cube, [0, 0, 0, 255])
         .unwrap();
     let mut d = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: `v` is a live view on `gpu`'s device and `d` is a writable desc out-parameter.
     unsafe {
         v.GetResource()
             .unwrap()

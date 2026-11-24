@@ -15,7 +15,7 @@ fn check(bytes: &[u8], logged: &[(u32, u32)], what: &str) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_meshes_match_the_pgpatcher_log() {
     let mods = std::path::PathBuf::from(
         std::env::var("SDC_ACHERUS").expect("set SDC_ACHERUS to the MO2 instance root"),

@@ -597,7 +597,7 @@ fn written(s: &MaterialState, target: Target) -> Vec<f32> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn real_curves_evaluate() {
     let Some(root) = std::env::var_os("SDC_ACHERUS") else {
         println!("skipped: set SDC_ACHERUS");

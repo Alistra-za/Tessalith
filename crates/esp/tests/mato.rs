@@ -270,7 +270,7 @@ fn oversized_subrecord_before_data_is_skipped() {
 
 /// Owner data: set `SDC_ACHERUS` and run with `--ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_faultier_values() {
     let Ok(root) = std::env::var("SDC_ACHERUS") else {
         return;
