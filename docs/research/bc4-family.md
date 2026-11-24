@@ -193,7 +193,7 @@ These rows compare two whole commits, so they do not isolate the bound: the boun
 
 What the bound costs and saves at each radius, measured on its own. Run: the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, the Windows exes under Wine 11.0), the 16 PNGs of the `speed.exe` set (1,048,576 blocks), quiet (no other process busy).
 
-Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block time of the radius-r search with the bound as built before it was limited to radius 10, over the same search with no bound at all; median of 5 interleaved passes. Above 1 the bound costs more than it saves. BC3 alpha is channel 3 of blocks that are 90% solid:
+Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block time of the radius-r search with the bound as built before it was limited to radius 10, over the same search with no bound at all; median of 5 interleaved passes. Above 1 the bound costs more than it saves. 90% of the BC3 alpha blocks are solid:
 
 | radius | path | BC4 / BC5 first channel | BC5 second channel | BC3 alpha |
 |---|---|---|---|---|
@@ -204,7 +204,7 @@ Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block 
 | 10 (`slowest`) | base | 0.911 | 0.908 | 1.051 |
 | 10 | avx2 | 0.859 | 0.868 | 1.024 |
 
-At radius 5, skipping the bound below radius 6 in two shapes, over the search with the bound: two calls of `searched` (the shipped shape) 0.933 on base and 0.974 on avx2 for the first channel, 0.939 and 0.982 for the second; one call with the bound picked at run time 0.965 and 0.979, 0.973 and 0.985. A second quiet probe at radius 5: building one bound costs about 236 ns (59 table entries on average, 4.0 ns each), 8 to 9% of the search; the pruning saves 1.0 to 1.4% of it on base and 4.3 to 4.5% on avx2. Radii 6 to 9 were not measured; no engine setting uses them.
+At radius 5, skipping the bound below radius 6 in two shapes, over the search with the bound: two calls of `searched` (the shipped shape; 6 was the probe's threshold and behaves the same at radius 4 and 5 as the shipped 10) 0.933 on base and 0.974 on avx2 for the first channel, 0.939 and 0.982 for the second; one call with the bound picked at run time 0.965 and 0.979, 0.973 and 0.985. A second quiet probe at radius 5: building one bound costs about 236 ns (59 table entries on average, 4.0 ns each), 8 to 9% of the search; the pruning saves 1.0 to 1.4% of it on base and 4.3 to 4.5% on avx2. Radii 6 to 9 were not measured; no engine setting uses them.
 
 `speed.exe --no-ref --rows=bc3,bc4,bc5,bc1-fast,bc3-fast`, 5 runs per round, 3 interleaved rounds, all clean: the build that builds the bound only from radius 10 (`d6d179fc`) over the one before it (`8f98807a`), ratio of the minima over the rounds:
 

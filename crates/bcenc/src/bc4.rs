@@ -853,8 +853,8 @@ fn search_avx2(t: Avx2, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8]
 }
 
 /// The least radius at which `search` builds a `Bound`; below it the search takes `EMPTY`, because at radius 4 and 5
-/// building the bound costs more than it saves and at 10 it saves (Note HY24). Radii 6 to 9 were not measured and no
-/// engine setting uses them.
+/// building the bound costs more than it saves and at 10 it saves for BC4 and BC5 (Note HY24). BC3 alpha loses slightly
+/// at radius 10 and keeps the bound under the one rule. Radii 6 to 9 were not measured and no engine setting uses them.
 const BOUND_MIN_RADIUS: u32 = 10;
 
 /// The body of [`search`], compiled for `isa`.
@@ -863,7 +863,7 @@ fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8
     let (mn, mx) = minmax(v);
     // A solid block, or a radius below `BOUND_MIN_RADIUS`, takes `EMPTY`; otherwise the window covers the radius plus
     // `local`'s reach of 3, and the clamp keeps the pad a byte for any radius. The two calls are on purpose: the `EMPTY`
-    // copy folds its bound checks away, while one call with a bound picked at run time kept only about half of the gain.
+    // copy folds its bound checks away, while one call with a bound picked at run time kept only about half of the gain on the base path.
     let (base, b) = if mn == mx || radius < BOUND_MIN_RADIUS {
         searched(isa, v, radius as i32, &EMPTY)
     } else {
@@ -1283,7 +1283,7 @@ mod tests {
         on_each_path!(isa, {
             let path = path_of(isa);
             let p = isa_name(isa);
-            for radius in [4, 5, 10] {
+            for radius in [4, 5, 9, 10] {
                 let before = crate::hits::counts();
                 search_on(path, &v, radius, None);
                 let after = crate::hits::counts();
