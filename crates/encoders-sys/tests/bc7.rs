@@ -239,6 +239,51 @@ fn exact_constants_refuse_an_alpha_bit() {
     bc7e_compress_blocks_tuned(&[], &mut [], U5, tune);
 }
 
+/// `Bc7Tune::weights` must be 1 to 65535 in every slot (Note LR, LR25): the shim reads a weight as `i32` (2^31 and above
+/// read as "unset"), the kernel's weighted square is a `uint32` and a weight of 0 makes Q3's copy and the estimators
+/// divide by a zero sum. One test per slot and bound, because a `should_panic` test ends at its first panic; the check
+/// runs before the empty-input return, so no block is needed.
+macro_rules! weight_range_refused {
+    ($($name:ident: $slot:expr, $value:expr;)*) => {$(
+        #[test]
+        #[should_panic(expected = "Bc7Tune::weights")]
+        fn $name() {
+            use encoders_sys::{bc7e_compress_blocks_tuned, Bc7Tune};
+            let mut w = [1u32; 4];
+            w[$slot] = $value;
+            let tune = Bc7Tune {
+                weights: Some(w),
+                ..Bc7Tune::default()
+            };
+            bc7e_compress_blocks_tuned(&[], &mut [], U5, tune);
+        }
+    )*};
+}
+
+weight_range_refused! {
+    weights_refuse_zero_in_r: 0, 0;
+    weights_refuse_zero_in_g: 1, 0;
+    weights_refuse_zero_in_b: 2, 0;
+    weights_refuse_zero_in_a: 3, 0;
+    weights_refuse_65536_in_r: 0, 65536;
+    weights_refuse_65536_in_g: 1, 65536;
+    weights_refuse_65536_in_b: 2, 65536;
+    weights_refuse_65536_in_a: 3, 65536;
+}
+
+/// The bounds themselves are accepted: 1 and 65535 in every slot.
+#[test]
+fn weights_accept_one_and_65535() {
+    use encoders_sys::{bc7e_compress_blocks_tuned, Bc7Tune};
+    for v in [1u32, 65535] {
+        let tune = Bc7Tune {
+            weights: Some([v; 4]),
+            ..Bc7Tune::default()
+        };
+        bc7e_compress_blocks_tuned(&[], &mut [], U5, tune);
+    }
+}
+
 /// The seed of `exact_constant_fixture` (Note LR, LR12).
 const EXACT_SEED: u32 = 0x5C0C_2026;
 
