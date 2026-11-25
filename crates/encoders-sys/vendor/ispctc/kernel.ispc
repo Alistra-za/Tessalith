@@ -44,7 +44,7 @@
 // PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
 // astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
-// Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a region whose endpoints share one code.
+// Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2488,8 +2488,10 @@ float bc6h_peak_guard(bc6h_enc_state state[], float err, float ep[], uint32 qblo
 // sign of the channel's covariance with the region's widest channel (a componentwise low-to-high pair would force a
 // positive correlation), and clamped to qbounds. A channel that is constant in the region keeps its code. The whole
 // block is rescored (the peak guard included) and the pair replaces qep, ep and qblock only when its error is lower.
-// The callers run it on every candidate that enters a best-of, not only the last, so a slower level's candidates
-// still include a faster level's. A candidate with no collapsed region costs the integer compares only.
+// The callers run it on the first quantisation only (the refine passes then refit from the kept indices); Veryfast's
+// one-region candidate is that first quantisation, so a slower level's candidates still include it. Bracketing every
+// refine pass too cost about 10 % at Basic for a gain inside the noise. A candidate with no collapsed region costs the
+// integer compares only.
 float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint32 qblock[2], float err, uint32 pattern, int part_id, uniform int pairs)
 {
     uniform int bits = (pairs == 2) ? 3 : 4; // index bits, as block_quant and bc6h_peak_guard take them
@@ -2685,7 +2687,6 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
         uint32 pattern = get_pattern(best_part_id);
         float err = block_quant(qblock, state->block, bits, ep, pattern, channels);
         err = bc6h_peak_guard(state, err, ep, qblock, pattern, bits);
-        err = bc6h_bracket_collapsed(state, qep, ep, qblock, err, pattern, best_part_id, pairs); // sdc patch 0007 (Q2)
 
         if (err<best_err)
         {
@@ -2762,7 +2763,6 @@ void bc6h_enc_1p(bc6h_enc_state state[])
         ep_quant_dequant_bc6h(state, qep, ep, 1);
         err = block_quant(qblock, state->block, 4, ep, 0, 3);
         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
-        err = bc6h_bracket_collapsed(state, qep, ep, qblock, err, 0, 0, 1); // sdc patch 0007 (Q2)
 
         if (err < best_err) // sdc patch 0004
         {
