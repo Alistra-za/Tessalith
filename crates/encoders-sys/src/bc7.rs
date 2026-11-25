@@ -122,7 +122,9 @@ pub fn bc7e_level_flat_tolerance(p: Bc7Params) -> f32 {
 /// value. The shim's other tuning slots (the BC7 tuning study's) are always sent unset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Bc7Tune {
-    /// Linear per-channel error weights (used with `perceptual = false`).
+    /// Linear per-channel error weights (used with `perceptual = false`), as passed. Since patch 0005 (L16) bc7e ranks
+    /// every linear call as the same weights x16 would, so pass x1-form weights (`[1, 1, 1, N]` for Alpha xN; weights
+    /// x16 would rank at x256). Note CP, Note LR.
     pub weights: Option<[u32; 4]>,
     /// The flat tolerance of patch 0005 (Q2t); `None` keeps the level's value, [`BC7_FLAT_TOLERANCE_DEFAULT`]
     /// (Note LR).

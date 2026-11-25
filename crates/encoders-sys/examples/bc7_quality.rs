@@ -19,15 +19,16 @@
 //! `run` encodes as the engine's `encode_band` does: RGBA8 through `image`, 4x4 blocks from `gather_blocks`, 64 blocks
 //! per call through `bc7e_compress_blocks_on`, or through the tuned call when the row overrides something (Note CP; a
 //! perceptual row runs once, at w 1). Each `--tuning` value is a row: `default` (the level as it is), `data` (flat
-//! tolerance `Bc7FlatTolerance::Data`), `x16` (weights scaled by 16 at the level's tolerance), `data_x16` and
+//! tolerance `Bc7FlatTolerance::Data`), `x16` (the level's weights at the level's tolerance), `data_x16` and
 //! `data_exact_g_x16` (`data_x16` with exact constants on G, `Bc7Tune::exact_constants` 0b010), and
 //! `data_guard_<letters>` (`data_x16` with the channel guard on the letters' channels, in R, G, B order: `r`, `g`, `b`,
-//! `rg`, `rb`, `gb` or `rgb`; `data_guard_g` is `data_exact_g_x16`). With perceptual off a row sends the weights
-//! `[s, s, s, s * w]` (s = 16 for the `x16` and `data_guard` values, else 1; `[1, 1, 1, 1]` is sent unset), its flat
-//! tolerance and its exact-constants mask; with perceptual on only its flat tolerance, so `default` and `x16` are the
-//! plain call there (Note LR). Such a perceptual `x16` row repeats `default`'s bytes, and `data_x16`,
-//! `data_exact_g_x16` and the `data_guard` rows repeat `data`'s: they are encoded again and kept, so every tuning has
-//! its rows for `compare`.
+//! `rg`, `rb`, `gb` or `rgb`; `data_guard_g` is `data_exact_g_x16`). The names are kept, so earlier CSVs still join
+//! in `compare`: "x16" now means the level's weights, which rank as x16 since patch 0005's L16 (Note LR, LR15), where
+//! these rows sent the weights scaled by 16 before it. With perceptual off a row sends the weights `[s, s, s, s * w]`
+//! (s = 1 for every value; `[1, 1, 1, 1]` is sent unset), its flat tolerance and its exact-constants mask; with
+//! perceptual on only its flat tolerance, so `default` and `x16` are the plain call there (Note LR). So an `x16` row
+//! repeats `default`'s bytes and a `data_x16` row `data`'s, and under perceptual `data_exact_g_x16` and the
+//! `data_guard` rows repeat `data`'s too: they are encoded again and kept, so every tuning has its rows for `compare`.
 //! `bc7_fixup::force_opaque_rotated` is applied to every block whose source alpha is 255 throughout (no zero fix), then
 //! the blocks are decoded with `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over
 //! the threads, so the output does not depend on `--threads`.
@@ -82,20 +83,21 @@ type Tuning = (&'static str, u32, Option<Bc7FlatTolerance>, Option<u8>);
 /// The data maps' flat tolerance, T_data.
 const DATA: Option<Bc7FlatTolerance> = Some(Bc7FlatTolerance::Data);
 
-/// The `--tuning` values.
+/// The `--tuning` values. The `x16` names keep scale 1: since patch 0005's L16 the level's weights rank as x16 (Note LR,
+/// LR15), and a scale of 16 would rank at x256.
 const TUNINGS: [Tuning; 12] = [
     ("default", 1, None, None),
     ("data", 1, DATA, None),
-    ("x16", 16, None, None),
-    ("data_x16", 16, DATA, None),
-    ("data_exact_g_x16", 16, DATA, Some(0b010)),
-    ("data_guard_r", 16, DATA, Some(0b001)),
-    ("data_guard_g", 16, DATA, Some(0b010)),
-    ("data_guard_b", 16, DATA, Some(0b100)),
-    ("data_guard_rg", 16, DATA, Some(0b011)),
-    ("data_guard_rb", 16, DATA, Some(0b101)),
-    ("data_guard_gb", 16, DATA, Some(0b110)),
-    ("data_guard_rgb", 16, DATA, Some(0b111)),
+    ("x16", 1, None, None),
+    ("data_x16", 1, DATA, None),
+    ("data_exact_g_x16", 1, DATA, Some(0b010)),
+    ("data_guard_r", 1, DATA, Some(0b001)),
+    ("data_guard_g", 1, DATA, Some(0b010)),
+    ("data_guard_b", 1, DATA, Some(0b100)),
+    ("data_guard_rg", 1, DATA, Some(0b011)),
+    ("data_guard_rb", 1, DATA, Some(0b101)),
+    ("data_guard_gb", 1, DATA, Some(0b110)),
+    ("data_guard_rgb", 1, DATA, Some(0b111)),
 ];
 
 fn parse_tuning(s: &str) -> Res<Tuning> {
@@ -1087,7 +1089,8 @@ mod tests {
     }
 
     /// Task 6's rule: weights `[s, s, s, s * w]`, the tolerance and the exact-constants mask with perceptual off, the
-    /// tolerance alone with it on.
+    /// tolerance alone with it on. Since L16 every value's scale is 1, so the `x16` rows send what `default`'s and
+    /// `data`'s send (Note LR, LR15).
     #[test]
     fn a_tuning_row_sends_what_the_rule_says() {
         let rows = settings(
@@ -1120,23 +1123,18 @@ mod tests {
                 ("data", 1, false, tune(None, data)),
                 ("data", 16, false, tune(Some([1, 1, 1, 16]), data)),
                 ("data", 1, true, tune(None, data)),
-                ("x16", 1, false, tune(Some([16, 16, 16, 16]), None)),
-                ("x16", 16, false, tune(Some([16, 16, 16, 256]), None)),
+                ("x16", 1, false, None),
+                ("x16", 16, false, tune(Some([1, 1, 1, 16]), None)),
                 ("x16", 1, true, None),
-                ("data_x16", 1, false, tune(Some([16, 16, 16, 16]), data)),
-                ("data_x16", 16, false, tune(Some([16, 16, 16, 256]), data)),
+                ("data_x16", 1, false, tune(None, data)),
+                ("data_x16", 16, false, tune(Some([1, 1, 1, 16]), data)),
                 ("data_x16", 1, true, tune(None, data)),
-                (
-                    "data_exact_g_x16",
-                    1,
-                    false,
-                    tune_x(Some([16, 16, 16, 16]), data, g),
-                ),
+                ("data_exact_g_x16", 1, false, tune_x(None, data, g)),
                 (
                     "data_exact_g_x16",
                     16,
                     false,
-                    tune_x(Some([16, 16, 16, 256]), data, g),
+                    tune_x(Some([1, 1, 1, 16]), data, g),
                 ),
                 ("data_exact_g_x16", 1, true, tune(None, data)),
             ]
@@ -1154,15 +1152,14 @@ mod tests {
             .iter()
             .map(|s| (s.tuning, s.perceptual, tune_of(s)))
             .collect();
-        let x16 = Some([16, 16, 16, 16]);
         assert_eq!(
             got,
             vec![
-                ("data_guard_rg", false, tune_x(x16, data, Some(0b011))),
+                ("data_guard_rg", false, tune_x(None, data, Some(0b011))),
                 ("data_guard_rg", true, tune(None, data)),
-                ("data_guard_gb", false, tune_x(x16, data, Some(0b110))),
+                ("data_guard_gb", false, tune_x(None, data, Some(0b110))),
                 ("data_guard_gb", true, tune(None, data)),
-                ("data_guard_rgb", false, tune_x(x16, data, Some(0b111))),
+                ("data_guard_rgb", false, tune_x(None, data, Some(0b111))),
                 ("data_guard_rgb", true, tune(None, data)),
             ]
         );

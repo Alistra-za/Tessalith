@@ -293,8 +293,9 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 /// Patch 0005, XC: with G in `Bc7Tune::exact_constants`, a subset whose G is 0 on every texel, or 255 on every texel,
 /// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters,
 /// solid-beside-noisy and near-solid blocks (its solid blocks take bc7e's mode 5 solid path). Raw bytes, 64-block
-/// calls, the data maps' tune (T_data, exact G) at weights x16 and x1, every level, exact opaque off and on, every
-/// path. Without the one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque
+/// calls, the data maps' tune (T_data, exact G) with weights `[1; 4]` passed and with weights unset, the same ranking
+/// since L16 (both rank as x16, so the two rows are now duplicates: the first is the x16 row re-based, the second how
+/// the engine calls it), every level, exact opaque off and on, every path. Without the one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque
 /// on, alpha decodes 255 after the post-fix in every cell, and wins over G where both cannot hold (ruling BC7-C4):
 /// mode 6's forced p-bits cannot decode G 0, so G 0 is not asserted in `exact_g_waived`'s cells (Note LR, LR12).
 #[test]
@@ -314,7 +315,7 @@ fn exact_constants_keep_a_flat_channel() {
                 exact_opaque,
                 ..U5
             };
-            for weights in [Some([16; 4]), None] {
+            for weights in [Some([1; 4]), None] {
                 let tune = Bc7Tune {
                     weights,
                     flat_tolerance: Some(Bc7FlatTolerance::Data),
@@ -368,8 +369,8 @@ fn exact_constants_keep_a_flat_channel() {
     );
 }
 
-/// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights give the plain
-/// call's bytes at each level, and other weights reach bc7e.
+/// Note CP: a tune that sets only the weights leaves every other level parameter alone: unit weights (the level's,
+/// which rank as x16 since L16) give the plain call's bytes at each level, and other weights reach bc7e.
 #[test]
 fn tuned_with_unit_weights_matches_the_plain_call() {
     use encoders_sys::{bc7e_compress_blocks_tuned, Bc7Tune};
@@ -735,24 +736,26 @@ fn q3_outputs(ids: &[u32], p: Bc7Params, w: [u32; 4], target: IspcTarget) -> Vec
 
 /// The `q3_candidate` indices and weights whose mode-6 output broke `mode6_indices_are_weighted_nearest` at veryslow on
 /// the AVX2 path before patch 0005's Q3, and that stay mode 6 and keep it at basic and veryslow on every path after: the
-/// first 8 per weight set of the 32 `search_q3_witnesses` printed (all 64 qualified; Note LR, LR13).
+/// first 8 per weight set of the 32 `search_q3_witnesses` printed (all 64 qualified; Note LR, LR13). They were found at
+/// `[16, 16, 16, 128]` and `[16, 16, 16, 256]`; since L16 the weights divided by 16 rank as those did and write their
+/// bytes (Note LR, LR15).
 const Q3_WITNESSES: [(u32, [u32; 4]); 16] = [
-    (4, [16, 16, 16, 128]),
-    (7, [16, 16, 16, 128]),
-    (23, [16, 16, 16, 128]),
-    (25, [16, 16, 16, 128]),
-    (33, [16, 16, 16, 128]),
-    (34, [16, 16, 16, 128]),
-    (57, [16, 16, 16, 128]),
-    (59, [16, 16, 16, 128]),
-    (4, [16, 16, 16, 256]),
-    (7, [16, 16, 16, 256]),
-    (23, [16, 16, 16, 256]),
-    (25, [16, 16, 16, 256]),
-    (34, [16, 16, 16, 256]),
-    (43, [16, 16, 16, 256]),
-    (59, [16, 16, 16, 256]),
-    (61, [16, 16, 16, 256]),
+    (4, [1, 1, 1, 8]),
+    (7, [1, 1, 1, 8]),
+    (23, [1, 1, 1, 8]),
+    (25, [1, 1, 1, 8]),
+    (33, [1, 1, 1, 8]),
+    (34, [1, 1, 1, 8]),
+    (57, [1, 1, 1, 8]),
+    (59, [1, 1, 1, 8]),
+    (4, [1, 1, 1, 16]),
+    (7, [1, 1, 1, 16]),
+    (23, [1, 1, 1, 16]),
+    (25, [1, 1, 1, 16]),
+    (34, [1, 1, 1, 16]),
+    (43, [1, 1, 1, 16]),
+    (59, [1, 1, 1, 16]),
+    (61, [1, 1, 1, 16]),
 ];
 
 /// Patch 0005, Q3: with linear weights that are not all equal (a user's alpha weight), mode 6's alpha-block selectors
@@ -851,7 +854,7 @@ fn search_q3_witnesses() {
         level: Bc7Level::Veryslow,
         ..U5
     };
-    for w in [[16, 16, 16, 128], [16, 16, 16, 256]] {
+    for w in [[1, 1, 1, 8], [1, 1, 1, 16]] {
         let start = std::time::Instant::now();
         let (mut scanned, mut found) = (0u32, 0);
         'scan: for base in (0..1u32 << 20).step_by(1 << 14) {
@@ -1180,8 +1183,9 @@ fn xc_fixture(seed: u32, flat: [Option<u8>; 3]) -> Vec<[u8; 4]> {
 
 /// Every masked channel stays exact when the masked channels agree (Task 5c's rule on several channels): each
 /// non-empty mask of R, G and B, its channels all 0 or all 255 on every texel of `xc_fixture` (the rest Task 5c's
-/// clusters), at basic and veryslow, T_data at weights x16 and x1, on every path. With no conflict the priority never
-/// decides, so this guards Task 5c's behaviour on masks it never ran (Note LR, LR14).
+/// clusters), at basic and veryslow, T_data with weights `[1; 4]` passed and with weights unset (the same ranking since
+/// L16, so the two rows are now duplicates), on every path. With no conflict the priority never decides, so this guards
+/// Task 5c's behaviour on masks it never ran (Note LR, LR14).
 #[test]
 fn exact_constants_keep_every_masked_channel() {
     use encoders_sys::{Bc7FlatTolerance, Bc7Tune};
@@ -1199,7 +1203,7 @@ fn exact_constants_keep_every_masked_channel() {
             let blocks = gather_blocks(&xc_fixture(EXACT_SEED, flat), 64, 64);
             for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
                 let p = Bc7Params { level, ..U5 };
-                for weights in [Some([16; 4]), None] {
+                for weights in [Some([1; 4]), None] {
                     let tune = Bc7Tune {
                         weights,
                         flat_tolerance: Some(Bc7FlatTolerance::Data),
@@ -1445,14 +1449,15 @@ const PACKER_FLAG_WITNESSES: &[(usize, Bc7Level)] = &[
 /// Round 6 (A3): the one-colour packers charge a guarded channel only where the subset's source holds it constant, not
 /// where the packed value is 0 or 255. Where A3c's near-255 G is constant in no subset of the unguarded output's
 /// partition (asserted), that solution pays no penalty and every other one pays at least its own unguarded score, so
-/// guarding G must write the unguarded bytes (x16 weights, as Task 6m2 ran them). Keyed on the packed value, the mean
+/// guarding G must write the unguarded bytes (weights `[1; 4]`, which since L16 rank as the x16 weights Task 6m2 ran them
+/// with). Keyed on the packed value, the mean
 /// colour's G rounded to 255 was forced and the subset decoded farther from its source. Each witness's unguarded
 /// output must still be mode 0 with a subset packed as one colour from a source that is not one colour (the mean-colour
 /// candidate), so a later kernel cannot pass it by leaving that path (Note LR, LR14).
 #[test]
 fn one_colour_packers_key_on_source_constants() {
     let tune = |mask| encoders_sys::Bc7Tune {
-        weights: Some([16; 4]),
+        weights: Some([1; 4]),
         exact_constants: Some(mask),
         ..encoders_sys::Bc7Tune::default()
     };
@@ -1637,7 +1642,7 @@ fn exact_opaque_keeps_opaque_alpha_255() {
 }
 
 /// Round 6 (A2), a guard: a rotated mode 4/5 trial of an alpha block holds source alpha in a colour slot and charges
-/// its loss at A's tier, so a guarded G cannot outrank it there. Alpha x16 linear (weights 16, 16, 16, 256), alpha 0
+/// its loss at A's tier, so a guarded G cannot outrank it there. Alpha x16 linear (weights 1, 1, 1, 16), alpha 0
 /// and G 255 on every texel, R and B noise, exact opaque on with G guarded, at basic and veryslow (rotations on): every
 /// texel decodes alpha 0 and G 255, raw, on every path. Task 6m2 found no block where A2 alone changes the output
 /// (`witness-A2.txt`: 0 of 65,536 at every level), so this holds without A2 too (Note LR, LR17).
@@ -1650,7 +1655,7 @@ fn a_outranks_g_in_rotated_trials() {
     };
     let blocks: Vec<[u8; 4]> = (0..256 * 16).map(|_| [next(), 255, next(), 0]).collect();
     let tune = encoders_sys::Bc7Tune {
-        weights: Some([16, 16, 16, 256]),
+        weights: Some([1, 1, 1, 16]),
         exact_constants: Some(0b010),
         ..encoders_sys::Bc7Tune::default()
     };
@@ -2187,10 +2192,11 @@ fn m5c_block(k: usize) -> [[u8; 4]; 16] {
 const M5_ALPHA_WITNESSES: &[usize] = &[922, 1572, 1969, 2383, 2546, 2936, 3311, 3596];
 
 /// The `m5c_block` indices that were mode 4 at a rotation at veryslow (plain linear call, raw) on every path before
-/// patch 0005's M5, and are mode 5 at a rotation after it, with the flat colour part exact: the first 8 of 1,183.
-/// Before M5 no rotated mode 5 output of `m5c_block` with a one-colour colour part decoded it off (it won only where
-/// its fit was exact), so the opaque RED is the path (Note LR, LR23).
-const M5_OPAQUE_WITNESSES: &[usize] = &[15, 29, 30, 32, 50, 57, 89, 109];
+/// patch 0005's M5, and are mode 5 at a rotation after it, with the flat colour part exact: the first 8 of 1,183 that
+/// still are on the L16 kernel (block 50, the fifth, is mode 6 on SSE2 and AVX2 since L16 and gave way to 125, the
+/// ninth; ruling BC7-C30). Before M5 no rotated mode 5 output of `m5c_block` with a one-colour colour part decoded it
+/// off (it won only where its fit was exact), so the opaque RED is the path (Note LR, LR23).
+const M5_OPAQUE_WITNESSES: &[usize] = &[15, 29, 30, 32, 57, 89, 109, 125];
 
 /// The fewest outputs of the first 4,096 `m5_alpha_block`s per cell (ultrafast, basic, veryslow) that must be mode 5 at
 /// rotation 0 with a flat colour part and a varying alpha: 2,786 to 3,427 were with patch 0005's M5, 346 to 772 before
@@ -2198,8 +2204,9 @@ const M5_OPAQUE_WITNESSES: &[usize] = &[15, 29, 30, 32, 50, 57, 89, 109];
 const M5_ALPHA_FLOOR: usize = 2_500;
 
 /// The fewest outputs of the first 4,096 `m5c_block`s at veryslow that must be mode 5 at a rotation with a one-colour
-/// colour part: 960 to 1,052 were with patch 0005's M5, 127 to 145 before (Note LR, LR23).
-const M5_OPAQUE_FLOOR: usize = 800;
+/// colour part: 787 to 829 are with patch 0005's L16 (960 to 1,052 with M5 before it, 127 to 145 before M5; ruling
+/// BC7-C30) (Note LR, LR15, LR23).
+const M5_OPAQUE_FLOOR: usize = 650;
 
 /// Patch 0005, M5: mode 5 had no one-colour candidate, and the one-colour test compared alpha even where the colour
 /// part does not score it, so a flat colour beside a varying scalar decoded a channel off by one where its value is

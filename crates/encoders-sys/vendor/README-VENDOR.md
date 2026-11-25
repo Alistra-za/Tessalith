@@ -138,9 +138,17 @@ linear `tests/level_identity.rs` row from veryfast to max on three paths; at mod
 of the scalar error and the best so that no half-written result is taken, no pin or `tests/bc7.rs` test fails, so the
 pins do not hold mode 5's skip; at both sites, with mode 5 returning the scalar error alone, `tests/bc7.rs` fails four
 tests and `tests/level_identity.rs` crashes (the return contract broken: the caller can then accept a trial whose colour
-part was never written). The other changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and
-the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once
-merged: a later bc7e change goes in a new patch file with its own tag.
+part was never written). L16: a linear (non-perceptual) call ranks errors as the same call with every weight x16 would:
+the uber threshold is compared at 1/16 and the two partition estimators (`color_cell_compression_est` and `_est_mode7`)
+cast 16 times their float error, which writes exactly the bytes of the weights x16 (scaling integer weights by 16
+commutes with every float step, so those two sites are the only ones where x16 changes bytes; the measured
+decomposition); the weights passed and perceptual calls are unchanged, so callers pass x1-form weights (`[1, 1, 1, N]`
+for Alpha xN) and weights x16 would rank at x256; proof test `tests/level_identity.rs`
+`linear_calls_write_the_x16_bytes` (the plain call and `[1, 1, 1, N]` write the bytes recorded from the x16 calls before
+L16); changes bytes of linear outputs from veryfast up (ultrafast runs neither site). The other changes alter BC7 bytes
+(the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes`
+hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch file with its
+own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a

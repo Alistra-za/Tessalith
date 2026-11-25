@@ -39,6 +39,9 @@
 // - KS: mode 4 tries the exact code pair for a scalar that is one value across the block.
 // - M5: mode 5 gets a one-colour candidate, and the one-colour test ignores alpha where alpha is not scored.
 // - SF: modes 4 and 5 search the scalar slot first and skip colour work that cannot win (no byte change).
+// - L16: a linear (non-perceptual) call ranks errors as the same call with every weight x16 would: the uber threshold
+//   is compared at 1/16 and the partition estimators cast 16 times their float error, which writes exactly the bytes
+//   of the weights x16 (Task 6m2's decomposition); the weights themselves and perceptual calls are unchanged.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -2757,7 +2760,8 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 		}
 
 		const uint32_t uber_err_thresh = (num_pixels * 56) >> 4;
-		if ((pComp_params->m_uber_level >= 2) && (pResults->m_best_overall_err > uber_err_thresh))
+		// sdc patch 0005 (L16): outcome D; a linear call's errors are x16's divided by 16, so compare with the threshold divided by 16
+		if ((pComp_params->m_uber_level >= 2) && (pResults->m_best_overall_err > (pParams->m_perceptual ? uber_err_thresh : (uber_err_thresh >> 4))))
 		{
 			const uniform int Q = (pComp_params->m_uber_level >= 4) ? (pComp_params->m_uber_level - 2) : 1;
 			for (uniform int ly = -Q; ly <= 1; ly++)
@@ -2972,7 +2976,8 @@ static uint64_t color_cell_compression_est(uniform uint32_t mode, const uniform 
 		}
 	}
 
-	total_err = (int64_t)total_errf;
+	// sdc patch 0005 (L16): outcome D; a linear call ranks its estimate at x16's resolution (x16 commutes with every float step)
+	total_err = pParams->m_perceptual ? (int64_t)total_errf : (int64_t)(total_errf * 16.0f);
 
 	return total_err;
 }
@@ -3084,7 +3089,8 @@ static uint64_t color_cell_compression_est_mode7(uniform uint32_t mode, const un
 		}
 	}
 
-	total_err = (int64_t)total_errf;
+	// sdc patch 0005 (L16): outcome D; a linear call ranks its estimate at x16's resolution (x16 commutes with every float step)
+	total_err = pParams->m_perceptual ? (int64_t)total_errf : (int64_t)(total_errf * 16.0f);
 
 	return total_err;
 }

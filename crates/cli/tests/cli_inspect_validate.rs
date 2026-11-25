@@ -104,7 +104,7 @@ fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
         "Dx10",
         "cubemap false",
         // The exact percentages pin the human output byte for byte (backlog L69), not just the codec.
-        "mip 0 64x32  alpha min 253 =255 19.5% =254 39.1% <254 41.4%",
+        "mip 0 64x32  alpha min 253 =255 25.0% =254 50.0% <254 25.0%",
     ] {
         assert!(out.contains(want), "{want}: {out}");
     }
