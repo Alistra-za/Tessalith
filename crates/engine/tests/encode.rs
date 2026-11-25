@@ -1493,10 +1493,32 @@ fn complex_m_keeps_alpha_zero_and_g_with_a_on() {
     );
 }
 
-/// BC7-O29 (e2): an alpha-0 `_m` with A off is encoded as with A (the route), so the same two properties hold; before
-/// the route the zero fix kept alpha 0 and cleared a p-bit under a guarded G of 255 (G3).
+/// BC7-O29 (e2): an alpha-0 `_m` with A off is encoded as with A (the route): the bytes equal the A-on encode's, and
+/// the same two properties hold. Before the route (with the ungated fix, and no route) 30 flat-G blocks lost G 255 and
+/// no alpha stayed above 0, because the fix cleared the p-bits of blocks the A-off kernel left above 0 (G3); with the
+/// zero arm off and no route 33 blocks kept alpha above 0 and G held (Task 6r report, Fix round 1).
 #[test]
 fn alpha_zero_m_with_a_off_keeps_alpha_and_g() {
+    for effort in [
+        Effort::Ultrafast,
+        Effort::Basic,
+        Effort::Veryslow,
+        Effort::Max,
+    ] {
+        let (on, off) = (zero_m_profile(effort, true), zero_m_profile(effort, false));
+        let work = preprocess(alpha_zero_m(false), &on);
+        for level in build_chain(&work, &on).iter() {
+            let EncoderInput::Ldr(px) = to_encoder_input(level, &work, &on) else {
+                panic!("LDR input expected");
+            };
+            let input = EncoderInput::Ldr(px);
+            let (w, h) = (level.width, level.height);
+            assert!(
+                encode(&input, w, h, &on) == encode(&input, w, h, &off),
+                "{effort:?} {w}x{h}: A off is not encoded as A on"
+            );
+        }
+    }
     let (bad, zero, flat) = zero_m_run(false);
     println!("checked {zero} all-0 blocks and {flat} flat-G blocks");
     assert!(zero > 0 && flat > 0, "the sources hold no block to check");

@@ -456,8 +456,8 @@ fn the_zero_fix_leaves_a_block_already_at_zero() {
             };
             for chunk in 0..(1usize << 16) / 256 {
                 let mut px = zero_alpha_blocks(0xA11C_E000 + chunk as u64, 256);
-                // Every other block holds G at 0 or 255, which the engine's `_m` guards (the p-bit the old fix
-                // cleared is where a guarded 255 sits).
+                // G is flat in every block, 255 and 0 in turn: the engine's `_m` guards G (the old fix cleared
+                // p-bits, where a guarded 255 sits; the test checks bytes kept, not G).
                 for (i, t) in px.iter_mut().enumerate() {
                     t[1] = [255, 0][i / 16 % 2];
                 }

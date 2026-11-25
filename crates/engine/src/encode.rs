@@ -147,6 +147,10 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     match p.format {
         Format::Bc7 => {
             // The channel guard's A (Note LR, LR17), or the alpha-0 `_m` route.
+            // shortcut: reads the profile, not the source, so a parallax-on `_m` whose source has no alpha channel
+            // (alpha 0 written, AlphaParallaxNoAlpha) keeps the profile's A and gets no fix; thread `has_alpha` through
+            // `EncodeCtx` to cover it (BC7-C36). The pipeline always resolves `alpha.parallax` for an `_m` (policy sets it
+            // from the analysis unless explicit), so `zero_fix`'s `!= Some(true)` and this `== Some(false)` agree there.
             let params = Bc7Params {
                 level: bc7_level(e.effort),
                 perceptual: e.perceptual,

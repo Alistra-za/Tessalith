@@ -197,8 +197,9 @@ pub fn force_zero_alpha(block: &mut [u8; 16]) -> bool {
         return false;
     };
     // Nothing to clear, or the alpha already decodes 0 at every texel: the rewrite would only move RGB. The decode
-    // runs only for a block with a bit to clear.
-    if v & mask == 0 || decode_alpha(v).is_none_or(|a| a == [0u8; 16]) {
+    // runs only for a block with a bit to clear. `decode_alpha` tests the same four mode patterns as the mask above, so
+    // it is `Some` here (the two are not one parse: the decode reads each mode's fields, the mask only cuts them).
+    if v & mask == 0 || decode_alpha(v).is_some_and(|a| a == [0u8; 16]) {
         return false;
     }
     v &= !mask;
