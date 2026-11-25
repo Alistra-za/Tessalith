@@ -81,78 +81,78 @@ fn hdr_image() -> Vec<[u16; 4]> {
     px
 }
 
-/// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
-/// (Note LO).
+/// AVX2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects
+/// (Note LT).
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "a1d86ce13ea28a4845aaaf64ecdf948763f67c6d514cea8f598ed254e848ecdc",
+        "5d73a5f78753bc50c8551232d9da261249a06fe8b08357f839938d72b5f8026f",
     ),
     (
         Bc6hLevel::Fast,
-        "8d00c0c10ee93e258239d55757965af02cd1a5431d44590b5979703e4a26aae0",
+        "044cfc3556fc61a4963bf9616ca4c60776450e140062b0244135fb454cecc8c8",
     ),
     (
         Bc6hLevel::Basic,
-        "21a38f0cf43a75ae4ab867b5c87414d4d621c5d4038634e71133eb7551317add",
+        "44c753bc4e487017964590122cb1cc46155427594235c3b255f1593f9a96b154",
     ),
     (
         Bc6hLevel::Slow,
-        "140a5cdb9359ff82d3f8d6cf9305a99be0b14d9d59ad971419b3d18ebc56929a",
+        "d7f14e2cce2f9c5d90b38c40a1040b3fcd5b8c5b4443b2ec35cabfee4498953c",
     ),
     (
         Bc6hLevel::Veryslow,
-        "6223e3309df86ec4d88be0fb872b0ac114d6466269a2811780fc2849da6fb788",
+        "f1f069cb5b5b798a0f5bb5c1167e7c5a5ba07aa9d5a5050c24400a5068297cb5",
     ),
 ];
 
-/// The SSE2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects
-/// (Note LO). The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes before patch 0004.
+/// The SSE2 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects
+/// (Note LT). The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes before patch 0004.
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "98215a3ca45c12c0f2ebc70fd0a14781b9368f159fc89ec1b3d098e1ac400d08",
+        "3bc40ae2f904a3328391a8ac61675e76b2a43872c896a5b7ef818c265bcf6699",
     ),
     (
         Bc6hLevel::Fast,
-        "5a27639f81f2781b265a8d7e74bd17da579b9a63b82f23dc39a4df919369a341",
+        "82d54ac3848a38b708f8b14dad775ed7b28dd07947de92d5edc0e7d44126c5bb",
     ),
     (
         Bc6hLevel::Basic,
-        "2ceecbcd810ffc4bd599fb87e5f8bd39335d93c008128d5e19989e3b171fee41",
+        "ef421e6b2d2cf115350d47192847dda1cc549e14c03590ac3cd95baa4feb0963",
     ),
     (
         Bc6hLevel::Slow,
-        "563d7eb914134fca56acf98f8925b8f72d6dd5f22183d4351026745f7812a5c9",
+        "b2ba25b0d62ac9fec5fd9da83ed2c8389dbe7aef858ed4a67ee0a6bd19fe84e7",
     ),
     (
         Bc6hLevel::Veryslow,
-        "4e39ad0b15e856d80c6d7994892d202b3a9bfd3f6d5e309c6e5f492b30182597",
+        "adc2f7875dd3c2bb3917187e8a4bd4d6d6e1840659047e2dfaaec8f8803259d6",
     ),
 ];
 
-/// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects built
-/// with ISPC 1.32.0 (Note LO). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+/// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects built
+/// with ISPC 1.32.0 (Note LT). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "593df3a2389f7fb381458647461d28ad7a7b7602cbc37d9809ce019bba023cff",
+        "c6f7a89f24c95746c05d18f4ee52fa0b70951ceaa5e652bd63edc0613062083c",
     ),
     (
         Bc6hLevel::Fast,
-        "ad1505e9e6d1c49b582c6bcb2fadff07be08696eebae8504fc13d63147a29cd8",
+        "bfa08f77a260ab98214bbec5009bad472e46c624de7925e6578e24d4e03c0515",
     ),
     (
         Bc6hLevel::Basic,
-        "610dcf00562c7bfb07dbcda1981aa749c4db05b0cfcb37d1995bb3500142260f",
+        "19ab65807fd92b6520cadfa303c73fedc24244250b7097d78678f2f09d3b7a05",
     ),
     (
         Bc6hLevel::Slow,
-        "cf1d4c07d29e1c2ca0d72e787718291d168db71728ec0fdfe8d02ca41f447bd5",
+        "5d3d92793ae92398588c793ba1f65a524f1c26da7c08a63ce341bb2ecb5c5457",
     ),
     (
         Bc6hLevel::Veryslow,
-        "58f8016368c8cd211e6cd17cf60bdcb58a0bcba2de9bde3fac2d0c48a43a8607",
+        "952782083bdf24c8517bc97be6ac4f44b6d02af2bf661f0613573cbfe00c02b7",
     ),
 ];
 
@@ -190,7 +190,7 @@ fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
     }
 }
 
-/// The five shipped levels encode byte-identically to the recorded objects (the patch 0004 objects, Note LO), on each
+/// The five shipped levels encode byte-identically to the recorded objects (the patch 0007 objects, Note LT), on each
 /// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). The paths differ, so each has its own hashes.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
@@ -198,11 +198,11 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 }
 
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
-/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-22, from the ISPC TC patch 0004 objects (Note LO).
+/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects (Note LT).
 const RECORDED_PEAK: [&str; 3] = [
-    "a2b6930bf3296db9b4caeff929581d32ed18da0ea2cbe4a27805dafff1336252",
-    "303e36d9d646693463545040a814a900cc45bf9506b4101d2066400d1a502a7f",
-    "6ca34e50b1565c7c9020d998cd109f47e46e5a634adfdbe29d16473d642ae52f",
+    "86adaa2e1431b4185692586f8a81a9c63cfea20694b2b249aa8398b241ddbbef",
+    "a0977ffb9d5931a58a5f4ed64283d77a13aa5fd1d6ec3977756f18d8b25d8e57",
+    "18cbaf94393d19f184cc78af5111cc90dd02b2d3467ce243820062c37d97ae35",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -583,20 +583,24 @@ fn random_strips() -> [Vec<[u16; 4]>; 4] {
 
 /// Bounds (E_lo, E_hi) on the encoder's own error for one encoded block, read from the output bytes alone, in half-code
 /// units (the encoder's UF16 error over the common factor (64/31)^2). The encoder scores the squared error of the
-/// decoded UF16 interpolant u against `h_src * 64 / 31`, unweighted over R, G and B. The decoder writes
-/// `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1): with e = h - h_src a channel's error lies between e^2
-/// and (e + 1)^2 (survey #3).
+/// decoded UF16 interpolant u against `(h_src + 0.5) * 64 / 31`, the centre of the source half code's decode range
+/// (Q5), unweighted over R, G and B. The decoder writes `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1):
+/// with d = h - h_src a channel's term (u * 31 / 64 - (h_src + 0.5))^2 lies in [d - 0.5, d + 0.5) squared. The lower
+/// bound is 0 when d = 0 (the interval holds 0), else the smaller of (d - 0.5)^2 and (d + 0.5)^2; the upper bound is
+/// the larger (survey #3).
 fn err_bounds(src: &[[u16; 4]; 16], dec: &[[u16; 3]; 16]) -> (f64, f64) {
-    let (mut lo, mut hi) = (0i64, 0i64);
+    let (mut lo, mut hi) = (0.0f64, 0.0f64);
     for (s, d) in src.iter().zip(dec) {
         for c in 0..3 {
-            let e = d[c] as i64 - s[c] as i64;
-            let (a, b) = (e * e, (e + 1) * (e + 1));
-            lo += a.min(b);
+            let e = d[c] as f64 - s[c] as f64;
+            let (a, b) = ((e - 0.5) * (e - 0.5), (e + 0.5) * (e + 0.5));
+            if e != 0.0 {
+                lo += a.min(b);
+            }
             hi += a.max(b);
         }
     }
-    (lo as f64, hi as f64)
+    (lo, hi)
 }
 
 /// `err_bounds` of one block encoded at `level` on `target`.
@@ -829,9 +833,13 @@ fn shipped_code(v: f32, bits: u32) -> u32 {
     ((v / 65535.0 * top as f32 + 0.5) as i32).clamp(0, top) as u32
 }
 
-/// The UF16 value `h` (a half code) becomes in the kernel's `bc6h_setup`, in f32 and in f64.
+/// The UF16 value `h` (a half code) becomes in the kernel's `bc6h_setup` (the centre of its decode range, Q5), in f32
+/// and in f64.
 fn uf16_of_half(h: u16) -> (f32, f64) {
-    ((h as f32 / 31.0) * 64.0, h as f64 * 64.0 / 31.0)
+    (
+        (h as f32 + 0.5) / 31.0 * 64.0,
+        (h as f64 + 0.5) * 64.0 / 31.0,
+    )
 }
 
 /// The half codes whose `bits`-bit code under the shipped rule is not the nearest code, as `(h, nearest, shipped)`.
@@ -964,7 +972,7 @@ fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
 /// are each constant. The test holds because that mode's 10-bit step is 64 UF16 units, and every input is at least 4
 /// units from an edge between two codes, so a small shift of the endpoint cannot change the nearest code.
 ///
-/// The inputs are half codes h (UF16 value v = h * 64 / 31) where the shipped rule and the nearest code differ, the
+/// The inputs are half codes h (UF16 value v = (h + 0.5) * 64 / 31, the centre of h's decode range) where the shipped rule and the nearest code differ, the
 /// nearest code is strict, and v is at least 4 UF16 units from both edges of that mismatch window: G from nearest codes
 /// 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too low). Four more blocks take the end
 /// codes: G with nearest code 0 (shipped 1) and B with nearest 1023 (shipped 1022).
@@ -1094,14 +1102,14 @@ fn pca_survives_a_zero_covariance_row_sum() {
 }
 
 /// The decoder writes `(u * 31) >> 6`, so the UF16 values that decode to half `h` are `[64h/31, 64(h+1)/31)`. The
-/// kernel aims at `(h / 31) * 64`, the bottom edge, so a constant block's 16-bit code `round(64h/31)` decodes to
-/// `h - 1` whenever the fraction is below 0.5 (survey section 1; h = 1 decodes to 0).
+/// kernel aimed at `(h / 31) * 64`, the bottom edge, so a constant block's 16-bit code `round(64h/31)` decoded to
+/// `h - 1` whenever the fraction was below 0.5 (survey section 1; h = 1 decoded to 0); it now aims at the centre,
+/// `(h + 0.5) / 31 * 64` (Q5).
 ///
 /// A constant neutral block (R = G = B = h) for every half `h` in `0x0001..=0x7BFF` stepping by 7, plus `0x7BFF`:
 /// at every level on every path every decoded channel of every texel equals `h`. The failure message names `h`, the
 /// level, the path and the decoded half, and the counts per level and path are printed.
 #[test]
-#[ignore = "RED for BC6H-Q5 (Note LT): passes once the Q5 rounding fix (patch 0007) lands"]
 fn constant_blocks_decode_to_their_half_code() {
     let mut hs: Vec<u16> = (1..=0x7BFFu16).step_by(7).collect();
     hs.push(0x7BFF);

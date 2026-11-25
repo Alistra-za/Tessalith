@@ -42,6 +42,7 @@
 // Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a second
 // audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
 // PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
+// Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -3429,7 +3430,7 @@ void bc6h_setup(bc6h_enc_state state[])
     for (uniform int p = 0; p < 3; p++)
     for (uniform int k = 0; k < 16; k++)
     {
-        state->block[p * 16 + k] = (state->block[p * 16 + k] / 31) * 64;
+        state->block[p * 16 + k] = (state->block[p * 16 + k] + 0.5f) / 31 * 64; // sdc patch 0007 (Q5): aim at the centre of the half code's decode range [64h/31, 64(h+1)/31), not its bottom edge
     }
 
     if (state->peak_mode)

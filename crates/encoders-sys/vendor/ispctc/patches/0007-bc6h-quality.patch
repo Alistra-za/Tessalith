@@ -1,19 +1,20 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index 1b68835c..212a09a6 100644
+index 1b68835c..fa5e43e4 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-@@ -39,6 +39,10 @@
+@@ -39,6 +39,11 @@
  // 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
  // S4 prune the slow levels skip a mode whose endpoint window cannot beat the best error so far.
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 +// Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a second
 +// audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
 +// PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
++// Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
 +///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
  #ifndef ISPC_UINT_IS_DEFINED
  //these are defined in ISPC version 1.13.0 and later
-@@ -310,8 +314,21 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
+@@ -310,8 +315,21 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
  			for (uniform int p=0; p<channels; p++)
  				norm_sq += axis[p]*axis[p];
  
@@ -37,3 +38,12 @@ index 1b68835c..212a09a6 100644
  		}		
  	}
  
+@@ -3412,7 +3430,7 @@ void bc6h_setup(bc6h_enc_state state[])
+     for (uniform int p = 0; p < 3; p++)
+     for (uniform int k = 0; k < 16; k++)
+     {
+-        state->block[p * 16 + k] = (state->block[p * 16 + k] / 31) * 64;
++        state->block[p * 16 + k] = (state->block[p * 16 + k] + 0.5f) / 31 * 64; // sdc patch 0007 (Q5): aim at the centre of the half code's decode range [64h/31, 64(h+1)/31), not its bottom edge
+     }
+ 
+     if (state->peak_mode)

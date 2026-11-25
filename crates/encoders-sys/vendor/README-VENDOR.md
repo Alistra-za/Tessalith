@@ -183,14 +183,19 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 0001, 0003, 0004 and 0006. It is produced with `git diff --output=<patch> 9c452929 -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
-measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of the pins,
-`identity.json` or the measured images. PCA re-seed: `compute_axis` renormalises the
+measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, and Q5
+(below) changes all of them. PCA re-seed: `compute_axis` renormalises the
 power-iteration vector every second iteration; when its squared norm is exactly 0 (a covariance whose rows sum to 0 with
 the epsilon absorbed) it now restarts from the unit vector of the channel with the largest covariance diagonal (the
 first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm takes the old path, so only such
 blocks change bytes. Test: `pca_survives_a_zero_covariance_row_sum`. It changes BC6H bytes on a path where the
 zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast to Basic); both helpers `block_pca_axis` and
-`get_pca_bound` share it (Note LT).
+`get_pca_bound` share it (Note LT). Q5: `bc6h_setup` converts each half code h to the UF16 target
+`(h + 0.5) / 31 * 64`, the centre of its decode range `[64h/31, 64(h+1)/31)`, instead of the bottom edge `h / 31 * 64`,
+so a constant block's code decodes to h and not h - 1 (the peak gate above it still reads the source half bits; `orig`
+and the lift in `bc6h_peak_retry` follow the new targets). Test: `constant_blocks_decode_to_their_half_code`. It changes
+BC6H bytes at all six levels on SSE2, AVX2 and AVX-512 (the 18 pins, `identity.json` `hdr_sky` and every measured
+image).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
