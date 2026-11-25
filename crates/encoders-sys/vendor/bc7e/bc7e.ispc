@@ -23,6 +23,10 @@
 //   keeps the constant wins whenever the search finds one.
 //   With exact opaque on, mode 6's one-colour p loop never leaves its forced p-bits: alpha 255 wins (BC7-C4).
 //   A one-colour candidate whose p loop finds no p that keeps a masked constant also scores 2^60.
+// - Q3: evaluate_solution picks mode 6's alpha-block indices in the weighted metric when the four linear weights are
+//   not all equal (all sixteen indices); equal weights run the unchanged code.
+// - DG: four float divisions by a flat subset's zero spread are guarded; the result equals what the clamp gave, so no
+//   byte changes.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -1418,7 +1422,8 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 				float dg = actualMaxColor.m_c[1] - lg;
 				float db = actualMaxColor.m_c[2] - lb;
 			
-				const float f = N / (dr * dr + dg * dg + db * db);
+				const float f_den = dr * dr + dg * dg + db * db; // sdc patch 0005 (DG): 0 on a flat subset; the guard gives the index the clamp gave
+				const float f = (f_den > 0) ? (N / f_den) : 0; // sdc patch 0005 (DG)
 
 				lr *= -dr;
 				lg *= -dg;
@@ -1579,7 +1584,10 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 		else
 		{
 			// alpha
-			if (N == 16)
+			// sdc patch 0005 (Q3): with linear weights that are not all equal, the weighted branch below picks the
+			// index in the weighted metric; equal weights run the original branch, whose projection is then exact.
+			const uniform bool q3_weighted = !((pParams->m_weights[0] == pParams->m_weights[1]) && (pParams->m_weights[0] == pParams->m_weights[2]) && (pParams->m_weights[0] == pParams->m_weights[3]));
+			if ((N == 16) && !q3_weighted) // sdc patch 0005 (Q3)
 			{
 				float lr = actualMinColor.m_c[0];
 				float lg = actualMinColor.m_c[1];
@@ -1591,7 +1599,8 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 				float db = actualMaxColor.m_c[2] - lb;
 				float da = actualMaxColor.m_c[3] - la;
 			
-				const float f = N / (dr * dr + dg * dg + db * db + da * da);
+				const float f_den = dr * dr + dg * dg + db * db + da * da; // sdc patch 0005 (DG): 0 on a flat subset; the guard gives the index the clamp gave
+				const float f = (f_den > 0) ? (N / f_den) : 0; // sdc patch 0005 (DG)
 
 				lr *= -dr;
 				lg *= -dg;
@@ -1635,6 +1644,53 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 					float min_err = min(err0, err1);
 					total_errf += min_err;
 					pResults->m_pSelectors_temp[i] = (int)select(min_err == err0, best_sel0, best_sel);
+				}
+			}
+			else if (N == 16) // sdc patch 0005 (Q3) (full window)
+			{
+				float lr = actualMinColor.m_c[0];
+				float lg = actualMinColor.m_c[1];
+				float lb = actualMinColor.m_c[2];
+				float la = actualMinColor.m_c[3];
+
+				float dr = actualMaxColor.m_c[0] - lr;
+				float dg = actualMaxColor.m_c[1] - lg;
+				float db = actualMaxColor.m_c[2] - lb;
+				float da = actualMaxColor.m_c[3] - la;
+			
+
+				lr *= -dr;
+				lg *= -dg;
+				lb *= -db;
+				la *= -da;
+
+				cfor (uniform uint32_t i = 0; i < num_pixels; i++)
+				{
+					const varying color_quad_i *uniform pC = &pPixels[i];
+					float r = pC->m_c[0];
+					float g = pC->m_c[1];
+					float b = pC->m_c[2];
+					float a = pC->m_c[3];
+
+					// sdc patch 0005 (Q3): full window: every palette entry scored with the weighted error in index order;
+					// strict < keeps the first lowest.
+					float min_err = 0;
+					int min_sel = 0;
+					for (uniform uint32_t j = 0; j < N; j++)
+					{
+						float dr0 = weightedColors[j].m_c[0] - r;
+						float dg0 = weightedColors[j].m_c[1] - g;
+						float db0 = weightedColors[j].m_c[2] - b;
+						float da0 = weightedColors[j].m_c[3] - a;
+						float err = (wr * dr0 * dr0) + (wg * dg0 * dg0) + (wb * db0 * db0) + (wa * da0 * da0);
+						if ((j == 0) || (err < min_err))
+						{
+							min_err = err;
+							min_sel = j;
+						}
+					}
+					total_errf += min_err;
+					pResults->m_pSelectors_temp[i] = min_sel;
 				}
 			}
 			else if (N == 8)
@@ -2678,7 +2734,8 @@ static uint64_t color_cell_compression_est(uniform uint32_t mode, const uniform 
 	float low = far * sr + fag * sg + fab * sb;
 	float high = far * hr + fag * hg + fab * hb;
 
-	float scale = ((float)N - 1) / (float)(high - low);
+	float scale_den = (float)(high - low); // sdc patch 0005 (DG): 0 on a flat subset; the guard gives the s the clamp gave
+	float scale = (scale_den > 0) ? (((float)N - 1) / scale_den) : 0; // sdc patch 0005 (DG)
 	float inv_n = 1.0f / ((float)N - 1);
 
 	float total_errf = 0;
@@ -2784,7 +2841,8 @@ static uint64_t color_cell_compression_est_mode7(uniform uint32_t mode, const un
 	float low = far * sr + fag * sg + fab * sb + faa * sa;
 	float high = far * hr + fag * hg + fab * hb + faa * ha;
 
-	float scale = ((float)N - 1) / (float)(high - low);
+	float scale_den = (float)(high - low); // sdc patch 0005 (DG): 0 on a flat subset; the guard gives the s the clamp gave
+	float scale = (scale_den > 0) ? (((float)N - 1) / scale_den) : 0; // sdc patch 0005 (DG)
 	float inv_n = 1.0f / ((float)N - 1);
 
 	float total_errf = 0;

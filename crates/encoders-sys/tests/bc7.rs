@@ -637,3 +637,225 @@ fn search_mode7_witnesses() {
         start.elapsed().as_secs_f64()
     );
 }
+
+/// The seed of the Q3 candidates (`q3_candidate`).
+const Q3_SEED: u32 = 0x5133_2026;
+
+/// Candidate `i` for mode 6's alpha-block selectors, from an LCG seeded with `Q3_SEED ^ i * 0x9E37_79B9`
+/// (`s = s * 1664525 + 1013904223`, each draw `s >> 24`): two random colours (R, G, B), then two random alphas (16 to
+/// 239); per texel in order, R, G and B on the ramp between the colours along the texel order plus noise of -2 to 2, then
+/// alpha on its own ramp between the alphas plus noise of -24 to 24, clamped to 16-239. So alpha is only loosely tied to
+/// the colour.
+fn q3_candidate(i: u32) -> [[u8; 4]; 16] {
+    let mut s = Q3_SEED ^ i.wrapping_mul(0x9E37_79B9);
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as i32
+    };
+    let ends = [[next(), next(), next()], [next(), next(), next()]];
+    let alpha = [16 + next() % 224, 16 + next() % 224];
+    std::array::from_fn(|t| {
+        let t = t as i32;
+        let mut px = [0u8; 4];
+        for c in 0..3 {
+            let v = ends[0][c] + (ends[1][c] - ends[0][c]) * t / 15 + next() % 5 - 2;
+            px[c] = v.clamp(0, 255) as u8;
+        }
+        let a = alpha[0] + (alpha[1] - alpha[0]) * t / 15 + next() % 49 - 24;
+        px[3] = a.clamp(16, 239) as u8;
+        px
+    })
+}
+
+/// BC7's 4-bit index weights (mode 6's palette).
+const BC7_WEIGHTS4: [u32; 16] = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64];
+
+/// For a mode-6 block, whether every texel's index has the smallest weighted error `sum w[c] * (pal[c] - src[c])^2`
+/// over the 16 palette entries (a tie passes). The endpoints (7 bits plus each endpoint's p-bit) and the indices (3 bits
+/// for texel 0, 4 for the rest) are read by the BC7 layout, and the palette is checked against the decoder. Any other
+/// mode returns true.
+fn mode6_indices_are_weighted_nearest(block: &[u8; 16], src: &[[u8; 4]; 16], w: [u32; 4]) -> bool {
+    if block[0] & 0x7f != 0x40 {
+        return true;
+    }
+    let v = u128::from_le_bytes(*block);
+    let bits = |at: u32, n: u32| ((v >> at) & ((1 << n) - 1)) as u32;
+    let p = [bits(63, 1), bits(64, 1)];
+    let ends: [[u32; 4]; 2] = std::array::from_fn(|k| {
+        std::array::from_fn(|c| (bits(7 + 14 * c as u32 + 7 * k as u32, 7) << 1) | p[k])
+    });
+    let pal: [[u32; 4]; 16] = std::array::from_fn(|j| {
+        let wj = BC7_WEIGHTS4[j];
+        std::array::from_fn(|c| ((64 - wj) * ends[0][c] + wj * ends[1][c] + 32) >> 6)
+    });
+    let err = |j: usize, s: &[u8; 4]| -> u64 {
+        (0..4)
+            .map(|c| u64::from(w[c]) * u64::from(pal[j][c].abs_diff(u32::from(s[c]))).pow(2))
+            .sum()
+    };
+    let decoded = decode(block);
+    (0..16).all(|t| {
+        let idx = if t == 0 {
+            bits(65, 3)
+        } else {
+            bits(64 + 4 * t as u32, 4)
+        } as usize;
+        assert_eq!(
+            pal[idx].map(|c| c as u8),
+            decoded[t],
+            "hand decode of texel {t}: {block:02x?}"
+        );
+        let best = (0..16).map(|j| err(j, &src[t])).min().unwrap();
+        err(idx, &src[t]) == best
+    })
+}
+
+/// Each `q3_candidate` of `ids` encoded alone (one block per call, so its bytes do not depend on gang neighbours) with
+/// linear weights `w`, raw (no post-fix).
+fn q3_outputs(ids: &[u32], p: Bc7Params, w: [u32; 4], target: IspcTarget) -> Vec<[u8; 16]> {
+    use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7Tune};
+    let tune = Bc7Tune {
+        weights: Some(w),
+        ..Bc7Tune::default()
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk = ids.len().div_ceil(threads).max(1);
+    let mut outs = vec![[0u8; 16]; ids.len()];
+    std::thread::scope(|sc| {
+        for (ids, outs) in ids.chunks(chunk).zip(outs.chunks_mut(chunk)) {
+            sc.spawn(move || {
+                for (i, o) in ids.iter().zip(outs) {
+                    bc7e_compress_blocks_tuned_on(&q3_candidate(*i), o, p, tune, target);
+                }
+            });
+        }
+    });
+    outs
+}
+
+/// The `q3_candidate` indices and weights whose mode-6 output broke `mode6_indices_are_weighted_nearest` at veryslow on
+/// the AVX2 path before patch 0005's Q3, and that stay mode 6 and keep it at basic and veryslow on every path after: the
+/// first 8 per weight set of the 32 `search_q3_witnesses` printed (all 64 qualified; Note LR, LR13).
+const Q3_WITNESSES: [(u32, [u32; 4]); 16] = [
+    (4, [16, 16, 16, 128]),
+    (7, [16, 16, 16, 128]),
+    (23, [16, 16, 16, 128]),
+    (25, [16, 16, 16, 128]),
+    (33, [16, 16, 16, 128]),
+    (34, [16, 16, 16, 128]),
+    (57, [16, 16, 16, 128]),
+    (59, [16, 16, 16, 128]),
+    (4, [16, 16, 16, 256]),
+    (7, [16, 16, 16, 256]),
+    (23, [16, 16, 16, 256]),
+    (25, [16, 16, 16, 256]),
+    (34, [16, 16, 16, 256]),
+    (43, [16, 16, 16, 256]),
+    (59, [16, 16, 16, 256]),
+    (61, [16, 16, 16, 256]),
+];
+
+/// Patch 0005, Q3: with linear weights that are not all equal (a user's alpha weight), mode 6's alpha-block selectors
+/// were chosen by a projection in the unweighted metric and scored on the two indices around it, so a texel could keep
+/// an index the weights rank below another; `evaluate_solution` now scores all sixteen palette entries with the weighted
+/// error. Equal weights run the unchanged code, so every level's default bytes stay. Each witness keeps the weighted
+/// nearest index on every texel at basic and veryslow on every path (Note LR, LR13).
+#[test]
+fn mode6_alpha_selectors_follow_the_weights() {
+    let mut bad = vec![];
+    for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
+        let p = Bc7Params { level, ..U5 };
+        for target in paths() {
+            for (i, w) in Q3_WITNESSES {
+                let out = q3_outputs(&[i], p, w, target)[0];
+                if !mode6_indices_are_weighted_nearest(&out, &q3_candidate(i), w) {
+                    bad.push(format!("candidate {i} weights {w:?} {level:?} {target:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "mode-6 texels not at the weighted nearest index:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Patch 0005, DG: the four divisions by a subset's spread (`evaluate_solution`'s linear `f`, opaque and alpha, and the
+/// estimators' `scale`) are 0 on a flat subset and are now guarded; the guard gives the index the clamp gave, so no byte
+/// changes. A unit check of that path, not a RED: an opaque block of (100, 100, 100) with one texel (101, 100, 100), and
+/// an alpha block of two solid halves (texel columns 0-1 and 2-3), linear at basic, decode within 1 of the source in
+/// every channel on every path (Note LR, LR19).
+#[test]
+fn flat_subsets_decode_sane() {
+    let mut opaque = [[100u8, 100, 100, 255]; 16];
+    opaque[5] = [101, 100, 100, 255];
+    let alpha: [[u8; 4]; 16] = std::array::from_fn(|t| {
+        if t % 4 < 2 {
+            [60, 120, 180, 200]
+        } else {
+            [200, 90, 30, 80]
+        }
+    });
+    let p = Bc7Params {
+        level: Bc7Level::Basic,
+        ..U5
+    };
+    let mut bad = vec![];
+    for (name, block) in [("opaque", opaque), ("alpha", alpha)] {
+        for target in paths() {
+            let mut out = [0u8; 16];
+            bc7e_compress_blocks_on(&block, &mut out, p, target);
+            let worst = decode(&out)
+                .iter()
+                .zip(block)
+                .flat_map(|(d, s)| (0..4).map(move |c| d[c].abs_diff(s[c])))
+                .max()
+                .unwrap();
+            if worst > 1 {
+                bad.push(format!("{name} {target:?}: worst {worst}, {out:02x?}"));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "flat subsets decoded more than 1 off:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Step A0 of patch 0005's Q3 (Note LR): scans `q3_candidate` at veryslow on the AVX2 path with each alpha-weighted set
+/// and prints the candidates whose mode-6 output breaks `mode6_indices_are_weighted_nearest`, up to 32 per set.
+#[test]
+#[ignore = "search for Q3 witnesses: run with --ignored --nocapture after a kernel change"]
+fn search_q3_witnesses() {
+    assert!(
+        IspcTarget::Avx2.supported(),
+        "the search runs on the AVX2 path"
+    );
+    let p = Bc7Params {
+        level: Bc7Level::Veryslow,
+        ..U5
+    };
+    for w in [[16, 16, 16, 128], [16, 16, 16, 256]] {
+        let start = std::time::Instant::now();
+        let (mut scanned, mut found) = (0u32, 0);
+        'scan: for base in (0..1u32 << 20).step_by(1 << 14) {
+            let ids: Vec<u32> = (base..base + (1 << 14)).collect();
+            for (i, out) in ids.iter().zip(q3_outputs(&ids, p, w, IspcTarget::Avx2)) {
+                scanned += 1;
+                if !mode6_indices_are_weighted_nearest(&out, &q3_candidate(*i), w) {
+                    println!("weights {w:?} candidate {i}");
+                    found += 1;
+                    if found == 32 {
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        println!(
+            "weights {w:?}: scanned {scanned}, found {found}, in {:.1} s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+}

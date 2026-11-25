@@ -75,7 +75,14 @@ at every level, set per call through the shim's tuning slot 15): when a subset's
 is skipped (a one-colour candidate with no such choice scores 2^60), except that with exact opaque on mode 6's
 one-colour choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs`
 `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask 0 is every level's default and writes
-the bytes it wrote before). The two fields change the generated header (Note LR). These changes alter BC7 bytes (the
+the bytes it wrote before). The two fields change the generated header (Note LR). Q3 (all sixteen indices): with linear
+weights that are not all equal, `evaluate_solution` scores every palette entry of a mode-6 alpha block with the weighted
+error, where it projected each texel in the unweighted metric and scored the two indices around the projection; equal
+weights run the unchanged code; proof test `tests/bc7.rs` `mode6_alpha_selectors_follow_the_weights`; changes bytes only
+for linear weights that are not all equal (a user's `encoder.bc7_weights = "alphaN"`). DG: four float divisions by a
+subset's spread (`evaluate_solution`'s linear projection factor, opaque and alpha, and the two estimators' `scale`), which
+is 0 on a flat subset, are guarded and give the index the clamp gave; unit check `tests/bc7.rs`
+`flat_subsets_decode_sane`; no byte change. These changes alter BC7 bytes (the
 pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes`
 hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch file with its
 own tag.
