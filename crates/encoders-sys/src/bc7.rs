@@ -124,9 +124,12 @@ pub fn bc7e_level_flat_tolerance(p: Bc7Params) -> f32 {
 pub struct Bc7Tune {
     /// Linear per-channel error weights (used with `perceptual = false`), as passed. Since patch 0005 (L16) bc7e ranks
     /// every linear call as the same weights x16 would, so pass x1-form weights (`[1, 1, 1, N]` for Alpha xN; weights
-    /// x16 would rank at x256). Each weight must be 1 to 65535, else the call panics: the shim reads a weight as `i32`
-    /// (2^31 and above read as "unset"), the kernel's weighted square is a `uint32` (safe up to 66,051) and a weight of
-    /// 0 makes the estimators divide by a zero sum. Note CP, Note LR (LR25).
+    /// x16 would rank at x256). Each weight must be 1 to 65535, else the call panics. The shim reads a weight as `i32`
+    /// (2^31 and above read as "unset"). The bound covers the kernel's `uint32` per-product sites, such as
+    /// `(be * be) * m_weights[3]` (safe up to 66,051, summed in `uint64`); the per-texel colour distances
+    /// (`compute_color_distance_rgb` and `compute_color_distance_rgba`) are float, so a large weight does not wrap
+    /// there and only coarsens float precision. A weight of 0 makes Q3's copy and the estimators divide by a zero sum.
+    /// Note CP, Note LR (LR25).
     pub weights: Option<[u32; 4]>,
     /// The flat tolerance of patch 0005 (Q2t); `None` keeps the level's value, [`BC7_FLAT_TOLERANCE_DEFAULT`]
     /// (Note LR).

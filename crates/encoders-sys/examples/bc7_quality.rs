@@ -539,8 +539,16 @@ fn run(args: &[String]) -> Res<()> {
     }
     let weights: Vec<u32> = weights
         .split(',')
-        .map(|w| w.parse().map_err(|e| format!("--weights {w}: {e}")))
-        .collect::<Result<_, _>>()?;
+        .map(|w| {
+            let v: u32 = w.parse().map_err(|e| format!("--weights {w}: {e}"))?;
+            // `Bc7Tune::weights` refuses anything else (Note LR, LR25); a usage error beats a panic.
+            if (1..=65535).contains(&v) {
+                Ok(v)
+            } else {
+                Err(format!("--weights {w}: must be 1 to 65535"))
+            }
+        })
+        .collect::<Result<_, String>>()?;
     let setts = settings(
         &levels.split(',').collect::<Vec<_>>(),
         &weights,
