@@ -127,7 +127,14 @@ witness, since with it reverted alone the test still passes, and is held by the 
 arm); changes bytes of blocks with a flat colour part beside a varying scalar: alpha blocks at every level, linear and
 perceptual (mode 4's shortcut at every level, mode 5 at every level but veryfast and fast, which run no mode 5 for alpha
 blocks), and opaque blocks whose rotated mode 5 holds two flat channels (linear, basic and above), and of any mode 5
-colour part whose mean colour beats its fit. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
+colour part whose mean colour beats its fit. SF: `handle_alpha_block_mode4` and `handle_alpha_block_mode5` (alpha and
+opaque calls) run the scalar search before the colour compress and skip the colour work when every active lane's scalar
+error alone is already at or above the best so far, which the callers pass in; a trial scores colour plus scalar plus
+any guard penalty, never below the scalar alone, so the callers' strict `<` could not have taken a skipped trial, and
+the scalar search is integer and reads nothing of the colour result; BC7 bytes unchanged: every `level_identity` hash on
+SSE2, AVX2 and AVX-512, `identity.json`, and every measured image's hash on AVX2 and AVX-512 equal; no test holds the
+skip on its own, but a skip made unsafe (taken when the scalar error exceeds half the best) fails
+`tests/level_identity.rs` on three paths. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
 `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
 file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.
 

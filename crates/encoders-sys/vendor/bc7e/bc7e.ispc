@@ -38,6 +38,7 @@
 // - WP: with unequal linear weights the mode 6 and 7 one-colour packers choose their p-bits by the weighted error.
 // - KS: mode 4 tries the exact code pair for a scalar that is one value across the block.
 // - M5: mode 5 gets a one-colour candidate, and the one-colour test ignores alpha where alpha is not scored.
+// - SF: modes 4 and 5 search the scalar slot first and skip colour work that cannot win (no byte change).
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -3667,16 +3668,7 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 			pParams->m_num_selector_weights = 4;
 		}
 								
-		color_cell_compressor_results results;
-		
-		int selectors[16];
-		results.m_pSelectors = selectors;
-
-		int selectors_temp[16];
-		results.m_pSelectors_temp = selectors_temp;
-				
-		uint64_t trial_err = color_cell_compression(4, pParams, &results, pComp_params, 16, pPixels, true);
-		assert(trial_err == results.m_best_overall_err);
+		// sdc patch 0005 (SF): the colour compress runs after the scalar search below
 
 		uint32_t la = minimumi((lo_a + 2) >> 2, 63);
 		uint32_t ha = minimumi((hi_a + 2) >> 2, 63);
@@ -3871,6 +3863,22 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 		}
 		} // sdc patch 0005 (S1)
 
+		// sdc patch 0005 (SF): the scalar error alone is at or above the best so far on every active lane, so colour + scalar cannot
+		// win under the strict < below: skip the colour work
+		if (all(best_alpha_err >= *pMode4_err))
+			continue;
+
+		color_cell_compressor_results results;
+		
+		int selectors[16];
+		results.m_pSelectors = selectors;
+
+		int selectors_temp[16];
+		results.m_pSelectors_temp = selectors_temp;
+				
+		uint64_t trial_err = color_cell_compression(4, pParams, &results, pComp_params, 16, pPixels, true);
+		assert(trial_err == results.m_best_overall_err);
+
 		trial_err += best_alpha_err;
 
 		if (trial_err < *pMode4_err)
@@ -3915,17 +3923,9 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 	pParams->m_exact_mask = (a_slot < 0) ? (pComp_params->m_exact_mask & 7) : ((pComp_params->m_exact_mask & 7 & ~(1 << a_slot)) | (((pComp_params->m_exact_mask >> 3) & 1) << a_slot));
 	pParams->m_xc_a_slot = a_slot;
 		
-	color_cell_compressor_results results5;
-	results5.m_pSelectors = pOpt_results5->m_selectors;
-
-	int selectors_temp[16];
-	results5.m_pSelectors_temp = selectors_temp;
-
-	*pMode5_err = color_cell_compression(5, pParams, &results5, pComp_params, 16, pPixels, true);
-	assert(*pMode5_err == results5.m_best_overall_err);
-
-	pOpt_results5->m_low[0] = results5.m_low_endpoint;
-	pOpt_results5->m_high[0] = results5.m_high_endpoint;
+	// sdc patch 0005 (SF): the best so far (the callers pass it in); the colour compress runs after the scalar search
+	const uint64_t sf_best = *pMode5_err;
+	uint64_t sf_alpha_err = 0;
 
 	cif (lo_a == hi_a)
 	{
@@ -4043,8 +4043,34 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 			} // ld
 		}
 
-		*pMode5_err += mode5_alpha_err;
+		sf_alpha_err = mode5_alpha_err; // sdc patch 0005 (SF)
 	}
+
+	// sdc patch 0005 (SF): the scalar error alone is at or above the best so far on every active lane: the trial cannot win under
+	// the callers' strict <, so return it without the colour work
+	if (all(sf_alpha_err >= sf_best))
+	{
+		*pMode5_err = sf_alpha_err;
+		return;
+	}
+
+	const uint32_t sf_lo_a = pOpt_results5->m_low[0].m_c[3];
+	const uint32_t sf_hi_a = pOpt_results5->m_high[0].m_c[3];
+	color_cell_compressor_results results5;
+	results5.m_pSelectors = pOpt_results5->m_selectors;
+
+	int selectors_temp[16];
+	results5.m_pSelectors_temp = selectors_temp;
+
+	*pMode5_err = color_cell_compression(5, pParams, &results5, pComp_params, 16, pPixels, true);
+	assert(*pMode5_err == results5.m_best_overall_err);
+
+	pOpt_results5->m_low[0] = results5.m_low_endpoint;
+	pOpt_results5->m_high[0] = results5.m_high_endpoint;
+
+	pOpt_results5->m_low[0].m_c[3] = sf_lo_a;
+	pOpt_results5->m_high[0].m_c[3] = sf_hi_a;
+	*pMode5_err += sf_alpha_err;
 
 	pOpt_results5->m_mode = 5;
 	pOpt_results5->m_index_selector = 0;
@@ -4213,7 +4239,7 @@ static void handle_alpha_block(void *varying pBlock, const varying color_quad_i 
 
 			bc7_optimization_results trial_opt_results5;
 
-			uint64_t trial_mode5_err = 0;
+			uint64_t trial_mode5_err = best_err; // sdc patch 0005 (SF): the best so far, for the handler's skip
 
 			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err, (rotation != 0) ? ((int)rotation - 1) : -1); // sdc patch 0005 (XC): (A) A2: the slot holding source alpha
 
@@ -4930,7 +4956,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 			bc7_optimization_results trial_opt_results5;
 
-			uint64_t trial_mode5_err = 0;
+			uint64_t trial_mode5_err = best_err; // sdc patch 0005 (SF): the best so far, for the handler's skip
 
 			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err, -1); // sdc patch 0005 (XC): (A) A2: opaque, no A slot
 
