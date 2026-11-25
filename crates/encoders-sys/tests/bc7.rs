@@ -226,8 +226,8 @@ fn flat_tolerance_slot_reaches_the_kernel() {
     }
 }
 
-/// Exact constants cover R, G and B only: alpha keeps bc7e's exact-opaque flag (BC7-O14), so an alpha bit is refused
-/// rather than dropped, even with no block to encode.
+/// `Bc7Tune::exact_constants` covers R, G and B only: alpha is the mask's bit 3, set from `Bc7Params::exact_opaque`
+/// (Note LR, LR17), so an alpha bit is refused rather than dropped, even with no block to encode.
 #[test]
 #[should_panic(expected = "R, G and B only")]
 fn exact_constants_refuse_an_alpha_bit() {
@@ -1494,6 +1494,186 @@ fn one_colour_packers_key_on_source_constants() {
     assert!(
         bad.is_empty(),
         "guarding an unflaggable G changed the bytes:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// The seed of `flat_alpha_blocks`.
+const FLAT_ALPHA_SEED: u32 = 0xA17A_2026;
+
+/// 256 blocks (16 texels each, in block order) whose alpha is `a` on every texel, from an LCG seeded with `seed`
+/// (`s = s * 1664525 + 1013904223`, each draw `s >> 24`): even blocks a ramp along the texel order between two random
+/// colours, odd blocks random colour noise. With `g = Some(v)`, G is v on every texel.
+fn flat_alpha_blocks(seed: u32, a: u8, g: Option<u8>) -> Vec<[u8; 4]> {
+    let mut s = seed;
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as i32
+    };
+    let mut px = Vec::with_capacity(256 * 16);
+    for k in 0..256 {
+        let ends = [[next(), next(), next()], [next(), next(), next()]];
+        for t in 0..16i32 {
+            let mut c: [u8; 4] = if k % 2 == 0 {
+                std::array::from_fn(|c| {
+                    if c == 3 {
+                        a
+                    } else {
+                        (ends[0][c] + (ends[1][c] - ends[0][c]) * t / 15) as u8
+                    }
+                })
+            } else {
+                [next() as u8, next() as u8, next() as u8, a]
+            };
+            if let Some(v) = g {
+                c[1] = v;
+            }
+            px.push(c);
+        }
+    }
+    px
+}
+
+/// `blocks` encoded with `tune` in 64-block calls, as the engine makes them, raw (no post-fix).
+fn tuned_on(
+    blocks: &[[u8; 4]],
+    p: Bc7Params,
+    tune: encoders_sys::Bc7Tune,
+    target: IspcTarget,
+) -> Vec<u8> {
+    let mut out = vec![0u8; blocks.len()];
+    for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
+        encoders_sys::bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
+    }
+    out
+}
+
+/// The texels of `out` whose decoded channel `c` is not `v`, and the blocks that hold them.
+fn off_count(out: &[u8], c: usize, v: u8) -> (usize, usize) {
+    out.chunks(16).fold((0, 0), |(texels, blocks), b| {
+        let n = decode(b).iter().filter(|d| d[c] != v).count();
+        (texels + n, blocks + usize::from(n > 0))
+    })
+}
+
+/// Patch 0005, XC (A): exact opaque is the channel guard's alpha, bit 3 of the mask, so in an alpha block a subset whose
+/// alpha is 0 on every texel decodes it exactly wherever the kernel finds such a solution, above G, B and R. On blocks
+/// whose alpha is 0 throughout (`flat_alpha_blocks`' ramps and noise) mode 4 keeps alpha 0 exactly and a rotated trial
+/// that loses it pays A's tier (A2), so every texel decodes alpha 0 at every level, linear and perceptual, raw, on every
+/// path. Before, exact opaque guarded opaque blocks only, and these blocks decoded alpha above 0 at every level. Then the
+/// same blocks with G 255 throughout and G guarded at ultrafast, veryfast and fast: alpha 0 still decodes exactly (A
+/// over G; before, guarding G lost alpha 0 in 57 to 94 of the 256 blocks) (Note LR, LR17).
+#[test]
+fn channel_guard_a_keeps_flat_alpha() {
+    let mut bad = vec![];
+    let blocks = flat_alpha_blocks(FLAT_ALPHA_SEED, 0, None);
+    let with_g = flat_alpha_blocks(FLAT_ALPHA_SEED, 0, Some(255));
+    for level in LEVELS {
+        for perceptual in [false, true] {
+            let p = Bc7Params {
+                level,
+                perceptual,
+                exact_opaque: true,
+            };
+            for target in paths() {
+                let (texels, n) = off_count(&raw_on(&blocks, p, target), 3, 0);
+                if texels > 0 {
+                    bad.push(format!(
+                        "{level:?} perceptual={perceptual} {target:?}: {texels} texels in {n} blocks"
+                    ));
+                }
+                if PBIT_LEVELS.contains(&level) {
+                    let out = tuned_on(&with_g, p, guard(0b010), target);
+                    let (texels, n) = off_count(&out, 3, 0);
+                    if texels > 0 {
+                        bad.push(format!(
+                            "G 255 guarded {level:?} perceptual={perceptual} {target:?}: {texels} texels in {n} \
+                             blocks"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "alpha 0 throughout decoded off 0:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Exact opaque keeps alpha 255 on opaque blocks at every level, linear and perceptual, raw, on every path:
+/// `flat_alpha_blocks` at alpha 255 (these blocks need no rotated-block post-fix). Bit 3 drives the opaque handlers'
+/// forced mode-6 p-bits as the flag did, so the property holds before and after patch 0005 (A); that opaque bytes are
+/// unchanged was checked by the pins when A was added (Note LR, LR17).
+#[test]
+fn exact_opaque_keeps_opaque_alpha_255() {
+    let blocks = flat_alpha_blocks(FLAT_ALPHA_SEED, 255, None);
+    let mut bad = vec![];
+    for level in LEVELS {
+        for perceptual in [false, true] {
+            let p = Bc7Params {
+                level,
+                perceptual,
+                exact_opaque: true,
+            };
+            for target in paths() {
+                let (texels, n) = off_count(&raw_on(&blocks, p, target), 3, 255);
+                if texels > 0 {
+                    bad.push(format!(
+                        "{level:?} perceptual={perceptual} {target:?}: {texels} texels in {n} blocks"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "exact-opaque alpha decoded below 255:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Round 6 (A2), a guard: a rotated mode 4/5 trial of an alpha block holds source alpha in a colour slot and charges
+/// its loss at A's tier, so a guarded G cannot outrank it there. Alpha x16 linear (weights 16, 16, 16, 256), alpha 0
+/// and G 255 on every texel, R and B noise, exact opaque on with G guarded, at basic and veryslow (rotations on): every
+/// texel decodes alpha 0 and G 255, raw, on every path. Task 6m2 found no block where A2 alone changes the output
+/// (`witness-A2.txt`: 0 of 65,536 at every level), so this holds without A2 too (Note LR, LR17).
+#[test]
+fn a_outranks_g_in_rotated_trials() {
+    let mut s = FLAT_ALPHA_SEED ^ 0x0A02;
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as u8
+    };
+    let blocks: Vec<[u8; 4]> = (0..256 * 16).map(|_| [next(), 255, next(), 0]).collect();
+    let tune = encoders_sys::Bc7Tune {
+        weights: Some([16, 16, 16, 256]),
+        exact_constants: Some(0b010),
+        ..encoders_sys::Bc7Tune::default()
+    };
+    let mut bad = vec![];
+    for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
+        let p = Bc7Params {
+            level,
+            exact_opaque: true,
+            ..U5
+        };
+        for target in paths() {
+            let out = tuned_on(&blocks, p, tune, target);
+            for (c, v) in [(3, 0), (1, 255)] {
+                let (texels, n) = off_count(&out, c, v);
+                if texels > 0 {
+                    bad.push(format!(
+                        "{level:?} {target:?}: channel {c} off {v} on {texels} texels in {n} blocks"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "alpha 0 or guarded G 255 decoded off:\n{}",
         bad.join("\n")
     );
 }

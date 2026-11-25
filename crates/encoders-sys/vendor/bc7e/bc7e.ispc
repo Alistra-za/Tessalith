@@ -17,7 +17,7 @@
 //   not on the 6-bit codes, so mode 7's one-colour candidate is no longer rejected on a wrong error.
 // - Q4: the mode 7 one-colour table resets its best endpoints per p-bit pair, so no entry keeps a pair found under
 //   other p-bits.
-// - XC: exact constants. When bit c of bc7e_compress_block_params::m_exact_mask is set (R, G or B; 0 by default) and
+// - XC: exact constants. When bit c of bc7e_compress_block_params::m_exact_mask is set (R, G, B or A; 0 by default) and
 //   a subset's channel c is 0 on every texel, or 255 on every texel, a solution that does not decode it exactly at
 //   every texel pays a penalty above any real error, and a one-colour candidate takes the p-bits whose entries lose
 //   the least, so a solution that keeps the constant wins whenever the search finds one.
@@ -31,6 +31,10 @@
 //   closest solution wins within a tier: solutions that lose their channels in the same number of subsets); the
 //   one-colour packers charge only channels flat across the subset; exact opaque's alpha stays above them through
 //   its forced p-bits.
+// - XC (A): exact opaque is the channel guard's alpha bit, bit 3 of m_exact_mask. Opaque blocks keep the forced
+//   mode-6 p-bits; in alpha blocks a subset whose alpha is 0 or 255 throughout keeps it exactly where the kernel
+//   finds such a solution, above G, B and R; a rotated mode 4/5 trial charges source alpha at A's tier in whichever
+//   colour slot holds it.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -89,7 +93,7 @@ struct bc7e_compress_block_params
 	bool m_perceptual;
 	bool m_pbit_search;
 	bool m_mode6_only;
-	bool m_exact_opaque_alpha;
+	bool m_exact_opaque_alpha; // sdc patch 0005 (XC): (A) unread since A is m_exact_mask bit 3; the field keeps the struct's layout
 	
 	struct
 	{
@@ -125,8 +129,8 @@ struct bc7e_compress_block_params
 	// sdc patch 0005 (Q2t): fixDegenerateEndpoints spreads a channel only when its float endpoints differ by more than
 	// this, already divided by 255 (the 0..1 domain); 0.5/255 by default, set per texture type (Note LR).
 	float m_flat_tolerance;
-	// sdc patch 0005 (XC): exact constants, bit c = channel c (RGB only): a subset whose channel c is 0 or 255 on every
-	// texel decodes it exactly; 0 by default (off).
+	// sdc patch 0005 (XC): exact constants, bit c = channel c (R 1, G 2, B 4; (A) alpha 8): a subset whose channel c is
+	// 0 or 255 on every texel decodes it exactly; 0 by default (off).
 	uint32_t m_exact_mask;
 };
 
@@ -860,6 +864,7 @@ struct color_cell_compressor_params
 	uniform bool m_force_pbit1;
 	uniform float m_flat_tolerance; // sdc patch 0005 (Q2t): bc7e_compress_block_params::m_flat_tolerance
 	uniform uint32_t m_exact_mask; // sdc patch 0005 (XC): bc7e_compress_block_params::m_exact_mask
+	uniform int m_xc_a_slot; // sdc patch 0005 (XC): (A) A2: the colour slot holding source alpha in a rotated mode 4/5 trial of an alpha block (-1: none)
 };
 
 static inline void color_cell_compressor_params_clear(uniform color_cell_compressor_params *uniform p)
@@ -879,6 +884,7 @@ static inline void color_cell_compressor_params_clear(uniform color_cell_compres
 	p->m_force_pbit1 = false;
 	p->m_flat_tolerance = 0.0f; // sdc patch 0005 (Q2t)
 	p->m_exact_mask = 0; // sdc patch 0005 (XC)
+	p->m_xc_a_slot = -1; // sdc patch 0005 (XC): (A) A2: no A slot
 }
 
 struct color_cell_compressor_results
@@ -922,11 +928,13 @@ static inline color_quad_i scale_color(const varying color_quad_i *uniform pC, c
 #define XC_LOST_R (((uint64_t)1) << 54)
 #define XC_LOST_B (((uint64_t)1) << 56)
 #define XC_LOST_G (((uint64_t)1) << 58)
+// sdc patch 0005 (XC): (A) the channel guard's alpha, mask bit 3, above G, B and R; 3 x (2^54 + 2^56 + 2^58 + 2^60) < 2^62.
+#define XC_LOST_A (((uint64_t)1) << 60)
 
 // sdc patch 0005 (XC): the penalty of a set of lost channels (bit c = channel c).
 static inline uint64_t xc_penalty(uint32_t lost)
 {
-	return ((((lost & 1) != 0) ? XC_LOST_R : (uint64_t)0) + (((lost & 2) != 0) ? XC_LOST_G : (uint64_t)0) + (((lost & 4) != 0) ? XC_LOST_B : (uint64_t)0));
+	return ((((lost & 1) != 0) ? XC_LOST_R : (uint64_t)0) + (((lost & 2) != 0) ? XC_LOST_G : (uint64_t)0) + (((lost & 4) != 0) ? XC_LOST_B : (uint64_t)0) + (((lost & 8) != 0) ? XC_LOST_A : (uint64_t)0)); // sdc patch 0005 (XC): (A)
 }
 
 // sdc patch 0005 (XC): a one-colour table entry (error e) loses channel c when c is flagged in the subset's
@@ -939,7 +947,7 @@ static inline uint64_t xc_penalty(uint32_t lost)
 static inline uint32_t xc_constant_channels(uniform uint32_t mask, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
 {
 	uint32_t flags = 0;
-	for (uniform uint32_t c = 0; c < 3; c++)
+	for (uniform uint32_t c = 0; c < 4; c++) // sdc patch 0005 (XC): (A) bit 3 is alpha
 	{
 		if ((mask & (1 << c)) != 0)
 		{
@@ -961,7 +969,7 @@ static inline uint32_t xc_lost_channels(const uniform color_cell_compressor_para
 	uint32_t flags, const varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
 {
 	uint32_t lost = 0;
-	for (uniform uint32_t c = 0; c < 3; c++)
+	for (uniform uint32_t c = 0; c < 4; c++) // sdc patch 0005 (XC): (A) bit 3 is alpha
 	{
 		if ((flags & (1 << c)) != 0)
 		{
@@ -981,6 +989,12 @@ static inline uint32_t xc_lost_channels(const uniform color_cell_compressor_para
 			if (!ok)
 				lost |= (uint32_t)(1 << c);
 		}
+	}
+	// sdc patch 0005 (XC): (A) A2: in a rotated trial of an alpha block the A slot holds source alpha, so its loss is A's (bit 3)
+	if (pParams->m_xc_a_slot >= 0)
+	{
+		const uniform uint32_t sb = (uint32_t)(1 << pParams->m_xc_a_slot);
+		lost = (lost & ~sb) | (((lost & sb) != 0) ? (uint32_t)8 : (uint32_t)0);
 	}
 	return lost;
 }
@@ -1267,7 +1281,7 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
 		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error);
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error) | XC_FLAG_LOST(xc_flags, 3, g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error); // sdc patch 0005 (XC): (A) A3, keyed on the subset's flags
 		const uint64_t pen = xc_penalty(lost);
 		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
@@ -1343,7 +1357,7 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
 		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error);
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error) | XC_FLAG_LOST(xc_flags, 3, g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error); // sdc patch 0005 (XC): (A) A3, keyed on the subset's flags
 		const uint64_t pen = xc_penalty(lost);
 		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
@@ -3510,7 +3524,7 @@ static inline void encode_bc7_block_mode6(void *pBlock, varying bc7_optimization
 }
 
 static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels, const uniform bc7e_compress_block_params *uniform pComp_params, uniform color_cell_compressor_params *uniform pParams, uint32_t lo_a, uint32_t hi_a, 
-	varying bc7_optimization_results *uniform pOpt_results4, varying uint64_t *uniform pMode4_err)
+	varying bc7_optimization_results *uniform pOpt_results4, varying uint64_t *uniform pMode4_err, uniform int a_slot) // sdc patch 0005 (XC): (A) A2: a_slot = the colour slot holding source alpha, -1 for none
 {
 	pParams->m_has_alpha = false;
 	pParams->m_comp_bits = 5;
@@ -3518,7 +3532,9 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 	pParams->m_endpoints_share_pbit = false;				
 	pParams->m_perceptual = pComp_params->m_perceptual;
 	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-	pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+	// sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only; A2: with an A slot, that slot's bit is A's
+	pParams->m_exact_mask = (a_slot < 0) ? (pComp_params->m_exact_mask & 7) : ((pComp_params->m_exact_mask & 7 & ~(1 << a_slot)) | (((pComp_params->m_exact_mask >> 3) & 1) << a_slot));
+	pParams->m_xc_a_slot = a_slot;
 
 	for (uniform uint32_t index_selector = 0; index_selector < 2; index_selector++)
 	{
@@ -3750,7 +3766,7 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 }
 
 static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels, const uniform bc7e_compress_block_params *uniform pComp_params, uniform color_cell_compressor_params *uniform pParams, uint32_t lo_a, uint32_t hi_a, 
-	varying bc7_optimization_results *uniform pOpt_results5, varying uint64_t *uniform pMode5_err)
+	varying bc7_optimization_results *uniform pOpt_results5, varying uint64_t *uniform pMode5_err, uniform int a_slot) // sdc patch 0005 (XC): (A) A2: a_slot = the colour slot holding source alpha, -1 for none
 {
 	pParams->m_pSelector_weights = g_bc7_weights2;
 	pParams->m_pSelector_weightsx = (const vec4F * uniform)&g_bc7_weights2x[0];
@@ -3763,7 +3779,9 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 	
 	pParams->m_perceptual = pComp_params->m_perceptual;
 	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-	pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+	// sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only; A2: with an A slot, that slot's bit is A's
+	pParams->m_exact_mask = (a_slot < 0) ? (pComp_params->m_exact_mask & 7) : ((pComp_params->m_exact_mask & 7 & ~(1 << a_slot)) | (((pComp_params->m_exact_mask >> 3) & 1) << a_slot));
+	pParams->m_xc_a_slot = a_slot;
 		
 	color_cell_compressor_results results5;
 	results5.m_pSelectors = pOpt_results5->m_selectors;
@@ -3952,7 +3970,7 @@ static void handle_alpha_block(void *varying pBlock, const varying color_quad_i 
 
 			uint64_t trial_mode4_err = best_err;
 
-			handle_alpha_block_mode4(pTrial_pixels, pComp_params, &params4, trial_lo_a, trial_hi_a, &trial_opt_results4, &trial_mode4_err);
+			handle_alpha_block_mode4(pTrial_pixels, pComp_params, &params4, trial_lo_a, trial_hi_a, &trial_opt_results4, &trial_mode4_err, (rotation != 0) ? ((int)rotation - 1) : -1); // sdc patch 0005 (XC): (A) A2: the slot holding source alpha
 
 			if (trial_mode4_err < best_err)
 			{
@@ -4065,7 +4083,7 @@ static void handle_alpha_block(void *varying pBlock, const varying color_quad_i 
 
 			uint64_t trial_mode5_err = 0;
 
-			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err);
+			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err, (rotation != 0) ? ((int)rotation - 1) : -1); // sdc patch 0005 (XC): (A) A2: the slot holding source alpha
 
 			if (trial_mode5_err < best_err)
 			{
@@ -4275,8 +4293,8 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
 		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-		pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
-		pParams->m_force_pbit1 = pComp_params->m_exact_opaque_alpha;
+		pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
+		pParams->m_force_pbit1 = (pComp_params->m_exact_mask & 8) != 0; // sdc patch 0005 (XC): (A) alpha 255 on opaque blocks through the forced p-bits, as the exact-opaque flag did
 				
 		color_cell_compressor_results results6;						
 		results6.m_pSelectors = opt_results.m_selectors;
@@ -4327,7 +4345,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
 		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-		pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+		pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions2; solution_index++)
 		{
@@ -4499,7 +4517,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
 		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-		pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+		pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
 				
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions3; solution_index++)
 		{
@@ -4590,7 +4608,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
 		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-		pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+		pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions2; solution_index++)
 		{
@@ -4782,7 +4800,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 			uint64_t trial_mode5_err = 0;
 
-			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err);
+			handle_alpha_block_mode5(pTrial_pixels, pComp_params, &params5, trial_lo_a, trial_hi_a, &trial_opt_results5, &trial_mode5_err, -1); // sdc patch 0005 (XC): (A) A2: opaque, no A slot
 
 			if (trial_mode5_err < best_err)
 			{
@@ -4819,7 +4837,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 		pParams->m_perceptual = pComp_params->m_perceptual;
 		pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-		pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
+		pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
 
 		for (uniform uint32_t solution_index = 0; solution_index < num_solutions3; solution_index++)
 		{
@@ -4935,7 +4953,7 @@ static void handle_opaque_block(void *varying pBlock, const varying color_quad_i
 
 			uint64_t trial_mode4_err = best_err;
 
-			handle_alpha_block_mode4(pTrial_pixels, pComp_params, &params4, trial_lo_a, trial_hi_a, &trial_opt_results4, &trial_mode4_err);
+			handle_alpha_block_mode4(pTrial_pixels, pComp_params, &params4, trial_lo_a, trial_hi_a, &trial_opt_results4, &trial_mode4_err, -1); // sdc patch 0005 (XC): (A) A2: opaque, no A slot
 
 			if (trial_mode4_err < best_err)
 			{
@@ -5009,8 +5027,8 @@ static void handle_opaque_block_mode6(void *varying pBlock, const varying color_
 
 	pParams->m_perceptual = pComp_params->m_perceptual;
 	pParams->m_flat_tolerance = pComp_params->m_flat_tolerance; // sdc patch 0005 (Q2t)
-	pParams->m_exact_mask = pComp_params->m_exact_mask; // sdc patch 0005 (XC)
-	pParams->m_force_pbit1 = pComp_params->m_exact_opaque_alpha;
+	pParams->m_exact_mask = pComp_params->m_exact_mask & 7; // sdc patch 0005 (XC): (A) alpha is not scored here (m_has_alpha false): RGB bits only
+	pParams->m_force_pbit1 = (pComp_params->m_exact_mask & 8) != 0; // sdc patch 0005 (XC): (A) alpha 255 on opaque blocks through the forced p-bits, as the exact-opaque flag did
 				
 	color_cell_compressor_results results6;						
 	results6.m_pSelectors = opt_results.m_selectors;

@@ -69,11 +69,11 @@ one-colour candidate (`pack_mode7_to_one_color`) is scored on its endpoints expa
 not on the 6-bit codes (Q1), and its table resets its best endpoints per p-bit pair (Q4), so mode 7 no longer loses a
 solid subset of an alpha block to a worse fit on a wrong score; proof tests `tests/bc7.rs` `mode7_takes_its_solid_subset`
 (Q1) and `mode7_table_keeps_each_p_bit_pairs_own_best` (Q4); changes bytes (alpha blocks only: opaque blocks never try
-mode 7, and ultrafast turns it off). XC: exact constants, the trailing params field `m_exact_mask` (R, G and B bits; 0
-at every level, set per call through the shim's tuning slot 15): when a subset's masked channel is 0 on every texel, or
-255 on every texel, a solution that does not decode it exactly pays a penalty above any real error and a one-colour
-candidate takes the p-bit choice whose entries lose the least, except that with exact opaque on mode 6's one-colour
-choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs`
+mode 7, and ultrafast turns it off). XC: exact constants, the trailing params field `m_exact_mask` (R, G and B bits, and
+A's under XC (A) below; 0 at every level, set per call through the shim's tuning slot 15): when a subset's masked
+channel is 0 on every texel, or 255 on every texel, a solution that does not decode it exactly pays a penalty above any
+real error and a one-colour candidate takes the p-bit choice whose entries lose the least, except that with exact opaque
+on mode 6's one-colour choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs`
 `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask 0 is every level's default and writes
 the bytes it wrote before). The two fields change the generated header (Note LR). Q3 (all sixteen indices): with linear
 weights that are not all equal, `evaluate_solution` scores every palette entry of a mode-6 alpha block with the weighted
@@ -90,9 +90,15 @@ lose their channels in the same number of subsets), and a one-colour candidate c
 subset's source holds at 0 or 255, not a mean that rounds there; proof tests `tests/bc7.rs`
 `guarded_channels_conflict_by_priority`, `a_lost_channel_keeps_the_closest_solution`,
 `a1_witnesses_pick_the_closest_loser` and `one_colour_packers_key_on_source_constants`; changes bytes only with the mask
-set. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The
-engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e change
-goes in a new patch file with its own tag.
+set. XC (A): exact opaque is the mask's bit 3 (the shim's exact-opaque tables set it, and tuning slot 15 adds R, G and B
+without clearing it), so `m_exact_opaque_alpha` is read nowhere and the generated header does not change; opaque blocks
+keep the forced mode-6 p-bits (alpha 255, their bytes unchanged); in alpha blocks a subset whose alpha is 0 or 255 on
+every texel keeps it exactly where the kernel finds such a solution, above G, B and R (penalty 2^60), and a rotated mode
+4/5 trial charges source alpha at A's tier in the colour slot that holds it; proof test `tests/bc7.rs`
+`channel_guard_a_keeps_flat_alpha`; changes bytes only with exact opaque on, in alpha blocks. These changes alter BC7
+bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag
+`bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch
+file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a

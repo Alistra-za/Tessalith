@@ -19,7 +19,10 @@ pub enum Bc7Level {
 pub struct Bc7Params {
     pub level: Bc7Level,
     pub perceptual: bool,
-    /// Force mode-6 p-bits to 1 on all-255 blocks (needs the patched bc7e objects, Task 14).
+    /// The channel guard's A: bit 3 of bc7e's exact-constants mask (patch 0005, Note LR, LR17). On a block whose alpha
+    /// is 255 throughout, mode 6 takes p-bits 1, so alpha decodes exactly 255; in an alpha block, a subset whose alpha
+    /// is 0 or 255 on every texel decodes it exactly wherever the kernel finds such a solution, above any guarded R, G
+    /// or B ([`Bc7Tune::exact_constants`]).
     pub exact_opaque: bool,
 }
 
@@ -126,9 +129,9 @@ pub struct Bc7Tune {
     /// Exact constants (patch 0005 XC): bit 0 R, bit 1 G, bit 2 B. A subset whose masked channel is 0 on every texel,
     /// or 255 on every texel, decodes that channel exactly wherever the kernel finds such a solution. `None` keeps the
     /// level's value, 0, which writes the bytes the plain call writes (Note LR, LR12). Where masked channels cannot all
-    /// be kept, the higher of G, B and R is kept first, across every subset (LR14). Alpha has bc7e's exact-opaque flag
-    /// instead, so an alpha bit is refused; with both set, an opaque block's alpha 255 wins where both cannot hold
-    /// (LR12).
+    /// be kept, the higher of G, B and R is kept first, across every subset (LR14). Alpha is the mask's bit 3, set from
+    /// [`Bc7Params::exact_opaque`] and never from here, so an alpha bit is refused; with both set, alpha is kept above
+    /// R, G and B (LR17).
     pub exact_constants: Option<u8>,
 }
 

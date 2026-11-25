@@ -51,7 +51,9 @@ void sdc_init(int bc1_mode) {
                 ispc::bc7e_compress_block_params* p = &g_bc7[l][s][e];
                 std::memset(p, 0, sizeof(*p));  // rdo_bc_encoder.cpp does the same before init
                 init_bc7_level(p, l, s != 0);
-                p->m_exact_opaque_alpha = (e != 0);
+                // Exact opaque is the channel guard's alpha, bit 3 of the exact-constants mask (patch 0005, Note LR);
+                // the kernel reads m_exact_opaque_alpha nowhere since.
+                p->m_exact_mask = (e != 0) ? 8u : 0u;
             }
     GetProfile_bc6h_veryfast(&g_bc6[0]);
     GetProfile_bc6h_fast(&g_bc6[1]);
@@ -112,7 +114,8 @@ void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, i
     if (t[11] >= 0) p.m_endpoint_search = t[11] != 0;
     if (t[12] >= 0) p.m_refine_partitions = t[12] != 0;
     if (t[14] >= 0) std::memcpy(&p.m_flat_tolerance, &t[14], 4);
-    if (t[15] >= 0) p.m_exact_mask = static_cast<uint32_t>(t[15]);
+    // The tune's mask is R, G and B; A (bit 3) stays the table's, so a tune never clears exact opaque.
+    if (t[15] >= 0) p.m_exact_mask = (p.m_exact_mask & 8u) | static_cast<uint32_t>(t[15]);
     bc7e_blocks_on(target, n, blocks, px, &p);
 }
 
