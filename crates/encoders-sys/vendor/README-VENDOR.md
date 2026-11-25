@@ -99,14 +99,17 @@ every texel keeps it exactly where the kernel finds such a solution, above G, B 
 longer flags source alpha in a rotated mode 4/5 slot (the slot's bit was the RGB channel's before), which can change
 only blocks whose alpha is 0 throughout. WP: with linear weights that are not all equal (perceptual off), the mode 6 and
 mode 7 one-colour packers choose their p-bit pair by the weighted sum of the table entries' errors, where they chose it
-by the unweighted sum and weighed only the chosen pair (with alpha at 64 times the colour, mode 7 decoded a solid subset
-at (0, 0, 0, 1) as (0, 0, 0, 0), weighted error 64 per texel, where the pair that decodes (1, 1, 1, 1) costs 3); equal
-weights and perceptual run the unchanged sum; proof test `tests/bc7.rs` `one_colour_p_bits_follow_the_weights` (mode 7:
-no block was found where mode 6's change shows); changes bytes only for linear weights that are not all equal (a user's
-`encoder.bc7_weights = "alphaN"`), where a mode 6 or 7 candidate packs a solid subset or a subset's mean colour as one
-colour. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images).
-The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e
-change goes in a new patch file with its own tag.
+by the unweighted sum and weighed only the chosen pair (with alpha at 64 times the colour, mode 7's packer picked for a
+solid subset at (0, 0, 0, 1) the pair that decodes (0, 0, 0, 0), weighted error 64 per texel, where the pair that
+decodes (1, 1, 1, 1) costs 3; the test's witness 37, solid (0, 1, 0, 1), decoded (0, 0, 0, 0) at weighted error 65
+against a best pair's 2); equal weights and perceptual run the unchanged sum, and the mode 0 and mode 1 one-colour
+packers keep the unweighted choice, which ranks as the weighted one only while the R, G and B weights are equal (every
+shipped tuning); proof test `tests/bc7.rs` `one_colour_p_bits_follow_the_weights` (mode 7: no block was found where mode
+6's change shows); changes bytes only for linear weights that are not all equal (a user's `encoder.bc7_weights =
+"alphaN"`), where a mode 6 or 7 candidate packs a solid subset or a subset's mean colour as one colour. These changes
+alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only
+tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new
+patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a

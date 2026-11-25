@@ -1754,8 +1754,9 @@ const WP_WEIGHTS: [u32; 4] = [1, 1, 1, 64];
 const WP_MODE7_WITNESSES: &[usize] = &[2, 6, 19, 21, 22, 24, 30, 37];
 
 /// Patch 0005, WP: with linear weights that are not all equal, mode 7's one-colour packer chose its p-bits by the
-/// unweighted sum of the table entries' errors and weighed only the chosen pair, so with alpha at 64 times the colour a
-/// solid subset at (0, 0, 0, 1) decoded (0, 0, 0, 0), weighted error 64 per texel, where p = 2's (1, 1, 1, 1) costs 3.
+/// unweighted sum of the table entries' errors and weighed only the chosen pair, so with alpha at 64 times the colour the
+/// packer's pick for a solid subset at (0, 0, 0, 1) decodes (0, 0, 0, 0), weighted error 64 per texel, where p = 2's
+/// (1, 1, 1, 1) costs 3; witness 37's solid (0, 1, 0, 1) decoded (0, 0, 0, 0) at 65 against a best pair's 2.
 /// The packer now picks the pair with the smallest weighted error. Each witness must still be mode 7 with the solid
 /// columns as its own subset (a block that left that path proves nothing, so that fails too), and every solid texel
 /// decodes at weighted error at most the best p-bit pair's (`mode7_one_colour_best`), at basic on every path. Mode 6's
