@@ -268,15 +268,27 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
             }
             let file = v.hdri_file().map(std::path::Path::to_path_buf);
             let picker = v.picker.clone();
+            // A background choice made this frame: a chosen file still decoding then leaves the mode alone (Note IH3).
+            let mut acted = false;
             let l = &mut v.look;
             ui.horizontal_wrapped(|ui| {
                 ui.label("Background");
-                ui.radio_value(&mut l.mode, BgMode::Solid, "Solid");
-                ui.radio_value(&mut l.mode, BgMode::Gradient, "Gradient")
-                    .on_hover_text("Black fading to grey, with a floor that takes the shadows");
-                // With no file loaded the radio asks for one; the mode switches when the file is good.
-                let r = ui.radio(l.mode == BgMode::Hdri, "HDRI file…");
+                acted |= ui.radio_value(&mut l.mode, BgMode::Solid, "Solid").clicked();
+                acted |= ui
+                    .radio_value(&mut l.mode, BgMode::Gradient, "Gradient")
+                    .on_hover_text("Black fading to grey, with a floor that takes the shadows")
+                    .clicked();
+                // With no file known the radio asks for one, so it waits while a file dialog is open; the mode
+                // switches when the file is good.
+                let free = file.is_some() || !picker.busy();
+                let r = ui
+                    .add_enabled(
+                        free,
+                        egui::RadioButton::new(l.mode == BgMode::Hdri, "HDRI file…"),
+                    )
+                    .on_disabled_hover_text(picker::BUSY_HOVER);
                 if r.clicked() {
+                    acted = true;
                     if file.is_some() {
                         l.mode = BgMode::Hdri;
                     } else {
@@ -297,6 +309,7 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                         .on_hover_text(p.display().to_string());
                     let change = picker::button(ui, &picker, egui::Button::new("Change…"));
                     if change {
+                        acted = true;
                         let start = p.parent().map(std::path::Path::to_path_buf);
                         picker.request(
                             ui.ctx(),
@@ -339,10 +352,14 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                     ..Look::default()
                 };
                 v.orbit.reset();
+                acted = true;
             }
             ui.weak("Drag: orbit · middle or Shift+drag: pan · Shift+right drag: turn the sun · wheel: zoom · double-click or Home: recentre");
             if v.look.mode == BgMode::Hdri {
                 ui.weak("The HDRI is the background and the ambient light; Shift+right drag turns it with the sun.");
+            }
+            if acted {
+                v.background_action();
             }
         });
 }

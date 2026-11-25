@@ -1,6 +1,6 @@
 //! The 3D viewport of the Meshes view (plan B Task B8): panel texts, the render-thread protocol and, with
 //! `--ignored`, a real render of the owner's femalebody_1.nif at 1600×900 (frame-time measurement).
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::LE_WARNING;
 use sdc_gui::model::viewport3d::{self as v3, V3State, Viewport3d};
@@ -1299,7 +1299,7 @@ fn a_refused_file_keeps_the_previous_hdri() {
     v.picker.set_backend(answers(vec![Some(bad)]));
     v.load_hdri(a.clone(), true);
     poll_until(&mut v, "file A", |v| v.hdri_file().is_some());
-    assert_eq!(v.take_chosen_hdri(), Some(a.clone()));
+    assert_eq!(v.take_accepted_hdri().map(|(p, _)| p), Some(a.clone()));
     let mut h = harness(v);
     open_view_menu(&mut h);
     h.get_by_label("Change…").click();
@@ -1316,11 +1316,84 @@ fn a_refused_file_keeps_the_previous_hdri() {
     );
     assert_eq!(h.state().look.mode, v3::BgMode::Hdri);
     assert!(
-        h.state_mut().take_chosen_hdri().is_none(),
+        h.state_mut().take_accepted_hdri().is_none(),
         "a refused file is not handed to the other panel"
     );
     h.run();
     h.get_by_label("a.hdr");
+}
+
+/// Final review: a picked file that lands after a later background action (another background, or Reset view) is
+/// kept but does not switch the background over that action.
+#[test]
+fn a_pick_that_lands_after_another_background_choice_keeps_that_choice() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = hdr_file(dir.path(), "a.hdr", 128, 64);
+    for (action, want) in [
+        ("Gradient", v3::BgMode::Gradient),
+        ("Reset view", v3::BgMode::Solid),
+    ] {
+        let mut h = harness(Viewport3d::with_state(V3State::Ready));
+        open_view_menu(&mut h);
+        // The decode starts as the picker's answer would start it; the user acts before it lands.
+        h.state_mut().load_hdri(a.clone(), true);
+        h.get_by_label(action).click();
+        h.run();
+        poll_until_h(&mut h, "the file is loaded", |v| v.hdri_file().is_some());
+        assert_eq!(
+            h.state().look.mode,
+            want,
+            "{action}: the later choice stays"
+        );
+        assert_eq!(
+            h.state().hdri_file(),
+            Some(a.as_path()),
+            "{action}: the file is kept"
+        );
+    }
+}
+
+/// A file dialog that stays open until the test drops the sender, then answers "cancel".
+struct Held(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+
+impl sdc_gui::model::picker::PickerBackend for Held {
+    fn pick(&self, _: &sdc_gui::model::picker::PickerSpec) -> Option<PathBuf> {
+        let _ = self.0.lock().unwrap().recv();
+        None
+    }
+}
+
+/// Final review: with no file loaded, "HDRI file…" needs the dialog, so it is disabled while another one is open;
+/// with a file loaded it only switches, and stays available.
+#[test]
+fn the_hdri_radio_waits_for_a_busy_file_dialog_only_when_it_needs_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = hdr_file(dir.path(), "a.hdr", 128, 64);
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let v = Viewport3d::with_state(V3State::Ready);
+    v.picker
+        .set_backend(Arc::new(Held(std::sync::Mutex::new(held))));
+    let mut h = harness(v);
+    open_view_menu(&mut h);
+    // Another part of the app opens a dialog (the picker is shared).
+    let other = sdc_gui::model::picker::Picker::shared();
+    let ctx = h.ctx.clone();
+    assert!(other.request(
+        &ctx,
+        sdc_gui::model::picker::PickerPurpose::ScanFolder,
+        None,
+        sdc_gui::model::picker::PickerSpec::folder(),
+    ));
+    h.run();
+    let radio = |h: &Harness<'static, Viewport3d>| {
+        h.get_by_label("HDRI file…").accesskit_node().is_disabled()
+    };
+    assert!(radio(&h), "no file: it would need the busy dialog");
+    h.state_mut().load_hdri(a.clone(), false);
+    poll_until_h(&mut h, "the file is loaded", |v| v.hdri_file().is_some());
+    h.run();
+    assert!(!radio(&h), "a loaded file only switches");
+    drop(release);
 }
 
 #[test]

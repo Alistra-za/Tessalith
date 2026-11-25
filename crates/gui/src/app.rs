@@ -55,6 +55,8 @@ pub struct SdcApp {
     layout_save: crate::layout::SaveDebounce,
     /// What the layout looked like last frame; `None` before the first.
     layout_probe: Option<crate::layout::Probe>,
+    /// The HDRI file a 3D panel took this frame (`route_3d`): the next `sync_layout_at` saves it.
+    hdri_taken: Option<std::path::PathBuf>,
     /// Test seam (the UI driver, Note HM3): `Some` records Explorer requests instead of spawning explorer.exe.
     #[cfg(feature = "test-hooks")]
     pub shell_log: Option<Vec<crate::model::shell::ShellRequest>>,
@@ -82,11 +84,11 @@ impl SdcApp {
         );
         meshes.v3.look = Look::from_settings(layout.look.as_ref());
         set3d.v3.look = Look::from_settings(layout.set_look.as_ref());
-        // One saved HDRI file for both panels; each decodes it itself. A file that is gone or refused drops that panel
-        // to a solid background with a notice (`Viewport3d::load_hdri`).
+        // Note IH3: one saved HDRI file for both panels, known by name until a panel needs it; `route_3d` decodes it
+        // once. A file that is gone or refused drops that panel to a solid background with a notice.
         if let Some(p) = layout.hdri_file.clone() {
-            meshes.v3.load_hdri(p.clone(), false);
-            set3d.v3.load_hdri(p, false);
+            meshes.v3.set_saved_hdri(p.clone());
+            set3d.v3.set_saved_hdri(p);
         }
         SdcApp {
             model,
@@ -102,6 +104,7 @@ impl SdcApp {
             paused_mesh_focus: None,
             layout_save: Default::default(),
             layout_probe: None,
+            hdri_taken: None,
             #[cfg(feature = "test-hooks")]
             shell_log: None,
         }
@@ -126,18 +129,9 @@ impl SdcApp {
             &self.model.view,
             looks,
         );
-        // The shared HDRI file: what a panel has loaded; with none loaded (not decoded yet, or refused) the saved
-        // one stays.
-        let hdri_file = self
-            .meshes
-            .v3
-            .hdri_file()
-            .or_else(|| self.state.set3d.v3.hdri_file())
-            .map(std::path::Path::to_path_buf)
-            .or_else(|| self.model.settings.layout.hdri_file.clone());
-        if self.layout_probe.as_ref() != Some(&probe)
-            || self.model.settings.layout.hdri_file != hdri_file
-        {
+        // A file a 3D panel took since the last sync is the saved one (`route_3d`); otherwise the saved path stays.
+        let hdri_file = self.hdri_taken.take();
+        if self.layout_probe.as_ref() != Some(&probe) || hdri_file.is_some() {
             let mut cur = crate::layout::capture(
                 ctx,
                 &self.model.settings.layout,
@@ -147,7 +141,9 @@ impl SdcApp {
                 &self.model.view,
                 looks,
             );
-            cur.hdri_file = hdri_file;
+            if hdri_file.is_some() {
+                cur.hdri_file = hdri_file;
+            }
             // The first frame is the starting point: what it reads that the file did not have is no change to write.
             if cur != self.model.settings.layout {
                 self.model.settings.layout = cur;
@@ -167,12 +163,24 @@ impl SdcApp {
     /// Both 3D panels' links to the Textures view: which missing texture paths are items of the open folder, and a
     /// "Open in Textures" click (selects the item and switches to the Textures view).
     pub fn route_3d(&mut self, ctx: &egui::Context) {
-        // A file one panel's picker chose is the other's too (one saved path); the other decodes it itself.
-        if let Some(p) = self.meshes.v3.take_chosen_hdri() {
-            self.state.set3d.v3.load_hdri(p, false);
+        // Note IH3: a file one panel took (chosen there, or the saved one) is the saved path from this frame on, and the
+        // other panel's too, with the same decoded environment.
+        let (m, s) = (&mut self.meshes.v3, &mut self.state.set3d.v3);
+        if let Some((p, env)) = m.take_accepted_hdri() {
+            s.adopt_hdri(p.clone(), env);
+            self.hdri_taken = Some(p);
         }
-        if let Some(p) = self.state.set3d.v3.take_chosen_hdri() {
-            self.meshes.v3.load_hdri(p, false);
+        if let Some((p, env)) = s.take_accepted_hdri() {
+            m.adopt_hdri(p.clone(), env);
+            self.hdri_taken = Some(p);
+        }
+        // The saved file is decoded once, by the first panel whose background is HDRI, while neither decodes.
+        if !m.hdri_decoding() && !s.hdri_decoding() {
+            if m.wants_saved_hdri() {
+                m.decode_saved_hdri();
+            } else if s.wants_saved_hdri() {
+                s.decode_saved_hdri();
+            }
         }
         let model = &mut self.model;
         for v in [&mut self.meshes.v3, &mut self.state.set3d.v3] {

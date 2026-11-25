@@ -824,15 +824,21 @@ pub struct Viewport3d {
     last_sent: Option<(Camera, u32, u32, u64, Look, f32)>,
     /// The environment of the last `Render` (Hdri mode only), compared by `Arc::ptr_eq`.
     last_env: Option<Arc<render3d::hdri::Environment>>,
-    /// The HDRI file loaded for this panel and its decoded environment. Each panel decodes the shared path itself.
-    // shortcut: the two 3D panels decode the same file twice (up to ~100 MB each at 4096 x 2048); share a cache keyed
-    // by path if memory shows it.
+    /// The HDRI file decoded for this panel and its environment (the other panel holds the same `Arc`, Note IH3).
     hdri: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
+    /// The shared file this panel knows by name only (the saved one at start): decoded when the app finds the panel
+    /// needs it (`wants_saved_hdri`).
+    hdri_saved: Option<PathBuf>,
     /// The latest decode asked for and how many are out: an older answer is dropped, and `busy` holds while any is.
     hdri_want: u64,
     hdri_out: u32,
-    /// A file this panel's picker chose and decoded: the app hands the path to the other panel (`take_chosen_hdri`).
-    hdri_chosen: Option<PathBuf>,
+    /// A file this panel decoded and took (chosen here, or the saved one): the app saves its path and hands it to the
+    /// other panel (`take_accepted_hdri`).
+    hdri_accepted: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
+    /// Background actions taken here (`background_action`), and that count and the mode when the latest chosen file was
+    /// asked for: the file switches the background only if neither moved since.
+    bg_actions: u64,
+    hdri_choice: Option<(u64, BgMode)>,
     /// This panel's own file dialog; its result is taken in `poll`.
     pub picker: crate::model::picker::Picker,
     render_sent: u64,
@@ -904,9 +910,12 @@ impl Viewport3d {
             last_sent: None,
             last_env: None,
             hdri: None,
+            hdri_saved: None,
             hdri_want: 0,
             hdri_out: 0,
-            hdri_chosen: None,
+            hdri_accepted: None,
+            bg_actions: 0,
+            hdri_choice: None,
             picker: crate::model::picker::Picker::shared(),
             render_sent: 0,
             render_done: 0,
@@ -1278,18 +1287,61 @@ impl Viewport3d {
         }
     }
 
-    /// The HDRI file this panel has loaded (the one shown beside "HDRI file…"), if any.
+    /// The HDRI file shown beside "HDRI file…": the one decoded here, else the shared one known by name only.
     pub fn hdri_file(&self) -> Option<&Path> {
-        self.hdri.as_ref().map(|(p, _)| p.as_path())
+        self.hdri
+            .as_ref()
+            .map(|(p, _)| p.as_path())
+            .or(self.hdri_saved.as_deref())
     }
 
-    /// Decodes `path` on a spawned thread and takes it as this panel's HDRI when it is good. `choose`: the user picked
-    /// it here, so the panel also switches to the HDRI background and the app hands the path to the other panel. A
-    /// refused file leaves the previous HDRI and mode and shows the reason; a file that fails with nothing loaded
-    /// (the saved one is gone) drops the HDRI background back to Solid.
+    /// The environment decoded for this panel, if any.
+    pub fn hdri_env(&self) -> Option<&Arc<render3d::hdri::Environment>> {
+        self.hdri.as_ref().map(|(_, e)| e)
+    }
+
+    /// The saved file at start: shown by name, decoded only once a panel needs it (`wants_saved_hdri`).
+    pub fn set_saved_hdri(&mut self, path: PathBuf) {
+        self.hdri_saved = Some(path);
+    }
+
+    /// The panel shows the HDRI background with nothing decoded, and knows a file it has not asked to decode yet.
+    pub fn wants_saved_hdri(&self) -> bool {
+        self.look.mode == BgMode::Hdri
+            && self.hdri.is_none()
+            && self.hdri_saved.is_some()
+            && self.hdri_out == 0
+    }
+
+    /// A decode of this panel is out.
+    pub fn hdri_decoding(&self) -> bool {
+        self.hdri_out > 0
+    }
+
+    /// Decodes the file known by name only ([`Viewport3d::load_hdri`], not chosen).
+    pub fn decode_saved_hdri(&mut self) {
+        if let Some(p) = self.hdri_saved.take() {
+            self.load_hdri(p, false);
+        }
+    }
+
+    /// The user chose a background here (a background radio, Change…, Reset view): a chosen file that is still
+    /// decoding no longer switches the background when it lands.
+    pub fn background_action(&mut self) {
+        self.bg_actions += 1;
+    }
+
+    /// Decodes `path` on a spawned thread and takes it as this panel's HDRI when it is good; the app then saves its
+    /// path and hands it to the other panel (`take_accepted_hdri`). `choose`: the user picked it here, so the panel
+    /// also switches to the HDRI background, unless a background action came or the mode changed since. A refused
+    /// file leaves the previous HDRI and mode and shows the reason; a file that fails with nothing loaded (the saved
+    /// one is gone) drops the HDRI background back to Solid.
     pub fn load_hdri(&mut self, path: PathBuf, choose: bool) {
         self.hdri_want += 1;
         self.hdri_out += 1;
+        if choose {
+            self.hdri_choice = Some((self.bg_actions, self.look.mode));
+        }
         let seq = self.hdri_want;
         let tx = self.tx.clone();
         let spawned = std::thread::Builder::new()
@@ -1319,9 +1371,18 @@ impl Viewport3d {
         }
     }
 
-    /// The file this panel's picker chose and decoded since the last call: the app loads it in the other panel.
-    pub fn take_chosen_hdri(&mut self) -> Option<PathBuf> {
-        self.hdri_chosen.take()
+    /// The file this panel decoded and took since the last call, with its environment: the app saves the path and
+    /// hands both to the other panel ([`Viewport3d::adopt_hdri`]).
+    pub fn take_accepted_hdri(&mut self) -> Option<(PathBuf, Arc<render3d::hdri::Environment>)> {
+        self.hdri_accepted.take()
+    }
+
+    /// The file the other panel took, decoded there: this panel shows it too, with its mode unchanged. A decode of this
+    /// panel's still out was asked for before it and is dropped when it lands.
+    pub fn adopt_hdri(&mut self, path: PathBuf, env: Arc<render3d::hdri::Environment>) {
+        self.hdri_want += 1;
+        self.hdri = Some((path, env));
+        self.hdri_saved = None;
     }
 
     /// The decode of `path` landed (or failed).
@@ -1338,11 +1399,13 @@ impl Viewport3d {
         }
         match result {
             Ok(env) => {
-                self.hdri = Some((path.clone(), env));
-                if choose {
+                // The picker's request is still the latest background choice: nothing since moved the count or the mode.
+                if choose && self.hdri_choice == Some((self.bg_actions, self.look.mode)) {
                     self.look.mode = BgMode::Hdri;
-                    self.hdri_chosen = Some(path);
                 }
+                self.hdri = Some((path.clone(), env.clone()));
+                self.hdri_saved = None;
+                self.hdri_accepted = Some((path, env));
             }
             Err(e) => {
                 let name = path.file_name().map_or_else(
