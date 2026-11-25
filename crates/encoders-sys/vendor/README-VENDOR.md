@@ -254,8 +254,9 @@ takes a slot and the old one moves down, an equal one stays behind) instead of o
 only on a strictly lower error, so the lowest one's result is never lost. Only `state->slow_mode` keeps more than one
 (Slow, Veryslow and VeryslowPeak); Veryfast, Fast and Basic keep their bytes. Test: `two_region_refine_tries_more_partitions`.
 It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (the 9 pins of those levels;
-`identity.json` `hdr_sky`, all 18 `hdr_real` and all 4 `hdr_grad` images at those levels). `Q3_N` = 4 was measured too
-and costs 1.26 times Veryslow's VM time (over the 10 % limit); it is not built.
+`identity.json` `hdr_sky`, all 18 `hdr_real` and all 4 `hdr_grad` images at those levels, except that AVX-512 keeps 1 of
+the 4 `hdr_grad` images at Veryslow and VeryslowPeak). `Q3_N` = 4 was measured too and costs 1.26 times the previous
+kernel's VM time at Veryslow and VeryslowPeak (over the 10 % limit); it is not built.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

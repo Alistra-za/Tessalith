@@ -1,5 +1,5 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index 1b68835c..a40f13fd 100644
+index 1b68835c..9221ff38 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
 @@ -39,6 +39,19 @@
@@ -262,7 +262,7 @@ index 1b68835c..a40f13fd 100644
 +// sdc patch 0007 (Q3): the bracket and the refine passes of one ranked partition, moved out of bc6h_enc_2p_list
 +// unchanged so that each kept candidate runs them. best_qep and best_qblock come in as the candidate's first
 +// quantisation and leave as its best; the return is its error.
-+float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[24], uint32 best_qblock[2], float best_err, int best_part_id)
++inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 best_qblock[2], float best_err, int best_part_id)
  {
 -    if (part_count == 0) return;
      uniform int bits = 3;
@@ -317,7 +317,7 @@ index 1b68835c..a40f13fd 100644
  
          if (err<best_err)
          {
-@@ -2479,6 +2689,90 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
+@@ -2479,6 +2689,89 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
              best_err = err;
          }
      }
@@ -334,16 +334,19 @@ index 1b68835c..a40f13fd 100644
 +    int best_part_id = -1;
 +    float best_err = 1e99;
 +
-+    // sdc patch 0007 (Q3): the keep lowest-error first quantisations, in ascending error. keep is 1 below the slow
-+    // levels, so they refine only the lowest, as before.
++    // sdc patch 0007 (Q3): the `keep` lowest-error first quantisations, in ascending error. keep is 1 below the slow
++    // levels, so they refine only the lowest, as before. Each slot starts empty and zeroed, so the swap below reads
++    // no uninitialised memory.
 +    uniform int keep = 1;
 +    if (state->slow_mode) keep = min(Q3_N, part_count);
-+    int cand_qep[Q3_N * 24];
++    int cand_qep[Q3_N * 16];
 +    uint32 cand_qblock[Q3_N * 2];
 +    int cand_part[Q3_N];
 +    float cand_err[Q3_N];
-+    for (uniform int c = 0; c < Q3_N; c++)
++    for (uniform int c = 0; c < keep; c++)
 +    {
++        for (uniform int i = 0; i<8 * pairs; i++) cand_qep[c * 16 + i] = 0;
++        for (uniform int k = 0; k<2; k++) cand_qblock[c * 2 + k] = 0;
 +        cand_part[c] = -1;
 +        cand_err[c] = 1e99;
 +    }
@@ -364,8 +367,8 @@ index 1b68835c..a40f13fd 100644
 +            {
 +                for (uniform int i = 0; i<8 * pairs; i++)
 +                {
-+                    int t = cand_qep[c * 24 + i];
-+                    cand_qep[c * 24 + i] = qep[i];
++                    int t = cand_qep[c * 16 + i];
++                    cand_qep[c * 16 + i] = qep[i];
 +                    qep[i] = t;
 +                }
 +                for (uniform int k = 0; k<2; k++)
@@ -390,16 +393,12 @@ index 1b68835c..a40f13fd 100644
 +    {
 +        if (c == 0 || cand_part[c] >= 0)
 +        {
-+            int qep[24];
-+            uint32 qblock[2];
-+            for (uniform int i = 0; i<8 * pairs; i++) qep[i] = cand_qep[c * 24 + i];
-+            for (uniform int k = 0; k<2; k++) qblock[k] = cand_qblock[c * 2 + k];
-+            float err = bc6h_refine_2p(state, qep, qblock, cand_err[c], cand_part[c]);
++            float err = bc6h_refine_2p(state, &cand_qep[c * 16], &cand_qblock[c * 2], cand_err[c], cand_part[c]);
 +
 +            if (err<best_err)
 +            {
-+                for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = qep[i];
-+                for (uniform int k = 0; k<2; k++) best_qblock[k] = qblock[k];
++                for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = cand_qep[c * 16 + i];
++                for (uniform int k = 0; k<2; k++) best_qblock[k] = cand_qblock[c * 2 + k];
 +                best_part_id = cand_part[c];
 +                best_err = err;
 +            }
@@ -408,7 +407,7 @@ index 1b68835c..a40f13fd 100644
  
      if (best_err<state->best_err)
      {
-@@ -2529,9 +2823,10 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+@@ -2529,9 +2822,10 @@ void bc6h_enc_1p(bc6h_enc_state state[])
      uint32 qblock[2];
      float err = block_quant(qblock, state->block, 4, ep, 0, 3);
      err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
@@ -420,7 +419,7 @@ index 1b68835c..a40f13fd 100644
      float best_err = err;
      int best_qep[8];
      uint32 best_qblock[2];
-@@ -2542,7 +2837,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+@@ -2542,7 +2836,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
      uniform int refineIterations = state->refineIterations_1p;
      for (uniform int i = 0; i<refineIterations; i++)
      {
@@ -429,7 +428,7 @@ index 1b68835c..a40f13fd 100644
          ep_quant_dequant_bc6h(state, qep, ep, 1);
          err = block_quant(qblock, state->block, 4, ep, 0, 3);
          err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
-@@ -2602,6 +2897,7 @@ void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the boun
+@@ -2602,6 +2896,7 @@ void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the boun
  // distance to the unpacked qbounds window. Every endpoint a candidate uses is clamped to qbounds before it is unpacked
  // (ep_quant_dequant_bc6h), and block_quant's interpolated value lies between the two endpoints, so each decoded texel
  // channel lies inside [lo_p, hi_p] and its squared error is at least this distance.
@@ -437,7 +436,7 @@ index 1b68835c..a40f13fd 100644
  float bc6h_window_bound(bc6h_enc_state state[])
  {
      float bound = 0;
-@@ -2625,15 +2921,19 @@ float bc6h_window_bound(bc6h_enc_state state[])
+@@ -2625,15 +2920,19 @@ float bc6h_window_bound(bc6h_enc_state state[])
  // guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not apply there;
  // peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying: a skipped lane
  // is masked off, and the gang skips the call only when every lane skips.
@@ -460,7 +459,7 @@ index 1b68835c..a40f13fd 100644
  void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
  {
      uniform int mode_bits = get_mode_bits(mode);
-@@ -2641,7 +2941,24 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
+@@ -2641,7 +2940,24 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
      float max_span = state->max_span;
      int max_span_idx = state->max_span_idx;
  
@@ -486,7 +485,7 @@ index 1b68835c..a40f13fd 100644
  
      if (mode >= 10)
      {
-@@ -2676,7 +2993,46 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
+@@ -2676,7 +2992,46 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc,
          
          state->q_span = span; // sdc patch 0006 (7a)
          state->q_wide = max_span_idx;
@@ -534,7 +533,7 @@ index 1b68835c..a40f13fd 100644
          {
              bc6h_build_qbounds(state);
              if (!bc6h_mode_cannot_win(state)) bc6h_enc_2p(state); // sdc patch 0006 (S4)
-@@ -3392,19 +3748,25 @@ void bc6h_setup(bc6h_enc_state state[])
+@@ -3392,19 +3747,25 @@ void bc6h_setup(bc6h_enc_state state[])
          // least 32 times the block's geometric-mean luminance; otherwise peak_k = -1 and the block encodes as veryslow.
          state->peak_k = 0;
          state->peak_lum = -1;
@@ -562,7 +561,7 @@ index 1b68835c..a40f13fd 100644
          if (log(max(state->peak_lum, 1e-6f)) - log_sum / 16 < log(32.0f)) state->peak_k = -1;
      }
  
-@@ -3412,7 +3774,7 @@ void bc6h_setup(bc6h_enc_state state[])
+@@ -3412,7 +3773,7 @@ void bc6h_setup(bc6h_enc_state state[])
      for (uniform int p = 0; p < 3; p++)
      for (uniform int k = 0; k < 16; k++)
      {
@@ -571,7 +570,7 @@ index 1b68835c..a40f13fd 100644
      }
  
      if (state->peak_mode)
-@@ -3454,7 +3816,10 @@ void bc6h_peak_retry(bc6h_enc_state state[])
+@@ -3454,7 +3815,10 @@ void bc6h_peak_retry(bc6h_enc_state state[])
          for (uniform int k = 0; k < 16; k++)
          {
              float m = max(state->block[k], max(state->block[16 + k], state->block[32 + k]));

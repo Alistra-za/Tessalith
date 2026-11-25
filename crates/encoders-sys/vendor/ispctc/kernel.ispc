@@ -2647,7 +2647,7 @@ uniform const int Q3_N = 2;
 // sdc patch 0007 (Q3): the bracket and the refine passes of one ranked partition, moved out of bc6h_enc_2p_list
 // unchanged so that each kept candidate runs them. best_qep and best_qblock come in as the candidate's first
 // quantisation and leave as its best; the return is its error.
-float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[24], uint32 best_qblock[2], float best_err, int best_part_id)
+inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 best_qblock[2], float best_err, int best_part_id)
 {
     uniform int bits = 3;
     uniform int pairs = 2;
@@ -2702,16 +2702,19 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     int best_part_id = -1;
     float best_err = 1e99;
 
-    // sdc patch 0007 (Q3): the keep lowest-error first quantisations, in ascending error. keep is 1 below the slow
-    // levels, so they refine only the lowest, as before.
+    // sdc patch 0007 (Q3): the `keep` lowest-error first quantisations, in ascending error. keep is 1 below the slow
+    // levels, so they refine only the lowest, as before. Each slot starts empty and zeroed, so the swap below reads
+    // no uninitialised memory.
     uniform int keep = 1;
     if (state->slow_mode) keep = min(Q3_N, part_count);
-    int cand_qep[Q3_N * 24];
+    int cand_qep[Q3_N * 16];
     uint32 cand_qblock[Q3_N * 2];
     int cand_part[Q3_N];
     float cand_err[Q3_N];
-    for (uniform int c = 0; c < Q3_N; c++)
+    for (uniform int c = 0; c < keep; c++)
     {
+        for (uniform int i = 0; i<8 * pairs; i++) cand_qep[c * 16 + i] = 0;
+        for (uniform int k = 0; k<2; k++) cand_qblock[c * 2 + k] = 0;
         cand_part[c] = -1;
         cand_err[c] = 1e99;
     }
@@ -2732,8 +2735,8 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
             {
                 for (uniform int i = 0; i<8 * pairs; i++)
                 {
-                    int t = cand_qep[c * 24 + i];
-                    cand_qep[c * 24 + i] = qep[i];
+                    int t = cand_qep[c * 16 + i];
+                    cand_qep[c * 16 + i] = qep[i];
                     qep[i] = t;
                 }
                 for (uniform int k = 0; k<2; k++)
@@ -2758,16 +2761,12 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     {
         if (c == 0 || cand_part[c] >= 0)
         {
-            int qep[24];
-            uint32 qblock[2];
-            for (uniform int i = 0; i<8 * pairs; i++) qep[i] = cand_qep[c * 24 + i];
-            for (uniform int k = 0; k<2; k++) qblock[k] = cand_qblock[c * 2 + k];
-            float err = bc6h_refine_2p(state, qep, qblock, cand_err[c], cand_part[c]);
+            float err = bc6h_refine_2p(state, &cand_qep[c * 16], &cand_qblock[c * 2], cand_err[c], cand_part[c]);
 
             if (err<best_err)
             {
-                for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = qep[i];
-                for (uniform int k = 0; k<2; k++) best_qblock[k] = qblock[k];
+                for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = cand_qep[c * 16 + i];
+                for (uniform int k = 0; k<2; k++) best_qblock[k] = cand_qblock[c * 2 + k];
                 best_part_id = cand_part[c];
                 best_err = err;
             }
