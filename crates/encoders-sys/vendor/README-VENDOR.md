@@ -84,7 +84,9 @@ guard in `block_quant` reaches them too; by reading the code both are value-neut
 covariance entries are never read with three channels, the guard because BC7's endpoints are integers), but that build
 is neither compiled nor shipped, so the claim is not tested. 0007's `compute_axis` re-seed is also shared: BC7's PCA
 calls reach it without the define, but it acts only on a block whose power-iteration vector has an exactly zero norm,
-the same degenerate inputs as in BC6H (by reading; not compiled). `channel_opt_quant` keeps its own
+the same degenerate inputs as in BC6H (by reading; not compiled). No other 0007 item edits a helper BC7 calls:
+astra #4's refit is the BC6H-only fork `bc6h_opt_endpoints` (upstream's `opt_endpoints` is unchanged), and R1, which
+would have changed `compute_stats_masked` and `compute_covar_dc_masked`, was dropped. `channel_opt_quant` keeps its own
 `int best_err`, as upstream. `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both
 compilers), and `build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal
 on every path (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one synthetic 64x64 HDR
@@ -140,7 +142,8 @@ integer UF16 value, so `div` is 0 only for a region whose endpoints are equal in
 `(int)` turned it into INT_MIN and the clamp into index 1; with `div >= 1` the numerator is still exactly 0, so the
 index is the same, without the NaN. Q6 skip-retry: `bc6h_peak_retry` sets a per-lane `lifted` flag when the lift raises
 any channel of a guarded block and runs the second search only for a lane that set it. An unlifted block would repeat
-the identical search from `best_err = 1e99`, and the retry keeps its own result on a tie, which is the same data.
+the identical search from the same reset `best_err` (1e99 here; patch 0007 makes it the finite 1e30f), and the retry
+keeps its own result on a tie, which is the same data.
 VeryslowPeak only (the retry runs once per guarded block). S1 rank-once: the two-region partition ranking (now part of
 `bc6h_block_cache`, which S2 renamed from `bc6h_rank_partitions`; the body `bc6h_enc_2p` had, writing the new
 `state->part_list`) runs once per block at the end of `bc6h_setup` and once more in `bc6h_peak_retry` for a lifted lane,
@@ -180,67 +183,77 @@ error fired no assert, on the 22 measured images at the three slow levels and in
 docs/research/encoder-benchmark.md, "Mutations and proofs").
 
 ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 2026-11-25) applies on top of patches
-0001, 0003, 0004 and 0006. It is produced with `git diff --output=<patch> 9c452929 -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
-(9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
-built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
-measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, Q6 none of them, astra #5 none of them, and Q3 the Slow, Veryslow and VeryslowPeak pins.
+0001, 0003, 0004 and 0006. It is produced with
+`git diff --output=<patch> 9c452929 -- crates/encoders-sys/vendor/ispctc/kernel.ispc` (9c452929 is the speed phase's
+last kernel; the patch file is always regenerated whole, never edited by hand), and it is built with both compilers as
+before. It changes BC6H bytes: against the kernel of patches 0004 and 0006 (which write the same bytes) every one of
+the 22 measured images (18 `hdr_real` and 4 `hdr_grad`) differs at all six levels on SSE2, AVX2 and AVX-512 (Q5 alone
+does that), and the pins of `tests/bc6h.rs` and `identity.json` `hdr_sky` moved as each item says; quality and time
+per level are in docs/research/encoder-benchmark.md ("Audit follow-up, quality phase"). Kept: the PCA re-seed, Q5,
+astra #4, Q2 (first quantisation only), Q1, Q4, Q6, astra #6, astra #5, Q3 (N = 2) and the S4 guard, which changes no
+byte. Not kept: R1 (dropped), astra #2 (skipped) and S3 (dropped in the speed phase above and not tried again). Each
+item's counts are against the kernel before it.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
-channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
-takes the old path, so only such blocks change bytes. Test: `pca_survives_a_zero_covariance_row_sum`. It changes BC6H
-bytes on a path where the zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast to Basic); both
-helpers `block_pca_axis` and `get_pca_bound` share it (Note LT). Q5: `bc6h_setup` converts each half code h to the UF16
-target `(h + 0.5) / 31 * 64`, the centre of its decode range `[64h/31, 64(h+1)/31)`, instead of the bottom edge
-`h / 31 * 64`, so a constant block's code decodes to h and not h - 1 (the peak gate above it still reads the source half
-bits; `orig` and the lift in `bc6h_peak_retry` follow the new targets). Test:
-`constant_blocks_decode_to_their_half_code`. It changes BC6H bytes at all six levels on SSE2, AVX2 and AVX-512 (the 18
-pins, `identity.json` `hdr_sky` and every measured image). astra #4: the least-squares refit of `bc6h_enc_1p` and
-`bc6h_enc_2p_list` calls a BC6H-only fork, `bc6h_opt_endpoints`, that fits index q at the decoder's weight
-`table[q] / 64` (`get_unquant_table`) instead of `q / (levels - 1)`, with the determinant from the exact integer form
-`n * Sww - Sw * Sw` (a zero determinant flattens to the mean, as before); upstream's `opt_endpoints` is unchanged and
-only BC7 calls it, so in this build it is no longer called. Test: `refit_uses_the_decoder_weights`. It changes BC6H
-bytes at Fast, Basic, Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json`
-`hdr_sky` and every measured image at those levels); Veryfast, which has no refit, keeps its bytes. Q2: `bc6h_enc_1p`
-(its first quantisation) and `bc6h_enc_2p_list` (the chosen partition's first candidate) hand the candidate to
-`bc6h_bracket_collapsed`; the refine passes then refit from the indices it kept and are not bracketed themselves. For a
-region whose two endpoints share one code in every channel, it gives each channel that varies in the region the largest
-code that rebuilds at or below the region's minimum and the smallest at or above its maximum (in the other order for a
-channel whose covariance with the region's widest channel is negative), clamped to `qbounds`, and keeps the pair when
-the whole block's error, peak guard included, is lower. Test: `collapsed_regions_take_a_bracketing_pair`. It changes
-BC6H bytes at all six levels on SSE2, AVX2 and AVX-512: of the pins only SSE2 Fast's, and `identity.json` `hdr_sky` not;
-every measured image at Fast and slower but one at Basic; at Veryfast 11 or 12 of the 18 `hdr_real` images and 2 or 3 of
-the 4 `hdr_grad` ones, by path. Q1: `bc6h_enc_2p_list` keeps a working index block `cur_qblock`, which starts as the
-ranked partition's indices (after Q2's bracket) and becomes each refine pass's indices whether or not the pass won, so
-the next pass refits from the last pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the best's indices
-again (a failed pass repeated exactly); the best `(qep, qblock, err)` is updated only on a lower error, and the block is
-packed once after the loop. Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at Basic, Slow, Veryslow
-and VeryslowPeak on SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images
-and 3 of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no
-earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower). Q4: `bc6h_test_mode`
-gates mode 2 and 6 (the modes that double the widest channel's window) on `max_span * margin > 2 * span` for the widest
-channel and `second_span * margin > span` for the next widest, instead of on the widest against `span`, so a block with R
-span 6000 and G, B 2000 reaches mode 6 (window 7372.6) at Fast and Basic where it fell to mode 1; it only admits
-more blocks, and the later admitted mode replaces the earlier one without a comparison. Modes 0, 1, 5, 9 and 10 to 13
-keep the old test. The slow levels pass margin 0 and never return from either test, and Veryfast has no two-region
-search (its `fastSkipTreshold` is 0, so the gate is never run). Test:
+channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN.
+A non-zero norm takes the old path, so only such blocks change bytes. Test: `pca_survives_a_zero_covariance_row_sum`.
+It changes BC6H bytes only on a path where the zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast
+to Basic), and no pin, `identity.json` entry or measured image moved. Both helpers `block_pca_axis` and `get_pca_bound`
+share it (Note LT).
+Q5: `bc6h_setup` converts each half code h to the UF16 target `(h + 0.5) / 31 * 64`, the centre of its decode range
+`[64h/31, 64(h+1)/31)`, instead of the bottom edge `h / 31 * 64`, so a constant block's code decodes to h and not h - 1
+(the peak gate above it still reads the source half bits; `orig` and the lift in `bc6h_peak_retry` follow the new
+targets). Test: `constant_blocks_decode_to_their_half_code`. It changes BC6H bytes at all six levels on SSE2, AVX2 and
+AVX-512 (the 18 pins, `identity.json` `hdr_sky` and every measured image).
+astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_enc_2p_list` calls a BC6H-only fork,
+`bc6h_opt_endpoints`, that fits index q at the decoder's weight `table[q] / 64` (`get_unquant_table`) instead of
+`q / (levels - 1)`, with the determinant from the exact integer form `n * Sww - Sw * Sw` (a zero determinant flattens
+to the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no
+longer called. Test: `refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and
+VeryslowPeak on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those
+levels); Veryfast, which has no refit, keeps its bytes.
+Q2: `bc6h_enc_1p` (its first quantisation) and `bc6h_enc_2p_list` (the chosen partition's first candidate) hand the
+candidate to `bc6h_bracket_collapsed`; the refine passes then refit from the indices it kept and are not bracketed
+themselves. For a region whose two endpoints share one code in every channel, it gives each channel that varies in the
+region the largest code that rebuilds at or below the region's minimum and the smallest at or above its maximum (in the
+other order for a channel whose covariance with the region's widest channel is negative), clamped to `qbounds`, and
+keeps the pair when the whole block's error, peak guard included, is lower. Test:
+`collapsed_regions_take_a_bracketing_pair`. It changes BC6H bytes at all six levels on SSE2, AVX2 and AVX-512: of the
+pins only SSE2 Fast's, and `identity.json` `hdr_sky` not; every measured image at Fast and slower but one at Basic; at
+Veryfast 11 or 12 of the 18 `hdr_real` images and 2 or 3 of the 4 `hdr_grad` ones, by path. Bracketing every refine
+pass as well was measured and not kept: the same quality at 1.049 of the time against 1.018 in total.
+Q1: `bc6h_enc_2p_list` keeps a working index block `cur_qblock`, which starts as the ranked partition's indices (after
+Q2's bracket) and becomes each refine pass's indices whether or not the pass won, so the next pass refits from the last
+pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the best's indices again (a failed pass repeated
+exactly); the best `(qep, qblock, err)` is updated only on a lower error, and the block is packed once after the loop.
+Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at Basic, Slow, Veryslow and VeryslowPeak on SSE2,
+AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3 of the 4 `hdr_grad`
+ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no earlier pass to refit from, so
+both keep their bytes (profiles: 2 passes at Basic and slower).
+Q4: `bc6h_test_mode` gates mode 2 and 6 (the modes that double the widest channel's window) on
+`max_span * margin > 2 * span` for the widest channel and `second_span * margin > span` for the next widest, instead of
+on the widest against `span`, so a block with R span 6000 and G, B 2000 reaches mode 6 (window 7372.6) at Fast and
+Basic where it fell to mode 1; it only admits more blocks, and the later admitted mode replaces the earlier one without
+a comparison. Modes 0, 1, 5, 9 and 10 to 13 keep the old test. The slow levels pass margin 0 and never return from
+either test, and Veryfast has no two-region search (its `fastSkipTreshold` is 0, so the gate is never run). Test:
 `a_wide_channel_block_takes_the_doubled_window`. It changes BC6H bytes at Fast and Basic on SSE2, AVX2 and AVX-512 (6 of
-the 18 pins; `identity.json` `hdr_sky` and the Veryfast, Slow, Veryslow and VeryslowPeak levels keep their bytes). Q6: `bc6h_setup`
-floors each texel's luminance at `max(peak * 2^-12, 1e-6)`, not `1e-6` alone, in the geometric mean of the peak gate,
-so exact-black texels (each pulled the mean down by 13.8 / 16) no longer guard a block with no highlight: four to six
-of them did at luminance 0.5 to 20, and seven or more now guard by darkness alone. An all-black block keeps the `1e-6`
-floor and stays unguarded. Test: `exact_black_alone_does_not_guard_a_block`. It changes BC6H bytes only at VeryslowPeak
-(the other levels run no peak mode), and only for blocks the old floor guarded wrongly: none of the 18 pins,
-`identity.json` `hdr_sky`, the 18 `hdr_real` or the 4 `hdr_grad` images (0 of 256 guarded blocks change gate).
+the 18 pins; `identity.json` `hdr_sky` and the Veryfast, Slow, Veryslow and VeryslowPeak levels keep their bytes).
+Q6: `bc6h_setup` floors each texel's luminance at `max(peak * 2^-12, 1e-6)`, not `1e-6` alone, in the geometric mean of
+the peak gate, so exact-black texels (each pulled the mean down by 13.8 / 16) no longer guard a block with no
+highlight: four to six of them did at luminance 0.5 to 20, and seven or more still guard by darkness alone. An
+all-black block keeps the `1e-6` floor and stays unguarded. Test: `exact_black_alone_does_not_guard_a_block`. It
+changes BC6H bytes only at VeryslowPeak (the other levels run no peak mode), and only for blocks the old floor guarded
+wrongly: none of the 18 pins, `identity.json` `hdr_sky`, the 18 `hdr_real` or the 4 `hdr_grad` images (0 of 256 guarded
+blocks change gate).
 astra #6: at the slow levels (Slow, Veryslow, VeryslowPeak) `bc6h_test_mode` no longer widens only the widest channel
 for mode 2's and mode 6's families. After that variant's search it builds the other two channels' `qbounds` and their
 S4 window bounds (`bc6h_window_bound`); on lanes where the lower of them is below the widest variant's bound, that
-channel's variant (`mode + alt`, `q_wide = alt` and its bounds rebuilt by `bc6h_build_qbounds`) runs one extra two-region search and competes through `best_err`
-(S4's prune test applies to it, with its own bound). Trying all three variants was measured too (about +0.004 dB mPSNR
-at Veryslow); this one-extra-search form keeps about a third of that gain. Test:
-`asymmetric_modes_try_the_better_wide_channel`. It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2
-and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3 of the 4 `hdr_grad` ones at
-those levels); Veryfast, Fast and Basic keep their bytes.
+channel's variant (`mode + alt`, `q_wide = alt` and its bounds rebuilt by `bc6h_build_qbounds`) runs one extra
+two-region search and competes through `best_err` (S4's prune test applies to it, with its own bound). Trying all three
+variants was measured too (about +0.004 dB mPSNR at Veryslow); this one-extra-search form keeps about a third of that
+gain. Test: `asymmetric_modes_try_the_better_wide_channel`. It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on
+SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3 of the 4
+`hdr_grad` ones at those levels); Veryfast, Fast and Basic keep their bytes.
 astra #5: the lift in `bc6h_peak_retry` (a guarded block's second search) raised each channel to 12 half exponent steps
 below its texel's largest, which leaves the normal range under half 0.25: the lift fell short there and, under 0.125,
 changed nothing. For a texel whose largest channel's half code `hm` is below `0x3400` the lift now takes `2^-12` of the
@@ -252,11 +265,31 @@ Q3: `bc6h_enc_2p_list` keeps the `Q3_N` = 2 lowest-error first quantisations of 
 takes a slot and the old one moves down, an equal one stays behind) instead of only the lowest, and runs each through
 `bc6h_refine_2p`, the bracket and refine passes moved out of the function unchanged; a later candidate replaces the best
 only on a strictly lower error, so the lowest one's result is never lost. Only `state->slow_mode` keeps more than one
-(Slow, Veryslow and VeryslowPeak); Veryfast, Fast and Basic keep their bytes. Test: `two_region_refine_tries_more_partitions`.
-It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (the 9 pins of those levels;
-`identity.json` `hdr_sky`, all 18 `hdr_real` and all 4 `hdr_grad` images at those levels, except that AVX-512 keeps 1 of
-the 4 `hdr_grad` images at Veryslow and VeryslowPeak). `Q3_N` = 4 was measured too and costs 1.26 times the previous
-kernel's VM time at Veryslow and VeryslowPeak (over the 10 % limit); it is not built.
+(Slow, Veryslow and VeryslowPeak); Veryfast, Fast and Basic keep their bytes. Test:
+`two_region_refine_tries_more_partitions`. It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and
+AVX-512 (the 9 pins of those levels; `identity.json` `hdr_sky`, all 18 `hdr_real` and all 4 `hdr_grad` images at those
+levels, except that AVX-512 keeps 1 of the 4 `hdr_grad` images at Veryslow and VeryslowPeak). `Q3_N` = 4 was measured
+too and costs 1.26 times the previous kernel's VM time at Veryslow and VeryslowPeak (over the 10 % limit); it is not
+built.
+S4 guard (changes no byte): `bc6h_mode_cannot_win` prunes only when `state->best_err < 1e30f`, and the state's two
+`best_err` initialisers (`CompressBlockBC6H` and the reset in `bc6h_peak_retry`) are the finite `1e30f` instead of
+`1e99`, which is +inf in float, so no prune or `<` against the state's `best_err` reads an infinity. Every scored error
+is far below 1e30f (the largest, `bc6h_peak_guard`'s `(terr + 1) * 1e13f`, is about 2e24), so the first candidate still
+always wins. The local `best_err` and `cand_err` sentinels (1e99) in `bc6h_enc_2p_list` stay as upstream wrote them:
+they are only compared with `<` against finite errors and never feed the prune. Proof that no byte moved: the 22
+measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in every column but the time (132 of 132 rows
+each), the random strips (48 hashes, 72 with AVX-512), the pins and `identity.json` unchanged, and the scratch assert
+build of S4 (above) fired on none of 15,970,493 lane encodes of the 22 images on AVX2 or of the lane encodes of
+`random_blocks_encode_at_every_level_on_every_path` (212,686; 319,029 with AVX-512).
+R1 (dropped): centring the covariance sums of the PCA (`compute_stats_masked`, `compute_covar_dc_masked`) would have
+kept the covariance of bright smooth coloured blocks, which float32 raw second moments lose (test
+`a_brighter_copy_is_not_worse`: without it the bright copy is certainly worse on all 8 witnesses on AVX2, with it all 8
+decode as the dim copy shifted). `hdr_grad` sky_sun lost 0.074 dB mPSNR at Veryslow and VeryslowPeak, against gains of
+1.375 dB at Veryfast and 0.902 dB at Fast, and the owner dropped it. The kernel keeps the uncentred sums; the test and
+its witness search stay in the reverted commit 8fca6e78 only.
+astra #2 (skipped by the owner): giving a guarded block's peak texel a palette entry that decodes at 0.9 of its source
+luminance or more was not built; the bench holds 2 blocks whose peak texel decodes below that (both in satara_night),
+and no other index reaches 0.9 for either, so no byte and no test come from it.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
