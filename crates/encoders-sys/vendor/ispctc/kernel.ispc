@@ -29,28 +29,39 @@
 // #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
 // #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Modified for Tessalith (sdc patch 0006, 2026-11-24, patches/0006-bc6h-speed.patch): byte-neutral BC6H work from a second
-// audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
+// Modified for Tessalith (sdc patch 0006, 2026-11-24, patches/0006-bc6h-speed.patch): byte-neutral BC6H work from a
+// second audit. Changes are marked "sdc patch 0006". BC6H bytes do not change.
 // R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
 // zero-div block_quant never divides by a zero endpoint distance.
 // Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
-// S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not once per mode.
+// S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not once per
+//   mode.
 // S2 pca-once bc6h_block_cache computes the PCA endpoints once per block (and once after a lift), not once per mode.
 // 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
 // S4 prune the slow levels skip a mode whose endpoint window cannot beat the best error so far.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a second
-// audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
-// PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
+// Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a
+// second audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
+// PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm
+//   is zero.
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
-// astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
+// astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not
+//   q / (levels - 1).
 // Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
-// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
-// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
-// Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
-// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the widest's.
-// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code, not 12 exponent steps.
-// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions of the ranking, not only the lowest.
+// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the
+//   best's again.
+// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits
+//   the window.
+// Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric
+//   mean.
+// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the
+//   widest's.
+// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code,
+//   not 12 exponent steps.
+// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions of the ranking, not only
+//   the lowest.
+// S4 guard    bc6h_mode_cannot_win prunes only once a candidate has been scored (best_err < 1e30f), not through the
+//   1e99 infinity.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -323,8 +334,10 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
 			for (uniform int p=0; p<channels; p++)
 				norm_sq += axis[p]*axis[p];
 
-			// sdc patch 0007 (PCA re-seed): an exactly cancelling covariance (rows summing to 0 with eps absorbed) gave a zero vector, and RSQRT(0) * 0 was NaN; restart from the largest-variance coordinate
-			// (a not-finite norm is unreachable: covariance entries are at most 2^14 and the vector is renormalised every two iterations)
+			// sdc patch 0007 (PCA re-seed): an exactly cancelling covariance (rows summing to 0 with eps absorbed)
+			// gave a zero vector, and RSQRT(0) * 0 was NaN; restart from the largest-variance coordinate
+			// (a not-finite norm is unreachable: covariance entries are at most 2^14 and the vector is
+			// renormalised every two iterations)
 			if (norm_sq > 0)
 			{
 				float rnorm = RSQRT(norm_sq);
@@ -1324,7 +1337,10 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
             div += sq(ep_b-ep_a);
         }
         
-        // sdc patch 0006 (zero-div): BC6H endpoints are integer UF16 values, so div is 0 only for a region whose endpoints are equal in every channel; there 0/0 gave NaN, which (int) turned into INT_MIN and the clamp into index 1. With div >= 1 the numerator is still exactly 0: proj = 0, q1 = clamp(0, 1, levels-1) = 1, and err0 == err1 keeps 1, the same index without the NaN.
+        // sdc patch 0006 (zero-div): BC6H endpoints are integer UF16 values, so div is 0 only for a region whose
+        // endpoints are equal in every channel; there 0/0 gave NaN, which (int) turned into INT_MIN and the clamp
+        // into index 1. With div >= 1 the numerator is still exactly 0: proj = 0, q1 = clamp(0, 1, levels-1) = 1,
+        // and err0 == err1 keeps 1, the same index without the NaN.
         div = max(div, 1.0f);
         proj /= div;
         		
@@ -2315,12 +2331,19 @@ struct bc6h_enc_state
     float peak_lum;     // its source luminance
     float orig[48];     // the UF16 block before bc6h_peak_retry lifts it
 
-    float q_span;       // sdc patch 0006 (7a): the span and widened channel of the last admitted selector; bounds are built once, before the encode
+    // sdc patch 0006 (7a): the span and widened channel of the last admitted selector; bounds are built once,
+    // before the encode
+    float q_span;
+    // sdc patch 0006 (7a)
     int q_wide;
 
     int part_list[32];  // sdc patch 0006 (S1): partitions ranked once per block and retry pass (bc6h_block_cache)
-    float pca_ep_1p[8];   // sdc patch 0006 (S2): the one-region PCA endpoints, once per block and retry pass (bc6h_block_cache); read-only for users
-    float pca_ep_2p[32 * 16]; // sdc patch 0006 (S2): rank k's two regions at [k * 16 .. k * 16 + 15], laid out as ep[16] in bc6h_enc_2p_part_fast
+    // sdc patch 0006 (S2): the one-region PCA endpoints, once per block and retry pass (bc6h_block_cache); read-only
+    // for users
+    float pca_ep_1p[8];
+    // sdc patch 0006 (S2): rank k's two regions at [k * 16 .. k * 16 + 15], laid out as ep[16] in
+    // bc6h_enc_2p_part_fast
+    float pca_ep_2p[32 * 16];
 };
 
 void bc6h_code_2p(uint32 data[5], int pqep[], uint32 qblock[2], int part_id, int mode);
@@ -2578,7 +2601,8 @@ float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint
                     }
                     else
                     {
-                        // interior code q rebuilds at (q + 0.5) * 65536 / levels (ep_quant_bc6h); code 0 at 0, the top at 65535
+                        // interior code q rebuilds at (q + 0.5) * 65536 / levels (ep_quant_bc6h); code 0 at 0,
+                        // the top at 65535
                         lo = clamp((int)floor(vmin[p] * levels / 65536.0f - 0.5f), 0, levels - 2);
                         if (unpack_to_uf16(lo + 1, epb) <= vmin[p]) lo += 1; // only the top code can pass
                         hi = clamp((int)ceil(vmax[p] * levels / 65536.0f - 0.5f), 1, levels - 1);
@@ -2619,20 +2643,23 @@ float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint
 //////////////////////////
 // parameter estimation
 
-// sdc patch 0006 (S2): the number of ranked partitions bc6h_block_cache fills and bc6h_enc_2p searches; one helper so writer and reader cannot differ (a mismatch would read unwritten floats)
+// sdc patch 0006 (S2): the number of ranked partitions bc6h_block_cache fills and bc6h_enc_2p searches; one helper so
+// writer and reader cannot differ (a mismatch would read unwritten floats)
 uniform int bc6h_2p_depth(bc6h_enc_state state[])
 {
     return min(state->fastSkipTreshold, 32); // part_list holds 32 partitions
 }
 
-float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2], int part_id, uniform int rank) // sdc patch 0006 (S2): rank indexes the cached PCA endpoints
+// sdc patch 0006 (S2): rank indexes the cached PCA endpoints
+float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2], int part_id, uniform int rank)
 {
     uint32 pattern = get_pattern(part_id);
     uniform int bits = 3;
     uniform int channels = 3;
 
     float ep[16];
-    for (uniform int i = 0; i < 16; i++) ep[i] = state->pca_ep_2p[rank * 16 + i]; // sdc patch 0006 (S2): copy, ep_quant_dequant_bc6h overwrites ep
+    // sdc patch 0006 (S2): copy, ep_quant_dequant_bc6h overwrites ep
+    for (uniform int i = 0; i < 16; i++) ep[i] = state->pca_ep_2p[rank * 16 + i];
 
     ep_quant_dequant_bc6h(state, qep, ep, 2);
 
@@ -2658,7 +2685,8 @@ inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 bes
     // best_ep is scratch: the helper never reads ep, and the refine below refits its own
     best_err = bc6h_bracket_collapsed(state, best_qep, best_ep, best_qblock, best_err, get_pattern(best_part_id), best_part_id, pairs);
 
-    // sdc patch 0007 (Q1): refit from the previous pass, as bc6h_enc_1p does since patch 0004 #3; refitting from the best repeated a failed pass exactly
+    // sdc patch 0007 (Q1): refit from the previous pass, as bc6h_enc_1p does since patch 0004 #3; refitting from the
+    // best repeated a failed pass exactly
     uint32 cur_qblock[2];
     for (uniform int k = 0; k<2; k++) cur_qblock[k] = best_qblock[k];
 
@@ -2670,7 +2698,8 @@ inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 bes
         for (uniform int j = 0; j<pairs; j++)
         {
             int mask = get_pattern_mask(best_part_id, j);
-            bc6h_opt_endpoints(&ep[j * 8], state->block, bits, cur_qblock, mask); // sdc patch 0007 (astra #4): the decoder's weights; sdc patch 0007 (Q1): from the last pass
+            // sdc patch 0007 (astra #4): the decoder's weights; sdc patch 0007 (Q1): from the last pass
+            bc6h_opt_endpoints(&ep[j * 8], state->block, bits, cur_qblock, mask);
         }
 
         int qep[24];
@@ -2780,7 +2809,8 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     }
 }
 
-// sdc patch 0006 (S1, S2): the ranking and the PCA endpoints depend only on the block, so they are computed once per block (bc6h_setup) and once after a lift (bc6h_peak_retry), not once per mode
+// sdc patch 0006 (S1, S2): the ranking and the PCA endpoints depend only on the block, so they are computed once per
+// block (bc6h_setup) and once after a lift (bc6h_peak_retry), not once per mode
 void bc6h_block_cache(bc6h_enc_state state[])
 {
     block_segment_core(state->pca_ep_1p, state->block, -1, 3); // sdc patch 0006 (S2): every level reaches bc6h_enc_1p
@@ -2800,21 +2830,24 @@ void bc6h_block_cache(bc6h_enc_state state[])
     uniform int n = bc6h_2p_depth(state); // sdc patch 0006 (S2): the depth bc6h_enc_2p searches, from one helper
     partial_sort_list(state->part_list, 32, n);
 
-    for (uniform int k = 0; k < n; k++) // sdc patch 0006 (S2): the endpoints of the n ranked partitions, the ones bc6h_enc_2p searches
+    // sdc patch 0006 (S2): the endpoints of the n ranked partitions, the ones bc6h_enc_2p searches
+    for (uniform int k = 0; k < n; k++)
     for (uniform int j = 0; j < 2; j++)
         block_segment_core(&state->pca_ep_2p[k * 16 + j * 8], state->block, get_pattern_mask(state->part_list[k] & 31, j), 3);
 }
 
 void bc6h_enc_2p(bc6h_enc_state state[])
 {
-    uniform int n = bc6h_2p_depth(state); // sdc patch 0006 (S2): the depth, and the 32-partition bound of part_list, come from bc6h_2p_depth
+    // sdc patch 0006 (S2): the depth, and the 32-partition bound of part_list, come from bc6h_2p_depth
+    uniform int n = bc6h_2p_depth(state);
     bc6h_enc_2p_list(state, state->part_list, n); // sdc patch 0006 (S1): the list bc6h_block_cache ranked
 }
 
 void bc6h_enc_1p(bc6h_enc_state state[])
 {
     float ep[8];
-    for (uniform int i = 0; i < 8; i++) ep[i] = state->pca_ep_1p[i]; // sdc patch 0006 (S2): copy, ep_quant_dequant_bc6h overwrites ep
+    // sdc patch 0006 (S2): copy, ep_quant_dequant_bc6h overwrites ep
+    for (uniform int i = 0; i < 8; i++) ep[i] = state->pca_ep_1p[i];
 
     int qep[8];
     ep_quant_dequant_bc6h(state, qep, ep, 1);
@@ -2822,10 +2855,12 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     uint32 qblock[2];
     float err = block_quant(qblock, state->block, 4, ep, 0, 3);
     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
-    err = bc6h_bracket_collapsed(state, qep, ep, qblock, err, 0, 0, 1); // sdc patch 0007 (Q2): the next pass refits from the kept indices
+    // sdc patch 0007 (Q2): the next pass refits from the kept indices
+    err = bc6h_bracket_collapsed(state, qep, ep, qblock, err, 0, 0, 1);
 
     // sdc patch 0004: keep the best of the first quantisation and every refinement (upstream submitted the last).
-    // sdc patch 0007 (astra #4): each pass refits with the decoder's weights, not upstream's; the best-of keeps the first quantisation, so the result is never worse than it.
+    // sdc patch 0007 (astra #4): each pass refits with the decoder's weights, not upstream's; the best-of keeps the
+    // first quantisation, so the result is never worse than it.
     float best_err = err;
     int best_qep[8];
     uint32 best_qblock[2];
@@ -2886,7 +2921,8 @@ void compute_qbounds2(bc6h_enc_state state[], float span, int max_span_idx)
     compute_qbounds(state, rgb_span);
 }
 
-void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
+// sdc patch 0006 (7a): the bounds of the last admitted selector, built once per encode
+void bc6h_build_qbounds(bc6h_enc_state state[])
 {
     if (state->q_wide < 0) compute_qbounds(state, state->q_span); // sdc patch 0006 (7a): no channel is doubled
     else compute_qbounds2(state, state->q_span, state->q_wide);
@@ -2896,7 +2932,8 @@ void bc6h_build_qbounds(bc6h_enc_state state[]) // sdc patch 0006 (7a): the boun
 // distance to the unpacked qbounds window. Every endpoint a candidate uses is clamped to qbounds before it is unpacked
 // (ep_quant_dequant_bc6h), and block_quant's interpolated value lies between the two endpoints, so each decoded texel
 // channel lies inside [lo_p, hi_p] and its squared error is at least this distance.
-// sdc patch 0007 (Q2): bc6h_bracket_collapsed, the other writer of a candidate's codes, clamps its pairs to qbounds too.
+// sdc patch 0007 (Q2): bc6h_bracket_collapsed, the other writer of a candidate's codes, clamps its pairs to qbounds
+// too.
 float bc6h_window_bound(bc6h_enc_state state[])
 {
     float bound = 0;
@@ -2915,14 +2952,19 @@ float bc6h_window_bound(bc6h_enc_state state[])
 
 // sdc patch 0006 (S4): at the slow levels a mode whose window bound exceeds the best error so far cannot win, so the
 // lane skips its encode. It is exact: the bound is below every candidate's error (bc6h_window_bound), and a candidate
-// replaces the best only on a strictly lower error, so a skipped mode would not have replaced it; the slack covers float
-// summation order. best_err starts at 1e99, infinite in float, so nothing is skipped before the first candidate. A
-// guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not apply there;
-// peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying: a skipped lane
-// is masked off, and the gang skips the call only when every lane skips.
-bool bc6h_mode_cannot_win(bc6h_enc_state state[], float bound) // sdc patch 0007 (astra #6): the test on a bound the caller computed.
+// replaces the best only on a strictly lower error, so a skipped mode would not have replaced it; the slack covers
+// float summation order. best_err starts at 1e99, so nothing is skipped before the first candidate (see the guard
+// below). A guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not
+// apply there; peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying:
+// a skipped lane is masked off, and the gang skips the call only when every lane skips.
+// sdc patch 0007 (astra #6): the test on a bound the caller computed.
+bool bc6h_mode_cannot_win(bc6h_enc_state state[], float bound)
 {
-    bool prune = bound > state->best_err * (1 + 1e-4f) + 1; // sdc patch 0006 (S4): shortcut: nothing prunes before the first candidate only because best_err = 1e99 is +inf in float and this compares false under fast-math, as upstream's own first-candidate rule err < best_err relies on; switch to a finite sentinel if a compiler change ever makes the first mode prune
+    // sdc patch 0006 (S4): nothing prunes before the first candidate. Upstream's own first-candidate rule, err <
+    // best_err, relies on best_err = 1e99 being +inf in float under fast-math.
+    // sdc patch 0007 (S4 guard): the best_err < 1e30f test keeps this rule from relying on that: while best_err is
+    // still the sentinel no candidate has been scored, so nothing prunes.
+    bool prune = state->best_err < 1e30f && bound > state->best_err * (1 + 1e-4f) + 1;
     if (state->peak_mode) { if (state->peak_k >= 0) prune = false; }
     return prune;
 }
@@ -2930,7 +2972,8 @@ bool bc6h_mode_cannot_win(bc6h_enc_state state[], float bound) // sdc patch 0007
 bool bc6h_mode_cannot_win(bc6h_enc_state state[])
 {
     if (!state->slow_mode) return false;
-    return bc6h_mode_cannot_win(state, bc6h_window_bound(state)); // sdc patch 0007 (astra #6): the test moved to the overload above.
+    // sdc patch 0007 (astra #6): the test moved to the overload above.
+    return bc6h_mode_cannot_win(state, bc6h_window_bound(state));
 }
 
 void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
@@ -2969,7 +3012,8 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         if (enc)
         {
             bc6h_build_qbounds(state);
-            if (!bc6h_mode_cannot_win(state)) bc6h_enc_1p(state); // sdc patch 0006 (S4): the slow levels skip a mode that cannot win
+            // sdc patch 0006 (S4): the slow levels skip a mode that cannot win
+            if (!bc6h_mode_cannot_win(state)) bc6h_enc_1p(state);
         }
     }
     else if (mode <= 1 || mode == 5 || mode == 9)
@@ -3773,7 +3817,9 @@ void bc6h_setup(bc6h_enc_state state[])
     for (uniform int p = 0; p < 3; p++)
     for (uniform int k = 0; k < 16; k++)
     {
-        state->block[p * 16 + k] = (state->block[p * 16 + k] + 0.5f) / 31 * 64; // sdc patch 0007 (Q5): aim at the centre of the half code's decode range [64h/31, 64(h+1)/31), not its bottom edge
+        // sdc patch 0007 (Q5): aim at the centre of the half code's decode range [64h/31, 64(h+1)/31), not its
+        // bottom edge
+        state->block[p * 16 + k] = (state->block[p * 16 + k] + 0.5f) / 31 * 64;
     }
 
     if (state->peak_mode)
@@ -3815,18 +3861,22 @@ void bc6h_peak_retry(bc6h_enc_state state[])
         for (uniform int k = 0; k < 16; k++)
         {
             float m = max(state->block[k], max(state->block[16 + k], state->block[32 + k]));
-            // sdc patch 0007 (astra #5): below half 0.25, 12 exponent steps leave the normal range: take 2^-12 of the value as a subnormal half code instead.
+            // sdc patch 0007 (astra #5): below half 0.25, 12 exponent steps leave the normal range: take 2^-12 of
+            // the value as a subnormal half code instead.
             float hm = max(round(m * (31.0f / 64) - 0.5f), 0.0f);
             float hlo = round(half_to_float((unsigned int16)(int)hm) * 4096);
             float lo = (hm >= 0x3400) ? m - 12 * 1024 * 64 / 31.0f : m - (hm - hlo) * 64 / 31.0f;
-            for (uniform int p = 0; p < 3; p++) if (lo > state->block[p * 16 + k]) lifted = true; // sdc patch 0006 (Q6 skip-retry): compare before the max below
+            // sdc patch 0006 (Q6 skip-retry): compare before the max below
+            for (uniform int p = 0; p < 3; p++) if (lo > state->block[p * 16 + k]) lifted = true;
             for (uniform int p = 0; p < 3; p++) state->block[p * 16 + k] = max(state->block[p * 16 + k], lo);
         }
-        // sdc patch 0006 (Q6 skip-retry): an unlifted block would repeat the identical search, and the retry keeps its own result on a tie, which is the same data: skip it
+        // sdc patch 0006 (Q6 skip-retry): an unlifted block would repeat the identical search, and the retry keeps
+        // its own result on a tie, which is the same data: skip it
         if (lifted)
         {
             bc6h_bounds(state);
-            bc6h_block_cache(state); // sdc patch 0006 (S1, S2): the lift changed the block, rank and fit again (lifted lanes only)
+            // sdc patch 0006 (S1, S2): the lift changed the block, rank and fit again (lifted lanes only)
+            bc6h_block_cache(state);
             state->best_err = 1e99;
             bc6h_search_slow(state);
 
