@@ -1282,19 +1282,125 @@ fn a_lost_channel_keeps_the_closest_solution() {
     );
 }
 
-/// Block `k` of Task 6m2's synthetic class A3c, from its generator (copied; the seed and rule are in the research
-/// folder's `gen6.txt`): an LCG `x = 6364136223846793005 x + 1442695040888963407` (mod 2^64), `u(n) = (x >> 33) % n`,
-/// seeded 0x6A2A5, block k being the rule's (k + 1)th output. Texel columns 0-1 are near-solid with a near-255 G:
-/// R = r0 + u(5) - 2 (r0 = 60 + u(120)), G = 255 - u(3), B = 255 - u(4); columns 2-3 are textured: R = r0 + u(32),
-/// G = 200 + u(56), B = 200 + u(56); alpha 255.
+/// Task 6m2's `witness-A1.txt` blocks (class A1, `a1_block`): block k, the level, the RGB part of the mask it ran with
+/// (A was in the mask too, which is exact opaque here) and the mode it took (Note LR, LR14). The ultrafast six take
+/// mode 6 with the penalty replacing the error too, and lose the property there; the mode 3 two leave mode 3 then.
+const A1_WITNESSES: &[(usize, Bc7Level, u8, u32)] = &[
+    (13, Bc7Level::Ultrafast, 0b011, 6),
+    (21, Bc7Level::Ultrafast, 0b011, 6),
+    (13, Bc7Level::Ultrafast, 0b101, 6),
+    (24, Bc7Level::Ultrafast, 0b101, 6),
+    (13, Bc7Level::Ultrafast, 0b110, 6),
+    (21, Bc7Level::Ultrafast, 0b110, 6),
+    (14, Bc7Level::Veryfast, 0b011, 3),
+    (18, Bc7Level::Fast, 0b110, 3),
+];
+
+/// The channels of `bits` that decode off their source at some texel of `block`, and the number of subsets of the
+/// output's partition, summed over those channels, in which they do.
+fn lost_in(out: &[u8; 16], block: &[[u8; 4]; 16], bits: u8) -> (u8, usize) {
+    let (d, sub) = (decode(out), block_subsets(out));
+    let mut lost = 0;
+    let mut subsets = 0;
+    for c in (0..3).filter(|c| (bits >> c) & 1 == 1) {
+        let off: Vec<u8> = (0..3u8)
+            .filter(|&s| (0..16).any(|t| sub[t] == s && d[t][c] != block[t][c]))
+            .collect();
+        if !off.is_empty() {
+            lost |= 1 << c;
+            subsets += off.len();
+        }
+    }
+    (lost, subsets)
+}
+
+/// Round 6 (A1) on Task 6m2's witnesses: with exact opaque on and a mask whose flat channels cannot all be kept, the
+/// output loses some (the premise) and must write the bytes of the same mask without the lost channels, where every
+/// solution is ranked by its real error among those that keep the rest, unless it loses them in strictly fewer subsets.
+/// With the penalty replacing the error (Task 6m2's `xA1` arm) the first solution evaluated won instead, and this test
+/// fails. Each witness must still take the mode it took there, so a later kernel cannot pass it by leaving that path
+/// (Note LR, LR14).
+#[test]
+fn a1_witnesses_pick_the_closest_loser() {
+    let mut bad = vec![];
+    for &(k, level, mask, mode) in A1_WITNESSES {
+        let block = a1_block(k);
+        let flat: u8 = (0..3)
+            .filter(|&c| (mask >> c) & 1 == 1 && block.iter().all(|px| px[c] == block[0][c]))
+            .map(|c| 1u8 << c)
+            .sum();
+        let p = Bc7Params {
+            level,
+            exact_opaque: true,
+            ..U5
+        };
+        for target in paths() {
+            let out = tuned_block(&block, p, guard(mask), target);
+            let (lost, subsets) = lost_in(&out, &block, flat);
+            let what = format!("witness {k} {level:?} mask {mask:03b} {target:?}: lost {lost:03b}");
+            if out[0].trailing_zeros() != mode {
+                bad.push(format!(
+                    "{what}: left mode {mode} (mode {}): re-pick from witness-A1.txt",
+                    out[0].trailing_zeros()
+                ));
+            } else if lost == 0 {
+                bad.push(format!(
+                    "{what}: keeps every flat channel, so it has no loser to pick"
+                ));
+            } else {
+                let reduced = tuned_block(&block, p, guard(mask & !lost), target);
+                let (_, reduced_subsets) = lost_in(&reduced, &block, lost);
+                if out != reduced && subsets >= reduced_subsets {
+                    bad.push(format!(
+                        "{what} in {subsets} subsets, without them {reduced_subsets}: {out:02x?} != {reduced:02x?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a witness did not pick the closest loser:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// The draw of Task 6m2's synthetic-class generator (copied; the seeds and rules are in the research folder's
+/// `gen6.txt`): an LCG `x = 6364136223846793005 x + 1442695040888963407` (mod 2^64), `u(n) = (x >> 33) % n`. A class's
+/// block k is its rule's (k + 1)th output from the class's seed.
+fn gen6_u(x: &mut u64, n: u64) -> i32 {
+    *x = x
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    ((*x >> 33) % n) as i32
+}
+
+/// Block `k` of Task 6m2's synthetic class A1 (`gen6_u`, seed 0x6A2A1): the ramped channel rc = u(3), then each of R, G
+/// and B flat at u(2) * 255, then a ramp v0 + s * t (v0 = u(200), s = 1 + u(4), t the texel, capped at 255) replaces
+/// channel rc; alpha 255. So two channels are 0 or 255 throughout.
+fn a1_block(k: usize) -> [[u8; 4]; 16] {
+    let mut x = 0x6A2A1u64;
+    let mut u = move |n: u64| gen6_u(&mut x, n);
+    let mut block = [[0u8; 4]; 16];
+    for _ in 0..=k {
+        let rc = u(3) as usize;
+        let flat = [u(2) * 255, u(2) * 255, u(2) * 255];
+        let (v0, s) = (u(200), 1 + u(4));
+        for (t, px) in block.iter_mut().enumerate() {
+            let mut v = flat;
+            v[rc] = (v0 + s * t as i32).min(255);
+            *px = [v[0] as u8, v[1] as u8, v[2] as u8, 255];
+        }
+    }
+    block
+}
+
+/// Block `k` of Task 6m2's synthetic class A3c (`gen6_u`, seed 0x6A2A5). Texel columns 0-1 are near-solid with a
+/// near-255 G: R = r0 + u(5) - 2 (r0 = 60 + u(120)), G = 255 - u(3), B = 255 - u(4); columns 2-3 are textured:
+/// R = r0 + u(32), G = 200 + u(56), B = 200 + u(56); alpha 255.
 fn a3c_block(k: usize) -> [[u8; 4]; 16] {
     let mut x = 0x6A2A5u64;
-    let mut u = move |n: u64| {
-        x = x
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        ((x >> 33) % n) as i32
-    };
+    let mut u = move |n: u64| gen6_u(&mut x, n);
     let mut block = [[0u8; 4]; 16];
     for _ in 0..=k {
         let r0 = 60 + u(120);

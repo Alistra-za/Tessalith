@@ -88,11 +88,11 @@ solution keeps the higher one, G before B before R, across every subset (penalti
 channel and subset, added to the solution's real error, so the closest solution wins within a tier: solutions that
 lose their channels in the same number of subsets), and a one-colour candidate charges only the channels its
 subset's source holds at 0 or 255, not a mean that rounds there; proof tests `tests/bc7.rs`
-`guarded_channels_conflict_by_priority`, `a_lost_channel_keeps_the_closest_solution` and
-`one_colour_packers_key_on_source_constants`; changes bytes only with the mask set. These changes alter BC7 bytes (the
-pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes`
-hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch file with its
-own tag.
+`guarded_channels_conflict_by_priority`, `a_lost_channel_keeps_the_closest_solution`,
+`a1_witnesses_pick_the_closest_loser` and `one_colour_packers_key_on_source_constants`; changes bytes only with the mask
+set. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The
+engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e change
+goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
