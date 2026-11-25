@@ -426,10 +426,16 @@ fn a_wide_channel_block_takes_the_doubled_window() {
         );
         let family = matches!(mode, 18 | 22 | 26);
         if level == Bc6hLevel::Basic {
-            assert!(
-                family,
-                "{target:?} {level:?}: not in the mode 6 family: {mode}"
-            );
+            // Basic's choice between one and two regions is a float score compare, which may differ on an Intel
+            // CPU (Note JC), so the strict family check is skipped there; the mode-1 check above still runs.
+            if encoders_sys::skip_byte_pins() {
+                eprintln!("skipped: Basic's mode-6 family check (Intel CPU, Note JC)");
+            } else {
+                assert!(
+                    family,
+                    "{target:?} {level:?}: not in the mode 6 family: {mode}"
+                );
+            }
         } else {
             let one_region = matches!(mode, 3 | 7 | 11 | 15);
             assert!(
@@ -945,8 +951,8 @@ fn nearest_code_equals_the_exhaustive_search() {
     }
 }
 
-/// The kernel's `ep_quant_bc6h` for one endpoint, mirrored line by line in f32: below 15 bits the interior code from one
-/// multiply (`ceil(e * levels / 65536) - 1`, clamped to 1..levels-2), then one compare with an end code when the
+/// The kernel's `ep_quant_bc6h` for one endpoint, mirrored line by line in f32: below 15 bits the interior code from
+/// one multiply (`ceil(e * levels / 65536) - 1`, clamped to 1..levels-2), then one compare with an end code when the
 /// interior code is next to it; 15 bits and more keep upstream's rounding.
 fn kernel_ep_quant(ep: f32, bits: u32) -> u32 {
     let levels = 1i32 << bits;
@@ -1222,7 +1228,8 @@ const TWO_REGION_MASKS: [u16; 32] = [
 /// A two-cluster block from index `i` (half codes in 0x0400..=0x7000, alpha 1.0): one of the 32 two-region partitions,
 /// each region its own colour gradient (a random base, a random direction across the block, each channel's amplitude
 /// up to 4096 half codes either way) plus up to 32 half codes of noise. Integer arithmetic only, so the blocks are the
-/// same on every machine. Tasks 15, 17 and 24 search these.
+/// same on every machine. `search_refit_witnesses`, `search_two_region_refine_witnesses` and `search_q3_witnesses`
+/// search these.
 fn two_cluster(i: u32) -> [[u16; 4]; 16] {
     const LO: i64 = 0x0400;
     const HI: i64 = 0x7000;
@@ -1262,7 +1269,8 @@ fn texels_of(planes: &[[u16; 16]; 3]) -> [[u16; 4]; 16] {
     std::array::from_fn(|t| [planes[0][t], planes[1][t], planes[2][t], f16::ONE.to_bits()])
 }
 
-/// Task 15's seeded blocks: odd `i` is `two_cluster(i / 2)`; even `i` is a one-region ramp with clustered texels, like
+/// The refit witnesses' seeded blocks (`search_refit_witnesses`): odd `i` is `two_cluster(i / 2)`; even `i` is a
+/// one-region ramp with clustered texels, like
 /// the audit's grey block (four texels at half code 46, eight at 1038, four at 15918): 1 to 6 texels at the low end, 1
 /// to 6 at the high end and the rest 2/64 to 62/64 of the way along, in a shuffled texel order, with up to 16 half
 /// codes of noise. One ramp in two is grey (R = G = B); the others give each channel its own ends (low end 0..=0x2000,
@@ -1332,29 +1340,35 @@ fn record_witness_search(
     let start = std::time::Instant::now();
     for target in paths() {
         for &level in levels {
-            let chunks: Vec<String> = std::thread::scope(|s| {
+            let mut lines: Vec<(u32, String)> = std::thread::scope(|s| {
                 let jobs: Vec<_> = (0..threads)
                     .map(|t| {
                         s.spawn(move || {
-                            let mut part = String::new();
+                            let mut part = Vec::new();
                             for i in (t..end).step_by(threads as usize) {
                                 let px = blocks(i);
                                 let b = encode_block(&px, level, target);
                                 let (lo, hi) = err_bounds(&px, &decode_halves(&b));
+                                let mut line = String::new();
                                 writeln!(
-                                    part,
+                                    line,
                                     "{target:?} {level:?} {i} {} {lo} {hi}",
                                     hex::encode(b)
                                 )
                                 .unwrap();
+                                part.push((i, line));
                             }
                             part
                         })
                     })
                     .collect();
-                jobs.into_iter().map(|j| j.join().unwrap()).collect()
+                jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
             });
-            file.write_all(chunks.concat().as_bytes()).unwrap();
+            // By index, so two runs on machines with different thread counts write the same file.
+            lines.sort_by_key(|(i, _)| *i);
+            for (_, line) in &lines {
+                file.write_all(line.as_bytes()).unwrap();
+            }
             file.flush().unwrap();
             eprintln!(
                 "{target:?} {level:?}: {end} blocks written, {:.1} s since the start",
@@ -1413,7 +1427,7 @@ fn assert_witnesses_certainly_better(
     );
 }
 
-/// Records Task 15's search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
+/// Records the astra #4 search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
 #[test]
 #[ignore = "record refit witnesses: run on the objects before the change, then after"]
 fn search_refit_witnesses() {
@@ -1421,7 +1435,7 @@ fn search_refit_witnesses() {
     record_witness_search("refit_blocks", refit_blocks, 1 << 16, &levels);
 }
 
-/// Records Task 17's search (`two_cluster`, `i in 0..1 << 16`, Basic and Veryslow) for `TWO_REGION_REFINE_WITNESSES`.
+/// Records the Q1 search (`two_cluster`, `i in 0..1 << 16`, Basic and Veryslow) for `TWO_REGION_REFINE_WITNESSES`.
 #[test]
 #[ignore = "record two-region refine witnesses: run on the objects before the change, then after"]
 fn search_two_region_refine_witnesses() {
@@ -1549,7 +1563,7 @@ fn two_region_refine_keeps_its_best_pass() {
     assert_witnesses_certainly_better(TWO_REGION_REFINE_WITNESSES, two_cluster);
 }
 
-/// Records Task 24's search (`two_cluster`, `i in 0..1 << 16`, Veryslow and VeryslowPeak) for `Q3_WITNESSES`.
+/// Records the Q3 search (`two_cluster`, `i in 0..1 << 16`, Veryslow and VeryslowPeak) for `Q3_WITNESSES`.
 #[test]
 #[ignore = "record Q3 witnesses: run on the objects before the change, then after"]
 fn search_q3_witnesses() {
@@ -1629,9 +1643,9 @@ enum CollapseKind {
 /// `OneRegionRamp`: one smooth ramp along a random direction across the block in all three channels, each channel
 /// spanning 4 to 7 half codes in total (8.3 to 14.5 UF16 units: over mode 13's 6-unit gate and under mode 12's 16-unit
 /// code cell), every channel's UF16 range `(h + 0.5) * 64 / 31` inside one mode-12 cell `(16q, 16q + 16]` with a
-/// quarter unit to spare at each edge. That is the range `ep_quant_bc6h` maps to code q: `ceil(e / 16) - 1`, so a tie at
-/// 16q + 16 keeps q and 16q itself goes to q - 1. Odd `i` has one channel falling where the other two rise. The region is the
-/// whole block.
+/// quarter unit to spare at each edge. That is the range `ep_quant_bc6h` maps to code q: `ceil(e / 16) - 1`, so a tie
+/// at 16q + 16 keeps q and 16q itself goes to q - 1. Odd `i` has one channel falling where the other two rise. The
+/// region is the whole block.
 ///
 /// `TwoRegion` (fable's scenario A): one of the 32 two-region partitions; one region is dim (half codes 0x0400 to
 /// 0x2400 plus a ramp of 8 to 120 half codes per channel), the other bright (1000 to 0x5000 half codes above the dim
@@ -1795,6 +1809,8 @@ fn search_collapsed_witnesses() {
                 jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
             });
             hits.sort_unstable();
+            // The count line marks the item as complete: every index of 0..END not listed after it is a non-hit.
+            writeln!(file, "# {kind:?} {level:?} {} hits of {END}", hits.len()).unwrap();
             for i in &hits {
                 writeln!(file, "{kind:?} {level:?} {i}").unwrap();
             }
@@ -1865,8 +1881,9 @@ const COLLAPSED_WITNESSES: &[(u32, Bc6hLevel, CollapseKind)] = &[
 /// the others). Before the fix every witness decoded flat in all three channels.
 ///
 /// The pair is oriented: where two source-varying channels run against each other in the region (a negative source
-/// covariance, the falling channel of an odd `OneRegionRamp` against the two rising ones), their decoded covariance over
-/// the region is negative too. A componentwise low-to-high pair would make it positive. Skipped on an Intel CPU, like
+/// covariance, the falling channel of an odd `OneRegionRamp` against the two rising ones), their decoded covariance
+/// over the region is negative too. A componentwise low-to-high pair would make it positive. Skipped on an Intel CPU,
+/// like
 /// the pins: the witnesses were selected on the Ryzen's output (Note JC).
 #[test]
 fn collapsed_regions_take_a_bracketing_pair() {
@@ -1956,7 +1973,7 @@ fn black_gate_value(px: &[[u16; 4]; 16], relative: bool) -> f32 {
 }
 
 /// Whether `black_gate_block(i)` guards under the old floor, not under the relative one, and neither gate value lies
-/// within 1e-3 (relative) of `ln 32` (Task 2's tie band: the kernel's fast-math `log` may decide those differently).
+/// within 1e-3 (relative) of `ln 32` (the tie band: the kernel's fast-math `log` may decide those differently).
 fn black_gate_candidate(px: &[[u16; 4]; 16]) -> bool {
     let limit = 32.0f32.ln();
     let (old, new) = (black_gate_value(px, false), black_gate_value(px, true));
@@ -2014,6 +2031,9 @@ fn search_black_gate_witnesses() {
             .filter(|p| p[..3] == [0; 3])
             .count()
     };
+    // One item (one scan of 0..END), so it is written at once; the count line marks it complete and every index not
+    // listed after it is a non-hit.
+    writeln!(file, "# {} hits of {END}", hits.len()).unwrap();
     for &i in &hits {
         writeln!(file, "{i} {}", blacks(i)).unwrap();
     }
@@ -2042,9 +2062,9 @@ const BLACK_GATE_WITNESSES: &[u32] = &[25, 27, 17, 30, 49, 11, 13, 28];
 /// highlight; an unguarded block encodes exactly as Veryslow (`peak_k = -1`: `bc6h_peak_guard` returns the plain
 /// error, `bc6h_peak_retry` runs no second search, and S4's prune applies as at Veryslow; only a guarded block
 /// (`peak_k >= 0`) is exempt from it). On each witness VeryslowPeak's bytes equal Veryslow's on every path in
-/// `paths()`, and the replication of the gate guards the block under the old floor and not under the new one (so a witness cannot pass
-/// because it is no longer guarded by the replication's own count). Skipped on an Intel CPU, like the pins: the
-/// witnesses were selected on the Ryzen's output (Note JC).
+/// `paths()`, and the replication of the gate guards the block under the old floor and not under the new one (so a
+/// witness cannot pass because it is no longer guarded by the replication's own count). Skipped on an Intel CPU, like
+/// the pins: the witnesses were selected on the Ryzen's output (Note JC).
 #[test]
 fn exact_black_alone_does_not_guard_a_block() {
     if encoders_sys::skip_byte_pins() {
@@ -2157,7 +2177,8 @@ fn wide_pair(i: u32) -> [[u16; 4]; 16] {
     texels_of(&planes)
 }
 
-/// Records Task 22's search (`wide_pair`, `i in 0..1 << 16`, Veryslow and VeryslowPeak) for `WIDE_CHANNEL_WITNESSES`.
+/// Records the astra #6 search (`wide_pair`, `i in 0..1 << 16`, Veryslow and VeryslowPeak) for
+/// `WIDE_CHANNEL_WITNESSES`.
 #[test]
 #[ignore = "record wide-channel witnesses: run on the objects before the change, then after"]
 fn search_wide_channel_witnesses() {
@@ -2319,7 +2340,7 @@ fn dim_sun(i: u32) -> [[u16; 4]; 16] {
 }
 
 /// Whether the replication of `bc6h_setup`'s peak gate (f32, the relative floor) guards `px` with neither gate value
-/// within 1e-3 (relative) of `ln 32` (Task 2's tie band).
+/// within 1e-3 (relative) of `ln 32` (the tie band).
 fn dim_sun_guarded(px: &[[u16; 4]; 16]) -> bool {
     let limit = 32.0f32.ln();
     let g = black_gate_value(px, true);
@@ -2338,10 +2359,11 @@ fn peak_texel_ratio(px: &[[u16; 4]; 16], b: &[u8; 16]) -> f32 {
     lum(&d[peak * 3..peak * 3 + 3]) / src[peak]
 }
 
-/// Records Task 23's search (`dim_sun`, `i in 0..1 << 16`, VeryslowPeak) for `DIM_SUN_WITNESSES`: for each index the
-/// gate replication guards, one line per path in `paths()` in the form the other witness searches write plus a
-/// peak-ratio column, `<path> VeryslowPeak <i> <hex bytes> <peak texel ratio>`, in the file `SDC_BC6H_WITNESS_OUT` names (run it with
-/// `SDC_TEST_AVX512=1` so AVX-512 is included).
+/// Records the astra #5 search (`dim_sun`, `i in 0..1 << 16`, VeryslowPeak) for `DIM_SUN_WITNESSES`: for each index
+/// the gate replication guards, one line per path in `paths()`, `<path> VeryslowPeak <i> <hex bytes> <peak texel
+/// ratio>`, in the file `SDC_BC6H_WITNESS_OUT` names. The ratio replaces the `<E_lo> <E_hi>` columns that
+/// `record_witness_search` writes, so a tool that reads those files must not read this one. Run it with
+/// `SDC_TEST_AVX512=1` so AVX-512 is included.
 #[test]
 #[ignore = "record dim sun witnesses: run on the objects before the change, then after"]
 fn search_dim_sun_witnesses() {
@@ -2360,47 +2382,58 @@ fn search_dim_sun_witnesses() {
     )
     .unwrap();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
-    // Per guarded index, one `<hex bytes> <ratio>` string per path in `targets` order.
-    let mut lines: Vec<(u32, Vec<String>)> = std::thread::scope(|s| {
+    // The guarded indices come from the gate replication alone (no encode), so they are cheap; each path's lines are
+    // then written and flushed as soon as that path is done, so an interrupted run keeps the finished paths.
+    let mut guarded: Vec<u32> = std::thread::scope(|s| {
         let jobs: Vec<_> = (0..threads)
             .map(|t| {
-                let targets = &targets;
                 s.spawn(move || {
                     (t..END)
                         .step_by(threads as usize)
-                        .filter_map(|i| {
-                            let px = dim_sun(i);
-                            dim_sun_guarded(&px).then(|| {
-                                let per_path: Vec<String> = targets
-                                    .iter()
-                                    .map(|&target| {
-                                        let b = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
-                                        format!("{} {}", hex::encode(b), peak_texel_ratio(&px, &b))
-                                    })
-                                    .collect();
-                                (i, per_path)
-                            })
-                        })
-                        .collect::<Vec<_>>()
+                        .filter(|&i| dim_sun_guarded(&dim_sun(i)))
+                        .collect::<Vec<u32>>()
                 })
             })
             .collect();
         jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
     });
-    lines.sort_unstable();
-    for (k, target) in targets.iter().enumerate() {
-        for (i, per_path) in &lines {
-            writeln!(
-                file,
-                "{target:?} {:?} {i} {}",
-                Bc6hLevel::VeryslowPeak,
-                per_path[k]
-            )
-            .unwrap();
+    guarded.sort_unstable();
+    for &target in &targets {
+        let guarded = &guarded;
+        let mut lines: Vec<(u32, String)> = std::thread::scope(|s| {
+            let jobs: Vec<_> = (0..threads as usize)
+                .map(|t| {
+                    s.spawn(move || {
+                        guarded
+                            .iter()
+                            .skip(t)
+                            .step_by(threads as usize)
+                            .map(|&i| {
+                                let px = dim_sun(i);
+                                let b = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
+                                let ratio = peak_texel_ratio(&px, &b);
+                                (
+                                    i,
+                                    format!(
+                                        "{target:?} {:?} {i} {} {ratio}\n",
+                                        Bc6hLevel::VeryslowPeak,
+                                        hex::encode(b)
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+        });
+        lines.sort_unstable();
+        for (_, line) in &lines {
+            file.write_all(line.as_bytes()).unwrap();
         }
+        file.flush().unwrap();
     }
-    file.flush().unwrap();
-    println!("{} of {END} blocks are guarded", lines.len());
+    println!("{} of {END} blocks are guarded", guarded.len());
 }
 
 /// Witnesses from `search_dim_sun_witnesses`: `dim_sun` indices that the gate replication guards and whose peak texel

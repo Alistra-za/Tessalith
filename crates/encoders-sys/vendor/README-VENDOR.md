@@ -77,7 +77,9 @@ ISPC TC patch 0003 "BC6H only" (`ispctc/patches/0003-bc6h-only.patch`, 2026-11-1
 numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 is the next number not used anywhere
 under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use
 in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
-moved or edited. Without the define the source behaves as upstream plus patches 0001, 0004, 0006 and 0007. The BC7 kernels
+moved or edited. Since patch 0007 `block_quant` and `opt_endpoints` are outside every BC6H path (BC6H calls its forks
+`bc6h_block_quant` and `bc6h_opt_endpoints`), so they are unused in the shipped build though not guarded. Without the
+define the source behaves as upstream plus patches 0001, 0004, 0006 and 0007. The BC7 kernels
 call the same `block_quant`, so 0004's fix #1 would also reach them there (0007's S3 does not: BC7 keeps upstream's
 `block_quant`, and BC6H calls the fork `bc6h_block_quant`). 0006's R2 helper changes (`block_pca_axis`
 and `get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, and its zero-div
@@ -168,11 +170,11 @@ its span and widened channel in `state->q_span` and `state->q_wide` (-1 when no 
 `compute_qbounds2` otherwise), in `bc6h_test_mode` when `enc` is set and in `CompressBlockBC6H_core` right before
 `bc6h_enc_2p` and before `bc6h_enc_1p`. The slow levels (all `enc = true`) build once per mode as before. S3 (a BC6H
 `block_quant` that loads each region's endpoints once) was tried twice and dropped, because both attempts changed BC6H
-bytes, so it is not in this patch (patch 0007 keeps it, below; Note LT). Both attempts changed `encode_versions'`
-`hdr_sky.dds`. The first (a hoisted reciprocal) left the pins and the random strips equal. The second (a per-texel
-division) changed some of the 22 measured images at every level, from the one-region path at Veryfast on, on AVX2. S4
-prune: at Slow, Veryslow and VeryslowPeak,
-`bc6h_test_mode` computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum over the 16
+bytes, so it is not in this patch (patch 0007 keeps it, below; Note LT). Both attempts changed the `hdr_sky.dds` entry
+of `encode_versions`. The first (a hoisted reciprocal) left the pins and the random strips equal. The second (a
+per-texel division) changed some of the 22 measured images at every level, from the one-region path at Veryfast on, on
+AVX2. S4 prune: at Slow, Veryslow and VeryslowPeak, `bc6h_test_mode` computes `bc6h_window_bound` after
+`bc6h_build_qbounds` and before the encode: the sum over the 16
 texels and 3 channels of each texel channel's squared distance to the window
 `[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p], epb)]`, unpacked at the mode's endpoint bits. Every
 endpoint a candidate uses is clamped to `qbounds` before it is unpacked and each decoded value lies between its two
@@ -207,14 +209,16 @@ Q5: `bc6h_setup` converts each half code h to the UF16 target `(h + 0.5) / 31 * 
 (the peak gate above it still reads the source half bits; `orig` and the lift in `bc6h_peak_retry` follow the new
 targets). Test: `constant_blocks_decode_to_their_half_code`. It changes BC6H bytes at all six levels on SSE2, AVX2 and
 AVX-512 (the 18 pins, `identity.json` `hdr_sky` and every measured image).
-astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_enc_2p_list` calls a BC6H-only fork,
+astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_refine_2p` (`bc6h_enc_2p_list`'s refine passes before Q3
+moved them there) calls a BC6H-only fork,
 `bc6h_opt_endpoints`, that fits index q at the decoder's weight `table[q] / 64` (`get_unquant_table`) instead of
 `q / (levels - 1)`, with the determinant from the exact integer form `n * Sww - Sw * Sw` (a zero determinant flattens
 to the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no
 longer called. Test: `refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and
 VeryslowPeak on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those
 levels); Veryfast, which has no refit, keeps its bytes.
-Q2: `bc6h_enc_1p` (its first quantisation) and `bc6h_enc_2p_list` (the chosen partition's first candidate) hand the
+Q2: `bc6h_enc_1p` (its first quantisation) and `bc6h_refine_2p` (in `bc6h_enc_2p_list`, for each kept candidate since
+Q3: the chosen partition's first quantisation before it) hand the
 candidate to `bc6h_bracket_collapsed`; the refine passes then refit from the indices it kept and are not bracketed
 themselves. For a region whose two endpoints share one code in every channel, it gives each channel that varies in the
 region the largest code that rebuilds at or below the region's minimum and the smallest at or above its maximum (in the
@@ -224,7 +228,8 @@ keeps the pair when the whole block's error, peak guard included, is lower. Test
 pins only SSE2 Fast's, and `identity.json` `hdr_sky` not; every measured image at Fast and slower but one at Basic; at
 Veryfast 11 or 12 of the 18 `hdr_real` images and 2 or 3 of the 4 `hdr_grad` ones, by path. Bracketing every refine
 pass as well was measured and not kept: the same quality at 1.049 of the time against 1.018 in total.
-Q1: `bc6h_enc_2p_list` keeps a working index block `cur_qblock`, which starts as the ranked partition's indices (after
+Q1: `bc6h_refine_2p` (`bc6h_enc_2p_list`'s refine passes before Q3) keeps a working index block `cur_qblock`, which
+starts as the ranked partition's indices (after
 Q2's bracket) and becomes each refine pass's indices whether or not the pass won, so the next pass refits from the last
 pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the best's indices again (a failed pass repeated
 exactly); the best `(qep, qblock, err)` is updated only on a lower error, and the block is packed once after the loop.
@@ -277,12 +282,14 @@ S4 guard (changes no byte): `bc6h_mode_cannot_win` prunes only when `state->best
 `best_err` initialisers (`CompressBlockBC6H` and the reset in `bc6h_peak_retry`) are the finite `1e30f` instead of
 `1e99`, which is +inf in float, so the state's `best_err`, the value the S4 prune reads, is never an infinity. Every
 scored error is far below 1e30f (the largest, `bc6h_peak_guard`'s `(terr + 1) * 1e13f`, is about 2e24), so the first
-candidate still always wins. The local `best_err` and `cand_err` sentinels (1e99) in `bc6h_enc_2p_list` stay as
-upstream wrote them: they are only compared with `<` against finite errors and never feed the prune. Proof that no
-byte moved: the 22 measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in every column but the time
-(132 of 132 rows each), the random strips (48 hashes, 72 with AVX-512), the pins and `identity.json` unchanged, and
-the scratch assert build of S4 (above) fired on none of 15,970,493 lane encodes of the 22 images on AVX2 or of the lane
-encodes of `random_blocks_encode_at_every_level_on_every_path` (212,686; 319,029 with AVX-512).
+candidate still always wins. Q3's own `cand_err` sentinels in `bc6h_enc_2p_list` are `1e30f` too, so a folded compare
+cannot leave a kept partition at -1. Only that function's local `best_err = 1e99` stays as upstream wrote it: it is
+only compared with `<` against finite errors and never feeds the prune. Proof that no byte moved (for the state
+sentinels and again for `cand_err`): the 22 measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in
+every column but the time (132 of 132 rows each), the random strips (48 hashes, 72 with AVX-512), the pins and
+`identity.json` unchanged, and the scratch assert build of S4 (above) fired on none of the lane encodes of the 22
+images on AVX2 (about 15.97 million) or of `random_blocks_encode_at_every_level_on_every_path` (212,686; 319,029 with
+AVX-512).
 S3: every BC6H quantisation (`bc6h_enc_1p`, `bc6h_enc_2p_part_fast`, `bc6h_refine_2p`, `bc6h_bracket_collapsed`) calls
 `bc6h_block_quant`, which loads each region's endpoints once and multiplies by each region's reciprocal distance, formed
 once after the zero-div guard, instead of gathering 12 endpoint values and dividing per texel; the tie rule and the
