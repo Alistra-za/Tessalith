@@ -1754,9 +1754,9 @@ const WP_WEIGHTS: [u32; 4] = [1, 1, 1, 64];
 const WP_MODE7_WITNESSES: &[usize] = &[2, 6, 19, 21, 22, 24, 30, 37];
 
 /// Patch 0005, WP: with linear weights that are not all equal, mode 7's one-colour packer chose its p-bits by the
-/// unweighted sum of the table entries' errors and weighed only the chosen pair, so with alpha at 64 times the colour the
-/// packer's pick for a solid subset at (0, 0, 0, 1) decodes (0, 0, 0, 0), weighted error 64 per texel, where p = 2's
-/// (1, 1, 1, 1) costs 3; witness 37's solid (0, 1, 0, 1) decoded (0, 0, 0, 0) at 65 against a best pair's 2.
+/// unweighted sum of the table entries' errors and weighed only the chosen pair, so with alpha at 64 times the colour
+/// the packer's pick for a solid subset at (0, 0, 0, 1) decoded (0, 0, 0, 0), weighted error 64 per texel, where p =
+/// 2's (1, 1, 1, 1) costs 3; witness 37's solid (0, 1, 0, 1) decoded (0, 0, 0, 0) at 65 against a best pair's 2.
 /// The packer now picks the pair with the smallest weighted error. Each witness must still be mode 7 with the solid
 /// columns as its own subset (a block that left that path proves nothing, so that fails too), and every solid texel
 /// decodes at weighted error at most the best p-bit pair's (`mode7_one_colour_best`), at basic on every path. Mode 6's
@@ -1857,6 +1857,33 @@ fn constant_alpha_cell(
     (taken, missed, other)
 }
 
+/// `ks_best_errors` pins the tables' claim that LR22 and README-VENDOR repeat: every v decodes exactly at 3-bit
+/// indices, and at 2-bit indices every v but 2, 6, 10, 249 and 253, which come 1 off (Note LR, LR22).
+#[test]
+fn ks_tables_are_exact_but_five_two_bit_values() {
+    let best = ks_best_errors();
+    let off2: Vec<(usize, u32)> = (0..256)
+        .filter(|&v| best[0][v] != 0)
+        .map(|v| (v, best[0][v]))
+        .collect();
+    assert_eq!(off2, [(2, 1), (6, 1), (10, 1), (249, 1), (253, 1)]);
+    assert!(best[1].iter().all(|&e| e == 0), "3-bit table not exact");
+}
+
+/// The params and tune of one constant-alpha cell: linear weights `[1, 1, 1, 16]`, or the level's perceptual weights.
+fn ks_cell_params(level: Bc7Level, perceptual: bool) -> (Bc7Params, encoders_sys::Bc7Tune) {
+    let p = Bc7Params {
+        level,
+        perceptual,
+        exact_opaque: false,
+    };
+    let tune = encoders_sys::Bc7Tune {
+        weights: (!perceptual).then_some([1, 1, 1, 16]),
+        ..encoders_sys::Bc7Tune::default()
+    };
+    (p, tune)
+}
+
 /// The blocks of `flat_alpha_blocks(FLAT_ALPHA_SEED, 252, None)` (in its 64-block calls) that were mode 4 at rotation 0
 /// and decoded alpha off 252 at veryfast and fast, perceptual, on every path before patch 0005's KS, and stay mode 4 at
 /// rotation 0 there after it: the first 8 of 14 (all 14 stay; Note LR, LR22).
@@ -1865,11 +1892,12 @@ const KS_WITNESSES: &[usize] = &[19, 29, 47, 69, 99, 101, 131, 171];
 /// Patch 0005, KS: a block whose mode-4 scalar is one value v started mode 4's alpha search at la = ha = (v + 2) >> 2,
 /// which the refit cannot move (every selector 0), so without the uber grid (ultrafast, veryfast and fast) alpha 252
 /// decoded 255, though codes 62 and 63 at index weight 21 decode 252. Mode 4 now also scores the closest code pair from
-/// a table. On `flat_alpha_blocks` at alpha 252, every output that is mode 4 at rotation 0 decodes alpha within the
-/// table's best error for its index width (`ks_best_errors`), at veryfast and fast, linear (weights 1, 1, 1, 16) and
-/// perceptual, raw, on every path; `KS_WITNESSES` must still be mode 4 at rotation 0 in the perceptual cells. Outputs
-/// in another mode or rotated are counted, not asserted: KS adds a mode-4 candidate, it does not decide the mode
-/// (Note LR, LR22).
+/// a table. "Exactly" means at the table's best error for the output's index width (`ks_best_errors`: exact but for
+/// five values at 2-bit indices). On `flat_alpha_blocks` at alpha 252, at veryfast and fast, raw, on every path, every
+/// output that is mode 4 at rotation 0 decodes alpha within that error, and `KS_WITNESSES` must still be mode 4 at
+/// rotation 0 in the perceptual cells. The linear cells (weights 1, 1, 1, 16) are counted only: none of their outputs
+/// is mode 4 at rotation 0, so they assert nothing today (ruling BC7-C26). Outputs in another mode or rotated are
+/// counted, not asserted: KS adds a mode-4 candidate, it does not decide the mode (Note LR, LR22).
 #[test]
 fn a_constant_alpha_decodes_exactly() {
     let best = ks_best_errors();
@@ -1877,15 +1905,7 @@ fn a_constant_alpha_decodes_exactly() {
     let mut bad = vec![];
     for level in [Bc7Level::Veryfast, Bc7Level::Fast] {
         for perceptual in [false, true] {
-            let p = Bc7Params {
-                level,
-                perceptual,
-                exact_opaque: false,
-            };
-            let tune = encoders_sys::Bc7Tune {
-                weights: (!perceptual).then_some([1, 1, 1, 16]),
-                ..encoders_sys::Bc7Tune::default()
-            };
+            let (p, tune) = ks_cell_params(level, perceptual);
             for target in paths() {
                 let out = tuned_on(&blocks, p, tune, target);
                 let (taken, missed, other) = constant_alpha_cell(&out, 252, &best);
@@ -1909,25 +1929,26 @@ fn a_constant_alpha_decodes_exactly() {
     );
 }
 
-/// Patch 0005, KS, for every constant: `flat_alpha_blocks` at each alpha v from 1 to 254, at veryfast, linear (weights
-/// 1, 1, 1, 16) and perceptual, raw, on every path. Every output that is mode 4 at rotation 0 decodes alpha within the
-/// table's best error for its index width; other outputs are counted (Note LR, LR22).
+/// The fewest blocks of `every_constant_alpha_value_decodes_exactly`'s perceptual cells that must be mode 4 at rotation
+/// 0 on each path, so the test cannot pass by leaving that path: 4,123 of 65,024 were with patch 0005's KS (Note LR,
+/// LR22).
+const KS_PERCEPTUAL_FLOOR: usize = 4_000;
+
+/// Patch 0005, KS, for every constant: `flat_alpha_blocks` at each alpha v from 1 to 254, at veryfast, raw, on every
+/// path. Every output that is mode 4 at rotation 0 decodes alpha within the table's best error for its index width
+/// ("exactly", as in `a_constant_alpha_decodes_exactly`), and each perceptual cell holds at least `KS_PERCEPTUAL_FLOOR`
+/// such outputs. The linear cells (weights 1, 1, 1, 16) are counted only: none of their outputs is mode 4 at rotation
+/// 0 (ruling BC7-C26). Each cell prints its counts and the values none of whose blocks is mode 4 at rotation 0 (Note
+/// LR, LR22).
 #[test]
 fn every_constant_alpha_value_decodes_exactly() {
     let best = ks_best_errors();
     let mut bad = vec![];
     for perceptual in [false, true] {
-        let p = Bc7Params {
-            level: Bc7Level::Veryfast,
-            perceptual,
-            exact_opaque: false,
-        };
-        let tune = encoders_sys::Bc7Tune {
-            weights: (!perceptual).then_some([1, 1, 1, 16]),
-            ..encoders_sys::Bc7Tune::default()
-        };
+        let (p, tune) = ks_cell_params(Bc7Level::Veryfast, perceptual);
         for target in paths() {
-            let (mut taken, mut other, mut missed, mut values) = (0, 0, 0, vec![]);
+            let (mut taken, mut other, mut missed) = (0, 0, 0);
+            let (mut off_values, mut none_taken) = (vec![], vec![]);
             for v in 1..=254u8 {
                 let out = tuned_on(
                     &flat_alpha_blocks(FLAT_ALPHA_SEED, v, None),
@@ -1940,16 +1961,28 @@ fn every_constant_alpha_value_decodes_exactly() {
                 other += o;
                 missed += m.len();
                 if !m.is_empty() {
-                    values.push(v);
+                    off_values.push(v);
+                }
+                if t.is_empty() {
+                    none_taken.push(v);
                 }
             }
             let what = format!("perceptual={perceptual} {target:?}");
-            println!("{what}: mode 4 rotation 0 {taken}, other {other}, missed {missed}");
+            println!(
+                "{what}: mode 4 rotation 0 {taken}, other {other}, missed {missed}; {} values with no mode 4 \
+                 rotation 0 block: {none_taken:?}",
+                none_taken.len()
+            );
             if missed > 0 {
                 bad.push(format!(
                     "{what}: {missed} blocks off at {} values, first {:?}",
-                    values.len(),
-                    &values[..values.len().min(12)]
+                    off_values.len(),
+                    &off_values[..off_values.len().min(12)]
+                ));
+            }
+            if perceptual && taken < KS_PERCEPTUAL_FLOOR {
+                bad.push(format!(
+                    "{what}: only {taken} blocks mode 4 at rotation 0 (floor {KS_PERCEPTUAL_FLOOR})"
                 ));
             }
         }
@@ -1957,6 +1990,86 @@ fn every_constant_alpha_value_decodes_exactly() {
     assert!(
         bad.is_empty(),
         "constant alpha off its best code pair at veryfast:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// The seed of `ks3_block`.
+const KS3_SEED: u32 = 0x3B17_2026;
+
+/// Block `k` (from 0) of a seeded class whose mode-4 outputs use 3-bit alpha indices: an LCG seeded with `KS3_SEED`
+/// (`s = s * 1664525 + 1013904223`, each draw `s >> 24`); per block an alpha 1 + d % 254, then two colours whose R,
+/// G and B are 5-bit codes expanded as the decoder does, then per texel one of the two (d % 2). Mode 4's colour then
+/// needs no more than its 2-bit indices, so the 3-bit alpha half (tried first) keeps the tie.
+fn ks3_block(k: usize) -> [[u8; 4]; 16] {
+    let mut s = KS3_SEED;
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        s >> 24
+    };
+    let e5 = |c: u32| ((c << 3) | (c >> 2)) as u8;
+    let mut block = [[0u8; 4]; 16];
+    for _ in 0..=k {
+        let a = 1 + (next() % 254) as u8;
+        let cols: [[u8; 3]; 2] = std::array::from_fn(|_| std::array::from_fn(|_| e5(next() % 32)));
+        block = std::array::from_fn(|_| {
+            let c = cols[(next() % 2) as usize];
+            [c[0], c[1], c[2], a]
+        });
+    }
+    block
+}
+
+/// The `ks3_block` indices of `three_bit_alpha_takes_its_exact_pair`: blocks 0 to 7.
+const KS3_WITNESSES: std::ops::Range<usize> = 0..8;
+
+/// Patch 0005, KS, at 3-bit alpha indices (the `g_ks_mode4_pair3` table; `flat_alpha_blocks` reaches only the 2-bit
+/// one): each `ks3_block` witness, encoded alone at ultrafast, veryfast and fast (no uber grid, so KS is the only route
+/// to the pair), linear (the plain call and weights 1, 1, 1, 16) and perceptual, raw, on every path, must be mode 4 at
+/// rotation 0 with 3-bit alpha indices (index-mode bit clear; a block that left that path proves nothing, so that fails
+/// too) and decode its alpha exactly, as every value has an exact pair at 3 bits (Note LR, LR22).
+#[test]
+fn three_bit_alpha_takes_its_exact_pair() {
+    let mut bad = vec![];
+    for k in KS3_WITNESSES {
+        let block = ks3_block(k);
+        let v = block[0][3];
+        for level in [Bc7Level::Ultrafast, Bc7Level::Veryfast, Bc7Level::Fast] {
+            for (perceptual, weights) in [(false, None), (false, Some([1, 1, 1, 16])), (true, None)]
+            {
+                let p = Bc7Params {
+                    level,
+                    perceptual,
+                    exact_opaque: false,
+                };
+                let tune = encoders_sys::Bc7Tune {
+                    weights,
+                    ..encoders_sys::Bc7Tune::default()
+                };
+                for target in paths() {
+                    let out = tuned_block(&block, p, tune, target);
+                    let what = format!(
+                        "ks3 block {k} (alpha {v}) {level:?} perceptual={perceptual} {weights:?} \
+                         {target:?}"
+                    );
+                    if out[0].trailing_zeros() != 4 || out[0] >> 5 != 0 {
+                        bad.push(format!(
+                            "{what}: left mode 4 rotation 0 with 3-bit alpha (byte 0 {:#04x})",
+                            out[0]
+                        ));
+                        continue;
+                    }
+                    let a: Vec<u8> = decode(&out).iter().map(|d| d[3]).collect();
+                    if a.iter().any(|&x| x != v) {
+                        bad.push(format!("{what}: alpha decodes {a:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "3-bit alpha off its exact code pair:\n{}",
         bad.join("\n")
     );
 }

@@ -14,9 +14,10 @@
 //! 2026-11-25 when exact opaque became the channel guard's A (Note LR, LR17), and the veryfast and fast rows without
 //! perceptual weighting again that day when mode 4 gained the constant-scalar code pair (LR22; the smooth image's B is
 //! 128 throughout), over four deterministic 64x64 images (opaque colour, cutout, smooth alpha, normal-like) at every
-//! level, with and without perceptual weighting and exact opaque. `RECORDED_S1` pins a fifth image built to reach patch 0005's S1 shortcut. The first recording (2026-10-18,
-//! one hash per level) came from a Linux CPU's dispatch path and never matched a Windows machine. Run with
-//! `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change is intended (needs a DECISIONS note).
+//! level, with and without perceptual weighting and exact opaque. `RECORDED_S1` pins a fifth image built to reach patch
+//! 0005's S1 shortcut. The first recording (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and
+//! never matched a Windows machine. Run with `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded
+//! change is intended (needs a DECISIONS note).
 
 use encoders_sys::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
