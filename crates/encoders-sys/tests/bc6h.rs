@@ -1028,9 +1028,11 @@ fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
 ///
 /// The inputs are half codes h (UF16 value v = (h + 0.5) * 64 / 31, the centre of h's decode range) where the shipped
 /// rule and the nearest code differ, the nearest code is strict, and v is at least 4 UF16 units from both edges of that
-/// mismatch window: G from nearest codes 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too
-/// low). Four more blocks take the end codes: G with nearest code 0 (shipped 1) and B with nearest 1023 (shipped
-/// 1022).
+/// mismatch window. With the centred target the half codes with a strict mismatch have nearest codes 0..=370 where the
+/// shipped rule picks one too high and 669..=1023 where it picks one too low; the test takes G from nearest codes
+/// 8..=150 of the first and B from 870..=1015 of the second (a spread of codes clear of both ends). Four more blocks
+/// take the end codes: G with nearest code 0 (shipped 1, half codes 0x11 to 0x14) and B with nearest 1023 (shipped
+/// 1022, half codes 0x7BEA to 0x7BED).
 ///
 /// Not covered here, on purpose: a value midway between two codes (the kernel takes the lower, as `nearest_code`, but a
 /// tie is a knife edge that the encoder's float endpoint can fall either side of) and the delta modes 11 and 12 (an
@@ -1910,8 +1912,8 @@ fn collapsed_regions_take_a_bracketing_pair() {
 
 /// Q6's seeded blocks from index `i` (alpha 1.0): 4 to 8 exact-black texels (all channels 0) and the others one
 /// coloured value of luminance 0.5 to 20, scaled per texel by 0.6 to 1.0, a third of them with one channel exactly 0
-/// (as RGBE skies and suns have, so the lift in `bc6h_peak_retry` changes the block). Integer arithmetic and exact
-/// float scalings only, so the blocks are the same on every machine.
+/// (as RGBE skies and suns have, so the lift in `bc6h_peak_retry` changes the block). Integer arithmetic and
+/// deterministic f32 arithmetic (no contraction) only, so the blocks are the same on every machine.
 fn black_gate_block(i: u32) -> [[u16; 4]; 16] {
     let mut r = Lcg(i.wrapping_mul(0x9E37_79B1) ^ 0x85EB_CA6B);
     r.next();
@@ -2030,17 +2032,19 @@ fn search_black_gate_witnesses() {
 
 /// Witnesses from `search_black_gate_witnesses`: `black_gate_block` indices. On the objects before the Q6 fix each
 /// guarded under the `1e-6` floor and not under the relative one, and VeryslowPeak's bytes differed from Veryslow's on
-/// SSE2, AVX2 and AVX-512 (found on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25).
-/// Per black-texel count (4, 5, 6) the first hits: 19,872 of 65,536 blocks qualified, none with 7 or 8 black texels.
+/// SSE2, AVX2 and AVX-512 (found on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25). 19,872 of 65,536 blocks
+/// qualified, none with 7 or 8 black texels. The indices per black-texel count: 4 black texels 25 and 27, 5 black
+/// texels 17, 30 and 49, 6 black texels 11, 13 and 28.
 const BLACK_GATE_WITNESSES: &[u32] = &[25, 27, 17, 30, 49, 11, 13, 28];
 
 /// Q6 (Note LT): the peak gate should fire on a highlight, not on exact black. Each exact-black texel was floored at
 /// `1e-6` in the geometric mean and pulled it down by 13.8 / 16, so four to eight of them guarded a block with no
-/// highlight; an unguarded block encodes exactly as Veryslow (`peak_k = -1` returns early from every peak path). On
-/// each witness VeryslowPeak's bytes equal Veryslow's on every path in `paths()`, and the replication of the gate
-/// guards the block under the old floor and not under the new one (so a witness cannot pass because it is no longer
-/// guarded by the replication's own count). Skipped on an Intel CPU, like the pins: the witnesses were selected on
-/// the Ryzen's output (Note JC).
+/// highlight; an unguarded block encodes exactly as Veryslow (`peak_k = -1`: `bc6h_peak_guard` returns the plain
+/// error, `bc6h_peak_retry` runs no second search, and S4's prune applies as at Veryslow, where a guarded block is
+/// exempt from it). On each witness VeryslowPeak's bytes equal Veryslow's on every path in `paths()`, and the
+/// replication of the gate guards the block under the old floor and not under the new one (so a witness cannot pass
+/// because it is no longer guarded by the replication's own count). Skipped on an Intel CPU, like the pins: the
+/// witnesses were selected on the Ryzen's output (Note JC).
 #[test]
 fn exact_black_alone_does_not_guard_a_block() {
     if encoders_sys::skip_byte_pins() {
@@ -2265,10 +2269,11 @@ fn asymmetric_modes_try_the_better_wide_channel() {
 }
 
 /// astra #5's seeded blocks from index `i` (alpha 1.0): one to three "blue-zero sun" texels, each with one channel
-/// exactly 0 (the same channel in all of them, blue in half the blocks), its largest channel at half code 0x2800 to
-/// 0x33FF (0.031 to 0.25, below the 12-stop lift's normal range) and the others coloured below it; the other texels a
-/// darker sky whose largest channel is at least 7 stops (7 * 1024 half codes) under every sun texel's, a third of them
-/// with one channel exactly 0. Integer arithmetic only, so the blocks are the same on every machine.
+/// exactly 0 (the same channel in all of them, blue in about two thirds of the blocks), its largest channel at half
+/// code 0x2800 to 0x33FF (0.031 to 0.25, below the 12-stop lift's normal range; each sun texel lies 0 to 64 codes under
+/// the block's top, so secondary suns reach 0x27C0) and the others coloured below it; the other texels a darker sky
+/// whose largest channel is at least 7 stops (7 * 1024 half codes) under every sun texel's, a third of them with one
+/// channel exactly 0. Integer arithmetic only, so the blocks are the same on every machine.
 fn dim_sun(i: u32) -> [[u16; 4]; 16] {
     let mut r = Lcg(i.wrapping_mul(0x9E37_79B1) ^ 0xA5A5_1F3D);
     r.next();
@@ -2334,8 +2339,9 @@ fn peak_texel_ratio(px: &[[u16; 4]; 16], b: &[u8; 16]) -> f32 {
 }
 
 /// Records Task 23's search (`dim_sun`, `i in 0..1 << 16`, VeryslowPeak) for `DIM_SUN_WITNESSES`: for each index the
-/// gate replication guards, one line `<i> <peak texel ratio on each path in paths()>` in the file
-/// `SDC_BC6H_WITNESS_OUT` names (run it with `SDC_TEST_AVX512=1` so AVX-512 is included).
+/// gate replication guards, one line per path in `paths()` in the form the other witness searches write,
+/// `<path> VeryslowPeak <i> <hex bytes> <peak texel ratio>`, in the file `SDC_BC6H_WITNESS_OUT` names (run it with
+/// `SDC_TEST_AVX512=1` so AVX-512 is included).
 #[test]
 #[ignore = "record dim sun witnesses: run on the objects before the change, then after"]
 fn search_dim_sun_witnesses() {
@@ -2354,7 +2360,8 @@ fn search_dim_sun_witnesses() {
     )
     .unwrap();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
-    let mut lines: Vec<(u32, String)> = std::thread::scope(|s| {
+    // Per guarded index, one `<hex bytes> <ratio>` string per path in `targets` order.
+    let mut lines: Vec<(u32, Vec<String>)> = std::thread::scope(|s| {
         let jobs: Vec<_> = (0..threads)
             .map(|t| {
                 let targets = &targets;
@@ -2364,14 +2371,14 @@ fn search_dim_sun_witnesses() {
                         .filter_map(|i| {
                             let px = dim_sun(i);
                             dim_sun_guarded(&px).then(|| {
-                                let ratios: Vec<String> = targets
+                                let per_path: Vec<String> = targets
                                     .iter()
                                     .map(|&target| {
                                         let b = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
-                                        peak_texel_ratio(&px, &b).to_string()
+                                        format!("{} {}", hex::encode(b), peak_texel_ratio(&px, &b))
                                     })
                                     .collect();
-                                (i, format!("{i} {}", ratios.join(" ")))
+                                (i, per_path)
                             })
                         })
                         .collect::<Vec<_>>()
@@ -2381,8 +2388,16 @@ fn search_dim_sun_witnesses() {
         jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
     });
     lines.sort_unstable();
-    for (_, l) in &lines {
-        writeln!(file, "{l}").unwrap();
+    for (k, target) in targets.iter().enumerate() {
+        for (i, per_path) in &lines {
+            writeln!(
+                file,
+                "{target:?} {:?} {i} {}",
+                Bc6hLevel::VeryslowPeak,
+                per_path[k]
+            )
+            .unwrap();
+        }
     }
     file.flush().unwrap();
     println!("{} of {END} blocks are guarded", lines.len());
