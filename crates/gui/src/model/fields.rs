@@ -75,7 +75,7 @@ pub const GUARD_RGB_HOVER: &str = "On: where this channel is exactly 0 or exactl
 
 /// Help of the Channel guard row, on its label and its `?` (owner, BC7-O30): one guarded channel at a time, the
 /// priority order, and what a channel guarded flat at 255 costs another.
-pub const GUARD_HELP: &str = "Keeps a channel's flat 0 or 255 exact in BC7, such as G for metalness in an _rmaos. Tick the one channel you need exact: the design assumes one guarded channel at a time, and if you tick several you sort out the trade-offs yourself. When blocks clash, the priority is A, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.";
+pub const GUARD_HELP: &str = "Keeps a channel's flat 0 or 255 exact in BC7 where the encoder can, such as G for metalness in an _rmaos. Tick the one channel you need exact: the design assumes one guarded channel at a time, and if you tick several you sort out the trade-offs yourself. When blocks clash, the priority is A, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.";
 
 /// Why the A tick of a complex `_m` or an env mask written as BC7 cannot be turned off (`ALPHA-EXACT-OFF-M`).
 pub const GUARD_A_LOCK: &str = "this map keeps alpha 0 and 255 exact wherever the encoder can, and opaque alpha exactly 255: PGPatcher and ENB read it (ALPHA-EXACT-OFF-M)";
@@ -787,30 +787,43 @@ fn weighting_view(target: Target, job: &ResolvedJob, label: &'static str) -> Fie
     }
 }
 
-/// The Channel guard row's view: its value is the four ticks (R, G, B, A), and its provenance and edited mark come
-/// from the fields that are on, the highest priority first (A, G, B, R), else from the first field the row has a
-/// provenance for. Any of the four set in the texture's own entry marks it edited.
+/// The four ticks of the Channel guard row (R, G, B, A), read from the resolved profile; the one place both the view
+/// and the drawn row read them.
+pub fn guard_on(p: &Profile) -> [bool; 4] {
+    let g = &p.encoder.channel_guard;
+    [g.r, g.g, g.b, p.alpha.exact_opaque]
+}
+
+/// The Channel guard row's view: its value is the bc7e mask of the ticks (bit 0 R to bit 3 A, no allocation), and its
+/// provenance comes from the texture's own entry when any of the four is set there, else from the highest-priority
+/// field that is on (A, G, B, R), else from the first the row has one for. One string per call, as `weighting_view`.
 fn guard_view(target: Target, job: &ResolvedJob, label: &'static str) -> FieldView {
-    let prov = |f: &str| job.provenance.get(f).map(ToString::to_string);
-    let g = &job.profile.encoder.channel_guard;
-    let on = [g.r, g.g, g.b, job.profile.alpha.exact_opaque];
-    let decided_by = (0..4)
-        .rev()
-        .find(|&i| on[i])
-        .and_then(|i| prov(GUARD_FIELDS[i].0))
-        .or_else(|| GUARD_FIELDS.iter().find_map(|f| prov(f.0)));
+    let on = guard_on(&job.profile);
+    let prov_of = |i: usize| job.provenance.get(GUARD_FIELDS[i].0);
+    let edited = (0..4).any(|i| prov_of(i) == Some(&Provenance::ProjectFile));
+    let provenance = if edited {
+        "project_file".to_string()
+    } else {
+        (0..4)
+            .rev()
+            .find(|&i| on[i])
+            .and_then(prov_of)
+            .or_else(|| (0..4).find_map(prov_of))
+            .map_or_else(|| "builtin".into(), ToString::to_string)
+    };
     FieldView {
         field: CHANNEL_GUARD,
         label,
-        value: Value::from(on.to_vec()),
-        provenance: decided_by.unwrap_or_else(|| "builtin".into()),
-        edited: GUARD_FIELDS
-            .iter()
-            .any(|f| prov(f.0).as_deref() == Some("project_file")),
+        value: Value::from(
+            on.iter()
+                .enumerate()
+                .fold(0u8, |m, (i, &b)| m | u8::from(b) << i),
+        ),
+        provenance,
+        edited,
         lock: field_lock(target, &job.profile, CHANNEL_GUARD),
     }
 }
-
 /// Provenance as a reader sees it.
 pub fn provenance_text(p: &str) -> String {
     match p {

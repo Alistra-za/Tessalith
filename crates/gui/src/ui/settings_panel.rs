@@ -10,10 +10,11 @@ use crate::model::code_text::{
 use crate::model::fields::{
     auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_help,
     field_hidden, field_views, filter_option_lock, filter_view, format_choices, group_of,
-    guard_channel_lock, levels_view, mips_on, provenance_text, weighting_option_lock, FieldView,
-    BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD, EXR_STRAIGHT_HOVER,
-    FILTER_OPTIONS, GUARD_A_HOVER, GUARD_FIELDS, GUARD_LETTERS, GUARD_RGB_HOVER, HELPER_HELP,
-    NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    guard_channel_lock, guard_on, levels_view, mips_on, provenance_text, weighting_option_lock,
+    FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD,
+    EXR_STRAIGHT_HOVER, FILTER_OPTIONS, GUARD_A_HOVER, GUARD_FIELDS, GUARD_LETTERS,
+    GUARD_RGB_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING,
+    WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::labels::{
@@ -1023,8 +1024,7 @@ fn row_label(ui: &mut egui::Ui, cx: &Ctx, label: &str, help: Option<&str>) -> eg
 /// while a tooltip shows).
 fn guard_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     let p = &cx.job.profile;
-    let g = &p.encoder.channel_guard;
-    let on = [g.r, g.g, g.b, p.alpha.exact_opaque];
+    let on = guard_on(p);
     row_label(ui, cx, f.label, field_help(CHANNEL_GUARD));
     control_slot(ui, control_width(ui, cx), |ui| {
         ui.scope(|ui| {
@@ -1035,7 +1035,7 @@ fn guard_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Actio
             }
             for (i, (field, name)) in GUARD_FIELDS.into_iter().enumerate() {
                 let letter = GUARD_LETTERS[i];
-                let lock = guard_channel_lock(p, letter.chars().next().unwrap_or(' '));
+                let lock = (i == 3).then(|| guard_channel_lock(p, 'A')).flatten();
                 let mut b = on[i];
                 let r = ui.add_enabled(lock.is_none(), egui::Checkbox::new(&mut b, letter));
                 // The box's text is the letter alone; a screen reader hears "Channel guard A".

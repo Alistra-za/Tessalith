@@ -144,7 +144,7 @@ One row per type: the first column is the id `sdc.toml` and the command line use
 | `hdr_sky` | HDR sky | Hdr | BC6H | n/a | | no | `cs` only. |
 
 - **Default alpha is a start.** Analysis decides: no alpha channel resolves to `remove`; alpha is opaque when its minimum is 251 or more, or when fewer than 0.1 % of texels are below 251 and no connected group of them is larger than 16 texels (stray noise from a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes answer.
-- **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
+- **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`). In the GUI it is the **A** tick of [Channel guard](GUI-Texture-Panel.md#channel-guard).
 - **HDR formats** (BC6H, RGBA16F) exist only under `cs`; an emissive becomes BC6H only from a float source above 1.0.
 
 ### sRGB or UNORM

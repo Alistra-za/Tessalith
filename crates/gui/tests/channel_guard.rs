@@ -124,13 +124,27 @@ fn the_a_tick_writes_exact_opaque_and_removes_a_hand_written_a() {
     assert_eq!(own(m, A), Some(json!(true)));
     assert_eq!(own(m, "encoder.channel_guard.a"), None);
     let job = m.item(ROCK).unwrap().job.as_ref().unwrap();
+    // A plan that failed on two disagreeing keys would leave the earlier job, whose A is off.
     assert!(job.profile.alpha.exact_opaque, "the plan took the A");
-    assert!(
-        !job.warnings
-            .iter()
-            .any(|w| w.code == engine::codes::Code::CfgInvalid),
-        "no clash of the two keys"
-    );
+}
+
+/// A bulk Set of the A row goes through `set_field` too (bulk.rs `apply_bulk_edit`), so it removes the alias.
+#[test]
+fn a_bulk_a_removes_a_disagreeing_hand_written_a() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_file_value(ROCK, "encoder.channel_guard.a", &json!(false));
+    idle(&mut m);
+    let op = sdc_gui::model::bulk::BulkOp::Set(json!(true));
+    m.apply_bulk_edit(&[ROCK.to_string()], A, op);
+    idle(&mut m);
+    assert_eq!(own(&m, A), Some(json!(true)));
+    assert_eq!(own(&m, "encoder.channel_guard.a"), None);
+    let job = m.item(ROCK).unwrap().job.as_ref().unwrap();
+    assert!(job.profile.alpha.exact_opaque);
 }
 
 #[test]
@@ -239,6 +253,13 @@ fn the_tick_hovers_are_the_approved_texts() {
         ("Channel guard G", RGB_HOVER),
         ("Channel guard B", RGB_HOVER),
     ] {
+        // R, G and B share one text: take the pointer away first, so the previous tooltip cannot answer for this one.
+        h.hover_at(eframe::egui::pos2(1.0, 1.0));
+        h.run();
+        assert!(
+            h.query_by_label(text).is_none(),
+            "{name}: a tooltip is left"
+        );
         h.get_by_role_and_label(Role::CheckBox, name).hover();
         h.run();
         assert!(h.query_by_label(text).is_some(), "{name}: {text}");
@@ -271,4 +292,85 @@ fn the_row_help_carries_the_o30_texts() {
 fn alpha_x8_names_its_cost_in_two_db() {
     let o = WEIGHTING_OPTIONS.iter().find(|o| o.0 == "alpha8").unwrap();
     assert_eq!(o.2, ALPHA8_HOVER);
+}
+
+/// Minor 1 of the review: a G ticked on a complex material (whose A is on from the preset) shows as from this
+/// texture's settings, and the row's ↺, drawn by the panel, clears it.
+#[test]
+fn the_row_reads_the_own_entry_and_its_reset_button_clears_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    m.set_field(ROCK, "subtype", json!("complex_material"));
+    idle(&mut m);
+    let mut h = harness(m, ROCK);
+    click(&mut h, "Channel guard G");
+    let job = h.state().item(ROCK).unwrap().job.clone().unwrap();
+    let view = sdc_gui::model::fields::field_views(h.state().target, &job)
+        .into_iter()
+        .find(|v| v.field == ROW)
+        .unwrap();
+    assert!(view.edited);
+    assert_eq!(view.provenance, "project_file");
+    let tick = h
+        .get_by_role_and_label(Role::CheckBox, "Channel guard G")
+        .rect();
+    h.query_all_by_label("↺")
+        .find(|n| (n.rect().center().y - tick.center().y).abs() < 4.0)
+        .expect("the Channel guard row's ↺")
+        .click();
+    h.step();
+    idle(h.state_mut());
+    h.run();
+    assert_eq!(own(h.state(), "encoder.channel_guard.g"), None);
+}
+
+/// The lock covers both `_m` types, and only A while on, on BC7.
+#[test]
+fn the_lock_covers_envmask_and_only_a_on_bc7() {
+    use engine::config::{Subtype, Target};
+    let reg = engine::presets::PresetRegistry::builtin().unwrap();
+    for (st, locked) in [
+        (Subtype::Envmask, true),
+        (Subtype::ComplexMaterial, true),
+        (Subtype::Diffuse, false),
+    ] {
+        let mut p = reg.base_profile(Target::Cs, st);
+        p.format = Format::Bc7;
+        p.alpha.exact_opaque = true;
+        let lock = sdc_gui::model::fields::guard_channel_lock(&p, 'A');
+        assert_eq!(lock.is_some(), locked, "{st:?}");
+        assert_eq!(sdc_gui::model::fields::guard_channel_lock(&p, 'G'), None);
+        p.alpha.exact_opaque = false;
+        assert_eq!(sdc_gui::model::fields::guard_channel_lock(&p, 'A'), None);
+    }
+}
+
+/// Edits off (a plan in flight): the grid is disabled, so the ticks are too. (settings_panel.rs `group`, Note FK3.)
+#[test]
+fn the_ticks_are_off_while_a_plan_runs() {
+    let d = tempfile::tempdir().unwrap();
+    let m = ready(d.path());
+    let mut h = harness(m, ROCK);
+    h.state_mut()
+        .set_field(ROCK, "encoder.effort", json!("max"));
+    h.run();
+    for name in TICKS {
+        let n = h.get_by_role_and_label(Role::CheckBox, name);
+        assert!(n.accesskit_node().is_disabled(), "{name}");
+    }
+    idle(h.state_mut());
+}
+
+/// The four ticks fit the control column, and so the strip's 140 px control (`COMPACT_CONTROL_W`).
+#[test]
+fn the_four_ticks_fit_the_control_columns() {
+    use sdc_gui::ui::settings_panel::{COMPACT_CONTROL_W, CONTROL_W};
+    let d = tempfile::tempdir().unwrap();
+    let m = ready(d.path());
+    let h = harness(m, ROCK);
+    let first = h.get_by_role_and_label(Role::CheckBox, TICKS[0]).rect();
+    let last = h.get_by_role_and_label(Role::CheckBox, TICKS[3]).rect();
+    let span = last.max.x - first.min.x;
+    assert!(span <= COMPACT_CONTROL_W, "{span} px of ticks");
+    assert!(span <= CONTROL_W);
 }

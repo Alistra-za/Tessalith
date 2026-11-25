@@ -10,7 +10,7 @@ The centre column groups a texture's settings as Type, Alpha, Mipmaps, Size and 
 
 ## Changing a setting
 
-Every row writes one key of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields). Hover the **?** beside a row, or its label, for what the row does; it still works while the row is greyed out.
+Every row writes keys of the texture's `[files]` entry. The values each key takes are in [Project config](Project-Config.md#fields). Hover the **?** beside a row, or its label, for what the row does; it still works while the row is greyed out.
 
 | Row | Key |
 |---|---|
@@ -50,10 +50,10 @@ I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps 
 
 ### Channel guard
 
-*Channel guard* keeps a flat 0 or 255 exact in BC7. It shows only for BC7, in Compression, as four ticks. Tick the one channel your map needs exact, such as G for the metalness of an `_rmaos`. <!-- D:LR8 -->
+*Channel guard* keeps a flat 0 or 255 exact in BC7 where the encoder can. It shows only for BC7, in Compression, as four ticks. Tick the one channel your map needs exact, such as G on an `_rmaos`. <!-- D:LR8 -->
 
 - **R**, **G**, **B** (`encoder.channel_guard.r`, `.g`, `.b`): where the channel is exactly 0 or exactly 255 across part of a block, BC7 keeps that value wherever the encoder can.
-- **A** (`alpha.exact_opaque`, which `encoder.channel_guard.a` also sets): fully opaque 4x4 blocks decode as exactly 255, and blocks whose alpha is 0 throughout as exactly 0. Where only part of a block is 0 or 255, the encoder keeps it when it can, ahead of R, G and B.
+- **A** (`alpha.exact_opaque`): fully opaque 4x4 blocks decode as exactly 255, and blocks whose alpha is 0 throughout as exactly 0. Where only part of a block is 0 or 255, the encoder keeps it when it can, ahead of R, G and B.
 - Guard one channel at a time. The design assumes one, and if you tick several you sort out the trade-offs yourself. When they clash, A wins, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.
 - A complex `_m` and a BC7 env mask keep **A** on, because PGPatcher and ENB read their alpha: the tick is greyed while on (`ALPHA-EXACT-OFF-M`).
 
