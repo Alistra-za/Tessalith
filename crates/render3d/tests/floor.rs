@@ -267,6 +267,134 @@ fn blended_shapes_draw_over_the_floor() {
     }
 }
 
+/// The built-in plane (±32 in X and Z, normal +Y) turned so its normal is +Z, scaled 3×, at height `z`.
+fn flat(id: u32, z: f32) -> ParsedShape {
+    ParsedShape {
+        id: ShapeId(id),
+        name: format!("flat{id}").into(),
+        mesh: std::sync::Arc::new(render3d::builtin_mesh(Builtin::Plane)),
+        world: [
+            [3.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, -3.0, 0.0],
+            [0.0, 3.0, 0.0, z],
+        ],
+        material: opaque(),
+    }
+}
+
+/// Final review: the floor never paints over the model. A flat mesh lying at the model's lowest Z shares the floor's
+/// depth, and an opaque sphere that writes no depth leaves none for the floor to fail against; in both, forward and
+/// deferred, every model pixel is what the same frame draws without the floor (its creation made to fail, so the
+/// sun fit and everything else stay).
+#[test]
+fn the_floor_never_covers_the_model() {
+    type Model = fn() -> Vec<ParsedShape>;
+    let cases: [(&str, Model); 2] = [
+        ("a flat mesh at the lowest Z", || {
+            vec![ball(0, 1.0, 0.0), flat(1, -40.0)]
+        }),
+        ("an opaque sphere writing no depth", || {
+            let mut s = ball(0, 1.0, 0.0);
+            s.material.slsf2 &= !1; // ZBuffer_Write clear
+            vec![s, ball(1, 0.01, -40.0)]
+        }),
+    ];
+    let mut covering = vec![];
+    for (what, shapes) in cases {
+        for deferred in [false, true] {
+            let (c1, c2, c3) = (
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+            );
+            let s = scene(0.5, true);
+            let mut with = renderer(c1.path(), deferred, shapes());
+            let mut without = renderer(c2.path(), deferred, shapes());
+            without.set_fault(Some((render3d::Fault::Floor, "no floor")));
+            let (a, b) = (
+                with.render(&s, W, H).unwrap(),
+                without.render(&s, W, H).unwrap(),
+            );
+            assert_eq!(without.backdrop_error(), Some("no floor"));
+            let empty = renderer(c3.path(), deferred, vec![])
+                .render(&s, W, H)
+                .unwrap();
+            // The model's pixels: where the frame without the floor is not the bare background.
+            let model: Vec<usize> = (0..(W * H) as usize)
+                .filter(|&i| b[i * 4..i * 4 + 3] != empty[i * 4..i * 4 + 3])
+                .collect();
+            assert!(model.len() > 2000, "{what}: {} model pixels", model.len());
+            let covered = model
+                .iter()
+                .filter(|&&i| a[i * 4..i * 4 + 3] != b[i * 4..i * 4 + 3])
+                .count();
+            println!(
+                "{what}, deferred {deferred}: {covered} of {} model pixels changed",
+                model.len()
+            );
+            if covered > 0 {
+                covering.push(format!("{what}, deferred {deferred}: {covered}"));
+            }
+            // The floor is drawn: it shows beside the model.
+            assert!(
+                (0..(W * H) as usize).any(|i| a[i * 4..i * 4 + 3] != b[i * 4..i * 4 + 3]),
+                "{what}, deferred {deferred}: the floor is drawn"
+            );
+        }
+    }
+    assert!(
+        covering.is_empty(),
+        "the floor covers model pixels: {covering:?}"
+    );
+}
+
+/// Final review: a shape revealed after the load (hidden in the NIF, shown through `set_material`) counts for the
+/// floor and the sun's fit: the floor moves down to its lowest point, and under Solid (where the fit is the model's
+/// sphere alone) the fit grows to hold it. The camera's framing (`bounds`) stays.
+#[test]
+fn a_revealed_lower_shape_moves_the_floor_and_the_sun_fit() {
+    let mut low = ball(2, 0.01, -80.0);
+    low.material.hidden = true;
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(
+        cache.path(),
+        false,
+        vec![ball(0, 1.0, 0.0), ball(1, 0.01, -40.0), low],
+    );
+    let gradient = scene(0.5, true);
+    let solid = Scene {
+        background: Background::Solid([0.0; 3]),
+        ..scene(0.5, true)
+    };
+    let low_point = [0.0, 0.0, -80.32];
+    let holds = |fit: ([f32; 3], f32)| {
+        let d = [0, 1, 2].map(|k| fit.0[k] - low_point[k]);
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= fit.1
+    };
+    r.render(&gradient, W, H).unwrap();
+    let floor = r.last_floor().expect("a floor");
+    assert!((floor.centre[2] - FLOOR_Z).abs() < 1e-3, "{floor:?}");
+    r.render(&solid, W, H).unwrap();
+    assert!(
+        !holds(r.last_sun_fit().unwrap()),
+        "the hidden shape is outside"
+    );
+    let framing = r.bounds();
+    assert_eq!(
+        r.set_material(ShapeId(2), opaque(), &|_| None).map(|_| ()),
+        Ok(())
+    );
+    r.render(&gradient, W, H).unwrap();
+    let floor = r.last_floor().expect("a floor");
+    assert!((floor.centre[2] - low_point[2]).abs() < 1e-3, "{floor:?}");
+    r.render(&solid, W, H).unwrap();
+    assert!(
+        holds(r.last_sun_fit().unwrap()),
+        "the fit holds the revealed shape"
+    );
+    assert_eq!(r.bounds(), framing, "the camera's framing stays");
+}
+
 /// Review Focus 5: from below the floor plane nothing of the floor is drawn: every pixel the sphere does not cover is
 /// the backdrop (the frame of nothing loaded), and the sphere shows.
 #[test]

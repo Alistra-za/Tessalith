@@ -2330,11 +2330,12 @@ fn render_loop(
                 result = r.render(&scene, w, h);
             }
         }
-        if let Some(e) = r.backdrop_error() {
-            if backdrop_told.as_deref() != Some(e) {
-                backdrop_told = Some(e.to_owned());
-                send(V3Reply::Notice(format!("Background unavailable: {e}")));
-            }
+        if let Some(e) = notice_once(&mut backdrop_told, r.backdrop_error()) {
+            send(V3Reply::Notice(format!("Background unavailable: {e}")));
+        }
+        // Note IH4: the renderer tells each shadow resource it could not make once, and draws without those shadows.
+        if let Some(e) = r.take_shadow_error() {
+            send(V3Reply::Notice(format!("Shadows unavailable: {e}")));
         }
         // A features change can turn deferred off during render (late fallback).
         if let Some(e) = r.deferred_error() {
@@ -2377,9 +2378,38 @@ fn render_loop(
     }
 }
 
+/// A failure that holds for as long as its cause does (`Renderer::backdrop_error`): `now` the first frame it shows,
+/// or when it changes; nothing while it stays. Once it clears, `told` forgets it, so the same failure later is told
+/// again.
+fn notice_once(told: &mut Option<String>, now: Option<&str>) -> Option<String> {
+    match now {
+        None => {
+            *told = None;
+            None
+        }
+        Some(e) if told.as_deref() == Some(e) => None,
+        Some(e) => {
+            *told = Some(e.to_owned());
+            Some(e.to_owned())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Final review: a background error is told once while it holds, a new one is told, and after a frame without
+    /// one (another background, or a fixed failure) the same error is told again.
+    #[test]
+    fn a_background_notice_is_told_again_after_its_error_clears() {
+        let mut told = None;
+        assert_eq!(notice_once(&mut told, Some("a")).as_deref(), Some("a"));
+        assert_eq!(notice_once(&mut told, Some("a")), None);
+        assert_eq!(notice_once(&mut told, Some("b")).as_deref(), Some("b"));
+        assert_eq!(notice_once(&mut told, None), None);
+        assert_eq!(notice_once(&mut told, Some("b")).as_deref(), Some("b"));
+    }
 
     /// Trace-debug #14: a swap or edit that fails because the device is gone is replayed by the rebuild.
     #[test]

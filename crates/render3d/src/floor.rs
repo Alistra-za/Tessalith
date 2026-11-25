@@ -3,8 +3,9 @@
 //! floor colour times the light the sun, the ambient from above and the point light bring, with the shadow maps read
 //! directly through [`crate::shadow`]'s lookups (the same PCF as the mask).
 //!
-//! The quad is drawn after the opaque shapes and CS's deferred composite (which runs over every pixel the opaque
-//! pass left, floor pixels too), before the blended shapes: it tests and writes depth, blended over the backdrop.
+//! The quad is background: drawn after the light passes and before the opaque shapes, blended over the gradient,
+//! testing the pre-pass's depth and writing none, so every model pixel is drawn over it and CS's deferred composite
+//! passes its pixels through as it does the gradient's.
 use crate::background::{compile_source, gradient_floor_linear};
 use crate::device::Gpu;
 use crate::scene::{dot, sub, Scene, View};
@@ -17,7 +18,7 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11RasterizerState, ID3D11VertexShader, D3D11_BIND_CONSTANT_BUFFER, D3D11_BLEND_DESC,
     D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BLEND_SRC_ALPHA,
     D3D11_BUFFER_DESC, D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_COMPARISON_LESS_EQUAL, D3D11_CULL_NONE,
-    D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_FILL_SOLID, D3D11_RASTERIZER_DESC,
+    D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILL_SOLID, D3D11_RASTERIZER_DESC,
     D3D11_RENDER_TARGET_BLEND_DESC, D3D11_USAGE_DEFAULT,
 };
 
@@ -140,9 +141,11 @@ impl Floor {
             MiscFlags: 0,
             StructureByteStride: 0,
         };
+        // Tests the pre-pass's depth (where the model is in front, nothing to draw) and writes none: the floor is
+        // background, so every model pixel drawn after it wins, and a deferred frame's composite sees depth 1 there.
         let dd = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
-            DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ALL,
+            DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ZERO,
             DepthFunc: D3D11_COMPARISON_LESS_EQUAL,
             ..Default::default()
         };
@@ -157,8 +160,8 @@ impl Floor {
             BlendOpAlpha: D3D11_BLEND_OP_ADD,
             RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
         };
-        // No depth clip: the quad reaches past the camera's far plane (4 radii out), where its depth clamps to 1 and
-        // the model still wins; a clipped rim would be an edge.
+        // No depth clip: the quad reaches past the camera's far plane (4 radii out), where its depth clamps to 1; a
+        // clipped rim would be an edge.
         let rd = D3D11_RASTERIZER_DESC {
             FillMode: D3D11_FILL_SOLID,
             CullMode: D3D11_CULL_NONE,
@@ -199,7 +202,8 @@ impl Floor {
 
     /// Draws the quad into the bound target (viewport, render target RT0 alone and depth already set), lit by
     /// `scene`'s lights and, with `maps`, shadowed by them. `encode`: the readback does not sRGB-encode. Restores
-    /// the default states, the triangle-list topology and the shadow registers.
+    /// the default blend and depth states and the triangle-list topology and unbinds the shadow registers; its
+    /// rasteriser stays bound (every shape binds its own).
     pub fn draw(
         &self,
         gpu: &Gpu,

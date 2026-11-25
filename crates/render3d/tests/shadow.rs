@@ -560,6 +560,106 @@ fn a_shadow_flip_reaches_a_draw_whose_edit_is_still_compiling() {
     assert_eq!(shadow_bits(&r, 1), (1 << 13) | (1 << 14));
 }
 
+/// Final review: a shadow mask that cannot be made does not fail the frame. The frame draws unshadowed, the error is
+/// told once, and the mask is not tried again at that size; a new size tries again (and tells its own failure), and
+/// one that succeeds shadows again.
+#[test]
+fn a_mask_that_cannot_be_made_leaves_the_frame_unshadowed_and_is_told_once() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), false, floor_and_ball());
+    let off = r.render(&scene(false), W, H).unwrap();
+    r.set_fault(Some((render3d::Fault::ShadowMask, "out of memory")));
+    let on = r
+        .render(&scene(true), W, H)
+        .expect("the frame still renders");
+    let under = px(&r, &scene(true), W, H, UNDER);
+    assert!(lum(&off, W, under) > 20.0);
+    assert!(
+        close(rgb(&off, W, under), rgb(&on, W, under), 1),
+        "unshadowed: {:?} vs {:?}",
+        rgb(&off, W, under),
+        rgb(&on, W, under)
+    );
+    assert!(r.take_shadow_error().unwrap().contains("out of memory"));
+    r.render(&scene(true), W, H).unwrap();
+    assert_eq!(r.take_shadow_error(), None, "told once");
+    assert_eq!(r.fault_hits(), 1, "not tried again at the same size");
+    r.render(&scene(true), 200, 200).unwrap();
+    assert_eq!(r.fault_hits(), 2, "a new size tries again");
+    assert!(r.take_shadow_error().is_some(), "and tells its failure");
+    r.set_fault(None);
+    let (w, h) = (192, 160);
+    let off = r.render(&scene(false), w, h).unwrap();
+    let on = r.render(&scene(true), w, h).unwrap();
+    let under = px(&r, &scene(true), w, h, UNDER);
+    assert!(
+        lum(&on, w, under) < 0.6 * lum(&off, w, under),
+        "a size that succeeds shadows again"
+    );
+}
+
+/// Final review: the point light's cube that cannot be made leaves the point light unshadowed and the sun's shadow
+/// as it was; a sun map that cannot be made leaves the frame unshadowed.
+#[test]
+fn a_light_map_that_cannot_be_made_turns_off_only_its_shadows() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), false, floor_and_ball());
+    let mut s = point_scene(true, [60.0, 0.0, 80.0]);
+    s.sun_brightness = 1.0;
+    r.set_fault(Some((render3d::Fault::PointCube, "no cube")));
+    r.render(&s, W, H).expect("the frame still renders");
+    assert!(r.has_shadow_maps() && !r.has_point_shadow_map());
+    let (_, _, mask) = r.read_shadow_mask().unwrap();
+    assert!(
+        (0..(W * H) as usize).any(|i| mask[i * 4] < 128),
+        "the sun still shadows"
+    );
+    assert!(
+        (0..(W * H) as usize).all(|i| mask[i * 4 + 1] == 255),
+        "the point light does not"
+    );
+    assert!(r.take_shadow_error().unwrap().contains("no cube"));
+    r.render(&s, W, H).unwrap();
+    assert_eq!(
+        (r.fault_hits(), r.take_shadow_error()),
+        (1, None),
+        "kept for that size"
+    );
+
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), false, floor_and_ball());
+    let off = r.render(&scene(false), W, H).unwrap();
+    r.set_fault(Some((render3d::Fault::SunMap, "no sun map")));
+    let on = r
+        .render(&scene(true), W, H)
+        .expect("the frame still renders");
+    let under = px(&r, &scene(true), W, H, UNDER);
+    assert!(close(rgb(&off, W, under), rgb(&on, W, under), 1));
+    assert!(!r.has_shadow_maps());
+    assert!(r.take_shadow_error().unwrap().contains("no sun map"));
+}
+
+/// Final review: a removed device stays an error (the GUI rebuilds on it), and nothing is kept: the next frame tries
+/// again.
+#[test]
+fn a_removed_device_while_making_shadows_is_still_an_error() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), false, floor_and_ball());
+    let off = r.render(&scene(false), W, H).unwrap();
+    let lost = format!("{}: hung (shadow mask)", render3d::device::DEVICE_REMOVED);
+    r.set_fault(Some((render3d::Fault::ShadowMask, &lost)));
+    let e = r.render(&scene(true), W, H).unwrap_err();
+    assert!(e.starts_with(render3d::device::DEVICE_REMOVED), "{e}");
+    assert_eq!(r.take_shadow_error(), None);
+    r.set_fault(None);
+    let on = r.render(&scene(true), W, H).unwrap();
+    let under = px(&r, &scene(true), W, H, UNDER);
+    assert!(
+        lum(&on, W, under) < 0.6 * lum(&off, W, under),
+        "not kept as failed"
+    );
+}
+
 /// A blended plane under the opaque sphere keeps its shadows-off colour. It blends SrcAlpha / InvSrcAlpha at alpha 1,
 /// so it hides the opaque plane below it; that plane is shadowed at the same pixel, so the mask there is dark: a
 /// blended shape that read it would darken.

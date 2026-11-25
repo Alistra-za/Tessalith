@@ -241,3 +241,26 @@ fn a_new_environment_replaces_the_backdrop() {
     assert!(p[0] > 150 && p[1] < 80 && p[2] < 80, "the new image: {p:?}");
     assert_eq!(r.backdrop_error(), None);
 }
+
+/// Final review: the error reported is the active background's. An HDRI backdrop that failed does not hide a floor
+/// failure under Gradient, and a Solid frame reports none; back on the HDRI its own error shows again.
+#[test]
+fn the_backdrop_error_is_the_active_backgrounds() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = sphere(cache.path());
+    let mut s = Scene::neutral();
+    s.background = Background::Hdri(test_env());
+    r.set_fault(Some((render3d::Fault::Backdrop, "no backdrop")));
+    r.render(&s, 48, 32).unwrap();
+    assert_eq!(r.backdrop_error(), Some("no backdrop"));
+    r.set_fault(Some((render3d::Fault::Floor, "no floor")));
+    let hdri = std::mem::replace(&mut s.background, Background::Gradient);
+    r.render(&s, 48, 32).unwrap();
+    assert_eq!(r.backdrop_error(), Some("no floor"));
+    s.background = Background::grey(0.5);
+    r.render(&s, 48, 32).unwrap();
+    assert_eq!(r.backdrop_error(), None);
+    s.background = hdri;
+    r.render(&s, 48, 32).unwrap();
+    assert_eq!(r.backdrop_error(), Some("no backdrop"));
+}
