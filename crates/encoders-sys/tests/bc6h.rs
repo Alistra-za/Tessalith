@@ -1050,7 +1050,8 @@ fn one_region_endpoints_take_the_nearest_code() {
 /// Eight texels of half bits `(7936, 7936, 0)` and eight of `(0, 0, 15872)` give UF16 colours `(16384, 16384, 0)` and
 /// `(0, 0, 32768)`. The scaled covariance has every row summing to 0 exactly and absorbs the `1e-6` eps, so the first
 /// power iteration gives the zero vector and `RSQRT(0) * 0` is NaN (survey section 11). Whether the shipped objects
-/// reach it depends on how ISPC lowers `/stats[14]`, which differs by CPU target.
+/// reach it depends on how ISPC lowers `/stats[14]`, which differs by CPU target. Only the AVX-512 object reaches the
+/// zero vector, so only a run with `SDC_TEST_AVX512=1` sees a regression.
 ///
 /// The two colours go in alternate texels and in two halves of the block. At every level on every path, every
 /// decoded channel of every texel lies within 256 half codes of its source. Mode 10's interior codes rebuild at

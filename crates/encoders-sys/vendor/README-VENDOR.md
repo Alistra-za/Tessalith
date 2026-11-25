@@ -182,13 +182,14 @@ docs/research/encoder-benchmark.md, "Mutations and proofs").
 ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 2026-11-25) applies on top of patches
 0001, 0003, 0004 and 0006. It is produced with `git diff --output=<patch> 9c452929 -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
-built with both compilers as before. These fixes change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
-measured images; per-level counts in docs/research/encoder-benchmark.md). PCA re-seed: `compute_axis` renormalises the
+built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
+measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of the pins,
+`identity.json` or the measured images. PCA re-seed: `compute_axis` renormalises the
 power-iteration vector every second iteration; when its squared norm is exactly 0 (a covariance whose rows sum to 0 with
 the epsilon absorbed) it now restarts from the unit vector of the channel with the largest covariance diagonal (the
 first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm takes the old path, so only such
 blocks change bytes. Test: `pca_survives_a_zero_covariance_row_sum`. It changes BC6H bytes on a path where the
-zero vector was reached (the Ryzen's AVX-512 object: Veryfast to Basic); both helpers `block_pca_axis` and
+zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast to Basic); both helpers `block_pca_axis` and
 `get_pca_bound` share it (Note LT).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
