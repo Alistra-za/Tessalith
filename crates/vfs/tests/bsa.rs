@@ -1,4 +1,3 @@
-use std::io::Write;
 use vfs::bsa::Bsa;
 
 /// Builds a v105 BSA with the given (folder, file, bytes, compress) entries; flags 0x1|0x2 (+0x4 if all compressed).
@@ -52,9 +51,12 @@ fn build(entries: &[(&str, &str, &[u8], bool)], embed_names: bool) -> Vec<u8> {
             }
             if *comp {
                 blob.extend((bytes.len() as u32).to_le_bytes());
-                let mut enc = lz4_flex::frame::FrameEncoder::new(vec![]);
-                enc.write_all(bytes).unwrap();
-                blob.extend(enc.finish().unwrap());
+                lzzzz::lz4f::compress_to_vec(
+                    bytes,
+                    &mut blob,
+                    &lzzzz::lz4f::Preferences::default(),
+                )
+                .unwrap();
             } else {
                 blob.extend(*bytes);
             }
@@ -135,6 +137,82 @@ fn real_bsa() {
         .unwrap();
     let bytes = bsa.read(nif).unwrap();
     assert!(nif::scan::scan(&bytes).is_ok(), "{}", nif.norm);
+}
+
+/// Timing and checksum of the whole decode path: `SDC_BSA=<a stock SSE archive> cargo test --release -p vfs
+/// --test bsa -- --ignored --nocapture stock_archive_reads_every_entry`. The checksum must not change with the decoder.
+#[test]
+#[ignore = "needs SDC_BSA (a stock SSE archive); timing"]
+fn stock_archive_reads_every_entry() {
+    use std::hash::{Hash, Hasher};
+    let Ok(path) = std::env::var("SDC_BSA") else {
+        eprintln!("skipped: SDC_BSA is not set");
+        return;
+    };
+    let bsa = Bsa::open(std::path::Path::new(&path)).unwrap();
+    let round = || {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut total = 0u64;
+        for e in &bsa.entries {
+            let bytes = bsa.read(e).unwrap();
+            total += bytes.len() as u64;
+            bytes.hash(&mut h);
+        }
+        total.hash(&mut h);
+        (total, h.finish())
+    };
+    let first = round(); // warm-up: also warms the file cache
+    let mut times = vec![];
+    for _ in 0..5 {
+        let t = std::time::Instant::now();
+        let r = round();
+        times.push(t.elapsed());
+        assert_eq!(r, first, "rounds disagree");
+    }
+    times.sort();
+    eprintln!(
+        "entries={} median={:?} bytes={} checksum={:016x}",
+        bsa.entries.len(),
+        times[2],
+        first.0,
+        first.1
+    );
+}
+
+/// An entry whose compressed frame is damaged reads as `Corrupt`, never as wrong bytes.
+#[test]
+fn garbled_lz4_frame_is_corrupt() {
+    let payload: Vec<u8> = (0..6000u32)
+        .flat_map(|i| format!("vertex {} normal {};", i % 97, i % 13).into_bytes())
+        .collect();
+    let (_d, p, good) = hostile(&[("meshes", "a.nif", &payload, true)]);
+    // single folder "meshes": the file record is at 68, its offset at +12; no embedded names
+    let off = u32::from_le_bytes(good[80..84].try_into().unwrap()) as usize;
+    let size = u32::from_le_bytes(good[76..80].try_into().unwrap()) as usize & 0x3FFF_FFFF;
+    let frame = off + 4; // after the u32 original size
+    for what in [
+        "header checksum byte",
+        "frame cut to half",
+        "declared size one short",
+    ] {
+        let mut b = good.clone();
+        match what {
+            "header checksum byte" => b[frame + 6] ^= 0xFF,
+            "frame cut to half" => {
+                // shrink the entry: the size field and the file end move together
+                let half = (size - 4) / 2;
+                put(&mut b, 76, (4 + half) as u32 | 0x4000_0000);
+                b.truncate(frame + half);
+            }
+            _ => put(&mut b, off, payload.len() as u32 - 1),
+        }
+        std::fs::write(&p, &b).unwrap();
+        let bsa = Bsa::open(&p).unwrap();
+        assert!(
+            matches!(bsa.read(&bsa.entries[0]), Err(vfs::VfsError::Corrupt(_))),
+            "{what}"
+        );
+    }
 }
 
 fn hostile(
