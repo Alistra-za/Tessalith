@@ -2004,6 +2004,155 @@ fn exact_black_alone_does_not_guard_a_block() {
     );
 }
 
+/// astra #6's scenario from index `i` (alpha 1.0): two channels whose spans are within 10 % of each other, both over
+/// the single window of an asymmetric family and under its doubled one, and a third channel near constant, each
+/// centred near half 0x3800 (1.0). Even `i` takes mode 2's family, odd `i` mode 6's: `get_span` is 204.8 and 3686.4
+/// UF16 units, about 99 and 1786 half codes (times 31 / 64), doubled about 198 and 3571. The wider channel has 2 to 4
+/// texels at its two ends and the rest within a sixteenth of its span of the middle; the other is split evenly, eight
+/// texels at each end, on a two-region partition with eight texels a side. Widening the wider channel (the only
+/// variant before astra #6) leaves all 16 texels of the split channel outside its window; widening the split channel
+/// leaves only the outliers outside. Up to 4 half codes of noise, inward from each end. Integer arithmetic only, so
+/// the blocks are the same on every machine.
+fn wide_pair(i: u32) -> [[u16; 4]; 16] {
+    let mut r = Lcg(i.wrapping_mul(0x9E37_79B9) ^ 0x510E_527F);
+    r.next();
+    // The wider span is over 10 / 9 of the single window, so the other (at least 90 % of it) is over it too.
+    let (lo_span, hi_span) = if i.is_multiple_of(2) {
+        (112, 196)
+    } else {
+        (1986, 3569)
+    };
+    let span_a = r.range(lo_span, hi_span) as i64;
+    let span_b = span_a * r.range(90, 99) as i64 / 100;
+    let even = TWO_REGION_MASKS.iter().filter(|m| m.count_ones() == 8);
+    let mask = *even.clone().nth(r.next() as usize % even.count()).unwrap();
+    // The channels' roles: outliers, split, near constant.
+    let roles = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ][r.range(0, 5) as usize];
+    let n_out = r.range(2, 4) as usize;
+    let mut order: [usize; 16] = std::array::from_fn(|t| t);
+    for t in (1..16).rev() {
+        order.swap(t, r.next() as usize % (t + 1));
+    }
+    let noise = r.range(0, 4) as i64;
+    let mut planes = [[0u16; 16]; 3];
+    for (role, &channel) in roles.iter().enumerate() {
+        let mid = 0x3800 + r.range(0, 0x200) as i64 - 0x100;
+        let plane = &mut planes[channel];
+        match role {
+            0 => {
+                let (lo, hi) = (mid - span_a / 2, mid - span_a / 2 + span_a);
+                for (rank, &t) in order.iter().enumerate() {
+                    plane[t] = match rank {
+                        0 => lo,
+                        1 => hi,
+                        _ if rank < n_out => {
+                            if r.next().is_multiple_of(2) {
+                                lo + r.range(0, noise as u32) as i64
+                            } else {
+                                hi - r.range(0, noise as u32) as i64
+                            }
+                        }
+                        _ => mid + r.range(0, (span_a / 8) as u32) as i64 - span_a / 16,
+                    } as u16;
+                }
+            }
+            1 => {
+                let lo = mid - span_b / 2;
+                for (t, v) in plane.iter_mut().enumerate() {
+                    let dither = r.range(0, noise as u32) as i64;
+                    *v = if (mask >> t) & 1 == 1 {
+                        lo + span_b - dither
+                    } else {
+                        lo + dither
+                    } as u16;
+                }
+            }
+            _ => {
+                for v in plane.iter_mut() {
+                    *v = (mid + r.range(0, noise as u32) as i64) as u16;
+                }
+            }
+        }
+    }
+    texels_of(&planes)
+}
+
+/// Records Task 22's search (`wide_pair`, `i in 0..1 << 16`, Veryslow and VeryslowPeak) for `WIDE_CHANNEL_WITNESSES`.
+#[test]
+#[ignore = "record wide-channel witnesses: run on the objects before the change, then after"]
+fn search_wide_channel_witnesses() {
+    let levels = [Bc6hLevel::Veryslow, Bc6hLevel::VeryslowPeak];
+    record_witness_search("wide_pair", wide_pair, 1 << 16, &levels);
+}
+
+/// Witnesses from `search_wide_channel_witnesses`: (`wide_pair` index, level, the bytes the objects before the astra #6
+/// fix wrote on SSE2, AVX2 and AVX-512, in `IspcTarget::ALL` order). Recorded on Windows on an AMD Ryzen 7 9800X3D,
+/// 2026-11-25. Five are mode 2's family (even index) and three mode 6's (odd); after the fix each writes a variant of
+/// its family that widens a channel other than the widest. The three paths agree on them.
+#[rustfmt::skip]
+const WIDE_CHANNEL_WITNESSES: &[(u32, Bc6hLevel, [[u8; 16]; 3])] = &[
+    (1038, Bc6hLevel::Veryslow, [
+        [0xa0, 0x38, 0xe7, 0x8e, 0x03, 0x63, 0x70, 0x00, 0x08, 0x62, 0x97, 0xe2, 0x24, 0x52, 0xe2, 0x24],
+        [0xa0, 0x38, 0xe7, 0x8e, 0x03, 0x63, 0x70, 0x00, 0x08, 0x62, 0x97, 0xe2, 0x24, 0x52, 0xe2, 0x24],
+        [0xa0, 0x38, 0xe7, 0x8e, 0x03, 0x63, 0x70, 0x00, 0x08, 0x62, 0x97, 0xe2, 0x24, 0x52, 0xe2, 0x24],
+    ]),
+    (19911, Bc6hLevel::Veryslow, [
+        [0x01, 0x07, 0x1d, 0x6c, 0x01, 0x80, 0x27, 0x00, 0x01, 0xe0, 0x07, 0xf0, 0x03, 0x00, 0x00, 0x20],
+        [0x01, 0x07, 0x1d, 0x6c, 0x01, 0x80, 0x27, 0x00, 0x01, 0xe0, 0x07, 0xf0, 0x03, 0x00, 0x00, 0x20],
+        [0x01, 0x07, 0x1d, 0x6c, 0x01, 0x80, 0x27, 0x00, 0x01, 0xe0, 0x07, 0xf0, 0x03, 0x00, 0x00, 0x20],
+    ]),
+    (29508, Bc6hLevel::Veryslow, [
+        [0xa2, 0x72, 0xc5, 0x39, 0xcf, 0x0c, 0x30, 0x00, 0xba, 0x6c, 0x40, 0x84, 0x3b, 0x76, 0x88, 0x10],
+        [0xa2, 0x72, 0xc5, 0x39, 0xcf, 0x0c, 0x30, 0x00, 0xba, 0x6c, 0x40, 0x84, 0x3b, 0x76, 0x88, 0x10],
+        [0xa2, 0x72, 0xc5, 0x39, 0xcf, 0x0c, 0x30, 0x00, 0xba, 0x6c, 0x40, 0x84, 0x3b, 0x76, 0x88, 0x10],
+    ]),
+    (29807, Bc6hLevel::Veryslow, [
+        [0xa1, 0x86, 0x1c, 0x6a, 0x01, 0x00, 0x00, 0x82, 0x10, 0x84, 0x83, 0xe3, 0x01, 0x3a, 0x9e, 0xff],
+        [0xa1, 0x86, 0x1c, 0x6a, 0x01, 0x00, 0x00, 0x82, 0x10, 0x84, 0x83, 0xe3, 0x01, 0x3a, 0x9e, 0xff],
+        [0xa1, 0x86, 0x1c, 0x6a, 0x01, 0x00, 0x00, 0x82, 0x10, 0x84, 0x83, 0xe3, 0x01, 0x3a, 0x9e, 0xff],
+    ]),
+    (48084, Bc6hLevel::Veryslow, [
+        [0x20, 0x39, 0xe4, 0xa0, 0x13, 0x08, 0x20, 0x00, 0x00, 0x0f, 0x80, 0x04, 0xc8, 0x01, 0x00, 0x4f],
+        [0x20, 0x39, 0xe4, 0xa0, 0x13, 0x08, 0x20, 0x00, 0x00, 0x0f, 0x80, 0x04, 0xc8, 0x01, 0x00, 0x4f],
+        [0x20, 0x39, 0xe4, 0xa0, 0x13, 0x08, 0x20, 0x00, 0x00, 0x0f, 0x80, 0x04, 0xc8, 0x01, 0x00, 0x4f],
+    ]),
+    (59874, Bc6hLevel::Veryslow, [
+        [0xc8, 0x39, 0xe4, 0xa2, 0x03, 0x08, 0x20, 0xd1, 0x01, 0x60, 0x07, 0x06, 0xee, 0xf8, 0xf0, 0x01],
+        [0xc8, 0x39, 0xe4, 0xa2, 0x03, 0x08, 0x20, 0xd1, 0x01, 0x60, 0x07, 0x06, 0xee, 0xf8, 0xf0, 0x01],
+        [0xc8, 0x39, 0xe4, 0xa2, 0x03, 0x08, 0x20, 0xd1, 0x01, 0x60, 0x07, 0x06, 0xee, 0xf8, 0xf0, 0x01],
+    ]),
+    (37930, Bc6hLevel::VeryslowPeak, [
+        [0x70, 0xb9, 0xe5, 0xa4, 0x03, 0x00, 0x00, 0x11, 0x48, 0xb2, 0x93, 0x1c, 0x01, 0x38, 0x10, 0x00],
+        [0x70, 0xb9, 0xe5, 0xa4, 0x03, 0x00, 0x00, 0x11, 0x48, 0xb2, 0x93, 0x1c, 0x01, 0x38, 0x10, 0x00],
+        [0x70, 0xb9, 0xe5, 0xa4, 0x03, 0x00, 0x00, 0x11, 0x48, 0xb2, 0x93, 0x1c, 0x01, 0x38, 0x10, 0x00],
+    ]),
+    (59765, Bc6hLevel::VeryslowPeak, [
+        [0x72, 0x8e, 0x35, 0xe8, 0x48, 0x1c, 0x70, 0x00, 0x84, 0x5c, 0x13, 0x9e, 0x28, 0xb9, 0x02, 0x05],
+        [0x72, 0x8e, 0x35, 0xe8, 0x48, 0x1c, 0x70, 0x00, 0x84, 0x5c, 0x13, 0x9e, 0x28, 0xb9, 0x02, 0x05],
+        [0x72, 0x8e, 0x35, 0xe8, 0x48, 0x1c, 0x70, 0x00, 0x84, 0x5c, 0x13, 0x9e, 0x28, 0xb9, 0x02, 0x05],
+    ]),
+];
+
+/// astra #6 (Note LT): at the slow levels an asymmetric family (modes 2-4, 6-8) also tries widening the channel whose
+/// single window clips the block least, when that clips less than widening the widest channel. On each witness the
+/// encode is certainly better than the bytes the objects before the fix wrote (`err_bounds`: E_hi now < E_lo before),
+/// on every path in `paths()`. Before the fix the encode is those bytes, so the test fails there. Skipped on an Intel
+/// CPU, like the pins: the bytes are the Ryzen's (Note JC).
+#[test]
+fn asymmetric_modes_try_the_better_wide_channel() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
+    assert_witnesses_certainly_better(WIDE_CHANNEL_WITNESSES, wide_pair);
+}
+
 #[test]
 #[should_panic(expected = "multiple of 4")]
 fn rejects_unaligned_width() {

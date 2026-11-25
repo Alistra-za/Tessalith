@@ -48,6 +48,7 @@
 // Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
 // Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
 // Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
+// astra #6    bc6h_test_mode at the slow levels also widens the other channel whose window clips less, when it clips less.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2851,13 +2852,17 @@ float bc6h_window_bound(bc6h_enc_state state[])
 // guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not apply there;
 // peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying: a skipped lane
 // is masked off, and the gang skips the call only when every lane skips.
-bool bc6h_mode_cannot_win(bc6h_enc_state state[])
+bool bc6h_mode_cannot_win(bc6h_enc_state state[], float bound) // sdc patch 0007 (astra #6): the test on a bound the caller computed.
 {
-    if (!state->slow_mode) return false;
-    float bound = bc6h_window_bound(state);
     bool prune = bound > state->best_err * (1 + 1e-4f) + 1; // sdc patch 0006 (S4): shortcut: nothing prunes before the first candidate only because best_err = 1e99 is +inf in float and this compares false under fast-math, as upstream's own first-candidate rule err < best_err relies on; switch to a finite sentinel if a compiler change ever makes the first mode prune
     if (state->peak_mode) { if (state->peak_k >= 0) prune = false; }
     return prune;
+}
+
+bool bc6h_mode_cannot_win(bc6h_enc_state state[])
+{
+    if (!state->slow_mode) return false;
+    return bc6h_mode_cannot_win(state, bc6h_window_bound(state)); // sdc patch 0007 (astra #6): the test moved to the overload above.
 }
 
 void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, uniform float margin)
@@ -2919,7 +2924,43 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
         
         state->q_span = span; // sdc patch 0006 (7a)
         state->q_wide = max_span_idx;
-        if (enc)
+        if (enc && state->slow_mode)
+        {
+            // sdc patch 0007 (astra #6): the widest channel is not always the one to widen. Two channels with close
+            // spans can both overflow the single window: widening the one with a few far outliers leaves the other's
+            // two clusters clipped, while widening that one clips only the outliers. At the slow levels each of the
+            // other two channels' variants gets the S4 window bound on its own bounds; on lanes where the lower one is
+            // below the widest variant's bound, that variant (mode + alt, bounds rebuilt for it) runs one extra
+            // two-region search and competes through best_err. The widest variant's bound is taken before the loop
+            // overwrites qbounds, and a lane S4 pruned for the widest variant can still qualify. Cost per family and
+            // block: two more bounds of 48 terms, plus the extra search on qualifying lanes (the gang skips it when no
+            // lane qualifies). Nothing reads mode or qbounds before the next bc6h_test_mode call sets its own.
+            bc6h_build_qbounds(state);
+            float wide_bound = bc6h_window_bound(state);
+            if (!bc6h_mode_cannot_win(state, wide_bound)) bc6h_enc_2p(state);
+            int alt = max_span_idx;
+            float alt_bound = wide_bound;
+            for (uniform int c = 0; c < 3; c++)
+            {
+                if (c != max_span_idx)
+                {
+                    compute_qbounds2(state, span, c);
+                    float bound = bc6h_window_bound(state);
+                    if (bound < alt_bound)
+                    {
+                        alt = c;
+                        alt_bound = bound;
+                    }
+                }
+            }
+            if (alt != max_span_idx)
+            {
+                state->mode = mode + alt;
+                compute_qbounds2(state, span, alt);
+                if (!bc6h_mode_cannot_win(state, alt_bound)) bc6h_enc_2p(state);
+            }
+        }
+        else if (enc)
         {
             bc6h_build_qbounds(state);
             if (!bc6h_mode_cannot_win(state)) bc6h_enc_2p(state); // sdc patch 0006 (S4)
