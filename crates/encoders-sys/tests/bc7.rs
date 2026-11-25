@@ -1679,3 +1679,128 @@ fn a_outranks_g_in_rotated_trials() {
         bad.join("\n")
     );
 }
+
+/// Block `k` of Task 6m2's synthetic class wp (`gen6_u`, seed 0x6A2B1): texel columns 0-1 (subset 0 of partition 0 in
+/// modes 1, 3 and 7) solid at (u(4), u(4), u(4), 1 + u(3)); columns 2-3 an RGBA ramp, each channel in turn v0 + s * t
+/// (v0 = u(200), s = 1 + u(4), t the texel, capped at 255).
+fn wp_block(k: usize) -> [[u8; 4]; 16] {
+    let mut x = 0x6A2B1u64;
+    let mut u = move |n: u64| gen6_u(&mut x, n);
+    let mut block = [[0u8; 4]; 16];
+    for _ in 0..=k {
+        let solid = [u(4), u(4), u(4), 1 + u(3)];
+        let mut ramps = [(0, 0); 4];
+        for r in &mut ramps {
+            *r = (u(200), 1 + u(4));
+        }
+        for (t, px) in block.iter_mut().enumerate() {
+            for c in 0..4 {
+                px[c] = if t % 4 < 2 {
+                    solid[c]
+                } else {
+                    (ramps[c].0 + ramps[c].1 * t as i32).min(255)
+                } as u8;
+            }
+        }
+    }
+    block
+}
+
+/// The smallest squared error bc7e's mode-7 one-colour table holds for value `v` at p-bit pair `p` (bit 1 the high
+/// endpoint's p-bit, bit 0 the low's), built as the kernel builds it: every pair of 5-bit endpoints with those p-bits,
+/// expanded to 8 bits, interpolated at the table's selector, index 1 (weight 21 of 64).
+fn mode7_one_colour_error(v: u8, p: u32) -> u32 {
+    let expand = |e: u32, pbit: u32| {
+        let x = ((e << 1) | pbit) << 2;
+        x | (x >> 6)
+    };
+    (0..32u32)
+        .flat_map(|l| (0..32u32).map(move |h| (l, h)))
+        .map(|(l, h)| {
+            let k = (expand(l, p & 1) * 43 + expand(h, p >> 1) * 21 + 32) >> 6;
+            k.abs_diff(u32::from(v)).pow(2)
+        })
+        .min()
+        .unwrap()
+}
+
+/// The smallest weighted error `sum w[c] * e[c]` that colour `col` packed by mode 7's one-colour table reaches over the
+/// four p-bit pairs: what the packer's p choice gives when it follows the weights.
+fn mode7_one_colour_best(col: [u8; 4], w: [u32; 4]) -> u32 {
+    (0..4)
+        .map(|p| {
+            (0..4)
+                .map(|c| w[c] * mode7_one_colour_error(col[c], p))
+                .sum()
+        })
+        .min()
+        .unwrap()
+}
+
+/// `sum w[c] * (d[c] - s[c])^2` for one texel.
+fn weighted_error(d: [u8; 4], s: [u8; 4], w: [u32; 4]) -> u32 {
+    (0..4)
+        .map(|c| w[c] * u32::from(d[c].abs_diff(s[c])).pow(2))
+        .sum()
+}
+
+/// Linear weights with alpha at 64 times the colour (an `alpha64` texture's weights at x1).
+const WP_WEIGHTS: [u32; 4] = [1, 1, 1, 64];
+
+/// The wp blocks (`wp_block`) whose output at basic with `WP_WEIGHTS`, each encoded alone, is mode 7 with the solid
+/// columns as subset 0 (partition 0), and whose solid texels decoded above the weighted best of the four p-bit pairs
+/// before patch 0005's WP, on every path: the first 8 such blocks of the class (3,159 of its 16,384 on AVX2; the same
+/// first 8 at x16, `[16, 16, 16, 1024]`). Their solid alpha is 1 or 3 (Note LR, LR20).
+const WP_MODE7_WITNESSES: &[usize] = &[2, 6, 19, 21, 22, 24, 30, 37];
+
+/// Patch 0005, WP: with linear weights that are not all equal, mode 7's one-colour packer chose its p-bits by the
+/// unweighted sum of the table entries' errors and weighed only the chosen pair, so with alpha at 64 times the colour a
+/// solid subset at (0, 0, 0, 1) decoded (0, 0, 0, 0), weighted error 64 per texel, where p = 2's (1, 1, 1, 1) costs 3.
+/// The packer now picks the pair with the smallest weighted error. Each witness must still be mode 7 with the solid
+/// columns as its own subset (a block that left that path proves nothing, so that fails too), and every solid texel
+/// decodes at weighted error at most the best p-bit pair's (`mode7_one_colour_best`), at basic on every path. Mode 6's
+/// packer got the same change, but no block was found where it shows, so it has no witness here (Note LR, LR20).
+#[test]
+fn one_colour_p_bits_follow_the_weights() {
+    let tune = encoders_sys::Bc7Tune {
+        weights: Some(WP_WEIGHTS),
+        ..encoders_sys::Bc7Tune::default()
+    };
+    let p = Bc7Params {
+        level: Bc7Level::Basic,
+        ..U5
+    };
+    let mut bad = vec![];
+    for &k in WP_MODE7_WITNESSES {
+        let block = wp_block(k);
+        let best = mode7_one_colour_best(block[0], WP_WEIGHTS);
+        for target in paths() {
+            let out = tuned_block(&block, p, tune, target);
+            let what = format!("wp block {k} {target:?}");
+            if out[0].trailing_zeros() != 7 || block_subsets(&out) != PARTITION2[0] {
+                bad.push(format!(
+                    "{what}: left mode 7 partition 0 (mode {}): re-pick from the wp class",
+                    out[0].trailing_zeros()
+                ));
+                continue;
+            }
+            let d = decode(&out);
+            let worst = (0..16)
+                .filter(|t| t % 4 < 2)
+                .map(|t| weighted_error(d[t], block[t], WP_WEIGHTS))
+                .max()
+                .unwrap();
+            if worst > best {
+                bad.push(format!(
+                    "{what}: solid {:?} decodes {:?}, weighted error {worst}, best p-bit pair {best}",
+                    block[0], d[0]
+                ));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "solid subsets not at the weighted best p-bit pair:\n{}",
+        bad.join("\n")
+    );
+}

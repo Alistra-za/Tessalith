@@ -35,6 +35,7 @@
 //   mode-6 p-bits; in alpha blocks a subset whose alpha is 0 or 255 throughout keeps it exactly where the kernel
 //   finds such a solution, above G, B and R; a rotated mode 4/5 trial charges source alpha at A's tier in whichever
 //   colour slot holds it.
+// - WP: with unequal linear weights the mode 6 and 7 one-colour packers choose their p-bits by the weighted error.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -1272,12 +1273,18 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 	if (pParams->m_exact_mask != 0)
 		xc_flags = pResults->m_exact_const;
 
+	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and perceptual:
+	// the table sum, unchanged)
+	const uniform bool wp_weighted = !pParams->m_perceptual && !((pParams->m_weights[0] == pParams->m_weights[1]) && (pParams->m_weights[0] == pParams->m_weights[2]) && (pParams->m_weights[0] == pParams->m_weights[3]));
 	for (uniform uint32_t p = (pParams->m_force_pbit1 ? 3 : 0); p < 4; p++)
 	{
 		uniform uint32_t hi_p = p >> 1;
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error;
+		if (wp_weighted) // sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+#pragma ignore warning(perf)
+			err = pParams->m_weights[0] * g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error + pParams->m_weights[1] * g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error + pParams->m_weights[2] * g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error + pParams->m_weights[3] * g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error;
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
 		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
@@ -1348,12 +1355,18 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 	if (pParams->m_exact_mask != 0)
 		xc_flags = pResults->m_exact_const;
 
+	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and perceptual:
+	// the table sum, unchanged)
+	const uniform bool wp_weighted = !pParams->m_perceptual && !((pParams->m_weights[0] == pParams->m_weights[1]) && (pParams->m_weights[0] == pParams->m_weights[2]) && (pParams->m_weights[0] == pParams->m_weights[3]));
 	for (uniform uint32_t p = 0; p < 4; p++)
 	{
 		uniform uint32_t hi_p = p >> 1;
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error;
+		if (wp_weighted) // sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+#pragma ignore warning(perf)
+			err = pParams->m_weights[0] * g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error + pParams->m_weights[1] * g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error + pParams->m_weights[2] * g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error + pParams->m_weights[3] * g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error;
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
 		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
