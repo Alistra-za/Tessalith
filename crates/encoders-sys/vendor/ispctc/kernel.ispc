@@ -2629,7 +2629,7 @@ bool bc6h_mode_cannot_win(bc6h_enc_state state[])
 {
     if (!state->slow_mode) return false;
     float bound = bc6h_window_bound(state);
-    bool prune = bound > state->best_err * (1 + 1e-4f) + 1;
+    bool prune = bound > state->best_err * (1 + 1e-4f) + 1; // sdc patch 0006 (S4): shortcut: nothing prunes before the first candidate only because best_err = 1e99 is +inf in float and this compares false under fast-math, as upstream's own first-candidate rule err < best_err relies on; switch to a finite sentinel if a compiler change ever makes the first mode prune
     if (state->peak_mode) { if (state->peak_k >= 0) prune = false; }
     return prune;
 }

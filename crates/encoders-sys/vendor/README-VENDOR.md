@@ -169,15 +169,16 @@ region's endpoints once) was tried and dropped: a hoisted reciprocal and a per-t
 (`encode_versions`' `hdr_sky.dds` and the 22 measured images at every level, from the one-region path at Veryfast on),
 while the pins and the random strips stayed equal, so it is not in the patch (Note LT). S4 prune: at Slow, Veryslow and
 VeryslowPeak, `bc6h_test_mode` computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum
-over the 16 texels and 3 channels of each texel channel's squared distance to
-`[unpack_to_uf16(qbounds[p]), unpack_to_uf16(qbounds[4 + p])]`. Every endpoint a candidate uses is clamped to `qbounds`
-before it is unpacked and each decoded value lies between its two endpoints, so the bound is below every candidate's
-error. A lane skips the mode's encode when the bound exceeds `best_err * (1 + 1e-4) + 1` (a candidate replaces the best
-only on a strictly lower error; the slack covers float summation order), never in a guarded block (peak mode with
-`peak_k >= 0`, scored against the unlifted block); the gang skips the call only when every lane skips. A scratch build
-that asserted the bound against each encoded mode's best error fired no assert (15,922,981 lane encodes of the 22
-measured images at the three slow levels on AVX2, 3,735,259 skipped; the random strips on SSE2, AVX2 and AVX-512).
-BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512.
+over the 16 texels and 3 channels of each texel channel's squared distance to the window
+`[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p], epb)]`, unpacked at the mode's endpoint bits. Every
+endpoint a candidate uses is clamped to `qbounds` before it is unpacked and each decoded value lies between its two
+endpoints, so the bound is below every candidate's error. A lane skips the mode's encode when the bound exceeds
+`best_err * (1 + 1e-4) + 1` (a candidate replaces the best only on a strictly lower error; the slack covers float
+summation order), never in a guarded block (peak mode with `peak_k >= 0`, scored against the unlifted block); the gang
+skips the call only when every lane skips. A scratch build that asserted the bound against each encoded mode's best
+error fired no assert (15,922,981 lane encodes of the 22 measured images at the three slow levels on AVX2, 3,735,259
+skipped; `random_blocks_encode_at_every_level_on_every_path` on SSE2, AVX2 and AVX-512). BC6H bytes unchanged: the
+pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
