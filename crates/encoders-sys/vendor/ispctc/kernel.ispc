@@ -2612,7 +2612,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
 
     // sdc patch 0004: keep the best of the first quantisation and every refinement (upstream submitted the last).
-    // Each pass still refits from the previous pass's indices, so the result is never worse than upstream's.
+    // sdc patch 0007 (astra #4): each pass refits with the decoder's weights, not upstream's; the best-of keeps the first quantisation, so the result is never worse than it.
     float best_err = err;
     int best_qep[8];
     uint32 best_qblock[2];

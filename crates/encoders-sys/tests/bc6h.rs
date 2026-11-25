@@ -1250,16 +1250,38 @@ fn refit_blocks(i: u32) -> [[u16; 4]; 16] {
 
 /// Writes `<path> <level> <i> <hex bytes> <E_lo> <E_hi>` (`err_bounds` of the output) for `blocks(i)`, `i in 0..end`,
 /// encoded one block at a time (the witness tests' call) at each of `levels` on every path in `paths()`, to the file
-/// `SDC_BC6H_WITNESS_OUT` names; with the variable unset it says so and writes nothing.
-fn record_witness_search(blocks: fn(u32) -> [[u16; 4]; 16], end: u32, levels: &[Bc6hLevel]) {
+/// `SDC_BC6H_WITNESS_OUT` names; with the variable unset it says so and writes nothing. The first line,
+/// `# commit <git describe --dirty> input <name> 0..<end> levels <levels>`, names the objects and the input set, and
+/// each path and level's lines are appended as soon as they are done, so an interrupted run keeps them.
+fn record_witness_search(
+    name: &str,
+    blocks: fn(u32) -> [[u16; 4]; 16],
+    end: u32,
+    levels: &[Bc6hLevel],
+) {
     use std::fmt::Write as _;
+    use std::io::Write as _;
     let Some(path) = std::env::var_os("SDC_BC6H_WITNESS_OUT") else {
         eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
         return;
     };
+    let commit = std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty", "--abbrev=8"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map_or("unknown".to_string(), |o| {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        });
+    let mut file = std::fs::File::create(&path).unwrap();
+    writeln!(
+        file,
+        "# commit {commit} input {name} 0..{end} levels {levels:?}"
+    )
+    .unwrap();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
     let start = std::time::Instant::now();
-    let mut text = String::new();
     for target in paths() {
         for &level in levels {
             let chunks: Vec<String> = std::thread::scope(|s| {
@@ -1284,14 +1306,14 @@ fn record_witness_search(blocks: fn(u32) -> [[u16; 4]; 16], end: u32, levels: &[
                     .collect();
                 jobs.into_iter().map(|j| j.join().unwrap()).collect()
             });
-            text.extend(chunks);
+            file.write_all(chunks.concat().as_bytes()).unwrap();
+            file.flush().unwrap();
             eprintln!(
-                "{target:?} {level:?}: {end} blocks, {:.1} s",
+                "{target:?} {level:?}: {end} blocks written, {:.1} s since the start",
                 start.elapsed().as_secs_f64()
             );
         }
     }
-    std::fs::write(&path, text).unwrap();
 }
 
 /// Records Task 15's search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
@@ -1299,13 +1321,14 @@ fn record_witness_search(blocks: fn(u32) -> [[u16; 4]; 16], end: u32, levels: &[
 #[ignore = "record refit witnesses: run on the objects before the change, then after"]
 fn search_refit_witnesses() {
     let levels = [Bc6hLevel::Fast, Bc6hLevel::Basic, Bc6hLevel::Veryslow];
-    record_witness_search(refit_blocks, 1 << 16, &levels);
+    record_witness_search("refit_blocks", refit_blocks, 1 << 16, &levels);
 }
 
 /// Witnesses from `search_refit_witnesses`: (`refit_blocks` index, level, the bytes the objects before the refit fix
 /// wrote on SSE2, AVX2 and AVX-512, in `IspcTarget::ALL` order). Recorded on Windows on an AMD Ryzen 7 9800X3D,
-/// 2026-11-25. Two are one-region ramps (58198, 28394: the one-region refit), the rest two-region outputs (the
-/// two-region refit) at Fast, Basic and Veryslow.
+/// 2026-11-25. Before the fix 58198, 28394 and 48010 wrote a one-region mode (11) and the other five a two-region mode;
+/// after it 58198 and 28394 stay one-region (the one-region refit) and 48010 writes a two-region mode, so both refits
+/// are covered, at Fast, Basic and Veryslow.
 #[rustfmt::skip]
 const REFIT_WITNESSES: &[(u32, Bc6hLevel, [[u8; 16]; 3])] = &[
     (40309, Bc6hLevel::Basic, [

@@ -198,10 +198,10 @@ BC6H bytes at all six levels on SSE2, AVX2 and AVX-512 (the 18 pins, `identity.j
 image). astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_enc_2p_list` calls a BC6H-only fork,
 `bc6h_opt_endpoints`, that fits index q at the decoder's weight `table[q] / 64` (`get_unquant_table`) instead of
 `q / (levels - 1)`, with the determinant from the exact integer form `n * Sww - Sw * Sw` (a zero determinant flattens to
-the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no longer called. Test:
-`refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and VeryslowPeak on SSE2, AVX2
-and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those levels); Veryfast, which
-has no refit, keeps its bytes.
+the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no longer
+called. Test: `refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and VeryslowPeak
+on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those levels);
+Veryfast, which has no refit, keeps its bytes.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
