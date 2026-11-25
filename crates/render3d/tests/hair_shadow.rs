@@ -366,7 +366,8 @@ fn no_reader_shapes() -> Vec<ParsedShape> {
 /// f9639a84 (before Note GX); re-pinned in Note IH2 when the reflected environment changed from the bundled studio
 /// HDRI to the procedural one of the ambient (the deferred composite and the forward env registers read it), the
 /// old values being d3cddc82... (forward) and 7d1cef7a... (deferred). That the pre-pass changes nothing for a frame
-/// without a depth reader is held by the `last_prepass_draws` and `has_depth_copy` asserts below. WARP, not the
+/// without a depth reader is held by the `last_prepass_draws` and `has_depth_copy` asserts below; byte-identity to
+/// that base is no longer checked. WARP, not the
 /// default GPU, so the bytes do not depend on the adapter or driver; a Windows update that changes WARP's rasteriser
 /// changes them too.
 const NO_READER_SHA256: [(bool, &str); 2] = [

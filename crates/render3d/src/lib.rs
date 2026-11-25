@@ -71,7 +71,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16_UINT;
 
 /// What an env cube was built from: the HDRI's `Arc` (a `Weak`, so its address is not reused while it is the key) or
-/// the ambient bits for the procedural environment; plus the `env_yaw` bits it was turned by.
+/// the ambient bits for the procedural environment; plus the bits of the yaw it was turned by (`yaw_of`).
 struct EnvKey {
     source: EnvSource,
     yaw: u32,
@@ -96,7 +96,16 @@ impl EnvKey {
         };
         EnvKey {
             source,
-            yaw: scene.env_yaw.to_bits(),
+            yaw: EnvKey::yaw_of(scene).to_bits(),
+        }
+    }
+
+    /// The turn the cube is built with: an HDRI turns with `env_yaw`; the procedural environment stays unturned,
+    /// as the solid background's ambient does (and a sun drag rebuilds nothing).
+    fn yaw_of(scene: &Scene) -> f32 {
+        match scene.background {
+            Background::Hdri(_) => scene.env_yaw,
+            Background::Solid(_) => 0.0,
         }
     }
 
@@ -2485,11 +2494,12 @@ impl Renderer {
                     &procedural
                 }
             };
+            let env_yaw = EnvKey::yaw_of(scene);
             let built = match &mut self.prefilter {
                 Some((_, Ok(p))) => {
-                    composite::EnvMaps::new_gpu(&self.gpu, p, img, self.env_size, scene.env_yaw)
+                    composite::EnvMaps::new_gpu(&self.gpu, p, img, self.env_size, env_yaw)
                 }
-                _ => composite::EnvMaps::new(&self.gpu, img, self.env_size, scene.env_yaw),
+                _ => composite::EnvMaps::new(&self.gpu, img, self.env_size, env_yaw),
             };
             match built {
                 Ok(e) => {

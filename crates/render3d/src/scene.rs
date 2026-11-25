@@ -122,8 +122,8 @@ pub struct Scene {
     /// Ambient (DALC) colours seen from +X, −X, +Y, −Y, +Z, −Z, world space.
     pub ambient6: [[f32; 3]; 6],
     /// Environment turn about world +Z, radians, in the sun's sense (a feature at azimuth φ shows at φ + yaw). Turns the
-    /// HDRI backdrop and the ambient taken from it; 0 = the image as loaded. It also turns the reflected environment
-    /// whatever the background.
+    /// HDRI backdrop, the ambient taken from it and its reflected environment; 0 = the image as loaded. The procedural
+    /// environment of a solid background is not turned (the ambient is not either).
     pub env_yaw: f32,
     /// Seconds on the preview's animation clock, written to CS's `Timer` (v2 B3). 1.0 when nothing plays (the
     /// constant the preview always wrote).

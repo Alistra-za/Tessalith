@@ -569,9 +569,17 @@ fn env_cube_is_built_once_per_yaw() {
     r.render(&s, 64, 64).unwrap();
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 1);
+    // The procedural environment is unturned (as the solid ambient is): a sun drag rebuilds nothing.
     s.env_yaw = 0.5;
     r.render(&s, 64, 64).unwrap();
-    assert_eq!(r.env_builds(), 2);
+    assert_eq!(r.env_builds(), 1, "a yaw change on a solid background");
+    // An HDRI turns with env_yaw: a new yaw is a new cube.
+    s.background = render3d::scene::Background::Hdri(common::test_env());
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(r.env_builds(), 2, "the HDRI is another source");
+    s.env_yaw = 1.0;
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(r.env_builds(), 3, "a yaw change on an HDRI background");
     let mut plain = loaded(cache.path(), &feats(&[ADD]), vec![opaque()]);
     plain.set_deferred(true).unwrap();
     plain.render(&Scene::neutral(), 64, 64).unwrap();
@@ -579,7 +587,7 @@ fn env_cube_is_built_once_per_yaw() {
 }
 
 /// With a solid background the env cube is the procedural environment of `ambient6`: built once, rebuilt when the
-/// ambient or the yaw changes, not when the frame is unchanged; and the reflection it gives follows the ambient.
+/// ambient changes, not when the frame is unchanged or the yaw turns (it is unturned, like the ambient); and the reflection it gives follows the ambient.
 #[test]
 fn solid_frames_reflect_the_procedural_environment() {
     let cache = tempfile::tempdir().unwrap();
@@ -608,7 +616,11 @@ fn solid_frames_reflect_the_procedural_environment() {
     assert_eq!(r.env_builds(), 2);
     s.env_yaw = 0.5;
     r.render(&s, 64, 64).unwrap();
-    assert_eq!(r.env_builds(), 3, "a yaw change rebuilds");
+    assert_eq!(
+        r.env_builds(),
+        2,
+        "a yaw change does not rebuild the unturned cube"
+    );
 }
 
 /// R3: a forward DC draw reads the env cube at its EnvReflectionsTexture register (the stand-in adds its level-15 +Z
@@ -665,8 +677,8 @@ fn composite_with_an_unknown_sampler_fails_closed() {
     assert!(e.contains("PointSampler"), "{e}");
 }
 
-/// Review M4: a failed env-cube build is an Err once, then remembered for its yaw (no rebuild every frame, the frame
-/// draws with no reflection); a new yaw tries again. The failure is faked with a cube size that is not a power of two.
+/// Review M4: a failed env-cube build is an Err once, then remembered for its source (no rebuild every frame, the frame
+/// draws with no reflection); a new source (here another ambient) tries again. The failure is faked with a cube size that is not a power of two.
 #[test]
 fn failed_env_cube_build_is_not_retried_for_the_same_yaw() {
     let cache = tempfile::tempdir().unwrap();
@@ -678,10 +690,10 @@ fn failed_env_cube_build_is_not_retried_for_the_same_yaw() {
     assert!(e.contains("power of two"), "{e}");
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 0);
-    s.env_yaw = 0.5;
-    assert!(r.render(&s, 64, 64).is_err(), "a new yaw tries again");
+    s.ambient6[0] = [0.5; 3];
+    assert!(r.render(&s, 64, 64).is_err(), "a new source tries again");
     r.set_env_size(render3d::hdri::ENV_SIZE);
-    s.env_yaw = 0.25;
+    s.ambient6[0] = [0.6; 3];
     r.render(&s, 64, 64).unwrap();
     assert_eq!(r.env_builds(), 1);
 }
