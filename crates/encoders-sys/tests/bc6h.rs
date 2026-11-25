@@ -1321,6 +1321,42 @@ fn git_describe() -> String {
         })
 }
 
+/// The witness tests' check: for each witness `(i, level, bytes before the fix on SSE2, AVX2 and AVX-512)` and on every
+/// path in `paths()`, the encode of `blocks(i)` is certainly better than the recorded bytes (`err_bounds`: E_hi now <
+/// E_lo before). Before the fix the encode is those bytes, so the check fails there.
+fn assert_witnesses_certainly_better(
+    witnesses: &[(u32, Bc6hLevel, [[u8; 16]; 3])],
+    blocks: fn(u32) -> [[u16; 4]; 16],
+) {
+    let mut failures = Vec::new();
+    for target in paths() {
+        let slot = IspcTarget::ALL.iter().position(|t| *t == target).unwrap();
+        for (i, level, before) in witnesses {
+            let px = blocks(*i);
+            let now = encode_block(&px, *level, target);
+            let (lo, hi) = err_bounds(&px, &decode_halves(&now));
+            let (before_lo, before_hi) = err_bounds(&px, &decode_halves(&before[slot]));
+            if hi >= before_lo {
+                failures.push(format!(
+                    "witness {i} {target:?} {level:?}: E_hi {hi} >= E_lo {before_lo} before \
+                     (now [{lo}, {hi}], before [{before_lo}, {before_hi}], bytes {})",
+                    if now == before[slot] {
+                        "unchanged"
+                    } else {
+                        "changed"
+                    }
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} witnesses not certainly better:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 /// Records Task 15's search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
 #[test]
 #[ignore = "record refit witnesses: run on the objects before the change, then after"]
@@ -1395,33 +1431,7 @@ fn refit_uses_the_decoder_weights() {
     if encoders_sys::skip_byte_pins() {
         return;
     }
-    let mut failures = Vec::new();
-    for target in paths() {
-        let slot = IspcTarget::ALL.iter().position(|t| *t == target).unwrap();
-        for (i, level, before) in REFIT_WITNESSES {
-            let px = refit_blocks(*i);
-            let now = encode_block(&px, *level, target);
-            let (lo, hi) = err_bounds(&px, &decode_halves(&now));
-            let (before_lo, before_hi) = err_bounds(&px, &decode_halves(&before[slot]));
-            if hi >= before_lo {
-                failures.push(format!(
-                    "witness {i} {target:?} {level:?}: E_hi {hi} >= E_lo {before_lo} before \
-                     (now [{lo}, {hi}], before [{before_lo}, {before_hi}], bytes {})",
-                    if now == before[slot] {
-                        "unchanged"
-                    } else {
-                        "changed"
-                    }
-                ));
-            }
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "{} witnesses not certainly better:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_witnesses_certainly_better(REFIT_WITNESSES, refit_blocks);
 }
 
 /// Witnesses from `search_two_region_refine_witnesses`: (`two_cluster` index, level, the bytes the objects before the
@@ -1480,33 +1490,7 @@ fn two_region_refine_keeps_its_best_pass() {
     if encoders_sys::skip_byte_pins() {
         return;
     }
-    let mut failures = Vec::new();
-    for target in paths() {
-        let slot = IspcTarget::ALL.iter().position(|t| *t == target).unwrap();
-        for (i, level, before) in TWO_REGION_REFINE_WITNESSES {
-            let px = two_cluster(*i);
-            let now = encode_block(&px, *level, target);
-            let (lo, hi) = err_bounds(&px, &decode_halves(&now));
-            let (before_lo, before_hi) = err_bounds(&px, &decode_halves(&before[slot]));
-            if hi >= before_lo {
-                failures.push(format!(
-                    "witness {i} {target:?} {level:?}: E_hi {hi} >= E_lo {before_lo} before \
-                     (now [{lo}, {hi}], before [{before_lo}, {before_hi}], bytes {})",
-                    if now == before[slot] {
-                        "unchanged"
-                    } else {
-                        "changed"
-                    }
-                ));
-            }
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "{} witnesses not certainly better:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_witnesses_certainly_better(TWO_REGION_REFINE_WITNESSES, two_cluster);
 }
 
 /// Q2's two block generators (`collapsed_block`); the witnesses name theirs.

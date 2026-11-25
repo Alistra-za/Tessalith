@@ -185,10 +185,9 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
 (below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, and Q1 none of the pins.
-PCA re-seed:
-`compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is exactly 0 (a
-covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the channel with the
-largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
+PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
+exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
+channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
 takes the old path, so only such blocks change bytes. Test: `pca_survives_a_zero_covariance_row_sum`. It changes BC6H
 bytes on a path where the zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast to Basic); both
 helpers `block_pca_axis` and `get_pca_bound` share it (Note LT). Q5: `bc6h_setup` converts each half code h to the UF16
@@ -216,9 +215,9 @@ ranked partition's indices (after Q2's bracket) and becomes each refine pass's i
 the next pass refits from the last pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the best's indices
 again (a failed pass repeated exactly); the best `(qep, qblock, err)` is updated only on a lower error, and the block is
 packed once after the loop. Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at Basic, Slow, Veryslow
-and VeryslowPeak on SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3
-of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no earlier pass to refit from, so both keep
-their bytes (profiles: 2 passes at Basic and slower).
+and VeryslowPeak on SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images
+and 3 of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no
+earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
