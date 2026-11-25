@@ -43,6 +43,7 @@
 // audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
 // PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
+// astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -1424,6 +1425,68 @@ void opt_endpoints(float ep[], float block[64], uniform int bits, uint32 qblock[
 	}
 }
 
+// sdc patch 0007 (astra #4): BC6H's least-squares refit with the decoder's weights. opt_endpoints fits index q at
+// q / (levels - 1), but the decoder interpolates at table[q] / 64 (get_unquant_table), up to 0.53/64 of the segment
+// apart. This fork (three channels; opt_endpoints stays for BC7) fits w = table[q], x = 64 - w, and takes the
+// determinant from the exact integer form n * Sww - Sw * Sw (Cxx * Cyy - Cxy * Cxy is 64 * 64 times it).
+void bc6h_opt_endpoints(float ep[], float block[64], uniform int bits, uint32 qblock[2], int mask)
+{
+    uniform const int* uniform unquant_table = get_unquant_table(bits);
+
+    float Atb1[3] = {0, 0, 0};
+    float sum[3] = {0, 0, 0};
+    int n = 0;
+    int sum_w = 0;
+    int sum_ww = 0; // at most 16 * 64 * 64
+
+    int mask_shifted = mask << 1;
+    for (uniform int k1 = 0; k1 < 2; k1++)
+    {
+        uint32 qbits_shifted = qblock[k1];
+        for (uniform int k2 = 0; k2 < 8; k2++)
+        {
+            uniform int k = k1 * 8 + k2;
+            int q = qbits_shifted & 15;
+            qbits_shifted >>= 4;
+
+            mask_shifted >>= 1;
+            if ((mask_shifted & 1) == 0) continue;
+
+            int w = gather_int(unquant_table, q);
+            int x = 64 - w;
+
+            n += 1;
+            sum_w += w;
+            sum_ww += w * w;
+            for (uniform int p = 0; p < 3; p++) sum[p] += block[k + p * 16];
+            for (uniform int p = 0; p < 3; p++) Atb1[p] += x * block[k + p * 16];
+        }
+    }
+
+    int det_s = n * sum_ww - sum_w * sum_w; // 0 exactly when every included texel has one weight
+    float Cxx = 64 * 64 * n - 2 * 64 * sum_w + sum_ww;
+    float Cyy = sum_ww;
+    float Cxy = 64 * sum_w - sum_ww;
+    float scale = 1.0f / (64 * (det_s > 0 ? det_s : 1)); // the select keeps every lane's divisor non-zero
+
+    for (uniform int p = 0; p < 3; p++)
+    {
+        float Atb2 = 64 * sum[p] - Atb1[p]; // the sum of w * v
+        ep[0 + p] = (Atb1[p] * Cyy - Atb2 * Cxy) * scale;
+        ep[4 + p] = (Atb2 * Cxx - Atb1[p] * Cxy) * scale;
+    }
+
+    if (det_s == 0)
+    {
+        // flatten to the mean, as opt_endpoints does
+        for (uniform int p = 0; p < 3; p++)
+        {
+            ep[0 + p] = sum[p] / n;
+            ep[4 + p] = ep[0 + p];
+        }
+    }
+}
+
 //////////////////////////
 // parameter estimation
 
@@ -2479,7 +2542,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
         for (uniform int j = 0; j<pairs; j++)
         {
             int mask = get_pattern_mask(best_part_id, j);
-            opt_endpoints(&ep[j * 8], state->block, bits, best_qblock, mask, channels);
+            bc6h_opt_endpoints(&ep[j * 8], state->block, bits, best_qblock, mask); // sdc patch 0007 (astra #4): the decoder's weights
         }
 
         int qep[24];
@@ -2560,7 +2623,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     uniform int refineIterations = state->refineIterations_1p;
     for (uniform int i = 0; i<refineIterations; i++)
     {
-        opt_endpoints(ep, state->block, 4, qblock, -1, 3);
+        bc6h_opt_endpoints(ep, state->block, 4, qblock, -1); // sdc patch 0007 (astra #4): the decoder's weights
         ep_quant_dequant_bc6h(state, qep, ep, 1);
         err = block_quant(qblock, state->block, 4, ep, 0, 3);
         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);

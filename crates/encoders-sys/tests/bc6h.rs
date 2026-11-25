@@ -90,19 +90,19 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "044cfc3556fc61a4963bf9616ca4c60776450e140062b0244135fb454cecc8c8",
+        "a931015383cfac37c37dc94aa3029c111d6609fc919788cb46917d132a0685cb",
     ),
     (
         Bc6hLevel::Basic,
-        "44c753bc4e487017964590122cb1cc46155427594235c3b255f1593f9a96b154",
+        "aa6cbe4474709633ff7ba19eccc21342ff51d296e0d5ff0d1ed282dd00710d4a",
     ),
     (
         Bc6hLevel::Slow,
-        "d7f14e2cce2f9c5d90b38c40a1040b3fcd5b8c5b4443b2ec35cabfee4498953c",
+        "29a4e63f509f24c5b0dd3d7094e8a3e5eeec932ecbda51a33b52dffe395f9192",
     ),
     (
         Bc6hLevel::Veryslow,
-        "f1f069cb5b5b798a0f5bb5c1167e7c5a5ba07aa9d5a5050c24400a5068297cb5",
+        "c24af20ef81fbe0b091d7fbb6b0b53e1f1fc21964caed31bd75bc680a414c54e",
     ),
 ];
 
@@ -115,19 +115,19 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "82d54ac3848a38b708f8b14dad775ed7b28dd07947de92d5edc0e7d44126c5bb",
+        "e2cfc53d375a1b4d487761b60d6d6413e11097a6d3abcc03071ec96e6e90e491",
     ),
     (
         Bc6hLevel::Basic,
-        "ef421e6b2d2cf115350d47192847dda1cc549e14c03590ac3cd95baa4feb0963",
+        "65a81320edd86d76abd18dfb22c42e54ec859abaf813aa7e4fc2a7dec1fa2e9e",
     ),
     (
         Bc6hLevel::Slow,
-        "b2ba25b0d62ac9fec5fd9da83ed2c8389dbe7aef858ed4a67ee0a6bd19fe84e7",
+        "c69407eda0d1d1e7947b69cf54402a433770cfa51572db85768d8952d7f5bda2",
     ),
     (
         Bc6hLevel::Veryslow,
-        "adc2f7875dd3c2bb3917187e8a4bd4d6d6e1840659047e2dfaaec8f8803259d6",
+        "aec88b604925d456a2d795057a62f1fdc10405997838fc2ff7228e0ea5a4ee92",
     ),
 ];
 
@@ -140,19 +140,19 @@ const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "bfa08f77a260ab98214bbec5009bad472e46c624de7925e6578e24d4e03c0515",
+        "44c5e79f0499bbb8c39d5eb87cd4435b0bd0f2042aa937de80947085fdded228",
     ),
     (
         Bc6hLevel::Basic,
-        "19ab65807fd92b6520cadfa303c73fedc24244250b7097d78678f2f09d3b7a05",
+        "f402c41d785ffa75059add9ec73957ff41f55a6a6496f69ea069286336c8d9ad",
     ),
     (
         Bc6hLevel::Slow,
-        "5d3d92793ae92398588c793ba1f65a524f1c26da7c08a63ce341bb2ecb5c5457",
+        "0044a11248c11f80533da77d4ed8be51f27db06b0f00714db77bd397a00ea334",
     ),
     (
         Bc6hLevel::Veryslow,
-        "952782083bdf24c8517bc97be6ac4f44b6d02af2bf661f0613573cbfe00c02b7",
+        "9cdb7c28f4c9b359238bad48959907280caab8cc66197333720175833f93df18",
     ),
 ];
 
@@ -200,9 +200,9 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
 /// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects (Note LT).
 const RECORDED_PEAK: [&str; 3] = [
-    "86adaa2e1431b4185692586f8a81a9c63cfea20694b2b249aa8398b241ddbbef",
-    "a0977ffb9d5931a58a5f4ed64283d77a13aa5fd1d6ec3977756f18d8b25d8e57",
-    "18cbaf94393d19f184cc78af5111cc90dd02b2d3467ce243820062c37d97ae35",
+    "d90d462f34cc4f1133ded65f3248319c6e71f6cb64d9971d0ac1f6fab9bce91c",
+    "d91bb9afbdbd103d7ddbef9c80ec794aec9e95ad0579af94053a2c360601b8e9",
+    "6564a066b322aa71c40f8e0ffc5e6268418902c1541e0df7c915f49ee2d192e6",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -1153,6 +1153,239 @@ fn constant_blocks_decode_to_their_half_code() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The 32 two-region partitions as 16-bit texel masks (bit t set: texel t is in the second region), the high halves of
+/// the kernel's `pattern_mask_table`.
+const TWO_REGION_MASKS: [u16; 32] = [
+    0xCCCC, 0x8888, 0xEEEE, 0xECC8, 0xC880, 0xFEEC, 0xFEC8, 0xEC80, 0xC800, 0xFFEC, 0xFE80, 0xE800,
+    0xFFE8, 0xFF00, 0xFFF0, 0xF000, 0xF710, 0x008E, 0x7100, 0x08CE, 0x008C, 0x7310, 0x3100, 0x8CCE,
+    0x088C, 0x3110, 0x6666, 0x366C, 0x17E8, 0x0FF0, 0x718E, 0x399C,
+];
+
+/// A two-cluster block from index `i` (half codes in 0x0400..=0x7000, alpha 1.0): one of the 32 two-region partitions,
+/// each region its own colour gradient (a random base, a random direction across the block, each channel's amplitude
+/// up to 4096 half codes either way) plus up to 32 half codes of noise. Integer arithmetic only, so the blocks are the
+/// same on every machine. Tasks 15, 17 and 24 search these.
+fn two_cluster(i: u32) -> [[u16; 4]; 16] {
+    const LO: i64 = 0x0400;
+    const HI: i64 = 0x7000;
+    let mut r = Lcg(i.wrapping_mul(0x85EB_CA6B) ^ 0x6A09_E667);
+    r.next();
+    let mask = TWO_REGION_MASKS[(r.next() % 32) as usize];
+    let mut planes = [[0u16; 16]; 3];
+    for region in 0..2u16 {
+        let in_region = |t: &usize| (mask >> t) & 1 == region;
+        let (mut dx, dy) = (r.range(0, 6) as i64 - 3, r.range(0, 6) as i64 - 3);
+        if dx == 0 && dy == 0 {
+            dx = 1;
+        }
+        let pos = |t: usize| (t % 4) as i64 * dx + (t / 4) as i64 * dy;
+        let pmin = (0..16).filter(in_region).map(pos).min().unwrap();
+        let pmax = (0..16).filter(in_region).map(pos).max().unwrap();
+        let noise = r.range(0, 32) as i64;
+        for plane in &mut planes {
+            let amp = r.range(0, 8192) as i64 - 4096;
+            // The base keeps base + amp * t inside LO..=HI for every t in 0..=1.
+            let (lo, hi) = (LO - amp.min(0), HI - amp.max(0));
+            let base = r.range(lo as u32, hi as u32) as i64;
+            for t in (0..16).filter(in_region) {
+                let v = base
+                    + amp * (pos(t) - pmin) / (pmax - pmin).max(1)
+                    + r.range(0, noise as u32) as i64
+                    - noise / 2;
+                plane[t] = v.clamp(LO, HI) as u16;
+            }
+        }
+    }
+    texels_of(&planes)
+}
+
+/// Texels (alpha 1.0) from three channel planes.
+fn texels_of(planes: &[[u16; 16]; 3]) -> [[u16; 4]; 16] {
+    std::array::from_fn(|t| [planes[0][t], planes[1][t], planes[2][t], f16::ONE.to_bits()])
+}
+
+/// Task 15's seeded blocks: odd `i` is `two_cluster(i / 2)`; even `i` is a one-region ramp with clustered texels, like
+/// the audit's grey block (four texels at half code 46, eight at 1038, four at 15918): 1 to 6 texels at the low end, 1
+/// to 6 at the high end and the rest 2/64 to 62/64 of the way along, in a shuffled texel order, with up to 16 half
+/// codes of noise. One ramp in two is grey (R = G = B); the others give each channel its own ends (low end 0..=0x2000,
+/// span 512..=0x4000). Integer arithmetic only.
+fn refit_blocks(i: u32) -> [[u16; 4]; 16] {
+    if i % 2 == 1 {
+        return two_cluster(i / 2);
+    }
+    let mut r = Lcg(i.wrapping_mul(0xC2B2_AE35) ^ 0x3C6E_F372);
+    r.next();
+    let (n_lo, n_hi) = (r.range(1, 6) as usize, r.range(1, 6) as usize);
+    let along = r.range(2, 62) as i64;
+    let grey = r.next().is_multiple_of(2);
+    let noise = r.range(0, 16) as i64;
+    let mut order: [usize; 16] = std::array::from_fn(|t| t);
+    for t in (1..16).rev() {
+        order.swap(t, r.next() as usize % (t + 1));
+    }
+    let mut planes = [[0u16; 16]; 3];
+    for plane in planes.iter_mut().take(if grey { 1 } else { 3 }) {
+        let lo = r.range(0, 0x2000) as i64;
+        let hi = lo + r.range(512, 0x4000) as i64;
+        for (rank, &t) in order.iter().enumerate() {
+            let v = if rank < n_lo {
+                lo
+            } else if rank < n_lo + n_hi {
+                hi
+            } else {
+                lo + (hi - lo) * along / 64
+            };
+            let v = v + r.range(0, noise as u32) as i64 - noise / 2;
+            plane[t] = v.clamp(0, MAX_UF16 as i64) as u16;
+        }
+    }
+    if grey {
+        planes[1] = planes[0];
+        planes[2] = planes[0];
+    }
+    texels_of(&planes)
+}
+
+/// Writes `<path> <level> <i> <hex bytes> <E_lo> <E_hi>` (`err_bounds` of the output) for `blocks(i)`, `i in 0..end`,
+/// encoded one block at a time (the witness tests' call) at each of `levels` on every path in `paths()`, to the file
+/// `SDC_BC6H_WITNESS_OUT` names; with the variable unset it says so and writes nothing.
+fn record_witness_search(blocks: fn(u32) -> [[u16; 4]; 16], end: u32, levels: &[Bc6hLevel]) {
+    use std::fmt::Write as _;
+    let Some(path) = std::env::var_os("SDC_BC6H_WITNESS_OUT") else {
+        eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
+        return;
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
+    let start = std::time::Instant::now();
+    let mut text = String::new();
+    for target in paths() {
+        for &level in levels {
+            let chunks: Vec<String> = std::thread::scope(|s| {
+                let jobs: Vec<_> = (0..threads)
+                    .map(|t| {
+                        s.spawn(move || {
+                            let mut part = String::new();
+                            for i in (t..end).step_by(threads as usize) {
+                                let px = blocks(i);
+                                let b = encode_block(&px, level, target);
+                                let (lo, hi) = err_bounds(&px, &decode_halves(&b));
+                                writeln!(
+                                    part,
+                                    "{target:?} {level:?} {i} {} {lo} {hi}",
+                                    hex::encode(b)
+                                )
+                                .unwrap();
+                            }
+                            part
+                        })
+                    })
+                    .collect();
+                jobs.into_iter().map(|j| j.join().unwrap()).collect()
+            });
+            text.extend(chunks);
+            eprintln!(
+                "{target:?} {level:?}: {end} blocks, {:.1} s",
+                start.elapsed().as_secs_f64()
+            );
+        }
+    }
+    std::fs::write(&path, text).unwrap();
+}
+
+/// Records Task 15's search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
+#[test]
+#[ignore = "record refit witnesses: run on the objects before the change, then after"]
+fn search_refit_witnesses() {
+    let levels = [Bc6hLevel::Fast, Bc6hLevel::Basic, Bc6hLevel::Veryslow];
+    record_witness_search(refit_blocks, 1 << 16, &levels);
+}
+
+/// Witnesses from `search_refit_witnesses`: (`refit_blocks` index, level, the bytes the objects before the refit fix
+/// wrote on SSE2, AVX2 and AVX-512, in `IspcTarget::ALL` order). Recorded on Windows on an AMD Ryzen 7 9800X3D,
+/// 2026-11-25. Two are one-region ramps (58198, 28394: the one-region refit), the rest two-region outputs (the
+/// two-region refit) at Fast, Basic and Veryslow.
+#[rustfmt::skip]
+const REFIT_WITNESSES: &[(u32, Bc6hLevel, [[u8; 16]; 3])] = &[
+    (40309, Bc6hLevel::Basic, [
+        [0x15, 0xb6, 0xb2, 0x20, 0x8e, 0x4f, 0x1e, 0x7b, 0x58, 0x32, 0xf1, 0x5f, 0x6d, 0x25, 0x09, 0x00],
+        [0x15, 0xb6, 0xb2, 0x20, 0x8e, 0x4f, 0x1e, 0x7b, 0x58, 0x32, 0xf1, 0x5f, 0x6d, 0x25, 0x09, 0x00],
+        [0x15, 0xb6, 0xb2, 0x20, 0x8e, 0x4f, 0x1e, 0x7b, 0x58, 0x32, 0xf1, 0x5f, 0x6d, 0x25, 0x09, 0x00],
+    ]),
+    (46762, Bc6hLevel::Basic, [
+        [0xfe, 0xf4, 0x93, 0xcf, 0x4a, 0x34, 0xb9, 0x44, 0xb5, 0x33, 0xbc, 0xfd, 0xdf, 0xb1, 0x63, 0x3b],
+        [0xfe, 0xf4, 0x93, 0xcf, 0x4a, 0x34, 0xb9, 0x44, 0xb5, 0x33, 0xbc, 0xfd, 0xdf, 0xb1, 0x63, 0x3b],
+        [0xfe, 0xf4, 0x93, 0xcf, 0x4a, 0x34, 0xb9, 0x44, 0xb5, 0x33, 0xbc, 0xfd, 0xdf, 0xb1, 0x63, 0x3b],
+    ]),
+    (58198, Bc6hLevel::Basic, [
+        [0xe3, 0xbc, 0xf3, 0xce, 0xa3, 0x82, 0x0a, 0x2a, 0x7e, 0x07, 0x77, 0x77, 0xe7, 0x77, 0x77, 0x07],
+        [0xe3, 0xbc, 0xf3, 0xce, 0xa3, 0x82, 0x0a, 0x2a, 0x7e, 0x07, 0x77, 0x77, 0xe7, 0x77, 0x77, 0x07],
+        [0xe3, 0xbc, 0xf3, 0xce, 0xa3, 0x82, 0x0a, 0x2a, 0x7e, 0x07, 0x77, 0x77, 0xe7, 0x77, 0x77, 0x07],
+    ]),
+    (4339, Bc6hLevel::Fast, [
+        [0x5e, 0xa0, 0xf7, 0xaa, 0x53, 0x90, 0xae, 0x07, 0x69, 0x96, 0xdd, 0x17, 0xef, 0xde, 0xa9, 0x13],
+        [0x5e, 0xa0, 0xf7, 0xaa, 0x53, 0x90, 0xae, 0x07, 0x69, 0x96, 0xdd, 0x17, 0xef, 0xde, 0xa9, 0x13],
+        [0x5e, 0xa0, 0xf7, 0xaa, 0x53, 0x90, 0xae, 0x07, 0x69, 0x96, 0xdd, 0x17, 0xef, 0xde, 0xa9, 0x13],
+    ]),
+    (49260, Bc6hLevel::Fast, [
+        [0xd1, 0x05, 0x97, 0x5c, 0xbb, 0xe1, 0xe6, 0x1b, 0x00, 0x56, 0xf0, 0xfd, 0xc3, 0x3e, 0xfc, 0xdb],
+        [0xd1, 0x05, 0x97, 0x5c, 0xbb, 0xe1, 0xe6, 0x1b, 0x00, 0x56, 0xf0, 0xfd, 0xc3, 0x3e, 0xfc, 0xdb],
+        [0xd1, 0x05, 0x97, 0x5c, 0xbb, 0xe1, 0xe6, 0x1b, 0x00, 0x56, 0xf0, 0xfd, 0xc3, 0x3e, 0xfc, 0xdb],
+    ]),
+    (8625, Bc6hLevel::Veryslow, [
+        [0xde, 0x12, 0x81, 0x3a, 0x89, 0x08, 0xc9, 0xee, 0x14, 0x08, 0x21, 0x5a, 0xeb, 0x47, 0x9f, 0x86],
+        [0xde, 0x12, 0x81, 0x3a, 0x89, 0x08, 0xc9, 0xee, 0x14, 0x08, 0x21, 0x5a, 0xeb, 0x47, 0x9f, 0x86],
+        [0xde, 0x12, 0x81, 0x3a, 0x89, 0x08, 0xc9, 0xee, 0x14, 0x08, 0x21, 0x5a, 0xeb, 0x47, 0x9f, 0x86],
+    ]),
+    (28394, Bc6hLevel::Veryslow, [
+        [0xe3, 0xcd, 0x37, 0xdf, 0x4c, 0x27, 0x9d, 0x74, 0x70, 0x70, 0x07, 0x77, 0x7e, 0x07, 0x07, 0x70],
+        [0xe3, 0xcd, 0x37, 0xdf, 0x4c, 0x27, 0x9d, 0x74, 0x70, 0x70, 0x07, 0x77, 0x7e, 0x07, 0x07, 0x70],
+        [0xe3, 0xcd, 0x37, 0xdf, 0x4c, 0x27, 0x9d, 0x74, 0x70, 0x70, 0x07, 0x77, 0x7e, 0x07, 0x07, 0x70],
+    ]),
+    (48010, Bc6hLevel::Veryslow, [
+        [0xc3, 0x1a, 0x6b, 0xac, 0x11, 0x54, 0x50, 0x41, 0xfd, 0xf6, 0x06, 0x6f, 0xf6, 0x60, 0x60, 0x06],
+        [0xc3, 0x1a, 0x6b, 0xac, 0x11, 0x54, 0x50, 0x41, 0xfd, 0xf6, 0x06, 0x6f, 0xf6, 0x60, 0x60, 0x06],
+        [0xc3, 0x1a, 0x6b, 0xac, 0x11, 0x54, 0x50, 0x41, 0xfd, 0xf6, 0x06, 0x6f, 0xf6, 0x60, 0x60, 0x06],
+    ]),
+];
+
+/// astra #4 (Note LT): the least-squares refit fits index q at the decoder's weight `table[q] / 64`, not at
+/// `q / (levels - 1)`. On each witness the encode is certainly better than the bytes the objects before the fix wrote
+/// (`err_bounds`: E_hi now < E_lo before), on every path in `paths()`. Before the fix the encode is those bytes, so
+/// the test fails there. Skipped on an Intel CPU, like the pins: the bytes are the Ryzen's (Note JC).
+#[test]
+fn refit_uses_the_decoder_weights() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for target in paths() {
+        let slot = IspcTarget::ALL.iter().position(|t| *t == target).unwrap();
+        for (i, level, before) in REFIT_WITNESSES {
+            let px = refit_blocks(*i);
+            let now = encode_block(&px, *level, target);
+            let (lo, hi) = err_bounds(&px, &decode_halves(&now));
+            let (before_lo, before_hi) = err_bounds(&px, &decode_halves(&before[slot]));
+            if hi >= before_lo {
+                failures.push(format!(
+                    "witness {i} {target:?} {level:?}: E_hi {hi} >= E_lo {before_lo} before \
+                     (now [{lo}, {hi}], before [{before_lo}, {before_hi}], bytes {})",
+                    if now == before[slot] {
+                        "unchanged"
+                    } else {
+                        "changed"
+                    }
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} witnesses not certainly better:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[test]

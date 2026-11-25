@@ -183,8 +183,8 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 0001, 0003, 0004 and 0006. It is produced with `git diff --output=<patch> 9c452929 -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
-measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, and Q5
-(below) changes all of them. PCA re-seed: `compute_axis` renormalises the
+measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
+(below) changes all of them, and astra #4 all but Veryfast's. PCA re-seed: `compute_axis` renormalises the
 power-iteration vector every second iteration; when its squared norm is exactly 0 (a covariance whose rows sum to 0 with
 the epsilon absorbed) it now restarts from the unit vector of the channel with the largest covariance diagonal (the
 first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm takes the old path, so only such
@@ -195,7 +195,13 @@ zero vector was reached (the AVX-512 object, seen on the Ryzen: Veryfast to Basi
 so a constant block's code decodes to h and not h - 1 (the peak gate above it still reads the source half bits; `orig`
 and the lift in `bc6h_peak_retry` follow the new targets). Test: `constant_blocks_decode_to_their_half_code`. It changes
 BC6H bytes at all six levels on SSE2, AVX2 and AVX-512 (the 18 pins, `identity.json` `hdr_sky` and every measured
-image).
+image). astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_enc_2p_list` calls a BC6H-only fork,
+`bc6h_opt_endpoints`, that fits index q at the decoder's weight `table[q] / 64` (`get_unquant_table`) instead of
+`q / (levels - 1)`, with the determinant from the exact integer form `n * Sww - Sw * Sw` (a zero determinant flattens to
+the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no longer called. Test:
+`refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and VeryslowPeak on SSE2, AVX2
+and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those levels); Veryfast, which
+has no refit, keeps its bytes.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
