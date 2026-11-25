@@ -275,7 +275,7 @@
   "textures/h/hdr_sky.dds": {
     "format": "Bc6hUf16",
     "height": 64,
-    "payload_sha256@avx2": "190610e93b6c59f4b0374197bb37f6b0abe713dca9c44c893d39e1fac004a10b",
+    "payload_sha256@avx2": "a6bee4b818d4a7edb74f997c1afa6a1a1382c62454689ebf70f5efa5e2df8aff",
     "subtype": "hdr_sky",
     "width": 64
   },

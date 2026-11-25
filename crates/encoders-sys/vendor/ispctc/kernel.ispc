@@ -50,6 +50,7 @@
 // Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
 // astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the widest's.
 // astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code, not 12 exponent steps.
+// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions of the ranking, not only the lowest.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2640,36 +2641,19 @@ float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2
 
 }
 
-void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_count)
+// sdc patch 0007 (Q3): how many of the ranked partitions bc6h_enc_2p_list refines at the slow levels.
+uniform const int Q3_N = 2;
+
+// sdc patch 0007 (Q3): the bracket and the refine passes of one ranked partition, moved out of bc6h_enc_2p_list
+// unchanged so that each kept candidate runs them. best_qep and best_qblock come in as the candidate's first
+// quantisation and leave as its best; the return is its error.
+float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[24], uint32 best_qblock[2], float best_err, int best_part_id)
 {
-    if (part_count == 0) return;
     uniform int bits = 3;
     uniform int pairs = 2;
     uniform int channels = 3;
 
-    int best_qep[24];
-    uint32 best_qblock[2];
-    int best_part_id = -1;
-    float best_err = 1e99;
-
-    for (uniform int part = 0; part<part_count; part++)
-    {
-        int part_id = part_list[part] & 31;
-
-        int qep[24];
-        uint32 qblock[2];
-        float err = bc6h_enc_2p_part_fast(state, qep, qblock, part_id, part); // sdc patch 0006 (S2): part is the rank
-
-        if (err<best_err)
-        {
-            for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = qep[i];
-            for (uniform int k = 0; k<2; k++) best_qblock[k] = qblock[k];
-            best_part_id = part_id;
-            best_err = err;
-        }
-    }
-
-    // sdc patch 0007 (Q2): the chosen partition's first candidate (the ranking above is not bracketed)
+    // sdc patch 0007 (Q2): the candidate's first quantisation (the ranking is not bracketed)
     float best_ep[24];
     // best_ep is scratch: the helper never reads ep, and the refine below refits its own
     best_err = bc6h_bracket_collapsed(state, best_qep, best_ep, best_qblock, best_err, get_pattern(best_part_id), best_part_id, pairs);
@@ -2703,6 +2687,90 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
             for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = qep[i];
             for (uniform int k = 0; k<2; k++) best_qblock[k] = qblock[k];
             best_err = err;
+        }
+    }
+    return best_err;
+}
+
+void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_count)
+{
+    if (part_count == 0) return;
+    uniform int pairs = 2;
+
+    int best_qep[24];
+    uint32 best_qblock[2];
+    int best_part_id = -1;
+    float best_err = 1e99;
+
+    // sdc patch 0007 (Q3): the keep lowest-error first quantisations, in ascending error. keep is 1 below the slow
+    // levels, so they refine only the lowest, as before.
+    uniform int keep = 1;
+    if (state->slow_mode) keep = min(Q3_N, part_count);
+    int cand_qep[Q3_N * 24];
+    uint32 cand_qblock[Q3_N * 2];
+    int cand_part[Q3_N];
+    float cand_err[Q3_N];
+    for (uniform int c = 0; c < Q3_N; c++)
+    {
+        cand_part[c] = -1;
+        cand_err[c] = 1e99;
+    }
+
+    for (uniform int part = 0; part<part_count; part++)
+    {
+        int part_id = part_list[part] & 31;
+
+        int qep[24];
+        uint32 qblock[2];
+        float err = bc6h_enc_2p_part_fast(state, qep, qblock, part_id, part); // sdc patch 0006 (S2): part is the rank
+
+        // sdc patch 0007 (Q3): a lower error takes the slot and the old one moves on to the next slot, so an equal
+        // error ranks behind the earlier one.
+        for (uniform int c = 0; c < keep; c++)
+        {
+            if (err < cand_err[c])
+            {
+                for (uniform int i = 0; i<8 * pairs; i++)
+                {
+                    int t = cand_qep[c * 24 + i];
+                    cand_qep[c * 24 + i] = qep[i];
+                    qep[i] = t;
+                }
+                for (uniform int k = 0; k<2; k++)
+                {
+                    uint32 t = cand_qblock[c * 2 + k];
+                    cand_qblock[c * 2 + k] = qblock[k];
+                    qblock[k] = t;
+                }
+                int tp = cand_part[c];
+                cand_part[c] = part_id;
+                part_id = tp;
+                float te = cand_err[c];
+                cand_err[c] = err;
+                err = te;
+            }
+        }
+    }
+
+    // sdc patch 0007 (Q3): each kept candidate gets the bracket and the refine passes. A later one replaces the best
+    // only on a strictly lower error, so the lowest candidate's result is never lost.
+    for (uniform int c = 0; c < keep; c++)
+    {
+        if (c == 0 || cand_part[c] >= 0)
+        {
+            int qep[24];
+            uint32 qblock[2];
+            for (uniform int i = 0; i<8 * pairs; i++) qep[i] = cand_qep[c * 24 + i];
+            for (uniform int k = 0; k<2; k++) qblock[k] = cand_qblock[c * 2 + k];
+            float err = bc6h_refine_2p(state, qep, qblock, cand_err[c], cand_part[c]);
+
+            if (err<best_err)
+            {
+                for (uniform int i = 0; i<8 * pairs; i++) best_qep[i] = qep[i];
+                for (uniform int k = 0; k<2; k++) best_qblock[k] = qblock[k];
+                best_part_id = cand_part[c];
+                best_err = err;
+            }
         }
     }
 

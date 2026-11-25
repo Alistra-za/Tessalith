@@ -184,7 +184,7 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, Q6 none of them, and astra #5 none of them.
+(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, Q6 none of them, astra #5 none of them, and Q3 the Slow, Veryslow and VeryslowPeak pins.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
@@ -248,6 +248,14 @@ value as a subnormal half code (`hm - hlo` codes below, `hlo = round(half(hm) * 
 expression is kept, so blocks whose lifted texels are all that bright keep their bytes. Test:
 `peak_mode_keeps_a_dim_blue_zero_sun`. It changes BC6H bytes only at VeryslowPeak and only for guarded blocks with such
 a texel: none of the 18 pins, `identity.json` `hdr_sky`, the 18 `hdr_real` or the 4 `hdr_grad` images.
+Q3: `bc6h_enc_2p_list` keeps the `Q3_N` = 2 lowest-error first quantisations of the ranked partitions (a lower error
+takes a slot and the old one moves down, an equal one stays behind) instead of only the lowest, and runs each through
+`bc6h_refine_2p`, the bracket and refine passes moved out of the function unchanged; a later candidate replaces the best
+only on a strictly lower error, so the lowest one's result is never lost. Only `state->slow_mode` keeps more than one
+(Slow, Veryslow and VeryslowPeak); Veryfast, Fast and Basic keep their bytes. Test: `two_region_refine_tries_more_partitions`.
+It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (the 9 pins of those levels;
+`identity.json` `hdr_sky`, all 18 `hdr_real` and all 4 `hdr_grad` images at those levels). `Q3_N` = 4 was measured too
+and costs 1.26 times Veryslow's VM time (over the 10 % limit); it is not built.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
