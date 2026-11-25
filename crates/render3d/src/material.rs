@@ -554,20 +554,23 @@ pub fn verified_blend(src: u8, dst: u8) -> bool {
     matches!((src, dst), (6, 7) | (0, 0) | (1, 2))
 }
 
-/// The draw state a material asks for: alpha bits 1-4 / 5-8 when bit 0 is set; back-face culling unless
-/// Double_Sided (SLSF2 bit 4); depth test SLSF1 bit 31; depth write SLSF2 bit 0.
-/// The shape reads the shadow mask when shadows are on (Note IH4): the casters' rule, not blended and writing
-/// depth (`fixed`: a built-in, [`Pipe::FIXED`]). The mask holds the opaque depth only, so any other shape would
-/// take the shadow of the surface behind it.
+/// The shape reads the shadow mask when shadows are on (Note IH4): [`receives_shadows`] of its blend and depth state
+/// (`fixed`: a built-in, [`Pipe::FIXED`]).
 pub fn shadow_receiver(m: &MaterialState, fixed: bool) -> bool {
-    !m.blend()
-        && if fixed {
-            Pipe::FIXED.z_write
-        } else {
-            pipe(m).z_write
-        }
+    let p = if fixed { Pipe::FIXED } else { pipe(m) };
+    receives_shadows(m.blend(), &p)
 }
 
+/// Not blended, and its depth is in the camera pre-pass's: it tests and writes depth (a shape that writes but does not
+/// test is drawn with the depth test off, which writes nothing). The mask holds that depth only, so any other shape
+/// would take the shadow of the surface behind it. The casters are the pre-pass's shapes, a wider set (not blended,
+/// writing depth).
+pub fn receives_shadows(blend: bool, p: &Pipe) -> bool {
+    !blend && p.z_write && p.z_test
+}
+
+/// The draw state a material asks for: alpha bits 1-4 / 5-8 when bit 0 is set; back-face culling unless
+/// Double_Sided (SLSF2 bit 4); depth test SLSF1 bit 31; depth write SLSF2 bit 0.
 pub fn pipe(m: &MaterialState) -> Pipe {
     let (blend, mapped) = match m.alpha.filter(|a| a.blend()) {
         Some(a) => {

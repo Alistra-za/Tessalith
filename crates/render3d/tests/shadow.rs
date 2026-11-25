@@ -472,6 +472,94 @@ fn a_lone_builtin_sphere_does_not_shadow_itself() {
     }
 }
 
+/// The shadow bits (ShadowDir, DefShadow) in shape `id`'s `PixelShaderDescriptor`.
+fn shadow_bits(r: &Renderer, id: u32) -> u32 {
+    r.draw_cb_floats(ShapeId(id), "PixelShaderDescriptor")
+        .unwrap()[0]
+        .to_bits()
+        & ((1 << 13) | (1 << 14))
+}
+
+/// Final review: a shape that writes depth but does not test it is drawn with the camera pre-pass's depth test off, so
+/// the mask under it holds whatever is behind; it receives no shadow bits. The plane (testing and writing) does.
+#[test]
+fn a_shape_that_does_not_test_depth_gets_no_shadow_bits() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut untested = opaque();
+    untested.slsf1 &= !(1 << 31); // ZBuffer_Test clear, ZBuffer_Write still set
+    let mut r = renderer(
+        cache.path(),
+        false,
+        vec![sphere(0, untested), plane(1, opaque(), -40.0)],
+    );
+    r.render(&scene(true), W, H).unwrap();
+    assert_eq!(
+        shadow_bits(&r, 1),
+        (1 << 13) | (1 << 14),
+        "the plane receives"
+    );
+    assert_eq!(shadow_bits(&r, 0), 0, "the untested sphere does not");
+}
+
+/// Final review: a shape whose edit is still compiling keeps drawing its previous draw; a shadows flip meanwhile
+/// writes that draw's shadow bits (from the draw's own blend and depth state), and off clears them again.
+#[test]
+fn a_shadow_flip_reaches_a_draw_whose_edit_is_still_compiling() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = Renderer::with_gpu_source(
+        Gpu::new_warp().unwrap(),
+        render3d::ShaderSource::Bundled,
+        cache.path().to_path_buf(),
+    )
+    .unwrap();
+    r.set_shadow_sizes(512, 256);
+    r.set_async_compile(true);
+    r.load_parsed(
+        &ParsedNif {
+            shapes: floor_and_ball(),
+            ..Default::default()
+        },
+        &|_| None,
+    );
+    let drain = |r: &mut Renderer| {
+        for j in r.take_jobs() {
+            r.apply_compiled(render3d::run_job(j));
+        }
+    };
+    drain(&mut r);
+    r.render(&scene(false), W, H).unwrap();
+    assert_eq!(shadow_bits(&r, 1), 0);
+    // A permutation edit (alpha test on): the plane keeps its old draw while the new program compiles.
+    let mut m = opaque();
+    m.alpha = Some(nif::props::Alpha {
+        flags: 0x200,
+        threshold: 0,
+    });
+    assert_eq!(
+        r.set_material(ShapeId(1), m, &|_| None),
+        Ok(render3d::EditKind::Permutation)
+    );
+    assert_eq!(
+        r.shapes()[1].status,
+        render3d::ShapeStatus::Pending {
+            showing_previous: true
+        }
+    );
+    r.render(&scene(true), W, H).unwrap();
+    assert_eq!(
+        shadow_bits(&r, 1),
+        (1 << 13) | (1 << 14),
+        "the retained draw receives"
+    );
+    r.render(&scene(false), W, H).unwrap();
+    assert_eq!(shadow_bits(&r, 1), 0, "and off clears it");
+    // The edit lands with the bits of the current frame's setting.
+    r.render(&scene(true), W, H).unwrap();
+    drain(&mut r);
+    assert_eq!(r.shapes()[1].status, render3d::ShapeStatus::Drawing);
+    assert_eq!(shadow_bits(&r, 1), (1 << 13) | (1 << 14));
+}
+
 /// A blended plane under the opaque sphere keeps its shadows-off colour. It blends SrcAlpha / InvSrcAlpha at alpha 1,
 /// so it hides the opaque plane below it; that plane is shadowed at the same pixel, so the mask there is dark: a
 /// blended shape that read it would darken.

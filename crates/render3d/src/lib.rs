@@ -2555,12 +2555,18 @@ impl Renderer {
             });
         }
         // Note IH4: the shadow bits live in every material cbuffer (`PixelShaderDescriptor`), not in a per-frame field:
-        // a flip rewrites them through the cbuffer-edit path.
-        // shortcut: a Pending or Failed shape still showing its previous draw keeps that draw's bits until its
-        // program lands or its next edit; upgrade if shadows are ever toggled while shapes compile.
+        // a flip rewrites them through the cbuffer-edit path. A draw kept while its shape's edit compiles or after it
+        // failed gets only its bits, by its own state: its other constants stay those of the material it applied.
         if scene.shadows != self.shadows {
             self.shadows = scene.shadows;
             self.rewrite_static();
+            for s in self.shapes.values_mut() {
+                if s.status != ShapeStatus::Drawing {
+                    if let Some(d) = s.draw.as_mut() {
+                        d.set_shadow_bits(self.shadows);
+                    }
+                }
+            }
         }
         // D5: the env cube, before `gpu` and `target` are borrowed below. Any background (R7): the loaded HDRI, or
         // with a solid background the procedural environment of the ambient, is what the preview reflects.

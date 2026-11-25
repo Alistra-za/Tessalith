@@ -356,9 +356,20 @@ impl Environment {
         Self::from_image(decode_rgbe(bytes)?)
     }
 
-    /// The rules on a decoded image (what [`Environment::from_bytes`] runs after the decode).
+    /// The rules on a decoded image (what [`Environment::from_bytes`] runs after the decode), and a buffer of exactly
+    /// `width × height` RGB samples.
     pub fn from_image(image: Hdr) -> Result<Environment, String> {
         Self::check_size(image.width, image.height)?;
+        // The size rules bound both sides to 4096, so the product cannot overflow.
+        let want = image.width * image.height * 3;
+        if image.rgb.len() != want {
+            return Err(format!(
+                "the image holds {} values, not {want} ({}×{} RGB)",
+                image.rgb.len(),
+                image.width,
+                image.height
+            ));
+        }
         if !image.rgb.iter().all(|v| v.is_finite()) {
             return Err("the image holds a value that is not finite".into());
         }
@@ -367,7 +378,7 @@ impl Environment {
     }
 
     fn check_size(w: usize, h: usize) -> Result<(), String> {
-        if w != 2 * h {
+        if h.checked_mul(2) != Some(w) {
             return Err(format!("not 2:1 ({w}×{h})"));
         }
         if w < MIN_WIDTH {

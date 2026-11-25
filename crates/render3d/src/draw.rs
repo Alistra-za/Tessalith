@@ -6,9 +6,11 @@ use crate::cbuffer::CbWriter;
 use crate::compile::{Compiled, Reflection, SrvKind};
 use crate::device::Gpu;
 use crate::material::{
-    pipe, shadow_receiver, write_material, write_skin_flags, Bound, Pipe, ProjectedLayer,
+    pipe, receives_shadows, shadow_receiver, write_material, write_skin_flags, Bound, Pipe,
+    ProjectedLayer,
 };
 use crate::mesh::GpuMesh;
+use crate::permutation;
 #[cfg(feature = "test-hooks")]
 use crate::scene::Scene;
 use crate::scene::{
@@ -242,6 +244,23 @@ impl ShapeDraw {
         self.blend = m.blend();
         self.pipe = if fixed { Pipe::FIXED } else { pipe(m) };
         self.stale = true;
+    }
+
+    /// Only the shadow bits of `PixelShaderDescriptor` for `shadows` (Note IH4), by this draw's own blend and depth
+    /// state ([`receives_shadows`]); every other field stays. A draw kept on screen while its shape's edit compiles,
+    /// or after the edit failed, holds the constants of the material it last applied, which a rewrite from the
+    /// shape's newer material would replace.
+    pub fn set_shadow_bits(&mut self, shadows: bool) {
+        let on = shadows && receives_shadows(self.blend, &self.pipe);
+        for cb in self.vs_cbs.iter_mut().chain(self.ps_cbs.iter_mut()) {
+            if cb.writer.set_bits_u32(
+                "PixelShaderDescriptor",
+                permutation::SHADOW_DIR | permutation::DEF_SHADOW,
+                on,
+            ) {
+                cb.dirty = true;
+            }
+        }
     }
 }
 

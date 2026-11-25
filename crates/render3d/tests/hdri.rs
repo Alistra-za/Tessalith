@@ -61,6 +61,28 @@ fn refusals_name_the_reason() {
     assert!(e.contains(".hdr"), "{e}");
 }
 
+/// Final review: `from_image` is public, so an image whose buffer does not hold `width × height` RGB samples is refused
+/// with a reason, never indexed past its end; and a height whose double overflows is refused, not a panic.
+#[test]
+fn an_image_with_the_wrong_sample_count_is_refused() {
+    for (what, len) in [("short", 64 * 32 * 3 - 1), ("long", 64 * 32 * 3 + 3)] {
+        let e = Environment::from_image(Hdr {
+            width: 64,
+            height: 32,
+            rgb: vec![0.5; len],
+        })
+        .unwrap_err();
+        assert!(e.contains("6144"), "{what}: {e}");
+    }
+    let e = Environment::from_image(Hdr {
+        width: 64,
+        height: usize::MAX,
+        rgb: vec![],
+    })
+    .unwrap_err();
+    assert!(e.contains("2:1"), "{e}");
+}
+
 #[test]
 fn procedural_matches_the_ambient_axes() {
     // Opposite axes sum to 1.0 in every channel, so the six-axis blend returns each axis colour on its axis.
