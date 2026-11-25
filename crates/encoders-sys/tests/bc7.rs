@@ -2138,36 +2138,47 @@ fn flat_channels_exact(out: &[u8], src: &[[u8; 4]; 16], channels: &[usize]) -> b
 /// The seed of `m5_alpha_block`, a seeded search for Task 6o (Task 6m2's `m5` class put no alpha block in mode 5).
 const M5_ALPHA_SEED: u64 = 0x6A2C0;
 
-/// Block `k` (from 0) of a seeded class with a flat colour beside a varying alpha (`gen6_u`, seed `M5_ALPHA_SEED`): R,
-/// G and B each u(256) on every texel, then two alphas u(256), then per texel one of the two (u(2)). Mode 5's 8-bit
-/// alpha ends hold both alphas exactly, so mode 5 at rotation 0 often wins.
-fn m5_alpha_block(k: usize) -> [[u8; 4]; 16] {
+/// The first `n` blocks, in order, of a seeded class with a flat colour beside a varying alpha (`gen6_u`, seed
+/// `M5_ALPHA_SEED`), in one pass: per block R, G and B each u(256) on every texel, then two alphas u(256), then per
+/// texel one of the two (u(2)). Mode 5's 8-bit alpha ends hold both alphas exactly, so mode 5 at rotation 0 often wins.
+fn m5_alpha_blocks(n: usize) -> Vec<[[u8; 4]; 16]> {
     let mut x = M5_ALPHA_SEED;
     let mut u = move |n: u64| gen6_u(&mut x, n) as u8;
-    let mut block = [[0u8; 4]; 16];
-    for _ in 0..=k {
-        let (col, a) = ([u(256), u(256), u(256)], [u(256), u(256)]);
-        block = std::array::from_fn(|_| [col[0], col[1], col[2], a[usize::from(u(2))]]);
-    }
-    block
+    (0..n)
+        .map(|_| {
+            let (col, a) = ([u(256), u(256), u(256)], [u(256), u(256)]);
+            std::array::from_fn(|_| [col[0], col[1], col[2], a[usize::from(u(2))]])
+        })
+        .collect()
 }
 
-/// Block `k` of Task 6m2's synthetic class m5c (`gen6_u`, seed 0x6A2B9): R, G and B each u(256), then a channel c =
-/// u(3) and a base b = u(254); per texel channel c is b + u(3), so it takes up to three adjacent values; alpha 255.
-fn m5c_block(k: usize) -> [[u8; 4]; 16] {
+/// Block `k` (from 0) of `m5_alpha_blocks`.
+fn m5_alpha_block(k: usize) -> [[u8; 4]; 16] {
+    m5_alpha_blocks(k + 1)[k]
+}
+
+/// The first `n` blocks, in order, of Task 6m2's synthetic class m5c (`gen6_u`, seed 0x6A2B9), in one pass: per block
+/// R, G and B each u(256), then a channel c = u(3) and a base b = u(254); per texel channel c is b + u(3), so it takes
+/// up to three adjacent values; alpha 255.
+fn m5c_blocks(n: usize) -> Vec<[[u8; 4]; 16]> {
     let mut x = 0x6A2B9u64;
     let mut u = move |n: u64| gen6_u(&mut x, n);
-    let mut block = [[0u8; 4]; 16];
-    for _ in 0..=k {
-        let flat = [u(256), u(256), u(256)];
-        let (c, b) = (u(3) as usize, u(254));
-        block = std::array::from_fn(|_| {
-            let mut v = flat;
-            v[c] = b + u(3);
-            [v[0] as u8, v[1] as u8, v[2] as u8, 255]
-        });
-    }
-    block
+    (0..n)
+        .map(|_| {
+            let flat = [u(256), u(256), u(256)];
+            let (c, b) = (u(3) as usize, u(254));
+            std::array::from_fn(|_| {
+                let mut v = flat;
+                v[c] = b + u(3);
+                [v[0] as u8, v[1] as u8, v[2] as u8, 255]
+            })
+        })
+        .collect()
+}
+
+/// Block `k` (from 0) of `m5c_blocks`.
+fn m5c_block(k: usize) -> [[u8; 4]; 16] {
+    m5c_blocks(k + 1)[k]
 }
 
 /// The `m5_alpha_block` indices that were mode 5 at rotation 0 and decoded a flat R, G or B off at ultrafast, basic
@@ -2176,9 +2187,9 @@ fn m5c_block(k: usize) -> [[u8; 4]; 16] {
 const M5_ALPHA_WITNESSES: &[usize] = &[922, 1572, 1969, 2383, 2546, 2936, 3311, 3596];
 
 /// The `m5c_block` indices that were mode 4 at a rotation at veryslow (plain linear call, raw) on every path before
-/// patch 0005's M5, and are mode 5 at a rotation after it, with the flat colour part exact: the first 8 of 1,183. Before
-/// M5 no rotated mode 5 output of `m5c_block` with a one-colour colour part decoded it off (it won only where its fit
-/// was exact), so the opaque RED is the path (Note LR, LR23).
+/// patch 0005's M5, and are mode 5 at a rotation after it, with the flat colour part exact: the first 8 of 1,183.
+/// Before M5 no rotated mode 5 output of `m5c_block` with a one-colour colour part decoded it off (it won only where
+/// its fit was exact), so the opaque RED is the path (Note LR, LR23).
 const M5_OPAQUE_WITNESSES: &[usize] = &[15, 29, 30, 32, 50, 57, 89, 109];
 
 /// The fewest outputs of the first 4,096 `m5_alpha_block`s per cell (ultrafast, basic, veryslow) that must be mode 5 at
@@ -2209,8 +2220,8 @@ fn a_flat_colour_beside_a_varying_scalar_stays_exact() {
     let levels = [Bc7Level::Ultrafast, Bc7Level::Basic, Bc7Level::Veryslow];
     let ramp_alpha: [[u8; 4]; 16] = std::array::from_fn(|t| [200, 77, 130, 16 * t as u8]);
     let ramp_r: [[u8; 4]; 16] = std::array::from_fn(|t| [10 + 15 * t as u8, 77, 131, 255]);
-    let alpha: Vec<[[u8; 4]; 16]> = (0..4096).map(m5_alpha_block).collect();
-    let opaque: Vec<[[u8; 4]; 16]> = (0..4096).map(m5c_block).collect();
+    let alpha = m5_alpha_blocks(4096);
+    let opaque = m5c_blocks(4096);
     // (name, level, blocks, floor)
     let mut cells = vec![];
     for level in levels {
@@ -2269,24 +2280,26 @@ fn a_flat_colour_beside_a_varying_scalar_stays_exact() {
             }
         }
     }
+    // (name, index, block, level, expect_rotated)
     let witnesses = M5_ALPHA_WITNESSES
         .iter()
-        .flat_map(|&k| levels.map(|level| ("m5_alpha_block", k, m5_alpha_block(k), level)))
+        .flat_map(|&k| {
+            let block = m5_alpha_block(k);
+            levels.map(|level| ("m5_alpha_block", k, block, level, false))
+        })
         .chain(
             M5_OPAQUE_WITNESSES
                 .iter()
-                .map(|&k| ("m5c_block", k, m5c_block(k), Bc7Level::Veryslow)),
+                .map(|&k| ("m5c_block", k, m5c_block(k), Bc7Level::Veryslow, true)),
         );
-    for (name, k, block, level) in witnesses {
+    for (name, k, block, level, expect_rotated) in witnesses {
         let p = Bc7Params { level, ..U5 };
         for target in paths() {
             let out = raw_on(&block, p, target);
             let what = format!("{name} {k} {level:?} {target:?}");
             let rotated = out[0] >> 6 != 0;
             match m5_site(&out, &block, &m4) {
-                Ok(channels)
-                    if out[0].trailing_zeros() == 5 && rotated == (name == "m5c_block") =>
-                {
+                Ok(channels) if out[0].trailing_zeros() == 5 && rotated == expect_rotated => {
                     if !flat_channels_exact(&out, &block, &channels) {
                         let (src, dec) = (block[0], decode(&out)[0]);
                         bad.push(format!(

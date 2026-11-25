@@ -122,12 +122,14 @@ part does not score it, so a flat colour beside a varying scalar could decode a 
 start and as the mean-colour candidate, scored like the other packers (its weighted error plus, with a guard mask, the
 penalty of the flagged constants it loses), and the one-colour test compares alpha only where it is scored, so mode 4's
 one-colour shortcut is live for such blocks too; proof test `tests/bc7.rs`
-`a_flat_colour_beside_a_varying_scalar_stays_exact`; changes bytes of blocks with a flat colour part beside a varying
-scalar: alpha blocks at every level, linear and perceptual (mode 4's shortcut at every level, mode 5 at every level but
-veryfast and fast, which run no mode 5 for alpha blocks), and opaque blocks whose rotated mode 5 holds two flat channels
-(linear, basic and above). These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the
-measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once
-merged: a later bc7e change goes in a new patch file with its own tag.
+`a_flat_colour_beside_a_varying_scalar_stays_exact` (the packer at the mean-colour site; the alpha-agnostic test has no
+witness, since with it reverted alone the test still passes, and is held by the byte match to the measured reference
+arm); changes bytes of blocks with a flat colour part beside a varying scalar: alpha blocks at every level, linear and
+perceptual (mode 4's shortcut at every level, mode 5 at every level but veryfast and fast, which run no mode 5 for alpha
+blocks), and opaque blocks whose rotated mode 5 holds two flat channels (linear, basic and above), and of any mode 5
+colour part whose mean colour beats its fit. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
+`identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
+file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
