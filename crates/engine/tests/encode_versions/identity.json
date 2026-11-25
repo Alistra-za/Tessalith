@@ -198,7 +198,7 @@
   "textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "8472b31d37360c28a52ce42d22df3829a2e5b3f8906e9eecce1bda69217d9f7c",
+    "payload_sha256@avx2": "fd1efdb0345cbd36fa62e8ca6c4cce89e3b1ad6f54f65aa975b22ba2be10e07a",
     "subtype": "complex_grass",
     "width": 64
   },
@@ -345,7 +345,7 @@
   "textures/h/pbr_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "f4e55f91227b990456157b1e2c87253beb16758f74e8cb1c2acc2cc19b274d0b",
+    "payload_sha256@avx2": "d75e3aac0d4138175e2281c02c68ba08443687bb758135b7ce4cbf19918d1c48",
     "subtype": "pbr_normal",
     "width": 64
   },
@@ -471,7 +471,7 @@
   "vanilla/textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "8472b31d37360c28a52ce42d22df3829a2e5b3f8906e9eecce1bda69217d9f7c",
+    "payload_sha256@avx2": "fd1efdb0345cbd36fa62e8ca6c4cce89e3b1ad6f54f65aa975b22ba2be10e07a",
     "subtype": "complex_grass",
     "width": 64
   },

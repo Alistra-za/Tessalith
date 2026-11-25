@@ -37,6 +37,7 @@
 //   colour slot holds it.
 // - WP: with unequal linear weights the mode 6 and 7 one-colour packers choose their p-bits by the weighted error.
 // - KS: mode 4 tries the exact code pair for a scalar that is one value across the block.
+// - M5: mode 5 gets a one-colour candidate, and the one-colour test ignores alpha where alpha is not scored.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -1229,6 +1230,58 @@ static uint64_t pack_mode24_to_one_color(const uniform color_cell_compressor_par
 	return total_err;
 }
 
+// sdc patch 0005 (M5): mode 5's colour part as one colour: 7-bit endpoints from g_bc7_mode_5_optimal_endpoints, the 2-bit optimal
+// index; no p-bits, so 0 and 255 decode exactly and no p rule is needed. Scored like the other packers: its weighted
+// error plus, with the mask set, the penalty of any flagged constant it loses (the shared helpers).
+static uint64_t pack_mode5_to_one_color(const uniform color_cell_compressor_params *uniform pParams, varying color_cell_compressor_results *uniform pResults, uint32_t r, uint32_t g, uint32_t b,
+	varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
+{
+#pragma ignore warning(perf)
+	const uint32_t er = g_bc7_mode_5_optimal_endpoints[r];
+#pragma ignore warning(perf)
+	const uint32_t eg = g_bc7_mode_5_optimal_endpoints[g];
+#pragma ignore warning(perf)
+	const uint32_t eb = g_bc7_mode_5_optimal_endpoints[b];
+
+	color_quad_i_set(&pResults->m_low_endpoint, er & 0xFF, eg & 0xFF, eb & 0xFF, 0);
+	color_quad_i_set(&pResults->m_high_endpoint, er >> 8, eg >> 8, eb >> 8, 0);
+
+	for (uniform uint32_t i = 0; i < num_pixels; i++)
+		pSelectors[i] = BC7E_MODE_5_OPTIMAL_INDEX;
+
+	color_quad_i p, lo8, hi8;
+	for (uniform uint32_t i = 0; i < 3; i++)
+	{
+		uint32_t low = pResults->m_low_endpoint.m_c[i] << 1;
+		low |= (low >> 7);
+
+		uint32_t high = pResults->m_high_endpoint.m_c[i] << 1;
+		high |= (high >> 7);
+
+		lo8.m_c[i] = low;
+		hi8.m_c[i] = high;
+		p.m_c[i] = (low * (64 - g_bc7_weights2[BC7E_MODE_5_OPTIMAL_INDEX]) + high * g_bc7_weights2[BC7E_MODE_5_OPTIMAL_INDEX] + 32) >> 6;
+	}
+	p.m_c[3] = 255;
+	lo8.m_c[3] = 255;
+	hi8.m_c[3] = 255;
+
+	uint64_t total_err = 0;
+	for (uniform uint32_t i = 0; i < num_pixels; i++)
+		total_err += compute_color_distance_rgb(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
+
+	// the flagged constants it loses (the colour part's mask: R, G, B, and with an A slot that slot at A's tier)
+	if (pParams->m_exact_mask != 0)
+	{
+		const uint32_t lost = xc_lost_channels(pParams, &lo8, &hi8, pResults->m_exact_const, pSelectors, num_pixels, pPixels);
+		total_err += xc_penalty(lost);
+	}
+
+	pResults->m_best_overall_err = total_err;
+
+	return total_err;
+}
+
 static uint64_t pack_mode0_to_one_color(const uniform color_cell_compressor_params *uniform pParams, varying color_cell_compressor_results *uniform pResults, uint32_t r, uint32_t g, uint32_t b, 
 	varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
 {
@@ -2389,7 +2442,7 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 		assert(!pParams->m_has_alpha);
 	}
 
-	if ((mode <= 2) || (mode == 4) || (mode >= 6))
+	if ((mode <= 2) || (mode == 4) || (mode == 5) || (mode >= 6)) // sdc patch 0005 (M5): mode 5 has a one-colour packer
 	{
 		const uint32_t cr = pPixels[0].m_c[0];
 		const uint32_t cg = pPixels[0].m_c[1];
@@ -2399,7 +2452,7 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 		bool allSame = true;
 		for (uniform uint32_t i = 1; i < num_pixels; i++)
 		{
-			if ((cr != pPixels[i].m_c[0]) || (cg != pPixels[i].m_c[1]) || (cb != pPixels[i].m_c[2]) || (ca != pPixels[i].m_c[3]))
+			if ((cr != pPixels[i].m_c[0]) || (cg != pPixels[i].m_c[1]) || (cb != pPixels[i].m_c[2]) || (pParams->m_has_alpha && (ca != pPixels[i].m_c[3]))) // sdc patch 0005 (M5): alpha only where it is scored
 			{
 				allSame = false;
 				break;
@@ -2416,6 +2469,8 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 				return pack_mode6_to_one_color(pParams, pResults, cr, cg, cb, ca, pResults->m_pSelectors, num_pixels, pPixels);
 			else if (mode == 7)
 				return pack_mode7_to_one_color(pParams, pResults, cr, cg, cb, ca, pResults->m_pSelectors, num_pixels, pPixels);
+			else if (mode == 5) // sdc patch 0005 (M5)
+				return pack_mode5_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
 			else
 				return pack_mode24_to_one_color(pParams, pResults, cr, cg, cb, pResults->m_pSelectors, num_pixels, pPixels);
 		}
@@ -2775,7 +2830,7 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 		}
 	}
 
-	if ((mode <= 2) || (mode == 4) || (mode >= 6))
+	if ((mode <= 2) || (mode == 4) || (mode == 5) || (mode >= 6)) // sdc patch 0005 (M5): mode 5 has a one-colour packer
 	{
 		color_cell_compressor_results avg_results;
 					
@@ -2799,6 +2854,8 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 			avg_err = pack_mode6_to_one_color(pParams, &avg_results, r, g, b, a, pResults->m_pSelectors_temp, num_pixels, pPixels);
 		else if (mode == 7)
 			avg_err = pack_mode7_to_one_color(pParams, &avg_results, r, g, b, a, pResults->m_pSelectors_temp, num_pixels, pPixels);
+		else if (mode == 5) // sdc patch 0005 (M5)
+			avg_err = pack_mode5_to_one_color(pParams, &avg_results, r, g, b, pResults->m_pSelectors_temp, num_pixels, pPixels);
 		else
 			avg_err = pack_mode24_to_one_color(pParams, &avg_results, r, g, b, pResults->m_pSelectors_temp, num_pixels, pPixels);
 
