@@ -10,6 +10,7 @@ pub mod cs_settings;
 pub mod debug;
 pub mod device;
 pub mod draw;
+pub mod floor;
 pub mod glint_noise;
 #[cfg(feature = "test-hooks")]
 pub mod golden;
@@ -39,7 +40,7 @@ pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
 #[cfg(feature = "test-hooks")]
 pub use replay::{load_fixture, Replay, ReplayOut};
 
-use background::Backdrop;
+use background::{Backdrop, Gradient};
 use compile::{cached, program_key, CompiledPair, ProgramKey, SrvKind};
 use cs_settings::CsSettings;
 use device::{Gpu, Target};
@@ -89,7 +90,7 @@ impl EnvKey {
     fn of(scene: &Scene) -> EnvKey {
         let source = match &scene.background {
             Background::Hdri(e) => EnvSource::Hdri(Arc::downgrade(e)),
-            Background::Solid(_) => {
+            Background::Solid(_) | Background::Gradient => {
                 let mut bits = [0u32; 18];
                 for (b, v) in bits.iter_mut().zip(scene.ambient6.iter().flatten()) {
                     *b = v.to_bits();
@@ -108,7 +109,7 @@ impl EnvKey {
     fn yaw_of(scene: &Scene) -> f32 {
         match scene.background {
             Background::Hdri(_) => scene.env_yaw,
-            Background::Solid(_) => 0.0,
+            Background::Solid(_) | Background::Gradient => 0.0,
         }
     }
 
@@ -441,6 +442,8 @@ pub struct Renderer {
     /// The variant the resolver's bytes of the next loads count as ([`Renderer::set_load_variant`]).
     load_variant: Variant,
     bounds: Option<([f32; 3], f32)>,
+    /// World Z of the loaded model's lowest vertex (valid while `bounds` is `Some`): the Gradient floor's height.
+    min_z: f32,
     sampler: ID3D11SamplerState,
     raster: ID3D11RasterizerState,
     /// Same as `raster` with back-face culling (a shape without Double_Sided).
@@ -470,6 +473,10 @@ pub struct Renderer {
     /// The HDRI background pass for the environment it was made from (a `Weak`, so the address cannot be reused while
     /// it is kept), made on the first `Background::Hdri` frame and again when the `Arc` changes.
     backdrop: Option<(std::sync::Weak<hdri::Environment>, Result<Backdrop, String>)>,
+    /// The Gradient background pass and its floor (Note IH5), made on the first Gradient frame; a failure is kept, not
+    /// retried, and the frame draws without it ([`Renderer::backdrop_error`]).
+    gradient: Option<Result<Gradient, String>>,
+    floor: Option<Result<floor::Floor, String>>,
     /// [`Renderer::set_missing_texture`]: the colour a missing colour-slot texture shows; `None` = neutral defaults.
     missing_fill: Option<[u8; 4]>,
     /// [`Renderer::set_debug_output`]: the term the next permutations write instead of the lit colour.
@@ -626,6 +633,8 @@ impl Renderer {
             #[cfg(feature = "test-hooks")]
             reference_writer: false,
             backdrop: None,
+            gradient: None,
+            floor: None,
             missing_fill: None,
             debug: DebugOutput::Lit,
             #[cfg(feature = "test-hooks")]
@@ -672,6 +681,7 @@ impl Renderer {
             evicted_missing: HashSet::new(),
             load_variant: Variant::Source,
             bounds: None,
+            min_z: 0.0,
             sampler: s.ok_or("no sampler")?,
             raster: r.ok_or("no rasterizer state")?,
             raster_back: rb.ok_or("no rasterizer state")?,
@@ -1076,9 +1086,13 @@ impl Renderer {
         self.sources.get_debug(Path::new("Lighting.hlsl")).is_ok()
     }
 
-    /// Why the HDRI backdrop could not be made (kept, so it is tried once per environment), if it could not.
+    /// Why the HDRI backdrop, or the gradient or its floor, could not be made (kept, so it is tried once per
+    /// environment), if it could not.
     pub fn backdrop_error(&self) -> Option<&str> {
-        self.backdrop.as_ref()?.1.as_ref().err().map(String::as_str)
+        let hdri = self.backdrop.as_ref().and_then(|b| b.1.as_ref().err());
+        let gradient = self.gradient.as_ref().and_then(|g| g.as_ref().err());
+        let floor = self.floor.as_ref().and_then(|f| f.as_ref().err());
+        hdri.or(gradient).or(floor).map(String::as_str)
     }
 
     /// Timing of the last successful [`Renderer::render`].
@@ -1746,6 +1760,7 @@ impl Renderer {
         self.tex_cache.clear();
         self.evicted_missing.clear();
         self.bounds = None;
+        self.min_z = 0.0;
         self.fields_checked = true;
         self.late_warnings.clear();
         self.fixed_pipeline = fixed;
@@ -1797,7 +1812,7 @@ impl Renderer {
                 }
             }
         }
-        self.bounds = self.compute_bounds();
+        (self.bounds, self.min_z) = self.compute_bounds();
         // The check needs every shape's program: with some still pending, the last landing runs it (`apply_compiled`).
         if self.any_pending() {
             self.fields_checked = false;
@@ -2409,7 +2424,8 @@ impl Renderer {
         out
     }
 
-    fn compute_bounds(&self) -> Option<([f32; 3], f32)> {
+    /// The bounding sphere (box centre, farthest vertex) and the lowest vertex's world Z.
+    fn compute_bounds(&self) -> (Option<([f32; 3], f32)>, f32) {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         let mut points: Vec<[f32; 3]> = vec![];
         for s in self
@@ -2432,14 +2448,14 @@ impl Renderer {
             }
         }
         if points.is_empty() {
-            return None;
+            return (None, 0.0);
         }
         let c = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
         let r = points
             .iter()
             .map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt())
             .fold(0.0f32, f32::max);
-        Some((c, r))
+        (Some((c, r)), lo[2])
     }
 
     /// A required name no drawn shape's cbuffers have: logged once per load (CS version drift, 03 §6). The
@@ -2574,7 +2590,7 @@ impl Renderer {
             let procedural;
             let img = match &scene.background {
                 Background::Hdri(e) => e.image(),
-                Background::Solid(_) => {
+                Background::Solid(_) | Background::Gradient => {
                     procedural = hdri::procedural(&scene.ambient6);
                     &procedural
                 }
@@ -2651,6 +2667,20 @@ impl Renderer {
                 self.backdrop = Some((Arc::downgrade(e), Backdrop::new(&self.gpu, e.image())));
             }
         }
+        // Note IH5: the gradient pass and the floor, made once; a failure is kept and the frame goes without.
+        let mut plane = None;
+        if matches!(scene.background, Background::Gradient) {
+            if self.gradient.is_none() {
+                self.gradient = Some(Gradient::new(&self.gpu));
+            }
+            if self.floor.is_none() {
+                self.floor = Some(floor::Floor::new(&self.gpu));
+            }
+            plane = self
+                .bounds
+                .map(|b| floor::Plane::under(b, self.min_z))
+                .filter(|p| p.seen_from(view.eye));
+        }
         // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
         // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
         // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy. A shadow frame
@@ -2688,7 +2718,7 @@ impl Renderer {
             // The target is read back as is when not sRGB-encoding: give it the display value then.
             Background::Solid(c) if self.encode_srgb => *c,
             Background::Solid(c) => c.map(scene::linear_to_srgb),
-            Background::Hdri(_) => [0.0; 3],
+            Background::Hdri(_) | Background::Gradient => [0.0; 3],
         };
         target.clear(gpu, [clear[0], clear[1], clear[2], 1.0]);
         // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
@@ -2707,6 +2737,9 @@ impl Renderer {
             ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             if let (Background::Hdri(_), Some((_, Ok(b)))) = (&scene.background, &self.backdrop) {
                 b.draw(gpu, &view, !self.encode_srgb, scene.env_yaw);
+            }
+            if let (Background::Gradient, Some(Ok(g))) = (&scene.background, &self.gradient) {
+                g.draw(gpu, h, !self.encode_srgb);
             }
             // RT0 alone until a DEFERRED draw: a forward program must never see RT1-7 (its PS_OUTPUT writes
             // MotionVectors and NormalGlossiness too, Lighting.hlsl:303-308).
@@ -2756,6 +2789,16 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
                         bound_all = false;
                     }
+                }
+                // Note IH5: the Gradient floor after the composite (which runs over every pixel the opaque pass left)
+                // and before the blended shapes; RT0 alone, as the blend state is shared by every bound target.
+                // shortcut: an opaque shape that writes no depth leaves nothing for the floor to fail against, so the
+                // floor covers it; upgrade if such shapes show (draw the floor before the opaque pass, forward only).
+                if let (Some(true), Some(plane), Some(Ok(f))) = (pass, &plane, &self.floor) {
+                    ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
+                    bound_all = false;
+                    let maps = self.shadow.as_ref().filter(|_| shadows).map(|s| &s.maps);
+                    f.draw(gpu, plane, scene, &view, maps, !self.encode_srgb);
                 }
                 for id in &self.draw_order {
                     let Some(s) = self.shapes.get_mut(id).and_then(|st| st.draw.as_mut()) else {
@@ -2872,6 +2915,8 @@ impl Renderer {
                         &target.depth_copy,
                     ) {
                         let bounds = self.bounds.unwrap_or(([0.0; 3], 1.0));
+                        // Gradient: the floor's shadow may land past the model, so the map covers the quad too.
+                        let bounds = plane.map_or(bounds, |p| p.sun_bounds(bounds));
                         let sun = shadow::sun_view(scene.dir_light.direction, bounds, view.eye);
                         sh.maps.sun_view_proj = sun.view_proj;
                         let p = scene.point_light;

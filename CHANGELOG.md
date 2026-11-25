@@ -3,6 +3,8 @@
 ## Unreleased
 
 - 3D preview: the bundled studio HDRI is gone. **View ▾ > Background > HDRI file…** loads your own Radiance `.hdr` (2:1, 64 to 4096 pixels wide) as the background and ambient light, remembered for both 3D panels; with a solid background, shiny surfaces reflect an environment made from the scene's ambient light. An old `hdri = true` in `gui.toml` loads as a solid background.
+- 3D preview: the sun and the point light cast shadows.
+- 3D preview: **View ▾ > Background > Gradient** is black from the middle of the view up and a warm grey at the bottom, with a floor of that grey under the model that catches the sun's and the point light's shadows.
 - The texture panel opens on the name, type, output format and size, the meshes that use it, and its problems. Other settings sit in groups that start closed, and Tessalith remembers the ones you open, across textures and launches; each closed group says what it holds and marks the ones you changed. Problems' **Go to** opens the group at the setting.
 - New **Green** row on the bulk panel. With several textures selected, **Treat as OpenGL (flip green)** or **Treat as DirectX** sets the green convention of every selected normal map at once, as one undo step. Model-space normals, textures still waiting for their type, and other textures are left as they are.
 

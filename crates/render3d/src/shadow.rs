@@ -3,7 +3,7 @@
 //! (`dirDetailedShadow`, 2280-2281) and point light `i` its `ShadowLightMaskSelect[i]` channel (2401-2403).
 //!
 //! The renderer draws the casters (the depth pre-pass's shapes: not blended, writing depth, alpha test through their
-//! own programs) into a sun depth map, orthographic and fitted to the model's bounding sphere, and, while the point
+//! own programs) into a sun depth map, orthographic and fitted to the model's bounding sphere (with the Gradient floor's quad, Note IH5), and, while the point
 //! light is on, into a depth cube around it. This module's pass then turns the camera's depth into the mask: each
 //! pixel back to its camera-relative position (inverse view-projection), into each light's map, 3×3 PCF. Every
 //! [`View`] here is camera-relative like the camera's: `eye` is the camera's, so `World`, the point light and the
@@ -46,32 +46,20 @@ pub const SLOPE_BIAS_CLAMP: f32 = 0.01;
 /// CS's `TexShadowMaskSampler` register (Lighting.hlsl:504).
 pub const MASK_REGISTER: u32 = 14;
 
-/// The mask pass. `Depth` is the camera depth copy; positions are camera-relative. R = sun, G = point light 0, B = A
-/// = 1; a pixel with no geometry (depth 1) is 1 everywhere.
-const SOURCE: &str = r#"
-cbuffer Mask : register(b0)
-{
-    row_major float4x4 InvViewProj;
-    row_major float4x4 SunViewProj;
-    float4 Point;   // xyz: the light (camera-relative); w: 1 when the cube was drawn
-    float4 Params;  // x, y: the cube's near and far; z: 1 / sun size; w: 1 / cube size
-    float4 Bias;    // x: texels of depth bias
-};
-Texture2D<float> Depth : register(t0);
-Texture2D<float> SunMap : register(t1);
-TextureCube<float> PointMap : register(t2);
-SamplerComparisonState Cmp : register(s0);
+/// Where a pass that reads the maps finds them: the sun map, the point cube and the comparison sampler. The mask pass
+/// and the floor share these (and [`LOOKUP`]), so a register moves in one place.
+pub const SUN_REGISTER: u32 = 1;
+pub const POINT_REGISTER: u32 = 2;
+pub const SAMPLER_REGISTER: u32 = 0;
+const _: () = assert!(POINT_REGISTER == SUN_REGISTER + 1);
 
-struct VsOut { float4 pos : SV_Position; float2 ndc : TEXCOORD0; };
-
-VsOut vs(uint id : SV_VertexID)
-{
-    float2 p = float2((id << 1) & 2, id & 2) * 2.0 - 1.0;
-    VsOut o;
-    o.pos = float4(p, 0.0, 1.0);
-    o.ndc = p;
-    return o;
-}
+/// The lookups every reader of the maps shares, as HLSL: the map declarations and `Sun` / `PointShadow` (1 = lit,
+/// 3×3 PCF). The caller's `cbuffer` comes first and declares `SunViewProj`, `Point`, `Params` and `Bias` as
+/// [`ShadowMaps::lookup_floats`] lays them out; positions are camera-relative.
+const LOOKUP: &str = r#"
+Texture2D<float> SunMap : register(SUN_T);
+TextureCube<float> PointMap : register(POINT_T);
+SamplerComparisonState Cmp : register(CMP_S);
 
 float Sun(float3 p)
 {
@@ -112,6 +100,45 @@ float PointShadow(float3 p)
         [unroll] for (int x = -1; x <= 1; x++)
             lit += PointMap.SampleCmpLevelZero(Cmp, v + (x * t1 + y * t2) * step, z);
     return lit / 9.0;
+}
+"#;
+
+/// A shader that reads the maps: `head` (its `cbuffer`, which `LOOKUP` needs) then the lookups then `body`.
+pub(crate) fn lookup_source(head: &str, body: &str) -> String {
+    format!(
+        "#define SUN_T t{SUN_REGISTER}\n#define POINT_T t{POINT_REGISTER}\n#define CMP_S s{SAMPLER_REGISTER}\n{head}{LOOKUP}{body}"
+    )
+}
+
+/// The mask pass. `Depth` is the camera depth copy; positions are camera-relative. R = sun, G = point light 0, B = A
+/// = 1; a pixel with no geometry (depth 1) is 1 everywhere.
+const MASK_HEAD: &str = r#"
+cbuffer Mask : register(b0)
+{
+    row_major float4x4 InvViewProj;
+    row_major float4x4 SunViewProj;
+    float4 Point;   // xyz: the light (camera-relative); w: 1 when the cube was drawn
+    float4 Params;  // x, y: the cube's near and far; z: 1 / sun size; w: 1 / cube size
+    float4 Bias;    // x: texels of depth bias
+};
+Texture2D<float> Depth : register(t0);
+"#;
+
+/// The mask shader's whole source, as it is compiled (`tests/backend_baseline.rs` lists it).
+pub fn mask_source() -> String {
+    lookup_source(MASK_HEAD, MASK_BODY)
+}
+
+const MASK_BODY: &str = r#"
+struct VsOut { float4 pos : SV_Position; float2 ndc : TEXCOORD0; };
+
+VsOut vs(uint id : SV_VertexID)
+{
+    float2 p = float2((id << 1) & 2, id & 2) * 2.0 - 1.0;
+    VsOut o;
+    o.pos = float4(p, 0.0, 1.0);
+    o.ndc = p;
+    return o;
 }
 
 float4 ps(VsOut i) : SV_Target
@@ -224,8 +251,8 @@ pub struct PointCube {
 }
 
 /// The light maps of the current frame, for the mask pass and any other pass that samples them (the floor). The
-/// view-projection and the point light's place are this frame's, camera-relative. The mask pass binds the sun map at
-/// t1, the cube at t2 and `sampler` at s0.
+/// view-projection and the point light's place are this frame's, camera-relative. [`ShadowMaps::bind`] binds the sun
+/// map at [`SUN_REGISTER`], the cube at [`POINT_REGISTER`] and `sampler` at [`SAMPLER_REGISTER`].
 pub struct ShadowMaps {
     pub sun_size: u32,
     _sun_tex: ID3D11Texture2D,
@@ -240,6 +267,51 @@ pub struct ShadowMaps {
     pub point_far: f32,
     /// LessEqual comparison, bilinear, clamped: `SampleCmpLevelZero(…, depth) = 1` where lit.
     pub sampler: ID3D11SamplerState,
+}
+
+impl ShadowMaps {
+    /// The values of `SunViewProj`, `Point`, `Params` and `Bias` ([`LOOKUP`]'s cbuffer fields, 28 floats).
+    pub(crate) fn lookup_floats(&self) -> Vec<f32> {
+        let (point_on, cube) = match &self.point {
+            Some(c) => (1.0, c.size as f32),
+            None => (0.0, 1.0),
+        };
+        let p = self.point_pos;
+        self.sun_view_proj
+            .iter()
+            .flatten()
+            .copied()
+            .chain([p[0], p[1], p[2], point_on])
+            .chain([
+                self.point_far * POINT_NEAR,
+                self.point_far,
+                1.0 / self.sun_size as f32,
+                1.0 / cube,
+            ])
+            .chain([BIAS_TEXELS, 0.0, 0.0, 0.0])
+            .collect()
+    }
+
+    /// Binds the sun map, the cube (none while the light is off) and the sampler where [`LOOKUP`] reads them.
+    pub(crate) fn bind(&self, gpu: &Gpu) {
+        let cube = self.point.as_ref().map(|c| c.srv.clone());
+        // SAFETY: every object belongs to `gpu.device`.
+        unsafe {
+            gpu.ctx
+                .PSSetShaderResources(SUN_REGISTER, Some(&[Some(self.sun_srv.clone()), cube]));
+            gpu.ctx
+                .PSSetSamplers(SAMPLER_REGISTER, Some(&[Some(self.sampler.clone())]));
+        }
+    }
+
+    /// Unbinds the maps: the next light pass writes them.
+    pub(crate) fn unbind(&self, gpu: &Gpu) {
+        // SAFETY: plain context call.
+        unsafe {
+            gpu.ctx
+                .PSSetShaderResources(SUN_REGISTER, Some(&[None, None]));
+        }
+    }
 }
 
 /// The maps and the mask pass, made on the first shadow frame and dropped on a frame without.
@@ -340,8 +412,9 @@ impl Shadows {
             },
         )?;
         let sun_srv = r32_srv(gpu, &sun_tex)?;
-        let vs_code = compile_source(SOURCE, c"shadow.hlsl", "vs", "vs_5_0")?;
-        let ps_code = compile_source(SOURCE, c"shadow.hlsl", "ps", "ps_5_0")?;
+        let source = mask_source();
+        let vs_code = compile_source(&source, c"shadow.hlsl", "vs", "vs_5_0")?;
+        let ps_code = compile_source(&source, c"shadow.hlsl", "ps", "ps_5_0")?;
         let bd = D3D11_BUFFER_DESC {
             ByteWidth: 176,
             Usage: D3D11_USAGE_DEFAULT,
@@ -429,24 +502,15 @@ impl Shadows {
     }
 
     /// Draws the mask into the bound render target (the target's mask RTV, its viewport, no depth) from `depth` (the
-    /// camera depth copy) and the maps drawn this frame; `view` is the camera's. Leaves t0-t2 of the pixel stage
-    /// unbound, the default depth state and no input layout.
+    /// camera depth copy) and the maps drawn this frame; `view` is the camera's. Leaves t0 and the map registers
+    /// of the pixel stage unbound, the default depth state and no input layout.
     pub fn draw_mask(&self, gpu: &Gpu, depth: &ID3D11ShaderResourceView, view: &View) {
         let m = &self.maps;
-        let (point_on, cube) = match &m.point {
-            Some(c) => (1.0, c.size as f32),
-            None => (0.0, 1.0),
-        };
-        let near = m.point_far * POINT_NEAR;
-        let p = m.point_pos;
         let floats: Vec<f32> = inverse4(&view.view_proj)
             .iter()
-            .chain(m.sun_view_proj.iter())
             .flatten()
             .copied()
-            .chain([p[0], p[1], p[2], point_on])
-            .chain([near, m.point_far, 1.0 / m.sun_size as f32, 1.0 / cube])
-            .chain([BIAS_TEXELS, 0.0, 0.0, 0.0])
+            .chain(m.lookup_floats())
             .collect();
         let bytes: Vec<u8> = floats.iter().flat_map(|v| v.to_le_bytes()).collect();
         // SAFETY: every object belongs to `gpu.device`; `bytes` holds the buffer's 176 bytes.
@@ -459,14 +523,11 @@ impl Shadows {
             ctx.VSSetShader(&self.vs, None);
             ctx.PSSetShader(&self.ps, None);
             ctx.PSSetConstantBuffers(0, Some(&[Some(self.cb.clone())]));
-            let cube_srv = m.point.as_ref().map(|c| c.srv.clone());
-            ctx.PSSetShaderResources(
-                0,
-                Some(&[Some(depth.clone()), Some(m.sun_srv.clone()), cube_srv]),
-            );
-            ctx.PSSetSamplers(0, Some(&[Some(m.sampler.clone())]));
+            ctx.PSSetShaderResources(0, Some(&[Some(depth.clone())]));
+            m.bind(gpu);
             ctx.Draw(3, 0);
-            ctx.PSSetShaderResources(0, Some(&[None, None, None]));
+            ctx.PSSetShaderResources(0, Some(&[None]));
+            m.unbind(gpu);
             ctx.OMSetDepthStencilState(None, 0);
         }
     }

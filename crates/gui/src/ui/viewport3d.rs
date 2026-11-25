@@ -272,6 +272,8 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Background");
                 ui.radio_value(&mut l.mode, BgMode::Solid, "Solid");
+                ui.radio_value(&mut l.mode, BgMode::Gradient, "Gradient")
+                    .on_hover_text("Black fading to grey, with a floor that takes the shadows");
                 // With no file loaded the radio asks for one; the mode switches when the file is good.
                 let r = ui.radio(l.mode == BgMode::Hdri, "HDRI file…");
                 if r.clicked() {

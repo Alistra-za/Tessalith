@@ -3,7 +3,7 @@
 //! The image is uploaded once as RGBA16F; the pass does not touch the depth buffer.
 use crate::device::Gpu;
 use crate::hdri::{Hdr, YAW};
-use crate::scene::{inverse4, View};
+use crate::scene::{inverse4, srgb_to_linear, View};
 use std::ffi::CString;
 use windows::core::PCSTR;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCompile, D3DCOMPILE_OPTIMIZATION_LEVEL3};
@@ -91,6 +91,114 @@ pub(crate) fn compile_source(
         Err(x) => Err(errs
             .map(|b| String::from_utf8_lossy(&blob(&b)).to_string())
             .unwrap_or_else(|| x.to_string())),
+    }
+}
+
+/// The gradient background's bottom colour and the floor's colour, sRGB (Note IH5).
+pub const GRADIENT_FLOOR_SRGB: [f32; 3] = [0.42, 0.40, 0.39];
+
+/// [`GRADIENT_FLOOR_SRGB`] decoded to linear.
+pub fn gradient_floor_linear() -> [f32; 3] {
+    GRADIENT_FLOOR_SRGB.map(srgb_to_linear)
+}
+
+/// Per pixel `t = saturate((y_from_top / height − 0.5) / 0.5)`: black above the middle, the floor colour × smoothstep
+/// of `t` below. `Colour.w` > 0.5: the readback does not sRGB-encode, so give it display values (as `Backdrop`).
+pub const GRADIENT_SOURCE: &str = r#"
+cbuffer Gr : register(b0) { float4 Colour; float4 Size; };
+struct VsOut { float4 pos : SV_Position; };
+
+VsOut vs(uint id : SV_VertexID)
+{
+    float2 p = float2((id << 1) & 2, id & 2) * 2.0 - 1.0;
+    VsOut o;
+    o.pos = float4(p, 1.0, 1.0);
+    return o;
+}
+
+float4 ps(VsOut i) : SV_Target
+{
+    float t = saturate((i.pos.y / Size.x - 0.5) / 0.5);
+    float3 c = Colour.rgb * (t * t * (3.0 - 2.0 * t));
+    if (Colour.w > 0.5)
+        c = c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return float4(c, 1.0);
+}
+"#;
+
+/// The gradient background pass: one full-screen triangle, no texture, no depth.
+pub struct Gradient {
+    vs: ID3D11VertexShader,
+    ps: ID3D11PixelShader,
+    cb: ID3D11Buffer,
+    no_depth: ID3D11DepthStencilState,
+}
+
+impl Gradient {
+    pub fn new(gpu: &Gpu) -> Result<Gradient, String> {
+        let vs_code = compile_source(GRADIENT_SOURCE, c"gradient.hlsl", "vs", "vs_5_0")?;
+        let ps_code = compile_source(GRADIENT_SOURCE, c"gradient.hlsl", "ps", "ps_5_0")?;
+        let bd = D3D11_BUFFER_DESC {
+            ByteWidth: 32,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+            StructureByteStride: 0,
+        };
+        let dd = D3D11_DEPTH_STENCIL_DESC::default(); // DepthEnable = false
+        let (mut vs, mut ps, mut cb, mut ds) = (None, None, None, None);
+        // SAFETY: descriptors and bytecode outlive the calls; out-pointers are locals.
+        unsafe {
+            gpu.device
+                .CreateVertexShader(&vs_code, None, Some(&mut vs))
+                .map_err(|e| gpu.fail("CreateVertexShader(gradient)", e))?;
+            gpu.device
+                .CreatePixelShader(&ps_code, None, Some(&mut ps))
+                .map_err(|e| gpu.fail("CreatePixelShader(gradient)", e))?;
+            gpu.device
+                .CreateBuffer(&bd, None, Some(&mut cb))
+                .map_err(|e| gpu.fail("CreateBuffer(gradient)", e))?;
+            gpu.device
+                .CreateDepthStencilState(&dd, Some(&mut ds))
+                .map_err(|e| gpu.fail("CreateDepthStencilState(gradient)", e))?;
+        }
+        Ok(Gradient {
+            vs: vs.ok_or("no gradient vertex shader")?,
+            ps: ps.ok_or("no gradient pixel shader")?,
+            cb: cb.ok_or("no gradient buffer")?,
+            no_depth: ds.ok_or("no gradient depth state")?,
+        })
+    }
+
+    /// Draws the background into the bound target (viewport and render target already set), `height` pixels tall.
+    /// Leaves the default depth state and no input layout.
+    pub fn draw(&self, gpu: &Gpu, height: u32, encode: bool) {
+        let c = gradient_floor_linear();
+        let floats = [
+            c[0],
+            c[1],
+            c[2],
+            if encode { 1.0f32 } else { 0.0 },
+            height.max(1) as f32,
+            0.0,
+            0.0,
+            0.0,
+        ];
+        let bytes: Vec<u8> = floats.iter().flat_map(|v| v.to_le_bytes()).collect();
+        // SAFETY: every object belongs to `gpu.device`; `bytes` holds the buffer's 32 bytes.
+        unsafe {
+            let ctx = &gpu.ctx;
+            ctx.UpdateSubresource(&self.cb, 0, None, bytes.as_ptr() as _, 0, 0);
+            ctx.OMSetDepthStencilState(&self.no_depth, 0);
+            ctx.OMSetBlendState(None, None, 0xffff_ffff);
+            ctx.IASetInputLayout(None);
+            ctx.VSSetShader(&self.vs, None);
+            ctx.PSSetShader(&self.ps, None);
+            ctx.PSSetConstantBuffers(0, Some(&[Some(self.cb.clone())]));
+            ctx.Draw(3, 0);
+            ctx.OMSetDepthStencilState(None, 0);
+        }
     }
 }
 

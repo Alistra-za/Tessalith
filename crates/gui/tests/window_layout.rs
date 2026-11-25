@@ -776,6 +776,7 @@ fn old_hdri_true_loads_as_solid() {
     // The new key: "hdri" turns it on, an unknown name or a wrong type is Solid.
     for (toml_text, want) in [
         ("mode = \"hdri\"", BgMode::Hdri),
+        ("mode = \"gradient\"", BgMode::Gradient),
         ("mode = \"solid\"", BgMode::Solid),
         ("mode = \"plaid\"", BgMode::Solid),
         ("mode = 3", BgMode::Solid),
@@ -795,6 +796,18 @@ fn old_hdri_true_loads_as_solid() {
     assert!(
         saved.contains("mode = \"hdri\"") && !saved.contains("hdri = "),
         "{saved}"
+    );
+    // Gradient writes its name and reads back as itself.
+    let saved = toml::to_string(&LookSettings::of(&Look {
+        mode: BgMode::Gradient,
+        ..Look::default()
+    }))
+    .unwrap();
+    assert!(saved.contains("mode = \"gradient\""), "{saved}");
+    let (s, _) = load_text(&format!("[layout.look]\n{saved}"));
+    assert_eq!(
+        Look::from_settings(s.layout.look.as_ref()).mode,
+        BgMode::Gradient
     );
 }
 

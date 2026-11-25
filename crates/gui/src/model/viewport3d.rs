@@ -402,6 +402,9 @@ pub enum BgMode {
     /// A flat colour ([`Look::bg`]).
     #[default]
     Solid,
+    /// Black above the middle of the frame, a warm grey at the bottom, and a floor of that grey under the model that
+    /// takes the sun's and the point light's shadows (Note IH5). No colour to pick.
+    Gradient,
     /// The user's HDRI file ([`Viewport3d::hdri_file`]) behind the model and as ambient light; a flat colour while
     /// none is loaded.
     Hdri,
@@ -412,6 +415,7 @@ impl BgMode {
     pub fn name(self) -> &'static str {
         match self {
             BgMode::Solid => "solid",
+            BgMode::Gradient => "gradient",
             BgMode::Hdri => "hdri",
         }
     }
@@ -419,6 +423,7 @@ impl BgMode {
     /// The mode a saved name means; an unknown name is Solid.
     pub fn from_name(s: &str) -> BgMode {
         match s {
+            "gradient" => BgMode::Gradient,
             "hdri" => BgMode::Hdri,
             _ => BgMode::Solid,
         }
@@ -462,6 +467,7 @@ impl Look {
         let mut s = Scene {
             camera,
             background: match (self.mode, env) {
+                (BgMode::Gradient, _) => Background::Gradient,
                 (BgMode::Hdri, Some(e)) => Background::Hdri(e.clone()),
                 _ => Background::rgb(self.bg),
             },
@@ -1469,7 +1475,7 @@ impl Viewport3d {
         let want = (camera, w, h, loaded, look, time);
         let env = match look.mode {
             BgMode::Hdri => self.hdri.as_ref().map(|(_, e)| e.clone()),
-            BgMode::Solid => None,
+            BgMode::Solid | BgMode::Gradient => None,
         };
         let same_env = match (&self.last_env, &env) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -2327,7 +2333,7 @@ fn render_loop(
         if let Some(e) = r.backdrop_error() {
             if backdrop_told.as_deref() != Some(e) {
                 backdrop_told = Some(e.to_owned());
-                send(V3Reply::Notice(format!("HDRI backdrop unavailable: {e}")));
+                send(V3Reply::Notice(format!("Background unavailable: {e}")));
             }
         }
         // A features change can turn deferred off during render (late fallback).

@@ -54,6 +54,10 @@ pub enum Background {
     /// The user's HDRI file ([`crate::hdri::Environment`]) by view direction, turned by `Scene::env_yaw`. It also
     /// replaces `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
     Hdri(Arc<hdri::Environment>),
+    /// Black from the middle of the frame up, fading to [`crate::background::GRADIENT_FLOOR_SRGB`] at the bottom, and
+    /// a floor of that colour under the model that catches the sun and the point light's shadows (Note IH5). Ambient
+    /// and environment are Solid's (the procedural one).
+    Gradient,
 }
 
 /// `Hdri` compares by identity (`Arc::ptr_eq`): a new file is a new `Arc`.
@@ -62,6 +66,7 @@ impl PartialEq for Background {
         match (self, other) {
             (Background::Solid(a), Background::Solid(b)) => a == b,
             (Background::Hdri(a), Background::Hdri(b)) => Arc::ptr_eq(a, b),
+            (Background::Gradient, Background::Gradient) => true,
             _ => false,
         }
     }
@@ -165,7 +170,7 @@ impl Scene {
 
     pub fn ambient(&self) -> [[f32; 3]; 6] {
         match &self.background {
-            Background::Solid(_) => self.ambient6,
+            Background::Solid(_) | Background::Gradient => self.ambient6,
             Background::Hdri(e) => e.ambient6_at(self.env_yaw),
         }
     }

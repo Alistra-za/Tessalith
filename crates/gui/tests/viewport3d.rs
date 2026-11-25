@@ -1009,6 +1009,7 @@ fn changing_the_look_sends_a_render_and_no_load() {
     assert!(cmds.try_recv().is_err());
     for change in [
         (|l: &mut v3::Look| l.mode = v3::BgMode::Hdri) as fn(&mut v3::Look),
+        |l| l.mode = v3::BgMode::Gradient,
         |l| l.bg = [0.5, 0.25, 0.0],
         |l| l.sun = 2.0,
         |l| l.point = 1.5,
@@ -1082,6 +1083,31 @@ fn view_section_offers_background_and_lights() {
     h.get_by_label("Reset view").click();
     h.run();
     assert_eq!(h.state().look, v3::Look::default());
+}
+
+/// Note IH5: the background row reads Solid, Gradient, HDRI file…, left to right; Gradient switches the mode and the
+/// look's scene then draws the Gradient background.
+#[test]
+fn the_background_radio_has_three_modes_in_order() {
+    use render3d::scene::{Background, Camera};
+    let mut h = harness(Viewport3d::with_state(V3State::Ready));
+    h.run();
+    h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
+    h.run();
+    let x = |h: &Harness<'_, Viewport3d>, name: &str| h.get_by_label(name).rect().min.x;
+    let (solid, gradient, hdri) = (x(&h, "Solid"), x(&h, "Gradient"), x(&h, "HDRI file…"));
+    assert!(
+        solid < gradient && gradient < hdri,
+        "{solid} {gradient} {hdri}"
+    );
+    assert_eq!(h.state().look.mode, v3::BgMode::Solid, "the default");
+    h.get_by_label("Gradient").click();
+    h.run();
+    assert_eq!(h.state().look.mode, v3::BgMode::Gradient);
+    assert_eq!(
+        h.state().look.scene(Camera::Auto, None, None).background,
+        Background::Gradient
+    );
 }
 
 /// A flat RGBE `.hdr` of one grey, `w` × `h`.
