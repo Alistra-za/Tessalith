@@ -1805,3 +1805,158 @@ fn one_colour_p_bits_follow_the_weights() {
         bad.join("\n")
     );
 }
+
+/// BC7's 2-bit and 3-bit index weights (mode 4's palettes).
+const BC7_WEIGHTS2: [u32; 4] = [0, 21, 43, 64];
+const BC7_WEIGHTS3: [u32; 8] = [0, 9, 18, 27, 37, 46, 55, 64];
+
+/// Patch 0005 (KS)'s tables, built as the kernel builds them: `[width][v]` is the smallest squared error at which mode
+/// 4's scalar decodes `v` from a pair of 6-bit codes (expanded as the decoder does) and one selector, with 2-bit indices
+/// (`[0]`) or 3-bit (`[1]`). Every v has an exact pair at 3 bits; at 2 bits v = 2, 6, 10, 249 and 253 have none (1 off).
+fn ks_best_errors() -> [[u32; 256]; 2] {
+    [&BC7_WEIGHTS2[..], &BC7_WEIGHTS3[..]].map(|w| {
+        let mut decoded = vec![];
+        for l in 0..64u32 {
+            let lo = (l << 2) | (l >> 4);
+            for h in 0..64u32 {
+                let hi = (h << 2) | (h >> 4);
+                decoded.extend(w.iter().map(|&x| (lo * (64 - x) + hi * x + 32) >> 6));
+            }
+        }
+        // A value no pair decodes takes the error of the closest decoded value.
+        std::array::from_fn(|v| {
+            let d = decoded.iter().map(|&k| k.abs_diff(v as u32)).min().unwrap();
+            d * d
+        })
+    })
+}
+
+/// The outputs (raw) of one constant-alpha cell: the block indices that are mode 4 at rotation 0 (alpha in the scalar
+/// slot), those of them whose alpha decodes farther from `v` than `ks_best_errors` allows for the block's alpha index
+/// width (index-mode bit set: 2 bits), and the number of other blocks.
+fn constant_alpha_cell(
+    out: &[u8],
+    v: u8,
+    best: &[[u32; 256]; 2],
+) -> (Vec<usize>, Vec<usize>, usize) {
+    let (mut taken, mut missed, mut other) = (vec![], vec![], 0);
+    for (k, b) in out.chunks(16).enumerate() {
+        if b[0].trailing_zeros() != 4 || (b[0] >> 5) & 3 != 0 {
+            other += 1;
+            continue;
+        }
+        taken.push(k);
+        let width = usize::from(b[0] >> 7 == 0);
+        if decode(b)
+            .iter()
+            .any(|d| u32::from(d[3].abs_diff(v)).pow(2) > best[width][usize::from(v)])
+        {
+            missed.push(k);
+        }
+    }
+    (taken, missed, other)
+}
+
+/// The blocks of `flat_alpha_blocks(FLAT_ALPHA_SEED, 252, None)` (in its 64-block calls) that were mode 4 at rotation 0
+/// and decoded alpha off 252 at veryfast and fast, perceptual, on every path before patch 0005's KS, and stay mode 4 at
+/// rotation 0 there after it: the first 8 of 14 (all 14 stay; Note LR, LR22).
+const KS_WITNESSES: &[usize] = &[19, 29, 47, 69, 99, 101, 131, 171];
+
+/// Patch 0005, KS: a block whose mode-4 scalar is one value v started mode 4's alpha search at la = ha = (v + 2) >> 2,
+/// which the refit cannot move (every selector 0), so without the uber grid (ultrafast, veryfast and fast) alpha 252
+/// decoded 255, though codes 62 and 63 at index weight 21 decode 252. Mode 4 now also scores the closest code pair from
+/// a table. On `flat_alpha_blocks` at alpha 252, every output that is mode 4 at rotation 0 decodes alpha within the
+/// table's best error for its index width (`ks_best_errors`), at veryfast and fast, linear (weights 1, 1, 1, 16) and
+/// perceptual, raw, on every path; `KS_WITNESSES` must still be mode 4 at rotation 0 in the perceptual cells. Outputs
+/// in another mode or rotated are counted, not asserted: KS adds a mode-4 candidate, it does not decide the mode
+/// (Note LR, LR22).
+#[test]
+fn a_constant_alpha_decodes_exactly() {
+    let best = ks_best_errors();
+    let blocks = flat_alpha_blocks(FLAT_ALPHA_SEED, 252, None);
+    let mut bad = vec![];
+    for level in [Bc7Level::Veryfast, Bc7Level::Fast] {
+        for perceptual in [false, true] {
+            let p = Bc7Params {
+                level,
+                perceptual,
+                exact_opaque: false,
+            };
+            let tune = encoders_sys::Bc7Tune {
+                weights: (!perceptual).then_some([1, 1, 1, 16]),
+                ..encoders_sys::Bc7Tune::default()
+            };
+            for target in paths() {
+                let out = tuned_on(&blocks, p, tune, target);
+                let (taken, missed, other) = constant_alpha_cell(&out, 252, &best);
+                let what = format!("{level:?} perceptual={perceptual} {target:?}");
+                println!("{what}: mode 4 rotation 0 {taken:?}, other {other}; missed {missed:?}");
+                if !missed.is_empty() {
+                    bad.push(format!("{what}: alpha off 252 in {} blocks", missed.len()));
+                }
+                if perceptual {
+                    for k in KS_WITNESSES.iter().filter(|k| !taken.contains(k)) {
+                        bad.push(format!("{what}: witness {k} left mode 4 rotation 0"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "constant alpha 252 off its best code pair:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Patch 0005, KS, for every constant: `flat_alpha_blocks` at each alpha v from 1 to 254, at veryfast, linear (weights
+/// 1, 1, 1, 16) and perceptual, raw, on every path. Every output that is mode 4 at rotation 0 decodes alpha within the
+/// table's best error for its index width; other outputs are counted (Note LR, LR22).
+#[test]
+fn every_constant_alpha_value_decodes_exactly() {
+    let best = ks_best_errors();
+    let mut bad = vec![];
+    for perceptual in [false, true] {
+        let p = Bc7Params {
+            level: Bc7Level::Veryfast,
+            perceptual,
+            exact_opaque: false,
+        };
+        let tune = encoders_sys::Bc7Tune {
+            weights: (!perceptual).then_some([1, 1, 1, 16]),
+            ..encoders_sys::Bc7Tune::default()
+        };
+        for target in paths() {
+            let (mut taken, mut other, mut missed, mut values) = (0, 0, 0, vec![]);
+            for v in 1..=254u8 {
+                let out = tuned_on(
+                    &flat_alpha_blocks(FLAT_ALPHA_SEED, v, None),
+                    p,
+                    tune,
+                    target,
+                );
+                let (t, m, o) = constant_alpha_cell(&out, v, &best);
+                taken += t.len();
+                other += o;
+                missed += m.len();
+                if !m.is_empty() {
+                    values.push(v);
+                }
+            }
+            let what = format!("perceptual={perceptual} {target:?}");
+            println!("{what}: mode 4 rotation 0 {taken}, other {other}, missed {missed}");
+            if missed > 0 {
+                bad.push(format!(
+                    "{what}: {missed} blocks off at {} values, first {:?}",
+                    values.len(),
+                    &values[..values.len().min(12)]
+                ));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "constant alpha off its best code pair at veryfast:\n{}",
+        bad.join("\n")
+    );
+}

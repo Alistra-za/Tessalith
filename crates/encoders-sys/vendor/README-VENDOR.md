@@ -106,10 +106,18 @@ against a best pair's 2); equal weights and perceptual run the unchanged sum, an
 packers keep the unweighted choice, which ranks as the weighted one only while the R, G and B weights are equal (every
 shipped tuning); proof test `tests/bc7.rs` `one_colour_p_bits_follow_the_weights` (mode 7: no block was found where mode
 6's change shows); changes bytes only for linear weights that are not all equal (a user's `encoder.bc7_weights =
-"alphaN"`), where a mode 6 or 7 candidate packs a solid subset or a subset's mean colour as one colour. These changes
-alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only
-tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new
-patch file with its own tag.
+"alphaN"`), where a mode 6 or 7 candidate packs a solid subset or a subset's mean colour as one colour. KS: a mode-4
+scalar that is one value v across the block started the scalar search at la = ha = min((v + 2) >> 2, 63), which the
+refit cannot move (every selector 0), so where no uber grid runs (ultrafast, veryfast and fast) a constant alpha of 252
+decoded 255; mode 4 now also scores the closest 6-bit code pair and selector for v from two 256-entry tables (2-bit and
+3-bit indices, built once at init), kept only under a strict `<`, so 0 keeps its start (exact) and 255 keeps S1's
+shortcut (the pair is exact for every v at 3 bits and for all but 2, 6, 10, 249 and 253 at 2 bits, which it decodes 1
+off); proof tests `tests/bc7.rs` `a_constant_alpha_decodes_exactly` and `every_constant_alpha_value_decodes_exactly`;
+changes bytes of blocks whose mode-4 scalar is one value other than 0 and 255 (a constant alpha, or a constant colour
+channel in a rotated trial), at every level, linear and perceptual: at uber 1 and above the grid then searches around
+the new pair. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and the measured
+images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once merged: a later
+bc7e change goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a

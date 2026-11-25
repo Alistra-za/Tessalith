@@ -11,9 +11,10 @@
 //!
 //! The hashes are those of the patch 0005 objects (bc7enc_rdo b943862 + patches 0001, 0002 and 0005; ISPC 1.31.0, the
 //! AVX-512 row ISPC 1.32.0), recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-23, the exact-opaque rows again on
-//! 2026-11-25 when exact opaque became the channel guard's A (Note LR, LR17), over four deterministic 64x64 images
-//! (opaque colour, cutout, smooth alpha, normal-like) at every level, with and without perceptual weighting and exact
-//! opaque. `RECORDED_S1` pins a fifth image built to reach patch 0005's S1 shortcut. The first recording (2026-10-18,
+//! 2026-11-25 when exact opaque became the channel guard's A (Note LR, LR17), and the veryfast and fast rows without
+//! perceptual weighting again that day when mode 4 gained the constant-scalar code pair (LR22; the smooth image's B is
+//! 128 throughout), over four deterministic 64x64 images (opaque colour, cutout, smooth alpha, normal-like) at every
+//! level, with and without perceptual weighting and exact opaque. `RECORDED_S1` pins a fifth image built to reach patch 0005's S1 shortcut. The first recording (2026-10-18,
 //! one hash per level) came from a Linux CPU's dispatch path and never matched a Windows machine. Run with
 //! `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change is intended (needs a DECISIONS note).
 
@@ -52,8 +53,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "26703d28acd0bc81502c1d508daf6c175e0468c67c02d8d0c28203e0ccf17dbb",
-                "995060c9739bb8978ac80d9d27622dcea16cae4eaa17d84e3e7ea1e5d0a80b4d",
+                "5ce3ee30eb1dcb238e2921d4d477604809af343e07d6b3d5a4123246007cd8e8",
+                "51335795676e832726a53e2ab56bfeef589b6487236c20343ee35d757dc8f634",
             ],
             [
                 "96eb3ed4ca8e067f09613d5381ed6171ca625c56d32909898227577bbdc3110b",
@@ -62,8 +63,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "089484fd4e84bc1d5566ac9da84c5bcb73dfff249585c7d5d4d5631893b42536",
-                "a906456ae22790b689af8d4e41e5f442c7c00fd2375937eacc4e8a88600c108f",
+                "59b05f703a7fb9bbfa7f5c390942b377de4a95efb339e7800cea71405c96aa42",
+                "4d3630710b1d3d94b75063f6ea201011ca3599823eebcdf4dc41d8e419599b1d",
             ],
             [
                 "96eb3ed4ca8e067f09613d5381ed6171ca625c56d32909898227577bbdc3110b",
@@ -134,8 +135,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "05d30775ac25f81c6a6906a6e05b8c4181647c564095007eda83f096b46da6f4",
-                "197ec8d20bd67d5e4628a1979bf926035c8ee3680d56d67ed665bc08ed52db29",
+                "a1243c10a8766e80cc64c468638467cfc8f0307d1f3fe3a4239ccd4f6a1724ba",
+                "edd0e5f22adb49fbd6cb3d6f7a83a85699f05850fc15542e3f0bbea6ee465fec",
             ],
             [
                 "b05416828fee9264e0193e3ec7ee728881c45849b75017666697051645093965",
@@ -144,8 +145,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "efa476b78b6ccf60021b2e5b4e82f16d2c2866dd594eb33da539ce881bfba330",
-                "4a4f47608a6e175da3dc9bf629d1da2371508219f5b545d250c155eaa914915c",
+                "8cfe7dc6276f8b638e88371e527097219ac9f768803a0bc30fd87aed60b550a6",
+                "b18cdc852e533218073ea2c904183843695705871f40e10d92f4728724815f5a",
             ],
             [
                 "b05416828fee9264e0193e3ec7ee728881c45849b75017666697051645093965",
@@ -216,8 +217,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "76ebcf4b00ae1dad1c98e07765d59aa392c6426d118d27ba918465d94a429f52",
-                "df5a878855f91bf5124ffc79ca11f857cd5f96010ba565b4c82bae01173416d3",
+                "56d8c71b94cc66da0b01f9737c70e447f816491885bed0d7fc5baf26f6e6c80b",
+                "6b0bd371488e91e966e19738c5a7df9ee37ccc8ae053395f8085c2b54b7f08a9",
             ],
             [
                 "a0bff012a9f525ebf59366f1f83447520604c09f7aa72d3a98ab75fc611dd879",
@@ -226,8 +227,8 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
         ],
         [
             [
-                "59219410906be5691dd4dfa8ff75ef42cfb755a791884b2a6e39ab18662bd2d8",
-                "c9ecb66d2acf47baa6a9f7ce95207896ed86b4e035eb2d19dce989924e793086",
+                "12f857f5fb3a12cbbbe8aeced92ffe8189c6be4223612db1b3ec8963108c71df",
+                "d828bde515db1c51cc9b81260f16685df5f4019017ced17c58cf5a7192509d9f",
             ],
             [
                 "a0bff012a9f525ebf59366f1f83447520604c09f7aa72d3a98ab75fc611dd879",

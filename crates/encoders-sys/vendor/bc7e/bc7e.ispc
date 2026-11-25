@@ -36,6 +36,7 @@
 //   finds such a solution, above G, B and R; a rotated mode 4/5 trial charges source alpha at A's tier in whichever
 //   colour slot holds it.
 // - WP: with unequal linear weights the mode 6 and 7 one-colour packers choose their p-bits by the weighted error.
+// - KS: mode 4 tries the exact code pair for a scalar that is one value across the block.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -446,6 +447,9 @@ const uniform uint32_t BC7E_MODE_4_OPTIMAL_INDEX3 = 2;
 const uniform uint32_t BC7E_MODE_4_OPTIMAL_INDEX2 = 1;
 
 static uniform uint32_t g_bc7_mode_5_optimal_endpoints[256]; // [c]
+// sdc patch 0005 (KS): mode 4's scalar at one value v: the 6-bit code pair and selector closest to v (lo | hi << 8 | selector << 16)
+// and its squared error, for 2-bit (pair2) and 3-bit (pair3) indices
+static uniform uint32_t g_ks_mode4_pair2[256], g_ks_mode4_pair3[256], g_ks_mode4_err2[256], g_ks_mode4_err3[256];
 const uniform uint32_t BC7E_MODE_5_OPTIMAL_INDEX = 1;
 
 static uniform endpoint_err g_bc7_mode_0_optimal_endpoints[256][2][2]; // [c][hp][lp]
@@ -598,6 +602,45 @@ export void bc7e_compress_block_init()
 
 	} // c
 
+
+	// sdc patch 0005 (KS): the constant-scalar pairs of mode 4 (6-bit codes expanded as the decoder does; first found wins a tie)
+	for (uniform int c = 0; c < 256; c++)
+	{
+		for (uniform uint32_t bits = 2; bits <= 3; bits++)
+		{
+			uniform uint32_t best = 0;
+			uniform int best_err = 0x7FFFFFFF;
+			for (uniform uint32_t l = 0; l < 64; l++)
+			{
+				const uniform uint32_t lo = (l << 2) | (l >> 4);
+				for (uniform uint32_t h = 0; h < 64; h++)
+				{
+					const uniform uint32_t hi = (h << 2) | (h >> 4);
+					for (uniform uint32_t s = 0; s < (1U << bits); s++)
+					{
+						const uniform uint32_t w = (bits == 3) ? g_bc7_weights3[s] : g_bc7_weights2[s];
+						const uniform int k = (lo * (64 - w) + hi * w + 32) >> 6;
+						const uniform int err = (k - c) * (k - c);
+						if (err < best_err)
+						{
+							best_err = err;
+							best = l | (h << 8) | (s << 16);
+						}
+					}
+				}
+			}
+			if (bits == 3)
+			{
+				g_ks_mode4_pair3[c] = best;
+				g_ks_mode4_err3[c] = (uint32_t)best_err;
+			}
+			else
+			{
+				g_ks_mode4_pair2[c] = best;
+				g_ks_mode4_err2[c] = (uint32_t)best_err;
+			}
+		}
+	}
 
 	//Mode 4: 555 3-bit indices
 	for (uniform int c = 0; c < 256; c++)
@@ -3679,6 +3722,25 @@ static void handle_alpha_block_mode4(const varying color_quad_i *uniform pPixels
 			}
 						
 		} // pass
+
+		// sdc patch 0005 (KS): a scalar that is one value v starts at la = ha = (v + 2) >> 2, which the refit cannot move; the
+		// exact code pair (or the closest) is one more candidate, kept only under strict < (255 is S1's case above)
+		cif (lo_a == hi_a)
+		{
+#pragma ignore warning(perf)
+			const uint32_t ks = index_selector ? g_ks_mode4_pair2[lo_a] : g_ks_mode4_pair3[lo_a];
+#pragma ignore warning(perf)
+			const uint32_t ks_e = index_selector ? g_ks_mode4_err2[lo_a] : g_ks_mode4_err3[lo_a];
+			const uint64_t ks_err = (uint64_t)(16 * ks_e) * pParams->m_weights[3];
+			if (ks_err < best_alpha_err)
+			{
+				best_alpha_err = ks_err;
+				best_la = ks & 0xFF;
+				best_ha = (ks >> 8) & 0xFF;
+				for (uniform uint32_t i = 0; i < 16; i++)
+					best_alpha_selectors[i] = (ks >> 16) & 0xFF;
+			}
+		}
 
 		if (pComp_params->m_uber_level > 0)
 		{
