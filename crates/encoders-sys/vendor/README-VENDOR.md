@@ -133,10 +133,14 @@ error alone is already at or above the best so far, which the callers pass in; a
 any guard penalty, never below the scalar alone, so the callers' strict `<` could not have taken a skipped trial, and
 the scalar search is integer and reads nothing of the colour result; BC7 bytes unchanged: every `level_identity` hash on
 SSE2, AVX2 and AVX-512, `identity.json`, and every measured image's hash on AVX2 and AVX-512 equal; no test holds the
-skip on its own, but a skip made unsafe (taken when the scalar error exceeds half the best) fails
-`tests/level_identity.rs` on three paths. These changes alter BC7 bytes (the pins in `tests/level_identity.rs`,
-`identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the
-file is frozen once merged: a later bc7e change goes in a new patch file with its own tag.
+skip on its own. Made unsafe (taken when the scalar error exceeds half the best): at mode 4's site alone it moves every
+linear `tests/level_identity.rs` row from veryfast to max on three paths; at mode 5's site alone, returning the larger
+of the scalar error and the best so that no half-written result is taken, no pin or `tests/bc7.rs` test fails, so the
+pins do not hold mode 5's skip; at both sites, with mode 5 returning the scalar error alone, `tests/bc7.rs` fails four
+tests and `tests/level_identity.rs` crashes (the return contract broken: the caller can then accept a trial whose colour
+part was never written). The other changes alter BC7 bytes (the pins in `tests/level_identity.rs`, `identity.json` and
+the measured images). The engine's BC7-only tag `bc7e_fixes` hashes this patch file whole, so the file is frozen once
+merged: a later bc7e change goes in a new patch file with its own tag.
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes
 `ispctc/kernel.ispc` (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a
