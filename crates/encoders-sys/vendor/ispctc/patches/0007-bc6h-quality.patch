@@ -1,0 +1,39 @@
+diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+index 1b68835c..212a09a6 100644
+--- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
++++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+@@ -39,6 +39,10 @@
+ // 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
+ // S4 prune the slow levels skip a mode whose endpoint window cannot beat the best error so far.
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
++// Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a second
++// audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
++// PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm is zero.
++///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #ifndef ISPC_UINT_IS_DEFINED
+ //these are defined in ISPC version 1.13.0 and later
+@@ -310,8 +314,21 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
+ 			for (uniform int p=0; p<channels; p++)
+ 				norm_sq += axis[p]*axis[p];
+ 
+-			float rnorm = RSQRT(norm_sq);
+-			for (uniform int p=0; p<channels; p++) vec[p] *= rnorm;
++			// sdc patch 0007 (PCA re-seed): an exactly cancelling covariance (rows summing to 0 with eps absorbed) gave a zero vector, and RSQRT(0) * 0 was NaN; restart from the largest-variance coordinate
++			// (a not-finite norm is unreachable: covariance entries are at most 2^14 and the vector is renormalised every two iterations)
++			if (norm_sq > 0)
++			{
++				float rnorm = RSQRT(norm_sq);
++				for (uniform int p=0; p<channels; p++) vec[p] *= rnorm;
++			}
++			else
++			{
++				float best = covar[0];
++				vec[0] = 1; vec[1] = 0; vec[2] = 0; vec[3] = 0;
++				if (covar[4] > best) { best = covar[4]; vec[0] = 0; vec[1] = 1; vec[2] = 0; vec[3] = 0; }
++				if (covar[7] > best) { best = covar[7]; vec[0] = 0; vec[1] = 0; vec[2] = 1; vec[3] = 0; }
++				if (channels == 4 && covar[9] > best) { vec[0] = 0; vec[1] = 0; vec[2] = 0; vec[3] = 1; }
++			}
+ 		}		
+ 	}
+ 

@@ -23,7 +23,8 @@ pub const RELEASED_ENGINE_VERSION: &str = "3.1.0";
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
 /// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
 /// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`; `pbr_emissive` and `hdr_sky` moved to the current version
-/// with the BC6H kernel fixes (Note LO). No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// with the BC6H kernel fixes (Note LO) and moved again
+/// with ISPC TC patch 0007 (Note LT). No `_` arm: a new `Subtype` fails to compile until it gets one.
 /// An output whose record names an older arm is kept by `if-changed` unless the run's `--ev` covers it (Note JA).
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -45,7 +46,8 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::ComplexGrass
         | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
-        // The built-in BC6H types: ISPC TC patch 0004 changes BC6H bytes (Note LO). A pbr_emissive written as BC7 is
+        // The built-in BC6H types: ISPC TC patch 0004 changed BC6H bytes (Note LO) and patch 0007 changes them again
+        // (Note LT), so they follow the current version until the release names it. A pbr_emissive written as BC7 is
         // reported as an older encode too (ruling BC6H-Q1); `--ev --property bc6h_uf16` re-encodes only the BC6H outputs.
         // shortcut: a format = "bc6h_uf16" set by hand on any other sub-type is not marked. If that is reported, add a
         // BC6H-scoped `ispctc_patch` tag compared like `rgbcx_patch` (in api::currency) instead of moving more arms.
@@ -609,7 +611,8 @@ mod tests {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
             // 3.1.0 changes kept normal lengths, XY bases and the angular variance bake (LA).
             // SkinWet stays at 3.0.0 because every writable format stores XYZ.
-            // 3.1.0 also changes BC6H bytes (ISPC TC patch 0004, Note LO).
+            // 3.1.0 changed BC6H bytes (ISPC TC patch 0004, Note LO); the current version changes them again
+            // (patch 0007, Note LT).
             let want = if matches!(
                 st,
                 Subtype::Diffuse
