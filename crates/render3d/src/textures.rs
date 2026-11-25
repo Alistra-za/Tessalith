@@ -70,7 +70,8 @@ pub fn register_for_slot(shader_type: u32, pbr: bool, msn: bool, slot: usize) ->
 }
 
 /// Default colour of a register with no texture (brief B7): t0 white, t1 flat normal `(128,128,255,255)`,
-/// t14 (shadow mask) white = unshadowed, every other register black (t5 env mask, t6 glow …).
+/// t14 (shadow mask) white = unshadowed, every other register black (t5 env mask, t6 glow …). On a shadow frame the
+/// renderer binds its mask over the t14 default for the colour passes (Note IH4).
 pub fn default_for_register(reg: u32) -> [u8; 4] {
     match reg {
         0 | 14 => [255, 255, 255, 255],

@@ -23,6 +23,7 @@ pub mod pool;
 #[cfg(feature = "test-hooks")]
 pub mod replay;
 pub mod scene;
+pub mod shadow;
 pub mod source;
 pub mod textures;
 
@@ -43,7 +44,9 @@ use compile::{cached, program_key, CompiledPair, ProgramKey, SrvKind};
 use cs_settings::CsSettings;
 use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
-use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
+use material::{
+    perm_material, pipe, projected_eligible, shadow_receiver, write_material, write_skin_flags,
+};
 use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
 pub use scene::Background;
@@ -61,7 +64,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_BLEND_DEST_ALPHA, D3D11_BLEND_DEST_COLOR, D3D11_BLEND_INV_DEST_ALPHA,
     D3D11_BLEND_INV_DEST_COLOR, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_INV_SRC_COLOR,
     D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_SRC_ALPHA_SAT,
-    D3D11_BLEND_SRC_COLOR, D3D11_BLEND_ZERO, D3D11_COLOR_WRITE_ENABLE_ALL,
+    D3D11_BLEND_SRC_COLOR, D3D11_BLEND_ZERO, D3D11_CLEAR_DEPTH, D3D11_COLOR_WRITE_ENABLE_ALL,
     D3D11_COMPARISON_LESS_EQUAL, D3D11_COMPARISON_NEVER, D3D11_CULL_BACK, D3D11_CULL_NONE,
     D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_DEPTH_WRITE_MASK_ZERO,
     D3D11_FILL_SOLID, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FLOAT32_MAX, D3D11_QUERY_DESC,
@@ -504,6 +507,12 @@ pub struct Renderer {
     glint_noise: Option<ID3D11ShaderResourceView>,
     /// The glint-noise failure was already logged ([glint_noise_or_fallback]).
     glint_noise_logged: bool,
+    /// `Scene::shadows` of the last frame: what every material cbuffer's shadow bits were written for (Note IH4).
+    shadows: bool,
+    /// The light maps and the mask pass while shadows are on (Note IH4); `None` otherwise.
+    shadow: Option<shadow::Shadows>,
+    /// Sides of the sun map and of a cube face ([`shadow::SUN_SIZE`], [`shadow::POINT_SIZE`]; a test hook sets them).
+    shadow_sizes: (u32, u32),
 }
 
 impl Renderer {
@@ -636,6 +645,9 @@ impl Renderer {
             projected_missing: vec![],
             glint_noise: None,
             glint_noise_logged: false,
+            shadows: false,
+            shadow: None,
+            shadow_sizes: (shadow::SUN_SIZE, shadow::POINT_SIZE),
             gpu,
             sources: SourceSet::new(source.clone()),
             source,
@@ -769,7 +781,14 @@ impl Renderer {
                     &d.fields,
                     &s.material,
                 );
-                d.rewrite_material(&s.material, ll, &fv, fixed, self.projected.as_ref());
+                d.rewrite_material(
+                    &s.material,
+                    ll,
+                    &fv,
+                    fixed,
+                    self.projected.as_ref(),
+                    self.shadows,
+                );
             }
         }
     }
@@ -1088,6 +1107,51 @@ impl Renderer {
         self.target.as_ref().is_some_and(|t| t.depth_copy.is_some())
     }
 
+    /// Test hook: the sides of the sun map and of each point-cube face (default [`shadow::SUN_SIZE`],
+    /// [`shadow::POINT_SIZE`]); maps of another size are made again on the next shadow frame.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn set_shadow_sizes(&mut self, sun: u32, point: u32) {
+        self.shadow_sizes = (sun.max(1), point.max(1));
+    }
+
+    /// Test hook: the renderer holds shadow maps (made on a `Scene::shadows` frame, dropped on the next frame without).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn has_shadow_maps(&self) -> bool {
+        self.shadow.is_some()
+    }
+
+    /// Test hook: the renderer holds the point light's cube map (only while shadows are on and the light is).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn has_point_shadow_map(&self) -> bool {
+        self.shadow.as_ref().is_some_and(|s| s.maps.point.is_some())
+    }
+
+    /// Test hook: the last frame's shadow mask as (its width, its height, RGBA8 rows); Err when the frame had none.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn read_shadow_mask(&self) -> Result<(u32, u32, Vec<u8>), String> {
+        let t = self.target.as_ref().ok_or("no frame rendered")?;
+        t.read_shadow_mask(&self.gpu)
+    }
+
+    /// The maps a shadow frame draws into: the sun's at the set size, the point light's cube while it is on.
+    fn ensure_shadow_maps(&mut self, point_on: bool) -> Result<(), String> {
+        let (sun, point) = self.shadow_sizes;
+        if self.shadow.as_ref().is_some_and(|s| s.maps.sun_size != sun) {
+            self.shadow = None;
+        }
+        if self.shadow.is_none() {
+            self.shadow = Some(shadow::Shadows::new(&self.gpu, sun)?);
+        }
+        if let Some(s) = self.shadow.as_mut() {
+            s.set_point(&self.gpu, point_on.then_some(point))?;
+        }
+        Ok(())
+    }
+
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
     /// frame), the reference the resolved path must match pixel for pixel.
     #[cfg(feature = "test-hooks")]
@@ -1342,6 +1406,7 @@ impl Renderer {
         let ll = self.linear_lighting();
         let fields = program_fields(program);
         let fv = values_for(&self.settings, self.features_on, self.head_part, &fields, m);
+        let receives = self.shadows && shadow_receiver(m, self.fixed_pipeline);
         for cb in vs_cbs.iter_mut().chain(ps_cbs.iter_mut()) {
             write_material(
                 &mut cb.writer,
@@ -1349,6 +1414,7 @@ impl Renderer {
                 &bound,
                 ll,
                 self.projected.as_ref().map(|l| (l, world)),
+                receives,
             );
             scene::write_static(&mut cb.writer, &fv);
             write_skin_flags(&mut cb.writer, m, &bound);
@@ -1620,6 +1686,7 @@ impl Renderer {
         n.debug = self.debug;
         n.deferred = self.deferred;
         n.projected = self.projected.take();
+        n.shadow_sizes = self.shadow_sizes;
         n.projected_missing = std::mem::take(&mut self.projected_missing);
         for (reg, bytes, _) in std::mem::take(&mut self.projected_tex) {
             match textures::load_dds(&n.gpu, &bytes) {
@@ -1974,7 +2041,7 @@ impl Renderer {
             &d.fields,
             m,
         );
-        d.rewrite_material(m, ll, &fv, fixed, self.projected.as_ref());
+        d.rewrite_material(m, ll, &fv, fixed, self.projected.as_ref(), self.shadows);
         Ok(())
     }
 
@@ -2140,7 +2207,14 @@ impl Renderer {
                     &d.fields,
                     &material,
                 );
-                d.rewrite_material(&material, ll, &fv, fixed, self.projected.as_ref());
+                d.rewrite_material(
+                    &material,
+                    ll,
+                    &fv,
+                    fixed,
+                    self.projected.as_ref(),
+                    self.shadows,
+                );
             }
             touched.push((id, reg));
         }
@@ -2259,10 +2333,13 @@ impl Renderer {
         // SAFETY: plain context calls; the arrays are live locals of the length passed.
         unsafe {
             self.gpu.ctx.OMSetRenderTargets(None, None);
-            // An error-path `?` in render skips its end-of-frame t17 unbind.
+            // An error-path `?` in render skips its end-of-frame t17 and t14 unbinds.
             self.gpu
                 .ctx
                 .PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
+            self.gpu
+                .ctx
+                .PSSetShaderResources(shadow::MASK_REGISTER, Some(&[None]));
             self.gpu.ctx.CSSetShaderResources(0, Some(&srvs));
             self.gpu
                 .ctx
@@ -2461,6 +2538,14 @@ impl Renderer {
                 Target::new(&self.gpu, w, h)?
             });
         }
+        // Note IH4: the shadow bits live in every material cbuffer (`PixelShaderDescriptor`), not in a per-frame field:
+        // a flip rewrites them through the cbuffer-edit path.
+        // shortcut: a Pending or Failed shape still showing its previous draw keeps that draw's bits until its
+        // program lands or its next edit; upgrade if shadows are ever toggled while shapes compile.
+        if scene.shadows != self.shadows {
+            self.shadows = scene.shadows;
+            self.rewrite_static();
+        }
         // D5: the env cube, before `gpu` and `target` are borrowed below. Any background (R7): the loaded HDRI, or
         // with a solid background the procedural environment of the ambient, is what the preview reflects.
         let want_env = (deferred_frame
@@ -2543,6 +2628,17 @@ impl Renderer {
             lights_changed,
             view_changed,
         };
+        let shadows = scene.shadows;
+        // The light passes (Note IH4) leave their views in the casters' cbuffers: the colour passes write the camera's
+        // again.
+        let colour_inputs = FrameInputs {
+            view: &view,
+            view_values: &view_values,
+            lights: &light_values,
+            point: &point_values,
+            lights_changed,
+            view_changed: view_changed || shadows,
+        };
         let mut uploads = 0;
         if let Background::Hdri(e) = &scene.background {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
@@ -2557,18 +2653,34 @@ impl Renderer {
         }
         // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
         // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
-        // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy.
-        let prepass = self.draw_order.iter().any(|id| {
-            self.shapes
-                .get(id)
-                .and_then(|s| s.draw.as_ref())
-                .is_some_and(|d| d.reads_depth && (!d.deferred || deferred_frame))
-        });
+        // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy. A shadow frame
+        // (Note IH4) always draws it: the mask is made from that copy, and its casters are the pre-pass's shapes.
+        let prepass = shadows
+            || self.draw_order.iter().any(|id| {
+                self.shapes
+                    .get(id)
+                    .and_then(|s| s.draw.as_ref())
+                    .is_some_and(|d| d.reads_depth && (!d.deferred || deferred_frame))
+            });
         if prepass {
             self.target
                 .as_mut()
                 .ok_or("no target")?
                 .ensure_depth_copy(&self.gpu)?;
+        }
+        if shadows {
+            self.target
+                .as_mut()
+                .ok_or("no target")?
+                .ensure_shadow_mask(&self.gpu)?;
+            self.ensure_shadow_maps(scene.point_light.brightness > 0.0)?;
+        } else {
+            // Off: the maps and the mask are dropped (the mask is never bound past a frame). The depth copy a shadow
+            // frame made stays with the target, as after a hair frame (Note GX1).
+            self.shadow = None;
+            if let Some(t) = self.target.as_mut() {
+                t.shadow_mask = None;
+            }
         }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
@@ -2667,8 +2779,13 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&rtvs), &target.dsv);
                         bound_all = want;
                     }
-                    // The pre-pass already wrote this frame's fields.
-                    let fresh = pass.is_none() || !in_prepass(s);
+                    // The pre-pass already wrote this frame's fields, unless light passes wrote theirs since.
+                    let fresh = pass.is_none() || !in_prepass(s) || shadows;
+                    let frame_inputs = if pass.is_none() {
+                        &inputs
+                    } else {
+                        &colour_inputs
+                    };
                     // Test hook only (P0's reference writer, recomputed every frame): the default build takes the
                     // shipped path with no check.
                     #[cfg(feature = "test-hooks")]
@@ -2684,33 +2801,16 @@ impl Renderer {
                         );
                         s.update_by_name(gpu, scene, &view, &fv)
                     } else {
-                        s.update(gpu, &inputs)
+                        s.update(gpu, frame_inputs)
                     };
                     #[cfg(not(feature = "test-hooks"))]
-                    let n = if fresh { s.update(gpu, &inputs) } else { 0 };
+                    let n = if fresh {
+                        s.update(gpu, frame_inputs)
+                    } else {
+                        0
+                    };
                     uploads += n;
-                    ctx.IASetInputLayout(&s.mesh.layout);
-                    for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
-                        ctx.IASetVertexBuffers(
-                            slot as u32,
-                            1,
-                            Some(&Some(b.clone())),
-                            Some(stride),
-                            Some(&0),
-                        );
-                    }
-                    ctx.IASetIndexBuffer(&s.mesh.index, DXGI_FORMAT_R16_UINT, 0);
-                    ctx.VSSetShader(&s.vs, None);
-                    ctx.PSSetShader(&s.ps, None);
-                    for cb in &s.vs_cbs {
-                        ctx.VSSetConstantBuffers(cb.slot, Some(&[Some(cb.buffer.clone())]));
-                    }
-                    for cb in &s.ps_cbs {
-                        ctx.PSSetConstantBuffers(cb.slot, Some(&[Some(cb.buffer.clone())]));
-                    }
-                    for (reg, v) in &s.srvs {
-                        ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
-                    }
+                    bind_shape(ctx, s, &self.sampler);
                     // In the pre-pass the default stays: nothing is written but depth.
                     if let (true, Some((_, srv))) =
                         (s.reads_depth && pass.is_some(), &target.depth_copy)
@@ -2724,8 +2824,14 @@ impl Renderer {
                             ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
                         }
                     }
-                    for slot in &s.samplers {
-                        ctx.PSSetSamplers(*slot, Some(&[Some(self.sampler.clone())]));
+                    // Note IH4: the mask over the 1×1 white default at t14, for the colour passes.
+                    if let (Some(_), Some((_, _, mask))) = (pass, &target.shadow_mask) {
+                        if s.srvs.iter().any(|(r, _)| *r == shadow::MASK_REGISTER) {
+                            ctx.PSSetShaderResources(
+                                shadow::MASK_REGISTER,
+                                Some(&[Some(mask.clone())]),
+                            );
+                        }
                     }
                     ctx.RSSetState(if s.pipe.cull_back {
                         &self.raster_back
@@ -2757,6 +2863,67 @@ impl Renderer {
                     if let Some((copy, _)) = &target.depth_copy {
                         ctx.CopyResource(copy, &target.depth);
                     }
+                    // Note IH4: the light passes, then the mask from the copy, before any colour pass reads it (the
+                    // DEFERRED opaque draws light the sun themselves).
+                    if let (true, Some(sh), Some((_, mask_rtv, _)), Some((_, depth))) = (
+                        shadows,
+                        self.shadow.as_mut(),
+                        &target.shadow_mask,
+                        &target.depth_copy,
+                    ) {
+                        let bounds = self.bounds.unwrap_or(([0.0; 3], 1.0));
+                        let sun = shadow::sun_view(scene.dir_light.direction, bounds, view.eye);
+                        sh.maps.sun_view_proj = sun.view_proj;
+                        let p = scene.point_light;
+                        sh.maps.point_pos = scene::sub(p.position, view.eye);
+                        sh.maps.point_far = p.radius.max(1e-3);
+                        let mut light_views =
+                            vec![(sun, sh.maps.sun_dsv.clone(), sh.maps.sun_size)];
+                        if let Some(c) = &sh.maps.point {
+                            let faces = shadow::point_views(p.position, p.radius, view.eye);
+                            light_views.extend(
+                                faces
+                                    .into_iter()
+                                    .zip(c.dsvs.iter().cloned())
+                                    .map(|(v, d)| (v, d, c.size)),
+                            );
+                        }
+                        ctx.RSSetState(&sh.raster);
+                        ctx.OMSetDepthStencilState(&self.depth_states[3], 0);
+                        ctx.OMSetBlendState(None, None, 0xffff_ffff);
+                        for (mut lv, dsv, size) in light_views {
+                            (lv.width, lv.height) = (size, size);
+                            let lv_values = ViewValues::new(&lv);
+                            let light_inputs = FrameInputs {
+                                view: &lv,
+                                view_values: &lv_values,
+                                lights: &light_values,
+                                point: &point_values,
+                                lights_changed: false,
+                                view_changed: true,
+                            };
+                            ctx.ClearDepthStencilView(&dsv, D3D11_CLEAR_DEPTH.0, 1.0, 0);
+                            ctx.OMSetRenderTargets(None, &dsv);
+                            ctx.RSSetViewports(Some(&[viewport(size, size)]));
+                            for id in &self.draw_order {
+                                let Some(s) =
+                                    self.shapes.get_mut(id).and_then(|st| st.draw.as_mut())
+                                else {
+                                    continue;
+                                };
+                                if !in_prepass(s) {
+                                    continue;
+                                }
+                                uploads += s.update(gpu, &light_inputs);
+                                bind_shape(ctx, s, &self.sampler);
+                                ctx.DrawIndexed(s.mesh.index_count, 0, 0);
+                            }
+                        }
+                        ctx.OMSetRenderTargets(Some(&[Some(mask_rtv.clone())]), None);
+                        ctx.RSSetViewports(Some(&[viewport(w, h)]));
+                        ctx.RSSetState(&self.raster);
+                        sh.draw_mask(gpu, depth, &view);
+                    }
                     ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
                 }
             }
@@ -2767,6 +2934,9 @@ impl Renderer {
             // is never bound for reading.
             if prepass {
                 ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
+            }
+            if shadows {
+                ctx.PSSetShaderResources(shadow::MASK_REGISTER, Some(&[None]));
             }
             #[cfg(feature = "test-hooks")]
             {
@@ -2870,6 +3040,58 @@ fn define_of(feature: &str) -> Option<&'static str> {
         .iter()
         .find(|(n, _)| *n == feature)
         .map(|(_, d)| *d)
+}
+
+/// A `w × h` viewport at the origin, depth 0..1.
+fn viewport(w: u32, h: u32) -> D3D11_VIEWPORT {
+    D3D11_VIEWPORT {
+        TopLeftX: 0.0,
+        TopLeftY: 0.0,
+        Width: w as f32,
+        Height: h as f32,
+        MinDepth: 0.0,
+        MaxDepth: 1.0,
+    }
+}
+
+/// Binds a shape's mesh, programs, cbuffers, textures (`srvs`: the per-frame overrides come after) and `sampler` at
+/// every reflected slot.
+///
+/// # Safety
+/// Every object belongs to the device of `ctx`.
+unsafe fn bind_shape(
+    ctx: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+    s: &ShapeDraw,
+    sampler: &ID3D11SamplerState,
+) {
+    // SAFETY: the caller's contract; slices outlive the calls.
+    unsafe {
+        ctx.IASetInputLayout(&s.mesh.layout);
+        for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
+            ctx.IASetVertexBuffers(
+                slot as u32,
+                1,
+                Some(&Some(b.clone())),
+                Some(stride),
+                Some(&0),
+            );
+        }
+        ctx.IASetIndexBuffer(&s.mesh.index, DXGI_FORMAT_R16_UINT, 0);
+        ctx.VSSetShader(&s.vs, None);
+        ctx.PSSetShader(&s.ps, None);
+        for cb in &s.vs_cbs {
+            ctx.VSSetConstantBuffers(cb.slot, Some(&[Some(cb.buffer.clone())]));
+        }
+        for cb in &s.ps_cbs {
+            ctx.PSSetConstantBuffers(cb.slot, Some(&[Some(cb.buffer.clone())]));
+        }
+        for (reg, v) in &s.srvs {
+            ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
+        }
+        for slot in &s.samplers {
+            ctx.PSSetSamplers(*slot, Some(&[Some(sampler.clone())]));
+        }
+    }
 }
 
 /// Flushes and spins on the renderer's event query until the GPU has finished every submitted command, so the

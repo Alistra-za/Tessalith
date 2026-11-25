@@ -467,6 +467,8 @@ impl Look {
             },
             sun_brightness: self.sun.clamp(Self::SUN_RANGE.0, Self::SUN_RANGE.1),
             env_yaw: self.sun_yaw,
+            // Always on in the preview (Note IH4); `Scene::neutral` keeps them off for the renderer's pins.
+            shadows: true,
             ..Scene::neutral()
         };
         let [x, y, z] = s.dir_light.direction;

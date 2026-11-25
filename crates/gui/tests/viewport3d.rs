@@ -1031,7 +1031,14 @@ fn changing_the_look_sends_a_render_and_no_load() {
 fn the_default_look_is_the_unchanged_scene() {
     use render3d::scene::{Background, Camera, Scene};
     let l = v3::Look::default();
-    assert_eq!(l.scene(Camera::Auto, None, None), Scene::neutral());
+    // The neutral scene with shadows on: the preview always draws them (Note IH4).
+    assert_eq!(
+        l.scene(Camera::Auto, None, None),
+        Scene {
+            shadows: true,
+            ..Scene::neutral()
+        }
+    );
     // With bounds the point light is placed but off.
     let s = l.scene(Camera::Auto, Some(([1.0, 2.0, 3.0], 2.0)), None);
     assert_eq!(s.point_light.brightness, 0.0);

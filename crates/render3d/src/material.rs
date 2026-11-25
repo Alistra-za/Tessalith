@@ -370,13 +370,14 @@ pub fn write_skin_flags(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
 /// `CbWriter::new` or after `CbWriter::zero`): fields a branch does not write must read 0, never a previous
 /// material's value. `bound` = registers bound to a real texture in this draw. `projected`: the renderer's MATO
 /// layer and the shape's model, written when the layer applies to `m` ([`projected_eligible`]; the program then has
-/// `PROJECTED_UV`).
+/// `PROJECTED_UV`). `shadows`: the scene's shadows are on and `m` is a [`shadow_receiver`] (Note IH4).
 pub fn write_material(
     w: &mut CbWriter,
     m: &MaterialState,
     bound: &Bound,
     linear_lighting: bool,
     projected: Option<(&ProjectedLayer, &Mat3x4)>,
+    shadows: bool,
 ) {
     let p = &m.params;
     let pbr = m.is_pbr();
@@ -428,7 +429,10 @@ pub fn write_material(
         .map_or(0.0, |a| a.threshold as f32 / 255.0);
     w.set("AlphaTestRefRS", &[tref]);
     // cb4: engine PS desc & ~compile key = runtime bits only (answers.md Q4.1, B5 `runtime_bits`).
-    w.set_u32("PixelShaderDescriptor", &[runtime_bits(&perm_material(m))]);
+    w.set_u32(
+        "PixelShaderDescriptor",
+        &[runtime_bits(&perm_material(m), shadows)],
+    );
     // InWorld (bit 0); SourceAlphaBlend (bit 8) only for blended passes (answers.md Q4.2).
     w.set_u32(
         "ExtraShaderDescriptor",
@@ -552,6 +556,18 @@ pub fn verified_blend(src: u8, dst: u8) -> bool {
 
 /// The draw state a material asks for: alpha bits 1-4 / 5-8 when bit 0 is set; back-face culling unless
 /// Double_Sided (SLSF2 bit 4); depth test SLSF1 bit 31; depth write SLSF2 bit 0.
+/// The shape reads the shadow mask when shadows are on (Note IH4): the casters' rule, not blended and writing
+/// depth (`fixed`: a built-in, [`Pipe::FIXED`]). The mask holds the opaque depth only, so any other shape would
+/// take the shadow of the surface behind it.
+pub fn shadow_receiver(m: &MaterialState, fixed: bool) -> bool {
+    !m.blend()
+        && if fixed {
+            Pipe::FIXED.z_write
+        } else {
+            pipe(m).z_write
+        }
+}
+
 pub fn pipe(m: &MaterialState) -> Pipe {
     let (blend, mapped) = match m.alpha.filter(|a| a.blend()) {
         Some(a) => {

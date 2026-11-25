@@ -194,7 +194,7 @@ fn flags(w: &CbWriter) -> u32 {
 
 fn written(m: &MaterialState, regs: &[u32], linear_lighting: bool) -> CbWriter {
     let mut w = writer();
-    write_material(&mut w, m, &bound(regs), linear_lighting, None);
+    write_material(&mut w, m, &bound(regs), linear_lighting, None, false);
     w
 }
 
@@ -296,7 +296,7 @@ fn edit_rewrites_from_zero() {
     // 03 T-E2: a PBR → vanilla rewrite leaves no PBR bytes behind.
     let ss = pbr(&[26]);
     let mut w = writer();
-    write_material(&mut w, &ss, &bound(&[12]), false, None);
+    write_material(&mut w, &ss, &bound(&[12]), false, None, false);
     assert_ne!(floats(&w, "PBRParams2"), [0.0; 4]);
     assert_ne!(flags(&w), 0);
     w.zero();
@@ -307,6 +307,7 @@ fn edit_rewrites_from_zero() {
         &bound(&[]),
         false,
         None,
+        false,
     );
     for n in ["PBRParams1", "PBRParams2", "MultiLayerParallaxData"] {
         assert!(floats(&w, n).iter().all(|v| *v == 0.0), "{n}");

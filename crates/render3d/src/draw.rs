@@ -5,7 +5,9 @@
 use crate::cbuffer::CbWriter;
 use crate::compile::{Compiled, Reflection, SrvKind};
 use crate::device::Gpu;
-use crate::material::{pipe, write_material, write_skin_flags, Bound, Pipe, ProjectedLayer};
+use crate::material::{
+    pipe, shadow_receiver, write_material, write_skin_flags, Bound, Pipe, ProjectedLayer,
+};
 use crate::mesh::GpuMesh;
 #[cfg(feature = "test-hooks")]
 use crate::scene::Scene;
@@ -212,6 +214,7 @@ impl ShapeDraw {
 
     /// A cbuffer edit (03 §1.3): every writer back to zero, then the material and the static block, so no field
     /// of the previous material survives. The light and view fields come back with the next update (`stale`).
+    /// `shadows`: the renderer's shadows are on (the shadow bits go to a [`shadow_receiver`] only, Note IH4).
     pub fn rewrite_material(
         &mut self,
         m: &MaterialState,
@@ -219,7 +222,9 @@ impl ShapeDraw {
         feature_values: &[(String, Vec<f64>)],
         fixed: bool,
         projected: Option<&ProjectedLayer>,
+        shadows: bool,
     ) {
+        let receives = shadows && shadow_receiver(m, fixed);
         for cb in self.vs_cbs.iter_mut().chain(self.ps_cbs.iter_mut()) {
             cb.writer.zero();
             write_material(
@@ -228,6 +233,7 @@ impl ShapeDraw {
                 &self.bound,
                 linear_lighting,
                 projected.map(|l| (l, &self.model)),
+                receives,
             );
             write_static(&mut cb.writer, feature_values);
             write_skin_flags(&mut cb.writer, m, &self.bound);

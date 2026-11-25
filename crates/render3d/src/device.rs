@@ -43,7 +43,8 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R11G11B10_FLOAT,
     DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16_UNORM,
-    DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_TYPELESS, DXGI_FORMAT_R8G8B8A8_UINT, DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_TYPELESS, DXGI_FORMAT_R8G8B8A8_UINT,
+    DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
@@ -308,10 +309,20 @@ pub struct Target {
     /// at t17 (Note GX1). A copy, because `depth` stays bound for writing while the shapes read it. Made by
     /// [`Target::ensure_depth_copy`] on the first pre-pass frame and dropped with the target.
     pub depth_copy: Option<(ID3D11Texture2D, ID3D11ShaderResourceView)>,
+    /// CS's screen-space shadow mask at t14 (Note IH4): R8G8B8A8_UNORM at the frame's size, R = sun, G = point
+    /// light 0, B = A = 1. Made by [`Target::ensure_shadow_mask`] on a shadow frame, dropped on a frame without.
+    pub shadow_mask: Option<(
+        ID3D11Texture2D,
+        ID3D11RenderTargetView,
+        ID3D11ShaderResourceView,
+    )>,
 }
 
 /// An R32_FLOAT view of an R32_TYPELESS texture.
-fn r32_srv(gpu: &Gpu, tex: &ID3D11Texture2D) -> Result<ID3D11ShaderResourceView, String> {
+pub(crate) fn r32_srv(
+    gpu: &Gpu,
+    tex: &ID3D11Texture2D,
+) -> Result<ID3D11ShaderResourceView, String> {
     let sd = D3D11_SHADER_RESOURCE_VIEW_DESC {
         Format: DXGI_FORMAT_R32_FLOAT,
         ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
@@ -332,7 +343,7 @@ fn r32_srv(gpu: &Gpu, tex: &ID3D11Texture2D) -> Result<ID3D11ShaderResourceView,
     v.ok_or_else(|| gpu.fail("CreateShaderResourceView (depth)", "no view returned"))
 }
 
-fn tex2d_desc(w: u32, h: u32, format: DXGI_FORMAT) -> D3D11_TEXTURE2D_DESC {
+pub(crate) fn tex2d_desc(w: u32, h: u32, format: DXGI_FORMAT) -> D3D11_TEXTURE2D_DESC {
     D3D11_TEXTURE2D_DESC {
         Width: w,
         Height: h,
@@ -350,7 +361,10 @@ fn tex2d_desc(w: u32, h: u32, format: DXGI_FORMAT) -> D3D11_TEXTURE2D_DESC {
     }
 }
 
-fn create_tex(gpu: &Gpu, desc: &D3D11_TEXTURE2D_DESC) -> Result<ID3D11Texture2D, String> {
+pub(crate) fn create_tex(
+    gpu: &Gpu,
+    desc: &D3D11_TEXTURE2D_DESC,
+) -> Result<ID3D11Texture2D, String> {
     let mut t = None;
     // SAFETY: `desc` and the out-pointer are live locals.
     unsafe { gpu.device.CreateTexture2D(desc, None, Some(&mut t)) }
@@ -638,7 +652,51 @@ impl Target {
             main_uav,
             depth_srv,
             depth_copy: None,
+            shadow_mask: None,
         })
+    }
+
+    /// Makes [`Target::shadow_mask`] on the first shadow frame of this target (a resize makes a new target).
+    pub fn ensure_shadow_mask(&mut self, gpu: &Gpu) -> Result<(), String> {
+        if self.shadow_mask.is_none() {
+            let mut d = tex2d_desc(self.width, self.height, DXGI_FORMAT_R8G8B8A8_UNORM);
+            d.BindFlags = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
+            let tex = create_tex(gpu, &d)?;
+            let (mut rtv, mut srv) = (None, None);
+            // SAFETY: live resource and local out-pointers.
+            unsafe {
+                gpu.device
+                    .CreateRenderTargetView(&tex, None, Some(&mut rtv))
+                    .map_err(|e| gpu.fail("CreateRenderTargetView (shadow mask)", e))?;
+                gpu.device
+                    .CreateShaderResourceView(&tex, None, Some(&mut srv))
+                    .map_err(|e| gpu.fail("CreateShaderResourceView (shadow mask)", e))?;
+            }
+            let rtv = rtv.ok_or_else(|| gpu.fail("CreateRenderTargetView", "no view returned"))?;
+            let srv =
+                srv.ok_or_else(|| gpu.fail("CreateShaderResourceView", "no view returned"))?;
+            self.shadow_mask = Some((tex, rtv, srv));
+        }
+        Ok(())
+    }
+
+    /// The shadow mask's own size and its RGBA8 rows, top first (Err without one).
+    #[cfg(feature = "test-hooks")]
+    pub fn read_shadow_mask(&self, gpu: &Gpu) -> Result<(u32, u32, Vec<u8>), String> {
+        let (tex, _, _) = self.shadow_mask.as_ref().ok_or("no shadow mask")?;
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `desc` is a live local the call fills in; `tex` is a live texture.
+        unsafe { tex.GetDesc(&mut desc) };
+        let mut sd = tex2d_desc(desc.Width, desc.Height, DXGI_FORMAT_R8G8B8A8_UNORM);
+        sd.Usage = D3D11_USAGE_STAGING;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        let staging = create_tex(gpu, &sd)?;
+        let (w, h) = (desc.Width as usize, desc.Height as usize);
+        let mut out = Vec::with_capacity(w * h * 4);
+        map_rows(gpu, &staging, tex, h, w * 4, |row| {
+            out.extend_from_slice(row)
+        })?;
+        Ok((desc.Width, desc.Height, out))
     }
 
     /// Makes [`Target::depth_copy`] on the first depth pre-pass frame (Note GX1); a no-reader target never has one.
