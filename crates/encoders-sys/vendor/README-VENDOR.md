@@ -220,9 +220,10 @@ and 3 of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refi
 earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower). Q4: `bc6h_test_mode`
 gates mode 2 and 6 (the modes that double the widest channel's window) on `max_span * margin > 2 * span` for the widest
 channel and `second_span * margin > span` for the next widest, instead of on the widest against `span`, so a block with R
-span 6000 and G, B 2000 reaches mode 6 (window 7372.6) at Fast and Basic where it fell to mode 1 or 9; it only admits
+span 6000 and G, B 2000 reaches mode 6 (window 7372.6) at Fast and Basic where it fell to mode 1; it only admits
 more blocks, and the later admitted mode replaces the earlier one without a comparison. Modes 0, 1, 5, 9 and 10 to 13
-keep the old test, and the slow levels pass margin 0 and never return from either test. Test:
+keep the old test. The slow levels pass margin 0 and never return from either test, and Veryfast has no two-region
+search (its `fastSkipTreshold` is 0, so the gate is never run). Test:
 `a_wide_channel_block_takes_the_doubled_window`. It changes BC6H bytes at Fast and Basic on SSE2, AVX2 and AVX-512 (6 of
 the 18 pins; `identity.json` `hdr_sky` and the Veryfast, Slow, Veryslow and VeryslowPeak levels keep their bytes).
 

@@ -408,22 +408,35 @@ fn a_wide_channel_block_takes_the_doubled_window() {
             px[row * 4 + col][2] = v;
         }
     }
-    let modes: Vec<(IspcTarget, u32, u32)> = paths()
-        .map(|target| {
-            let b = encode_block(&px, Bc6hLevel::Fast, target);
+    // Fast and Basic are the levels that run the gate; both fell to mode 1 on this block.
+    let modes: Vec<(IspcTarget, Bc6hLevel, u32, u32)> = paths()
+        .flat_map(|target| [Bc6hLevel::Fast, Bc6hLevel::Basic].map(|level| (target, level)))
+        .map(|(target, level)| {
+            let b = encode_block(&px, level, target);
             let two = field(&b, 0, 2);
             let mode = if two < 2 { two } else { field(&b, 0, 5) };
-            eprintln!("{target:?} mode {mode}");
-            (target, two, mode)
+            eprintln!("{target:?} {level:?} mode {mode}");
+            (target, level, two, mode)
         })
         .collect();
-    for (target, two, mode) in modes {
-        assert_ne!(two, 1, "{target:?}: mode 1 kept the block out of mode 6");
-        let one_region = matches!(mode, 3 | 7 | 11 | 15);
-        assert!(
-            one_region || matches!(mode, 18 | 22 | 26),
-            "{target:?}: a two-region mode outside the mode 6 family: {mode}"
+    for (target, level, two, mode) in modes {
+        assert_ne!(
+            two, 1,
+            "{target:?} {level:?}: mode 1 kept the block out of mode 6"
         );
+        let family = matches!(mode, 18 | 22 | 26);
+        if level == Bc6hLevel::Basic {
+            assert!(
+                family,
+                "{target:?} {level:?}: not in the mode 6 family: {mode}"
+            );
+        } else {
+            let one_region = matches!(mode, 3 | 7 | 11 | 15);
+            assert!(
+                one_region || family,
+                "{target:?} {level:?}: a two-region mode outside the mode 6 family: {mode}"
+            );
+        }
     }
 }
 

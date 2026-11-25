@@ -2872,7 +2872,10 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
     }
     else
     {
-        // sdc patch 0007 (Q4): modes 2 and 6 give the widest channel twice the window (the other two keep span), so the gate tests the widest against 2 * span and the next widest against span; it only admits more blocks (compute_qbounds2 keeps the narrow bounds on the other two channels). The slow levels pass margin 0 and never return here
+        // sdc patch 0007 (Q4): the doubled-window modes (2-4 and 6-8) give the widest channel twice the window
+        // and the other two channels the single span. The gate therefore tests the widest channel against
+        // 2 * span and the next widest against span. It only admits more blocks (compute_qbounds2 keeps the
+        // narrow bounds on the other two channels). The slow levels pass margin 0 and never return here.
         float second_span = 0;
         for (uniform int p = 0; p < 3; p++)
         {
