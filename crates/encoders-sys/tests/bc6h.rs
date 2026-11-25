@@ -2006,7 +2006,7 @@ fn exact_black_alone_does_not_guard_a_block() {
 
 /// astra #6's scenario from index `i` (alpha 1.0): two channels whose spans are within 10 % of each other, both over
 /// the single window of an asymmetric family and under its doubled one, and a third channel near constant, each
-/// centred near half 0x3800 (1.0). Even `i` takes mode 2's family, odd `i` mode 6's: `get_span` is 204.8 and 3686.4
+/// centred near half 0x3800 (0.5). Even `i` takes mode 2's family, odd `i` mode 6's: `get_span` is 204.8 and 3686.3
 /// UF16 units, about 99 and 1786 half codes (times 31 / 64), doubled about 198 and 3571. The wider channel has 2 to 4
 /// texels at its two ends and the rest within a sixteenth of its span of the middle; the other is split evenly, eight
 /// texels at each end, on a two-region partition with eight texels a side. Widening the wider channel (the only

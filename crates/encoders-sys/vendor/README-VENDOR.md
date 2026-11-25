@@ -184,7 +184,7 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 none of the pins, Q4 only Fast's and Basic's, and Q6 and astra #6 none of them.
+(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, and Q6 none of them.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
