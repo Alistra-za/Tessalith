@@ -100,6 +100,37 @@ fn every_builtin_subtype_profile_deserialises() {
     }
 }
 
+/// Note LR (LR8, spec D5's table): every built-in preset gives the packed data maps `bc7_flat_tolerance = data` and a G
+/// guard (`complex_material` keeping A as `alpha.exact_opaque`), the normal types `data` alone, and every other type
+/// (`envmask` included) neither field, so their profiles serialise as before.
+#[test]
+fn the_per_type_bc7_settings_follow_the_table() {
+    use Subtype::*;
+    let r = PresetRegistry::builtin().unwrap();
+    let mut ids: Vec<String> = r.selectable().iter().map(|p| p.id.clone()).collect();
+    ids.push(BASE_ID.into());
+    for id in &ids {
+        for target in [Target::Cs, Target::Vanilla] {
+            for st in Subtype::ALL {
+                let p = r.profile(id, target, st).unwrap();
+                let v = serde_json::to_value(&p).unwrap();
+                let (tolerance, guard) = match st {
+                    Rmaos | SkinRfaos | ComplexMaterial => (json!("data"), json!({ "g": true })),
+                    Normal | LandscapeNormal | PbrNormal | Msn | CoatNormal | DetailNormal
+                    | SkinWet | SkinDetail => (json!("data"), serde_json::Value::Null),
+                    _ => (serde_json::Value::Null, serde_json::Value::Null),
+                };
+                let at = format!("{id}/{target:?}/{st:?}");
+                assert_eq!(v["encoder"]["bc7_flat_tolerance"], tolerance, "{at}");
+                assert_eq!(v["encoder"]["channel_guard"], guard, "{at}");
+                if matches!(st, ComplexMaterial | Envmask) {
+                    assert!(p.alpha.exact_opaque, "{at}");
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn preset_targets_and_default_preset_agree() {
     let r = PresetRegistry::builtin().unwrap();

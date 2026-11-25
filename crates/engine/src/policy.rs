@@ -2048,13 +2048,14 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
         // An alpha-0 complex `_m` (DECISIONS AH1/AH2) has no opaque block to round to 254.
         && !crate::ops::complex_alpha_zero(p, f.info.has_alpha)
     {
-        // BC7 only: its alpha endpoints are quantised, so opaque alpha can decode as 254 unless exact-opaque
-        // handling is on. BC3's alpha block stores 255 exactly, so it carries no such risk. Not conditional on
-        // the alpha policy: `remove` drops the source alpha, but BC7 still encodes an alpha channel
-        // (DECISIONS Notes A and D, spec §5.8).
+        // BC7 only: its alpha endpoints are quantised, so opaque alpha can decode as 254, and a flat 0 or 255 off,
+        // unless the channel guard's A (`alpha.exact_opaque`, Note LR) is on. BC3's alpha block stores 255 exactly, so
+        // it carries no such risk. Not conditional on the alpha policy: `remove` drops the source alpha, but BC7 still
+        // encodes an alpha channel (DECISIONS Notes A and D, spec §5.8).
         add(
             AlphaExactOffM,
-            "exact opaque alpha is off on an _m written as BC7; 254 may reach PGPatcher/ENB".into(),
+            "channel guard A is off on an _m written as BC7; alpha 0 and 255 may not stay exact for PGPatcher/ENB"
+                .into(),
         );
     }
     if st == Subtype::ComplexMaterial

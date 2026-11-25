@@ -203,6 +203,41 @@ impl Bc7Weights {
         }
     }
 }
+// The flat tolerance bc7e patch 0005 gets (Note LR, LR3): `default` is the level's own T_d (0.5/255), `data` is T_data
+// (2/255) for data maps. `//`, not `///`: a variant doc turns the schema into `oneOf`.
+cfg_enum!(#[derive(Default)] Bc7FlatTolerance, "snake_case" { #[default] Default, Data });
+impl Bc7FlatTolerance {
+    pub fn is_default(&self) -> bool {
+        *self == Bc7FlatTolerance::Default
+    }
+}
+
+/// The channel guard's R, G and B (Note LR): a guarded channel that is 0 on every texel of a subset, or 255 on every
+/// texel, decodes exactly wherever bc7e finds such a solution (best effort per subset). Where guarded channels cannot
+/// all be kept, the higher one wins: A > G > B > R. A is stored as `alpha.exact_opaque`; a settings table may also
+/// write it as `encoder.channel_guard.a`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChannelGuard {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub r: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub g: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub b: bool,
+}
+
+impl ChannelGuard {
+    /// No channel guarded.
+    pub fn is_empty(&self) -> bool {
+        !(self.r || self.g || self.b)
+    }
+
+    /// bc7e's exact-constants mask: bit 0 R, bit 1 G, bit 2 B (`encoders_sys::Bc7Tune::exact_constants`).
+    pub fn mask(self) -> u8 {
+        u8::from(self.r) | u8::from(self.g) << 1 | u8::from(self.b) << 2
+    }
+}
 cfg_enum!(GreenConvention, "lowercase" { Directx, Opengl });
 // What Preprocess does to a model-space normal (`msn`) to reach Skyrim's layout (Note IA1): `skyrim` nothing,
 // `swap_gb` for a Blender object-space bake, `invert_b` for Marmoset right-handed or Substance, `invert_gb` for
@@ -648,6 +683,17 @@ pub struct EncoderSpec {
     /// profile hashes hold (DECISIONS Note CP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bc7_weights: Option<Bc7Weights>,
+    /// BC7 only: the flat tolerance bc7e spreads a channel past (Note LR): `data` keeps near-constant channels of data
+    /// maps flat. It applies under `perceptual` too (a defect threshold, not a weighting). Not serialised at `default`,
+    /// so profiles that do not set it keep their hash.
+    #[serde(default, skip_serializing_if = "Bc7FlatTolerance::is_default")]
+    pub bc7_flat_tolerance: Bc7FlatTolerance,
+    /// BC7 only: the channel guard's R, G and B (Note LR): bc7e keeps a guarded channel that is 0 or 255 across a
+    /// subset exact, best effort, the higher channel first (A > G > B > R). It applies under `perceptual` too (a
+    /// constraint, not a weighting); other formats ignore it. A is `alpha.exact_opaque`. Not serialised when no channel
+    /// is guarded.
+    #[serde(default, skip_serializing_if = "ChannelGuard::is_empty")]
+    pub channel_guard: ChannelGuard,
     /// BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by
     /// default and never set automatically; not serialised when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -870,6 +916,46 @@ mod tests {
             .map(|w| serde_json::to_value(w).unwrap())
             .collect();
         assert_eq!(schema["enum"], serde_json::Value::Array(names));
+    }
+
+    /// Note LR: the per-type BC7 settings' serde names, the guard's mask bits (R 0, G 1, B 2), and neither field
+    /// serialised at its default.
+    #[test]
+    fn bc7_settings_serde_names_and_guard_mask() {
+        let schema = serde_json::to_value(schemars::schema_for!(Bc7FlatTolerance)).unwrap();
+        assert_eq!(schema["enum"], serde_json::json!(["default", "data"]));
+        assert_eq!(
+            serde_json::to_value(Bc7FlatTolerance::Data).unwrap(),
+            "data"
+        );
+        assert!(Bc7FlatTolerance::default().is_default());
+        let g = |r, g, b| ChannelGuard { r, g, b };
+        for (guard, mask) in [
+            (g(false, false, false), 0),
+            (g(true, false, false), 1),
+            (g(false, true, false), 2),
+            (g(false, false, true), 4),
+            (g(true, true, true), 7),
+        ] {
+            assert_eq!(guard.mask(), mask, "{guard:?}");
+            assert_eq!(guard.is_empty(), mask == 0, "{guard:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(g(false, true, false)).unwrap(),
+            serde_json::json!({ "g": true })
+        );
+        let back: ChannelGuard = serde_json::from_value(serde_json::json!({ "b": true })).unwrap();
+        assert_eq!(back, g(false, false, true));
+        assert!(serde_json::from_value::<ChannelGuard>(serde_json::json!({ "a": true })).is_err());
+        let spec: EncoderSpec = serde_json::from_value(serde_json::json!({
+            "effort": "veryslow", "perceptual": false, "bc45_search_radius": "default"
+        }))
+        .unwrap();
+        let v = serde_json::to_value(&spec).unwrap();
+        assert!(
+            v.get("bc7_flat_tolerance").is_none() && v.get("channel_guard").is_none(),
+            "{v}"
+        );
     }
 
     /// `from_id` reads back every `id`, and a removed id (`rfaos`, now `skin_rfaos`) is none.

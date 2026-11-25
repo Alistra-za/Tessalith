@@ -23,7 +23,8 @@ pub const RELEASED_ENGINE_VERSION: &str = "3.1.0";
 /// only the arms written as `ENGINE_VERSION`; every other arm is a literal and stays. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
 /// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
 /// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`; `pbr_emissive` and `hdr_sky` moved to 3.1.0 with the BC6H
-/// kernel fixes (Note LO) and stay there until their bytes change again. No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// kernel fixes (Note LO) and stay there until their bytes change again; `msn` and `skin_wet` moved to 3.2.0 with the
+/// per-type BC7 settings (Note LR). No `_` arm: a new `Subtype` fails to compile until it gets one.
 /// An output whose record names an older arm is kept by `if-changed` unless the run's `--ev` covers it (Note JA).
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -33,7 +34,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::BacklightTint
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
-        | Subtype::Msn
         | Subtype::GenericData
         | Subtype::Envmask
         | Subtype::Flow
@@ -57,12 +57,15 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
         // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
-        Subtype::SkinWet => "3.0.0",
+        // 3.2: `sdc-base` gives these the per-type BC7 flat tolerance (Note LR, LR8), which changes their profile hash
+        // and BC7 bytes. Every other type it sets that for is on `ENGINE_VERSION` below already.
+        Subtype::Msn | Subtype::SkinWet => ENGINE_VERSION,
         // XY-only normal outputs need unit directions even with Keep (Note LA7).
         Subtype::DetailNormal => ENGINE_VERSION,
         // Advanced Skin detail needs a unit base even with Keep (Note LA6).
         Subtype::SkinDetail => ENGINE_VERSION,
-        // Keep carries authored normal length and bakes angular spread (Note LA).
+        // Keep carries authored normal length and bakes angular spread (Note LA). 3.2 also gives these, and the two
+        // above, the per-type BC7 settings (Note LR, LR8).
         Subtype::Normal
         | Subtype::LandscapeNormal
         | Subtype::PbrNormal
@@ -622,16 +625,12 @@ mod tests {
         for st in Subtype::ALL {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
             // 3.1.0 changes kept normal lengths, XY bases and the angular variance bake (LA).
-            // SkinWet stays at 3.0.0 because every writable format stores XYZ.
             // 3.1.0 also changes BC6H bytes (ISPC TC patch 0004, Note LO): PbrEmissive and HdrSky stay at 3.1.0.
-            // The other 3.1.0 types above sit on `ENGINE_VERSION`, which is 3.2.0 from the per-type BC7 settings on.
+            // The other 3.1.0 types above sit on `ENGINE_VERSION`, which is 3.2.0 from the per-type BC7 settings on;
+            // those settings also move Msn (from 2.0.0) and SkinWet (from 3.0.0) there (Note LR).
             let want = if matches!(
                 st,
-                Subtype::Diffuse
-                    | Subtype::PbrAlbedo
-                    | Subtype::UiSky
-                    | Subtype::SkinAlbedo
-                    | Subtype::SkinWet
+                Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo
             ) {
                 "3.0.0"
             } else if matches!(st, Subtype::PbrEmissive | Subtype::HdrSky) {
@@ -647,6 +646,8 @@ mod tests {
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial
                     | Subtype::CoatNormal
+                    | Subtype::Msn
+                    | Subtype::SkinWet
             ) {
                 ENGINE_VERSION
             } else {

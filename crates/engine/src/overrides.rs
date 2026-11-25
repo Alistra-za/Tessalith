@@ -358,6 +358,10 @@ pub const FIELD_PATHS: &[&str] = &[
     "encoder.effort",
     "encoder.perceptual",
     "encoder.bc7_weights",
+    "encoder.bc7_flat_tolerance",
+    "encoder.channel_guard.r",
+    "encoder.channel_guard.g",
+    "encoder.channel_guard.b",
     "encoder.bc1_alpha",
     "encoder.bc45_search_radius",
     "encoder.bc1_search",
@@ -400,6 +404,53 @@ pub const REENCODE_FIELD: &str = "reencode";
 /// The sub-type field.
 pub const SUBTYPE_FIELD: &str = "subtype";
 
+/// The channel guard's A as a settings key: another name for [`EXACT_OPAQUE_FIELD`], which is where A is stored (Note
+/// LR, LR8). Not in [`FIELD_PATHS`]: every layer reader rewrites it before the merge.
+pub const CHANNEL_GUARD_A: &str = "encoder.channel_guard.a";
+/// Where the channel guard's A is stored.
+pub const EXACT_OPAQUE_FIELD: &str = "alpha.exact_opaque";
+
+/// Moves a settings table's `encoder.channel_guard.a` to `alpha.exact_opaque` (Note LR, LR8): run once per table at
+/// load (preset and config `[defaults]`, `[subtypes]` and rule overrides, each `[files]` entry), so the merge,
+/// provenance and locks see one field. An emptied `channel_guard` table goes too. Both keys in one table must agree;
+/// otherwise the error is the message, which the caller prefixes with `CFG-INVALID: <where>: `.
+pub(crate) fn alias_channel_guard_a(table: &mut Value) -> Result<(), String> {
+    let Some(encoder) = table.get_mut("encoder").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    let Some(guard) = encoder
+        .get_mut("channel_guard")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let Some(a) = guard.remove("a") else {
+        return Ok(());
+    };
+    if guard.is_empty() {
+        encoder.remove("channel_guard");
+    }
+    let alpha = table
+        .as_object_mut()
+        .expect("a table holding `encoder` is an object")
+        .entry("alpha")
+        .or_insert_with(|| Value::Object(Map::new()));
+    match alpha.as_object_mut() {
+        Some(alpha) => match alpha.get("exact_opaque") {
+            Some(old) if *old != a => Err(format!(
+                "`{CHANNEL_GUARD_A}` and `{EXACT_OPAQUE_FIELD}` are one setting; set one"
+            )),
+            Some(_) => Ok(()),
+            None => {
+                alpha.insert("exact_opaque".into(), a);
+                Ok(())
+            }
+        },
+        // `alpha` is not a table: deserialising the profile reports that.
+        None => Ok(()),
+    }
+}
+
 /// A plan-time per-file selector (`reencode`, `helper.*`): never merged into a profile.
 pub fn is_selector(field: &str) -> bool {
     field == REENCODE_FIELD || crate::helper::FIELDS.contains(&field)
@@ -440,7 +491,8 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     if let Some(m) = removed {
         return Err(format!("--set '{s}': {m}"));
     }
-    let known = |f: &str| FIELD_PATHS.contains(&f);
+    // The channel guard's A is set as `alpha.exact_opaque` (`CHANNEL_GUARD_A`), in every scope.
+    let known = |f: &str| FIELD_PATHS.contains(&f) || f == CHANNEL_GUARD_A;
     let (scope, field) = if let Some(rest) = key.strip_prefix("subtype:") {
         let (id, field) = rest
             .split_once('.')
@@ -492,6 +544,7 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
         // The glob may itself contain dots, so take the longest known field the key ends with.
         let field = FIELD_PATHS
             .iter()
+            .chain([&CHANNEL_GUARD_A])
             .filter(|f| rest.len() > f.len() + 1 && rest.ends_with(&format!(".{f}")))
             .max_by_key(|f| f.len())
             .ok_or_else(|| format!("--set '{s}': expected file:<glob>.<field>"))?;
@@ -519,6 +572,11 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     if let Some(e) = crate::helper::value_error(field, &value) {
         return Err(format!("--set '{s}': {e}"));
     }
+    let field = if field == CHANNEL_GUARD_A {
+        EXACT_OPAQUE_FIELD
+    } else {
+        field
+    };
     Ok(SetOverride {
         scope,
         field: field.to_string(),

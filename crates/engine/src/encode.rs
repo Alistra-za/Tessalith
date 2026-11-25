@@ -97,6 +97,30 @@ pub fn radius(r: SearchRadius) -> u32 {
     }
 }
 
+/// The bc7e tune a BC7 profile's encoder settings give (spec D5; Note LR, LR8), or `None` for the plain call:
+/// - weights: Note CP: perceptual uses bc7e's own weights, so it wins over `bc7_weights`; an `alphaN` passes its
+///   `[1, 1, 1, N]` (x1-form: bc7e ranks every linear call as x16 would, LR15), unset and `linear` keep the level's.
+/// - `exact_constants`: the channel guard's R, G and B (`None` when none is guarded); A is `Bc7Params::exact_opaque`.
+/// - `flat_tolerance`: `Some(Data)` for `data`; `default` keeps the level's T_d.
+///
+/// The guard and the tolerance apply under perceptual too (BC7-O16, O20): they are constraints, not weightings, and
+/// the tuned entry starts from the level's perceptual params.
+fn bc7_tune(e: &EncoderSpec) -> Option<Bc7Tune> {
+    let mask = e.channel_guard.mask();
+    let t = Bc7Tune {
+        weights: e
+            .bc7_weights
+            .filter(|w| !e.perceptual && *w != Bc7Weights::Linear)
+            .map(Bc7Weights::weights),
+        exact_constants: (mask != 0).then_some(mask),
+        flat_tolerance: match e.bc7_flat_tolerance {
+            crate::config::Bc7FlatTolerance::Default => None,
+            crate::config::Bc7FlatTolerance::Data => Some(encoders_sys::Bc7FlatTolerance::Data),
+        },
+    };
+    (t != Bc7Tune::default()).then_some(t)
+}
+
 /// Encode one band (one block row) of an LDR image. `b` holds 16 texels per block (see
 /// `gather_blocks`), `o` the matching output bytes.
 ///
@@ -111,29 +135,20 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     let e = &p.encoder;
     match p.format {
         Format::Bc7 => {
+            // The channel guard's A (Note LR, LR17).
             let params = Bc7Params {
                 level: bc7_level(e.effort),
                 perceptual: e.perceptual,
                 exact_opaque: p.alpha.exact_opaque,
             };
+            // Resolved once per band, before the 64-block calls.
+            let tune = bc7_tune(e);
             for (oc, bc) in o
                 .chunks_mut(BC7_BLOCKS_PER_CALL * BC7_BLOCK_BYTES)
                 .zip(b.chunks(BC7_BLOCKS_PER_CALL * BLOCK_TEXELS))
             {
-                // Note CP: perceptual mode uses bc7e's own weights, so it wins; unset and `linear` keep the plain call.
-                match e
-                    .bc7_weights
-                    .filter(|w| !e.perceptual && *w != Bc7Weights::Linear)
-                {
-                    Some(w) => bc7e_compress_blocks_tuned(
-                        bc,
-                        oc,
-                        params,
-                        Bc7Tune {
-                            weights: Some(w.weights()),
-                            ..Bc7Tune::default()
-                        },
-                    ),
+                match tune {
+                    Some(t) => bc7e_compress_blocks_tuned(bc, oc, params, t),
                     None => bc7e_compress_blocks(bc, oc, params),
                 }
             }

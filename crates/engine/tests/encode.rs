@@ -182,8 +182,25 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
         perceptual: false,
         exact_opaque: true,
     };
-    // Since bc7e patch 0005 (Q2t) raw bc7e writes no broken rotated block on these inputs (Note LR6), so no block may
-    // need the fix; the checks below hold for any block that does.
+    // `complex_material` ships the data flat tolerance and the G guard (Note LR, LR8), so the engine takes the tuned
+    // entry with them; the reference below makes the same call.
+    let v = serde_json::to_value(&p.encoder).unwrap();
+    assert_eq!(
+        (&v["bc7_flat_tolerance"], &v["channel_guard"]),
+        (
+            &serde_json::json!("data"),
+            &serde_json::json!({ "g": true })
+        ),
+        "complex_material's shipped BC7 settings changed: update the reference call"
+    );
+    let tune = encoders_sys::Bc7Tune {
+        weights: None,
+        flat_tolerance: Some(encoders_sys::Bc7FlatTolerance::Data),
+        exact_constants: Some(0b010),
+    };
+    // Since bc7e patch 0005 (Q2t) raw bc7e writes no broken rotated block on these inputs (Note LR6; with the shipped
+    // tolerance and guard too, LR8), so no block may need the fix; the checks below hold for any block that does.
+    let mut fixed = 0;
     for seed in 1..=6 {
         let px = opaque_noise(seed, 64 * 64);
         let out = encode(&EncoderInput::Ldr(px.clone()), 64, 64, &p);
@@ -192,8 +209,13 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
         let blocks = encoders_sys::gather_blocks(&px, 64, 64);
         let mut raw = vec![0u8; out.len()];
         for (o, b) in raw.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
-            encoders_sys::bc7e_compress_blocks(b, o, raw_params);
+            encoders_sys::bc7e_compress_blocks_tuned(b, o, raw_params, tune);
         }
+        fixed += out
+            .chunks(16)
+            .zip(raw.chunks(16))
+            .filter(|(f, r)| f != r)
+            .count();
         for (f, r) in out.chunks(16).zip(raw.chunks(16)) {
             // Mode 6 is bc7e's native flag (`raw_params.exact_opaque`); it is never post-fixed.
             if r[0] & 0x7f == 0x40 {
@@ -212,6 +234,7 @@ fn exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise() {
             assert!(dr.chunks(4).any(|t| t[3] != 255), "a fix must be needed");
         }
     }
+    println!("blocks the post-fix changed over the six seeds: {fixed}");
 }
 
 /// Raw bc7e output for a row-major image: the same calls as the encode stage, without any post-encode fix.
@@ -1089,4 +1112,249 @@ fn a_resized_cutout_export_keeps_the_source_coverage() {
         (cov - src_cov).abs() * 100.0 <= 2.0,
         "mip 0 coverage {cov:.3} vs source {src_cov:.3}"
     );
+}
+
+/// `p` with `patch` merged in and read back through serde, as a settings layer reaches a profile (an unknown key
+/// fails here).
+fn with(p: &Profile, patch: serde_json::Value) -> Profile {
+    let mut v = serde_json::to_value(p).unwrap();
+    engine::presets::merge_json(&mut v, &patch);
+    serde_json::from_value(v).unwrap()
+}
+
+/// `p` with one `--set` string applied (its scope ignored).
+fn with_set(p: &Profile, set: &str) -> Profile {
+    let o = engine::overrides::parse_set(set).unwrap();
+    with(p, engine::overrides::to_patch(&o.field, &o.value))
+}
+
+/// The seed of encoders-sys's `exact_constant_fixture` (Note LR, LR12).
+const EXACT_SEED: u32 = 0x5C0C_2026;
+
+/// encoders-sys's `xc_fixture` (`tests/bc7.rs`, Note LR, LR12, LR14), copied: a 64x64 opaque image, row-major, whose
+/// channels with `Some(v)` are v on every texel (all 0 or all 255) and whose other channels are per-block clusters
+/// from the LCG `s = s * 1664525 + 1013904223` (each draw `s >> 24`), each centre on the p-bit the flat value does not
+/// want: by block k % 4 two noisy clusters, a solid half beside a noisy one, near-solid, solid.
+fn xc_fixture(seed: u32, flat: [Option<u8>; 3]) -> Vec<[u8; 4]> {
+    let v = flat.into_iter().flatten().next().expect("a flat channel");
+    assert!(
+        flat.into_iter().flatten().all(|x| x == v) && (v == 0 || v == 255),
+        "{flat:?}"
+    );
+    let free: Vec<usize> = (0..3).filter(|&c| flat[c].is_none()).collect();
+    let mut s = seed;
+    let mut next = move || {
+        s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (s >> 24) as i32
+    };
+    let centre = |d: i32| {
+        if v == 0 {
+            255 - 2 * (d % 16)
+        } else {
+            2 * (d % 16)
+        }
+    };
+    let mut px = vec![[v, v, v, 255]; 64 * 64];
+    for k in 0..256 {
+        let (bx, by) = (k % 16 * 4, k / 16 * 4);
+        let kind = k % 4;
+        let c: [Vec<i32>; 2] =
+            std::array::from_fn(|_| free.iter().map(|_| centre(next())).collect());
+        for t in 0..16 {
+            let (x, y) = (t % 4, t / 4);
+            let vals: Vec<i32> = match kind {
+                1 if x < 2 => c[0].clone(),
+                0 | 1 => c[x / 2].iter().map(|m| m + next() % 5 - 2).collect(),
+                2 => {
+                    let up = i32::from(next() % 3 == 0);
+                    c[0].iter().map(|m| m + up).collect()
+                }
+                _ => c[0].clone(),
+            };
+            let p = &mut px[(by + y) * 64 + bx + x];
+            for (&ch, m) in free.iter().zip(vals) {
+                p[ch] = m.clamp(0, 255) as u8;
+            }
+        }
+    }
+    px
+}
+
+/// The BC7 mode of a block.
+fn bc7_mode(b: &[u8]) -> u32 {
+    b[0].trailing_zeros()
+}
+
+/// Every block of `bc7` decoded (bcdec), with its mode, in raster order.
+fn decoded_blocks(bc7: &[u8]) -> Vec<(u32, [u8; 64])> {
+    bc7.chunks(16)
+        .map(|b| {
+            let mut d = [0u8; 64];
+            bcdec_rs::bc7(b, &mut d, 16);
+            (bc7_mode(b), d)
+        })
+        .collect()
+}
+
+/// Texels whose channel `c` does not decode as `want`.
+fn off_texels(bc7: &[u8], c: usize, want: u8) -> usize {
+    decoded_blocks(bc7)
+        .iter()
+        .map(|(_, d)| d.chunks(4).filter(|t| t[c] != want).count())
+        .sum()
+}
+
+/// Note LR (LR8): `sdc-base` guards G on `rmaos`, so a flat metal of 0 or 255 decodes exactly. `xc_fixture` as an
+/// opaque `_rmaos` (G flat, R and B clusters on the p-bit G does not want), encoded through the engine with the
+/// profile `cs-quality` resolves for `rmaos`.
+#[test]
+fn rmaos_keeps_flat_metal_exact() {
+    let p = profile(Subtype::Rmaos);
+    assert_eq!(p.format, Format::Bc7);
+    for g in [0u8, 255] {
+        let px = xc_fixture(EXACT_SEED, [None, Some(g), None]);
+        let out = encode(&EncoderInput::Ldr(px), 64, 64, &p);
+        assert_eq!(off_texels(&out, 1, g), 0, "G {g}: texels decoded off");
+    }
+}
+
+/// Note LR (LR8): `complex_material` keeps A (exact opaque) and guards G. With alpha 255 every decoded alpha is 255;
+/// G is exact in every block whose mode is not 6, where the forced p-bits may lose G = 0 (A wins, BC7-C4). The
+/// resolved effort is `sdc-base`'s veryslow, which has p-bit-free opaque modes, so few or no mode-6 blocks are
+/// expected; the count is printed.
+#[test]
+fn complex_material_keeps_alpha_and_flat_metal() {
+    let p = profile(Subtype::ComplexMaterial);
+    assert_eq!(p.format, Format::Bc7);
+    assert!(p.alpha.exact_opaque);
+    assert_eq!(p.encoder.effort, Effort::Veryslow);
+    for g in [0u8, 255] {
+        let px = xc_fixture(EXACT_SEED, [None, Some(g), None]);
+        let out = encode(&EncoderInput::Ldr(px), 64, 64, &p);
+        assert_eq!(off_texels(&out, 3, 255), 0, "G {g}: alpha below 255");
+        let blocks = decoded_blocks(&out);
+        let mode6 = blocks.iter().filter(|(m, _)| *m == 6).count();
+        let off: usize = blocks
+            .iter()
+            .filter(|(m, _)| *m != 6)
+            .map(|(_, d)| d.chunks(4).filter(|t| t[1] != g).count())
+            .sum();
+        println!("G {g}: {mode6} mode-6 blocks of {}", blocks.len());
+        assert_eq!(off, 0, "G {g}: texels decoded off outside mode 6");
+    }
+}
+
+/// Note LR (LR8): a user's `encoder.channel_guard.b = true` on a type `sdc-base` guards nothing (`diffuse`) keeps a
+/// flat B of 0 or 255 exact.
+#[test]
+fn a_user_guard_keeps_a_flat_channel() {
+    let base = profile(Subtype::Diffuse);
+    assert!(!base.encoder.perceptual && base.format == Format::Bc7);
+    let p = with_set(&base, "encoder.channel_guard.b=true");
+    for b in [0u8, 255] {
+        let px = xc_fixture(EXACT_SEED, [None, None, Some(b)]);
+        let out = encode(&EncoderInput::Ldr(px.clone()), 64, 64, &p);
+        assert_eq!(off_texels(&out, 2, b), 0, "B {b}: texels decoded off");
+        // The fixture puts R and G on the p-bit B does not want, so unguarded it loses B somewhere.
+        let plain = encode(&EncoderInput::Ldr(px), 64, 64, &base);
+        assert!(
+            off_texels(&plain, 2, b) > 0,
+            "B {b}: unguarded is exact too"
+        );
+    }
+}
+
+/// Note LR (LR8): under perceptual the channel guard still applies (a constraint, not a weighting): a perceptual
+/// colour profile with `encoder.channel_guard.g = true` keeps a flat G exact. Perceptual weights G highly, so
+/// unguarded it rarely loses G: of `xc_fixture` at seeds `EXACT_SEED` + 0 to 4 with G 0 and 255 (searched when this
+/// was written), only seed + 3 with G 255 loses it (one texel), which makes that fixture the witness.
+#[test]
+fn perceptual_guard_keeps_flat_green() {
+    let mut base = profile(Subtype::Diffuse);
+    base.encoder.perceptual = true;
+    let p = with(
+        &base,
+        serde_json::json!({ "encoder": { "channel_guard": { "g": true } } }),
+    );
+    for (seed, g) in [(EXACT_SEED, 0u8), (EXACT_SEED, 255), (EXACT_SEED + 3, 255)] {
+        let px = xc_fixture(seed, [None, Some(g), None]);
+        let out = encode(&EncoderInput::Ldr(px), 64, 64, &p);
+        assert_eq!(
+            off_texels(&out, 1, g),
+            0,
+            "{seed:#x} G {g}: texels decoded off"
+        );
+    }
+    // The witness is AMD's bytes (one texel on the AVX2 and AVX-512 paths); an Intel CPU writes other bytes (Note JC),
+    // so there only the guarded half above is checked.
+    if encoders_sys::intel_cpu() {
+        eprintln!("skipped: the unguarded witness is AMD's bytes (Note JC)");
+        return;
+    }
+    let witness = xc_fixture(EXACT_SEED + 3, [None, Some(255), None]);
+    let plain = encode(&EncoderInput::Ldr(witness), 64, 64, &base);
+    let lost = off_texels(&plain, 1, 255);
+    println!("unguarded witness: {lost} texels off");
+    assert!(lost > 0, "unguarded keeps the witness's G");
+}
+
+/// encoders-sys's `opaque_white_noise` (`tests/bc7.rs`, Task 4 step F2's input), copied: 128x128 opaque xorshift64
+/// noise, row-major.
+fn f2_noise() -> Vec<[u8; 4]> {
+    let mut s = 0x1234_5678_9ABC_DEF1u64;
+    (0..128 * 128)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            [s as u8, (s >> 8) as u8, (s >> 16) as u8, 255]
+        })
+        .collect()
+}
+
+/// BC7-O16, O20 (Note LR, LR8): `encoder.bc7_flat_tolerance` applies under perceptual, through the tuned entry with the
+/// level's perceptual weights: on Task 4 step F2's noise `data` writes other bytes than perceptual alone, and
+/// `default` is the plain perceptual call.
+#[test]
+fn perceptual_bc7_takes_the_flat_tolerance() {
+    let mut p = profile(Subtype::Diffuse);
+    p.encoder.perceptual = true;
+    let px = f2_noise();
+    let input = EncoderInput::Ldr(px.clone());
+    let default = encode(&input, 128, 128, &p);
+    let mut plain = raw_bc7e(
+        &px,
+        128,
+        128,
+        encoders_sys::Bc7Params {
+            level: bc7_level(p.encoder.effort),
+            perceptual: true,
+            exact_opaque: p.alpha.exact_opaque,
+        },
+    );
+    for b in plain.chunks_mut(16) {
+        encoders_sys::bc7_fixup::force_opaque_rotated(b.try_into().unwrap());
+    }
+    assert!(default == plain, "default is not the plain perceptual call");
+    let data = encode(
+        &input,
+        128,
+        128,
+        &with(
+            &p,
+            serde_json::json!({ "encoder": { "bc7_flat_tolerance": "data" } }),
+        ),
+    );
+    let changed = default
+        .chunks(16)
+        .zip(data.chunks(16))
+        .filter(|(a, b)| a != b)
+        .count();
+    println!("data changed {changed} of {} blocks", default.len() / 16);
+    assert!(changed > 0, "data wrote perceptual alone's bytes");
+    let explicit = with(
+        &p,
+        serde_json::json!({ "encoder": { "bc7_flat_tolerance": "default" } }),
+    );
+    assert!(encode(&input, 128, 128, &explicit) == default);
 }

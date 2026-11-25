@@ -176,6 +176,53 @@ fn resize_and_edge_are_settable_fields() {
     );
 }
 
+/// Note LR (LR8): the per-type BC7 settings are settable in every scope, and the channel guard's A is the other name
+/// of `alpha.exact_opaque`, so `--set` maps it there.
+#[test]
+fn the_bc7_settings_are_settable_fields() {
+    for (set, field, value) in [
+        (
+            "encoder.bc7_flat_tolerance=data",
+            "encoder.bc7_flat_tolerance",
+            json!("data"),
+        ),
+        (
+            "encoder.channel_guard.r=true",
+            "encoder.channel_guard.r",
+            json!(true),
+        ),
+        (
+            "subtype:rmaos.encoder.channel_guard.g=false",
+            "encoder.channel_guard.g",
+            json!(false),
+        ),
+        (
+            "file:odd.png.encoder.channel_guard.b=true",
+            "encoder.channel_guard.b",
+            json!(true),
+        ),
+        (
+            "encoder.channel_guard.a=false",
+            "alpha.exact_opaque",
+            json!(false),
+        ),
+        (
+            "subtype:envmask.encoder.channel_guard.a=true",
+            "alpha.exact_opaque",
+            json!(true),
+        ),
+        (
+            "file:odd.png.encoder.channel_guard.a=true",
+            "alpha.exact_opaque",
+            json!(true),
+        ),
+    ] {
+        let s = parse_set(set).unwrap_or_else(|e| panic!("{set}: {e}"));
+        assert_eq!((s.field.as_str(), &s.value), (field, &value), "{set}");
+    }
+    assert!(parse_set("encoder.channel_guard.x=true").is_err());
+}
+
 /// Audit 2026-10-15 item 5 (DECISIONS AV3): `FileScopes::index` works out each planned file's match forms once;
 /// `forms_of` matches exactly what `path_key_matches(key, project_rel(..))` does, for an indexed file, an aliased
 /// one, a packed output's virtual name over an indexed path, and a file that was never indexed.

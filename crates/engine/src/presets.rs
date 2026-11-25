@@ -63,8 +63,9 @@ pub enum PresetError {
     NewerConfigSchema(String, u32),
     #[error("invalid profile: {0}")]
     Invalid(String),
-    /// A configuration the registry refuses (an invalid or conflicting suffix alias, spec §3.7, or a user preset
-    /// under the reserved id `sdc-base`); the message starts `CFG-INVALID:`.
+    /// A configuration the registry or the config loader refuses (an invalid or conflicting suffix alias, spec §3.7,
+    /// a user preset under the reserved id `sdc-base`, or one table setting `alpha.exact_opaque` and
+    /// `encoder.channel_guard.a` to different values, Note LR); the message starts `CFG-INVALID:`.
     #[error("{0}")]
     Alias(String),
 }
@@ -291,9 +292,17 @@ impl ConfigFile {
                 }
                 e => bad(e.to_string()),
             })?;
-        checked
+        let mut c: ConfigFile = checked
             .try_into()
-            .map_err(|e: toml::de::Error| bad(e.to_string()))
+            .map_err(|e: toml::de::Error| bad(e.to_string()))?;
+        // `[files]` entries are rewritten by `file_entry`, which the fast re-plan calls too.
+        alias_tables(
+            origin,
+            &mut c.defaults,
+            &mut c.subtypes,
+            c.rules.iter_mut().map(|r| &mut r.overrides),
+        )?;
+        Ok(c)
     }
 
     /// The `[files]` table as `Scope::Path` overrides (key order, then leaf order) and per-file `allow` codes.
@@ -311,6 +320,28 @@ impl ConfigFile {
     }
 }
 
+/// `encoder.channel_guard.a` moved to `alpha.exact_opaque` in a file's `[defaults]`, each `[subtypes]` table and each
+/// rule's overrides (`overrides::alias_channel_guard_a`; Note LR, LR8), once at load. `at` names the file in the error.
+fn alias_tables<'a>(
+    at: &str,
+    defaults: &mut Value,
+    subtypes: &mut BTreeMap<Subtype, Value>,
+    rules: impl Iterator<Item = &'a mut Value>,
+) -> Result<(), PresetError> {
+    let refuse =
+        |table: &str, m: String| PresetError::Alias(format!("CFG-INVALID: {at} {table}: {m}"));
+    crate::overrides::alias_channel_guard_a(defaults).map_err(|m| refuse("[defaults]", m))?;
+    for (st, v) in subtypes {
+        crate::overrides::alias_channel_guard_a(v)
+            .map_err(|m| refuse(&format!("[subtypes.{}]", st.id()), m))?;
+    }
+    for (i, v) in rules.enumerate() {
+        crate::overrides::alias_channel_guard_a(v)
+            .map_err(|m| refuse(&format!("rules[{i}].overrides"), m))?;
+    }
+    Ok(())
+}
+
 /// One `[files]` entry as `Scope::Path` overrides (leaf order) and its `allow` codes, if it lists any.
 pub(crate) fn file_entry(
     key: &str,
@@ -320,6 +351,8 @@ pub(crate) fn file_entry(
     let mut overrides = vec![];
     let mut allow = None;
     let mut entry = entry.clone();
+    crate::overrides::alias_channel_guard_a(&mut entry)
+        .map_err(|m| PresetError::Alias(format!("CFG-INVALID: [files.\"{key}\"]: {m}")))?;
     let obj = entry
         .as_object_mut()
         .ok_or_else(|| bad("expected a table".into()))?;
@@ -637,9 +670,15 @@ impl PresetRegistry {
         let toml::Value::Table(table) = checked else {
             return Err(PresetError::Parse("a preset file is a TOML table".into()));
         };
-        let p: PresetFile = toml::Value::Table(table.clone())
+        let mut p: PresetFile = toml::Value::Table(table.clone())
             .try_into()
             .map_err(|e: toml::de::Error| PresetError::Parse(e.to_string()))?;
+        alias_tables(
+            &format!("preset '{}' ({})", p.id, source.label()),
+            &mut p.defaults,
+            &mut p.subtypes,
+            p.rules.iter_mut().map(|r| &mut r.overrides),
+        )?;
         if source != Source::Builtin && p.id == BASE_ID {
             return Err(PresetError::Alias(format!(
                 "CFG-INVALID: preset id '{BASE_ID}' from {} is reserved for the built-in base profile, already loaded from {SOURCE_BUILTIN}",

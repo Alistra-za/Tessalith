@@ -79,6 +79,13 @@
       ],
       "type": "string"
     },
+    "Bc7FlatTolerance": {
+      "enum": [
+        "default",
+        "data"
+      ],
+      "type": "string"
+    },
     "Bc7Weights": {
       "enum": [
         "linear",
@@ -100,6 +107,22 @@
         "hdr"
       ],
       "type": "string"
+    },
+    "ChannelGuard": {
+      "additionalProperties": false,
+      "description": "The channel guard's R, G and B (Note LR): a guarded channel that is 0 on every texel of a subset, or 255 on every\ntexel, decodes exactly wherever bc7e finds such a solution (best effort per subset). Where guarded channels cannot\nall be kept, the higher one wins: A > G > B > R. A is stored as `alpha.exact_opaque`; a settings table may also\nwrite it as `encoder.channel_guard.a`.",
+      "properties": {
+        "b": {
+          "type": "boolean"
+        },
+        "g": {
+          "type": "boolean"
+        },
+        "r": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "ChannelSpec": {
       "additionalProperties": false,
@@ -347,6 +370,10 @@
         "bc45_search_radius": {
           "$ref": "#/$defs/SearchRadius"
         },
+        "bc7_flat_tolerance": {
+          "$ref": "#/$defs/Bc7FlatTolerance",
+          "description": "BC7 only: the flat tolerance bc7e spreads a channel past (Note LR): `data` keeps near-constant channels of data\nmaps flat. It applies under `perceptual` too (a defect threshold, not a weighting). Not serialised at `default`,\nso profiles that do not set it keep their hash."
+        },
         "bc7_weights": {
           "anyOf": [
             {
@@ -357,6 +384,10 @@
             }
           ],
           "description": "BC7 linear error weights (bc7e only; ignored when `perceptual` is on). Not serialised when unset, so existing\nprofile hashes hold (DECISIONS Note CP)."
+        },
+        "channel_guard": {
+          "$ref": "#/$defs/ChannelGuard",
+          "description": "BC7 only: the channel guard's R, G and B (Note LR): bc7e keeps a guarded channel that is 0 or 255 across a\nsubset exact, best effort, the higher channel first (A > G > B > R). It applies under `perceptual` too (a\nconstraint, not a weighting); other formats ignore it. A is `alpha.exact_opaque`. Not serialised when no channel\nis guarded."
         },
         "effort": {
           "$ref": "#/$defs/Effort"
@@ -960,6 +991,26 @@
       },
       "type": "object"
     },
+    "PartialChannelGuard": {
+      "additionalProperties": false,
+      "description": "The channel guard's R, G and B (Note LR): a guarded channel that is 0 on every texel of a subset, or 255 on every\ntexel, decodes exactly wherever bc7e finds such a solution (best effort per subset). Where guarded channels cannot\nall be kept, the higher one wins: A > G > B > R. A is stored as `alpha.exact_opaque`; a settings table may also\nwrite it as `encoder.channel_guard.a`.",
+      "properties": {
+        "a": {
+          "description": "The channel guard's A: the same setting as `alpha.exact_opaque` (set one of the two).",
+          "type": "boolean"
+        },
+        "b": {
+          "type": "boolean"
+        },
+        "g": {
+          "type": "boolean"
+        },
+        "r": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "PartialChannelSpec": {
       "additionalProperties": false,
       "properties": {
@@ -1143,6 +1194,10 @@
         "bc45_search_radius": {
           "$ref": "#/$defs/SearchRadius"
         },
+        "bc7_flat_tolerance": {
+          "$ref": "#/$defs/Bc7FlatTolerance",
+          "description": "BC7 only: the flat tolerance bc7e spreads a channel past (Note LR): `data` keeps near-constant channels of data\nmaps flat. It applies under `perceptual` too (a defect threshold, not a weighting). Not serialised at `default`,\nso profiles that do not set it keep their hash."
+        },
         "bc7_weights": {
           "anyOf": [
             {
@@ -1153,6 +1208,10 @@
             }
           ],
           "description": "BC7 linear error weights (bc7e only; ignored when `perceptual` is on). Not serialised when unset, so existing\nprofile hashes hold (DECISIONS Note CP)."
+        },
+        "channel_guard": {
+          "$ref": "#/$defs/PartialChannelGuard",
+          "description": "BC7 only: the channel guard's R, G and B (Note LR): bc7e keeps a guarded channel that is 0 or 255 across a\nsubset exact, best effort, the higher channel first (A > G > B > R). It applies under `perceptual` too (a\nconstraint, not a weighting); other formats ignore it. A is `alpha.exact_opaque`. Not serialised when no channel\nis guarded."
         },
         "effort": {
           "$ref": "#/$defs/Effort"
