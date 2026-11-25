@@ -480,8 +480,56 @@ fn strip(mut block: impl FnMut() -> [[u16; 3]; 16]) -> Vec<[u16; 4]> {
 /// of up to 64 half codes, a random 8/8 texel split; (c) narrow spans; (d) black beside bright neutral texels.
 #[test]
 fn random_blocks_encode_at_every_level_on_every_path() {
+    let strips = random_strips();
+    let levels = RANDOM_STRIP_LEVELS;
+    for target in paths() {
+        for (i, px) in strips.iter().enumerate() {
+            for level in levels {
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                eprintln!("strip {i} {target:?} {level:?} survived");
+            }
+        }
+    }
+}
+
+/// The levels the random strips are encoded at, in the order `random_strip_hashes` prints them.
+const RANDOM_STRIP_LEVELS: [Bc6hLevel; 6] = [
+    Bc6hLevel::Veryfast,
+    Bc6hLevel::Fast,
+    Bc6hLevel::Basic,
+    Bc6hLevel::Slow,
+    Bc6hLevel::Veryslow,
+    Bc6hLevel::VeryslowPeak,
+];
+
+/// Prints `<path> <strip> <level> <sha256 hex of the encoded strip>` for the random strips, one line per path in
+/// `paths()`, strip (a-d) and level. It asserts nothing: run it before and after a kernel change that must keep every
+/// byte and compare the two outputs (`-- --ignored --exact random_strip_hashes --nocapture`).
+#[test]
+#[ignore = "prints the random strips' output hashes: compare them before and after a byte-neutral kernel change"]
+fn random_strip_hashes() {
+    let strips = random_strips();
+    for target in paths() {
+        for (name, px) in ["a", "b", "c", "d"].into_iter().zip(&strips) {
+            for level in RANDOM_STRIP_LEVELS {
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                println!(
+                    "{target:?} {name} {level:?} {}",
+                    hex::encode(Sha256::digest(&out))
+                );
+            }
+        }
+    }
+}
+
+/// The four random strips of `random_blocks_encode_at_every_level_on_every_path`: (a) every channel of every texel a
+/// random half; (b) two clusters, each one random colour plus noise of up to 64 half codes, a random 8/8 texel split;
+/// (c) narrow spans; (d) black beside bright neutral texels.
+fn random_strips() -> [Vec<[u16; 4]>; 4] {
     let mut r = Lcg(0x1234_5678);
-    let strips = [
+    [
         strip(|| std::array::from_fn(|_| std::array::from_fn(|_| r.range(0, MAX_UF16)))),
         {
             let mut r = Lcg(0x2345_6789);
@@ -530,24 +578,7 @@ fn random_blocks_encode_at_every_level_on_every_path() {
                 })
             })
         },
-    ];
-    let levels = [
-        Bc6hLevel::Veryfast,
-        Bc6hLevel::Fast,
-        Bc6hLevel::Basic,
-        Bc6hLevel::Slow,
-        Bc6hLevel::Veryslow,
-        Bc6hLevel::VeryslowPeak,
-    ];
-    for target in paths() {
-        for (i, px) in strips.iter().enumerate() {
-            for level in levels {
-                let mut out = vec![0u8; STRIP_BLOCKS * 16];
-                bc6h_compress_rows_on(px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
-                eprintln!("strip {i} {target:?} {level:?} survived");
-            }
-        }
-    }
+    ]
 }
 
 /// Bounds (E_lo, E_hi) on the encoder's own error for one encoded block, read from the output bytes alone, in half-code
@@ -1014,6 +1045,105 @@ fn one_region_endpoints_take_the_nearest_code() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Eight texels of half bits `(7936, 7936, 0)` and eight of `(0, 0, 15872)` give UF16 colours `(16384, 16384, 0)` and
+/// `(0, 0, 32768)`. The scaled covariance has every row summing to 0 exactly and absorbs the `1e-6` eps, so the first
+/// power iteration gives the zero vector and `RSQRT(0) * 0` is NaN (survey section 11). Whether the shipped objects
+/// reach it depends on how ISPC lowers `/stats[14]`, which differs by CPU target.
+///
+/// The two colours go in alternate texels and in two halves of the block. At every level on every path, every
+/// decoded channel of every texel lies within 256 half codes of its source. Mode 10's interior codes rebuild at
+/// `(q + 0.5) * 64`, so each colour lands about 32 UF16 units (some 16 half codes) from its source: 256 is a loose
+/// bound that only a black or near-white NaN decode breaks; do not tighten it.
+#[test]
+#[ignore = "RED for the PCA zero-norm re-seed (Note LT): passes once the PCA re-seed (patch 0007) lands"]
+fn pca_survives_a_zero_covariance_row_sum() {
+    let a = [7936u16, 7936, 0];
+    let b = [0u16, 0, 15872];
+    let alternate: [[u16; 3]; 16] = std::array::from_fn(|t| if t % 2 == 0 { a } else { b });
+    let halves: [[u16; 3]; 16] = std::array::from_fn(|t| if t < 8 { a } else { b });
+    let mut failures = Vec::new();
+    for target in paths() {
+        for (name, src) in [("alternate", &alternate), ("halves", &halves)] {
+            let px: [[u16; 4]; 16] =
+                std::array::from_fn(|t| [src[t][0], src[t][1], src[t][2], f16::ONE.to_bits()]);
+            for level in RANDOM_STRIP_LEVELS {
+                let dec = decode_halves(&encode_block(&px, level, target));
+                let mut bad = Vec::new();
+                for t in 0..16 {
+                    for c in 0..3 {
+                        if dec[t][c].abs_diff(src[t][c]) > 256 {
+                            bad.push(format!("texel {t} ch {c}: {} -> {}", src[t][c], dec[t][c]));
+                        }
+                    }
+                }
+                eprintln!("{target:?} {level:?} {name}: {} channels off", bad.len());
+                if !bad.is_empty() {
+                    eprintln!("  decoded texels (half bits): {dec:?}");
+                    failures.push(format!(
+                        "{target:?} {level:?} {name}: {} channels off by more than 256 half codes, first {}",
+                        bad.len(),
+                        bad[0]
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The decoder writes `(u * 31) >> 6`, so the UF16 values that decode to half `h` are `[64h/31, 64(h+1)/31)`. The
+/// kernel aims at `(h / 31) * 64`, the bottom edge, so a constant block's 16-bit code `round(64h/31)` decodes to
+/// `h - 1` whenever the fraction is below 0.5 (survey section 1; h = 1 decodes to 0).
+///
+/// A constant neutral block (R = G = B = h) for every half `h` in `0x0001..=0x7BFF` stepping by 7, plus `0x7BFF`:
+/// at every level on every path every decoded channel of every texel equals `h`. The failure message names `h`, the
+/// level, the path and the decoded half, and the counts per level and path are printed.
+#[test]
+#[ignore = "RED for BC6H-Q5 (Note LT): passes once the Q5 rounding fix (patch 0007) lands"]
+fn constant_blocks_decode_to_their_half_code() {
+    let mut hs: Vec<u16> = (1..=0x7BFFu16).step_by(7).collect();
+    hs.push(0x7BFF);
+    let mut failures = Vec::new();
+    for target in paths() {
+        for level in RANDOM_STRIP_LEVELS {
+            let (mut count, mut minus_one, mut first) = (0usize, 0usize, String::new());
+            for chunk in hs.chunks(STRIP_BLOCKS) {
+                let mut it = chunk.iter().copied();
+                let px = strip(|| {
+                    let h = it.next().unwrap_or(0x7BFF);
+                    [[h; 3]; 16]
+                });
+                let mut out = vec![0u8; STRIP_BLOCKS * 16];
+                bc6h_compress_rows_on(&px, (STRIP_BLOCKS * 4) as u32, 4, &mut out, level, target);
+                for (i, &h) in chunk.iter().enumerate() {
+                    let b: [u8; 16] = out[i * 16..i * 16 + 16].try_into().unwrap();
+                    let dec = decode_halves(&b);
+                    if let Some(&d) = dec.iter().flatten().find(|&&d| d != h) {
+                        count += 1;
+                        // Q5's premise: the failure is exactly one half code low in every channel that misses.
+                        minus_one +=
+                            usize::from(dec.iter().flatten().all(|&c| c == h || c == h - 1));
+                        if first.is_empty() {
+                            first = format!("h = {h:#06x} decodes to {d:#06x}");
+                        }
+                    }
+                }
+            }
+            eprintln!(
+                "{target:?} {level:?}: {count} of {} constant blocks do not decode to h, {minus_one} of them to exactly h - 1",
+                hs.len()
+            );
+            if count > 0 {
+                failures.push(format!(
+                    "{target:?} {level:?}: {count} of {} blocks ({minus_one} exactly h - 1), first {first}",
+                    hs.len()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

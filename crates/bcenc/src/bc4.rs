@@ -19,8 +19,9 @@
 //! Before scoring, `Batch::push` skips a pair when the best as it stands has error 0 or the pair's lower bound
 //! (`bound::Bound`, whose module doc gives the proof) is at or above that error: the pair's error is at least its
 //! bound, so `try_pair` would refuse it, and skipping it changes no byte. On `Avx2` a waiting pair may still lower that
-//! best; a best that is higher only prunes less. [`search_on`] and [`search_max_on`] build one bound per block, except
-//! that a solid block shares `bound::EMPTY`, which never prunes on its own; [`upstream`] uses `EMPTY` too.
+//! best; a best that is higher only prunes less. [`search_on`] builds one bound per block from radius `BOUND_MIN_RADIUS`
+//! (10) up and takes `bound::EMPTY` below it, [`search_max_on`] builds one for every block, and a solid block takes
+//! `EMPTY` in both (it never prunes on its own); [`upstream`] uses `EMPTY` too.
 #![allow(
     clippy::needless_range_loop,
     reason = "index loops mirror the C++ they port"
@@ -851,20 +852,29 @@ fn search_avx2(t: Avx2, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8]
     search_in(t, v, radius, guard)
 }
 
+/// The least radius at which `search` builds a `Bound`; below it the search takes `EMPTY`, because at radius 4 and 5
+/// building the bound costs more than it saves and at 10 it saves for BC4 and BC5 (Note HY24). BC3 alpha loses slightly
+/// at radius 10 and keeps the bound under the one rule. Radii 6 to 9 were not measured and no engine setting uses them.
+const BOUND_MIN_RADIUS: u32 = 10;
+
 /// The body of [`search`], compiled for `isa`.
 #[inline(always)]
 fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let (mn, mx) = minmax(v);
-    // A solid block is coded exactly by its first candidate, so tables would prune nothing: it shares `EMPTY`. Otherwise
-    // the window covers the radius plus `local`'s reach of 3; the clamp keeps the pad a byte for any radius.
-    let built;
-    let bound: &Bound = if mn == mx {
-        &EMPTY
+    // A solid block, or a radius below `BOUND_MIN_RADIUS`, takes `EMPTY`; otherwise the window covers the radius plus
+    // `local`'s reach of 3, and the clamp keeps the pad a byte for any radius. The two calls are on purpose: the `EMPTY`
+    // copy folds its bound checks away, while one call with a bound picked at run time kept only about half of the gain
+    // on the base path.
+    let (base, b) = if mn == mx || radius < BOUND_MIN_RADIUS {
+        searched(isa, v, radius as i32, &EMPTY)
     } else {
-        built = Bound::new(v, radius.min(252) as u8 + 3);
-        &built
+        searched(
+            isa,
+            v,
+            radius as i32,
+            &Bound::new(v, radius.min(252) as u8 + 3),
+        )
     };
-    let (base, b) = searched(isa, v, radius as i32, bound);
     keep_guard(v, &base, b, guard).bytes()
 }
 
@@ -1263,6 +1273,29 @@ mod tests {
     /// The path `_isa` stands for.
     fn path_of<I: Isa>(_isa: I) -> Path {
         I::PATH
+    }
+
+    /// The search builds its bound only from `BOUND_MIN_RADIUS`: below it nothing is skipped by a table. The block has 16
+    /// distinct values, so its best never reaches error 0 and a `BoundSkip` can only come from a table.
+    #[test]
+    fn the_search_builds_its_bound_only_from_radius_10() {
+        const _: () = assert!(BOUND_MIN_RADIUS == 10);
+        let v: [u8; 16] = std::array::from_fn(|i| (i * 8) as u8);
+        on_each_path!(isa, {
+            let path = path_of(isa);
+            let p = isa_name(isa);
+            for radius in [4, 5, 9, 10] {
+                let before = crate::hits::counts();
+                search_on(path, &v, radius, None);
+                let after = crate::hits::counts();
+                let skips = taken(&before, &after, Hit::BoundSkip);
+                if radius < BOUND_MIN_RADIUS {
+                    assert_eq!(skips, 0, "path {p} radius {radius}");
+                } else {
+                    assert!(skips > 0, "path {p} radius {radius}");
+                }
+            }
+        });
     }
 
     /// `window_pairs` on `b` with `bound`: the `BoundSkip` and `BoundPass` counts and the `pair2` kernel runs it took.
