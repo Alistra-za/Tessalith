@@ -192,7 +192,7 @@ impl Bsa {
         // Grown by the decoder: a capacity of `orig` would commit up to MAX_ENTRY per reader on the word of the
         // entry header, before one byte is decoded (audit 2026-10-14 finding 1).
         let mut out = Vec::new();
-        lzzzz::lz4f::ReadDecompressor::new(&data[p + 4..])
+        lzzzz::lz4f::BufReadDecompressor::new(&data[p + 4..])
             .map_err(|x| VfsError::Corrupt(x.to_string()))?
             .take(orig as u64 + 1)
             .read_to_end(&mut out)

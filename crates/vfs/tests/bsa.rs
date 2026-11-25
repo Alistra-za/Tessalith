@@ -179,9 +179,11 @@ fn stock_archive_reads_every_entry() {
     );
 }
 
-/// An entry whose compressed frame is damaged reads as `Corrupt`, never as wrong bytes.
+/// A damaged frame, or a header that lies about the decoded size, reads as `Corrupt`, never as wrong bytes. The
+/// last case also pins the `take(orig + 1)` cap: the decode stops one byte past the declared size.
 #[test]
 fn garbled_lz4_frame_is_corrupt() {
+    // about 114 KiB: liblz4's default block is 64 KiB, so the frame has more than one block
     let payload: Vec<u8> = (0..6000u32)
         .flat_map(|i| format!("vertex {} normal {};", i % 97, i % 13).into_bytes())
         .collect();
@@ -190,10 +192,19 @@ fn garbled_lz4_frame_is_corrupt() {
     let off = u32::from_le_bytes(good[80..84].try_into().unwrap()) as usize;
     let size = u32::from_le_bytes(good[76..80].try_into().unwrap()) as usize & 0x3FFF_FFFF;
     let frame = off + 4; // after the u32 original size
+    assert_eq!(
+        good[frame..frame + 4],
+        0x184D_2204u32.to_le_bytes(),
+        "LZ4 frame magic"
+    );
+    // FLG bit 0 (dictionary id) and bit 3 (content size) clear: the header checksum is the byte at offset 6
+    assert_eq!(good[frame + 4] & 0b1001, 0);
+    let half_orig = payload.len() / 2;
     for what in [
         "header checksum byte",
         "frame cut to half",
         "declared size one short",
+        "declared size half",
     ] {
         let mut b = good.clone();
         match what {
@@ -204,14 +215,18 @@ fn garbled_lz4_frame_is_corrupt() {
                 put(&mut b, 76, (4 + half) as u32 | 0x4000_0000);
                 b.truncate(frame + half);
             }
-            _ => put(&mut b, off, payload.len() as u32 - 1),
+            "declared size one short" => put(&mut b, off, payload.len() as u32 - 1),
+            _ => put(&mut b, off, half_orig as u32),
         }
         std::fs::write(&p, &b).unwrap();
         let bsa = Bsa::open(&p).unwrap();
-        assert!(
-            matches!(bsa.read(&bsa.entries[0]), Err(vfs::VfsError::Corrupt(_))),
-            "{what}"
-        );
+        let Err(vfs::VfsError::Corrupt(msg)) = bsa.read(&bsa.entries[0]) else {
+            panic!("{what}: not Corrupt");
+        };
+        if what == "declared size half" {
+            // with the cap the decode yields orig + 1 bytes; without it, the whole payload
+            assert!(msg.contains(&format!("{} bytes,", half_orig + 1)), "{msg}");
+        }
     }
 }
 
