@@ -141,12 +141,13 @@ block and runs the second search only for a lane that set it. An unlifted block 
 `best_err = 1e99`, and the retry keeps its own result on a tie, which is the same data. VeryslowPeak only (the
 retry runs once per guarded block); BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash
 equal on SSE2, AVX2 and AVX-512. S1 rank-once: the two-region partition ranking (now part of `bc6h_block_cache`, which
-S2 renamed from `bc6h_rank_partitions`; the body `bc6h_enc_2p` had, writing the new `state->part_list`) runs once per block at the end of `bc6h_setup` and once more in
-`bc6h_peak_retry` for a lifted lane, when `fastSkipTreshold > 0`; `bc6h_enc_2p` only searches the stored list. The
-ranking depends on the block alone, so each two-region mode ranked the same list before (six times at Slow, Veryslow
-and VeryslowPeak, twice at Basic, once at Fast). The `(bound, partition id)` order and `partial_sort_list` are
-unchanged; BC6H bytes unchanged: the pins, the random strips and the 22 measured images hash equal on SSE2, AVX2 and
-AVX-512. S2 pca-once: `bc6h_block_cache` also fills `state->pca_ep_1p[8]` (the one-region `block_segment_core` fit, at
+S2 renamed from `bc6h_rank_partitions`; the body `bc6h_enc_2p` had, writing the new `state->part_list`) runs once per
+block at the end of `bc6h_setup` and once more in `bc6h_peak_retry` for a lifted lane, when `fastSkipTreshold > 0`;
+`bc6h_enc_2p` only searches the stored list. The ranking depends on the block alone, so each two-region mode ranked the
+same list before (six times at Slow, Veryslow and VeryslowPeak, twice at Basic, once at Fast). The `(bound, partition
+id)` order and `partial_sort_list` are unchanged; BC6H bytes unchanged: the pins, the random strips and the 22 measured
+images hash equal on SSE2, AVX2 and AVX-512.
+S2 pca-once: `bc6h_block_cache` also fills `state->pca_ep_1p[8]` (the one-region `block_segment_core` fit, at
 every level, in `bc6h_setup` and again for a lifted lane in `bc6h_peak_retry`) and, for each of the
 `n = bc6h_2p_depth(state) = min(fastSkipTreshold, 32)` ranked partitions k, `state->pca_ep_2p[k * 16 ..]` (both
 regions' fits, when `fastSkipTreshold > 0`); the one helper gives the fill and `bc6h_enc_2p` the same depth.
@@ -165,9 +166,10 @@ before; `bc6h_build_qbounds` builds the bounds from them (`compute_qbounds` when
 otherwise), in `bc6h_test_mode` when `enc` is set and in `CompressBlockBC6H_core` right before `bc6h_enc_2p` and before
 `bc6h_enc_1p`. The slow levels (all `enc = true`) build once per mode as before. BC6H bytes unchanged: the pins, the
 random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512. S3 (a BC6H `block_quant` that loads each
-region's endpoints once) was tried and dropped: a hoisted reciprocal and a per-texel division both changed BC6H bytes
-(`encode_versions`' `hdr_sky.dds` and the 22 measured images at every level, from the one-region path at Veryfast on),
-while the pins and the random strips stayed equal, so it is not in the patch (Note LT). S4 prune: at Slow, Veryslow and
+region's endpoints once) was tried twice and dropped, because both attempts changed BC6H bytes, so it is not in the
+patch (Note LT). Both attempts changed `encode_versions`' `hdr_sky.dds`. The first (a hoisted reciprocal) left the pins
+and the random strips equal. The second (a per-texel division) changed some of the 22 measured images at every level,
+from the one-region path at Veryfast on, on AVX2. S4 prune: at Slow, Veryslow and
 VeryslowPeak, `bc6h_test_mode` computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum
 over the 16 texels and 3 channels of each texel channel's squared distance to the window
 `[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p], epb)]`, unpacked at the mode's endpoint bits. Every

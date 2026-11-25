@@ -12,7 +12,8 @@ pub enum Bc6hLevel {
     // Veryslow plus the peak-preserving mode (kernel.ispc sdc patch 0001): in a block whose brightest texel is at
     // least 32x the block's geometric-mean luminance, candidates that decode that texel below 0.9 of its source
     // luminance rank last, and a second search on a lifted block competes. Other blocks encode as Veryslow.
-    // Not mapped to any effort.
+    // The engine's Slowest and Max efforts map here; Slowest is the BC6H default unless a preset, config, rule or
+    // `--set` names an effort (Notes FF and FM43).
     VeryslowPeak = 5,
 }
 
