@@ -7,4 +7,3 @@
 - **Faultier**: PBR landscape template values by Faultier (https://www.nexusmods.com/profile/Faultierfan?gameId=1704), from Faultier's PBR landscape modders resource. Used with permission.
 - **ousnius/nifly** (https://github.com/ousnius/nifly, GPL-3.0): the NIF library whose source the `nif` crate follows as a reference for parsing and for transform, shader-flag and tree-order conventions (cited in code comments). Its test NIF files (GPL-3.0, `crates/nif/tests/fixtures/`) are used by the test suite only and are not in the executables.
 - **hakasapl/PGPatcher** (https://github.com/hakasapl/PGPatcher, GPL-3.0): the PBR and complex-material JSON schemas Tessalith vendors unmodified to validate its exports, and the behaviour the `pgpsim` crate simulates.
-- **Poly Haven**: the `studio_small_09` HDRI behind the 3D preview (licence as recorded in `crates/render3d/assets/hdri/README.md`: CC0 1.0).

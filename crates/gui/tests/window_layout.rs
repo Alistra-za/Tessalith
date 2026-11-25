@@ -37,7 +37,8 @@ fn full() -> LayoutSettings {
         sets_shader: Some("pbr_landscape".into()),
         preview_channel: 3,
         look: Some(LookSettings {
-            hdri: Some(true),
+            hdri: None,
+            mode: Some("hdri".into()),
             grey: None,
             bg: Some([0.25; 3]),
             sun: Some(2.0),
@@ -47,6 +48,7 @@ fn full() -> LayoutSettings {
             deferred: None,
         }),
         set_look: None,
+        hdri_file: None,
         settings_window: Some([300.0, 140.0, 460.0, 600.0]),
         details: vec!["set-3d-details".into()],
     }
@@ -132,7 +134,7 @@ radius = 0.0
         "width < 200, text, unknown names and absurd widths are dropped"
     );
     assert_eq!(l.window, None, "a window with a bad field is ignored");
-    let look = l.look.expect("the look table is read");
+    let look = l.look.clone().expect("the look table is read");
     assert_eq!(look.grey, None, "folded into bg on load");
     assert_eq!(
         look.bg,
@@ -166,7 +168,7 @@ fn channels_and_looks_convert_both_ways() {
     }
     assert_eq!(Channel::from_id(99), None);
     let look = Look {
-        hdri: true,
+        mode: sdc_gui::model::viewport3d::BgMode::Hdri,
         bg: [0.5, 0.25, 0.0],
         sun: 2.0,
         point: 1.0,
@@ -373,7 +375,7 @@ fn a_new_app_starts_from_the_saved_layout() {
     assert_eq!(
         app.meshes.v3.look,
         Look {
-            hdri: true,
+            mode: sdc_gui::model::viewport3d::BgMode::Hdri,
             bg: [0.25; 3],
             sun: 2.0,
             point: 1.5,
@@ -758,6 +760,369 @@ fn an_old_grey_background_loads_as_that_grey_and_a_bad_bg_falls_back() {
     }))
     .unwrap();
     assert!(text.contains("bg") && !text.contains("grey"), "{text}");
+}
+
+/// The studio HDRI is gone: the old `hdri` key is read and ignored, and what the app writes has `mode`, not `hdri`.
+#[test]
+fn old_hdri_true_loads_as_solid() {
+    use sdc_gui::model::viewport3d::BgMode;
+    let (s, err) = load_text("[layout.look]\nhdri = true\nsun = 2.0\n");
+    assert_eq!(err, None);
+    let look = Look::from_settings(s.layout.look.as_ref());
+    assert_eq!(look.mode, BgMode::Solid);
+    assert_eq!(look.sun, 2.0, "its siblings survive");
+    let text = toml::to_string(s.layout.look.as_ref().unwrap()).unwrap();
+    assert!(!text.contains("hdri"), "never written back: {text}");
+    // The new key: "hdri" turns it on, an unknown name or a wrong type is Solid.
+    for (toml_text, want) in [
+        ("mode = \"hdri\"", BgMode::Hdri),
+        ("mode = \"gradient\"", BgMode::Gradient),
+        ("mode = \"solid\"", BgMode::Solid),
+        ("mode = \"plaid\"", BgMode::Solid),
+        ("mode = 3", BgMode::Solid),
+    ] {
+        let (s, _) = load_text(&format!("[layout.look]\n{toml_text}\n"));
+        assert_eq!(
+            Look::from_settings(s.layout.look.as_ref()).mode,
+            want,
+            "{toml_text}"
+        );
+    }
+    let saved = toml::to_string(&LookSettings::of(&Look {
+        mode: BgMode::Hdri,
+        ..Look::default()
+    }))
+    .unwrap();
+    assert!(
+        saved.contains("mode = \"hdri\"") && !saved.contains("hdri = "),
+        "{saved}"
+    );
+    // Gradient writes its name and reads back as itself.
+    let saved = toml::to_string(&LookSettings::of(&Look {
+        mode: BgMode::Gradient,
+        ..Look::default()
+    }))
+    .unwrap();
+    assert!(saved.contains("mode = \"gradient\""), "{saved}");
+    let (s, _) = load_text(&format!("[layout.look]\n{saved}"));
+    assert_eq!(
+        Look::from_settings(s.layout.look.as_ref()).mode,
+        BgMode::Gradient
+    );
+}
+
+#[test]
+fn hdri_file_round_trips() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let s = GuiSettings {
+        layout: LayoutSettings {
+            hdri_file: Some(d.path().join("skies").join("studio sky.hdr")),
+            ..full()
+        },
+        ..GuiSettings::default()
+    };
+    s.save(&p).unwrap();
+    let (back, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert_eq!(back, s);
+    assert!(back.layout.hdri_file.is_some());
+    // A wrong type is ignored on its own.
+    let (s, _) = load_text("[layout]\nhdri_file = 5\nmeshes_view = true\n");
+    assert_eq!(s.layout.hdri_file, None);
+    assert!(s.layout.meshes_view);
+}
+
+#[test]
+fn a_missing_hdri_file_at_start_falls_back_to_solid_with_a_notice() {
+    use sdc_gui::app::SdcApp;
+    use sdc_gui::model::viewport3d::BgMode;
+    let d = tempfile::tempdir().unwrap();
+    let gone = d.path().join("gone.hdr");
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            look: Some(LookSettings {
+                mode: Some("hdri".into()),
+                ..LookSettings::default()
+            }),
+            hdri_file: Some(gone.clone()),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    let mut app = SdcApp::new(sdc_gui::model::AppModel::new(
+        settings,
+        None,
+        support::session(),
+    ));
+    assert_eq!(
+        app.meshes.v3.look.mode,
+        BgMode::Hdri,
+        "kept until the read fails"
+    );
+    let ctx = egui::Context::default();
+    let t = Instant::now();
+    while app.meshes.v3.notice.is_none() {
+        // `route_3d` starts the decode: the panel shows the HDRI background.
+        app.route_3d(&ctx);
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "no notice");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(app.meshes.v3.look.mode, BgMode::Solid);
+    assert!(app
+        .meshes
+        .v3
+        .notice
+        .as_deref()
+        .unwrap()
+        .contains("gone.hdr"));
+    // The saved path stays: a drive that is back later gets its file again.
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(app.model.settings.layout.hdri_file, Some(gone));
+}
+
+/// Review Focus 1: a file the renderer refuses leaves the saved path alone (and the panel on the previous file).
+#[test]
+fn a_refused_hdri_file_leaves_the_saved_path() {
+    use sdc_gui::app::SdcApp;
+    let d = tempfile::tempdir().unwrap();
+    let write = |name: &str, w: usize, h: usize| {
+        let mut b = format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes();
+        for _ in 0..w * h {
+            b.extend([128, 128, 128, 129]);
+        }
+        let p = d.path().join(name);
+        std::fs::write(&p, b).unwrap();
+        p
+    };
+    let (good, bad) = (write("good.hdr", 128, 64), write("wide.hdr", 100, 64));
+    // The Meshes panel on the HDRI background, so the saved file is decoded (a Solid start decodes nothing).
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            look: Some(LookSettings {
+                mode: Some("hdri".into()),
+                ..LookSettings::default()
+            }),
+            hdri_file: Some(good.clone()),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    let mut app = SdcApp::new(sdc_gui::model::AppModel::new(
+        settings,
+        None,
+        support::session(),
+    ));
+    let ctx = egui::Context::default();
+    let t = Instant::now();
+    while app.meshes.v3.hdri_env().is_none() {
+        app.route_3d(&ctx);
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(app.model.settings.layout.hdri_file, Some(good.clone()));
+    // The user picks a refused file in the Meshes panel.
+    app.meshes.v3.load_hdri(bad, true);
+    let t = Instant::now();
+    while app.meshes.v3.notice.is_none() {
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(app.meshes.v3.notice.as_deref().unwrap().contains("2:1"));
+    assert_eq!(app.meshes.v3.hdri_file(), Some(good.as_path()));
+    assert!(app.meshes.v3.take_accepted_hdri().is_none());
+    app.route_3d(&ctx);
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(
+        app.model.settings.layout.hdri_file,
+        Some(good),
+        "the saved path is unchanged"
+    );
+}
+
+/// A flat 128 × 64 RGBE `.hdr` of one grey, `name` in `dir`.
+fn hdr_file(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let mut b = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 64 +X 128\n".to_vec();
+    for _ in 0..128 * 64 {
+        b.extend([128, 128, 128, 129]);
+    }
+    let p = dir.join(name);
+    std::fs::write(&p, b).unwrap();
+    p
+}
+
+/// Both panels on the HDRI background and `file` saved, written to `gui.toml` in `dir`.
+fn hdri_app(dir: &std::path::Path, file: &std::path::Path, mode: &str) -> sdc_gui::app::SdcApp {
+    let look = || {
+        Some(LookSettings {
+            mode: Some(mode.into()),
+            ..LookSettings::default()
+        })
+    };
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            look: look(),
+            set_look: look(),
+            hdri_file: Some(file.to_path_buf()),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    sdc_gui::app::SdcApp::new(sdc_gui::model::AppModel::new(
+        settings,
+        Some(dir.join("gui.toml")),
+        support::session(),
+    ))
+}
+
+/// One app frame of the 3D panels' part: both panels polled, then `route_3d`, then the layout sync at `now`.
+fn hdri_frame(app: &mut sdc_gui::app::SdcApp, ctx: &egui::Context, now: Instant) {
+    app.meshes.v3.poll();
+    app.state.set3d.v3.poll();
+    app.route_3d(ctx);
+    app.sync_layout_at(ctx, now);
+}
+
+/// Final review: a file chosen in Set 3D is the saved one from the frame Set 3D takes it, while Meshes has not
+/// decoded anything of it; Meshes shows it too, and `gui.toml` gets it.
+#[test]
+fn a_file_chosen_in_set_3d_is_saved_from_the_frame_set_3d_takes_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (a, b) = (hdr_file(d.path(), "a.hdr"), hdr_file(d.path(), "b.hdr"));
+    let mut app = hdri_app(d.path(), &a, "hdri");
+    let ctx = egui::Context::default();
+    let t0 = Instant::now();
+    let t = Instant::now();
+    loop {
+        hdri_frame(&mut app, &ctx, t0);
+        let both = app.meshes.v3.hdri_file() == Some(a.as_path())
+            && app.state.set3d.v3.hdri_file() == Some(a.as_path());
+        if both && !app.meshes.v3.busy() && !app.state.set3d.v3.busy() {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(20), "A in both panels");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The user picks B in Set 3D; only Set 3D is polled until it shows B.
+    app.state.set3d.v3.load_hdri(b.clone(), true);
+    let t = Instant::now();
+    while app.state.set3d.v3.hdri_file() != Some(b.as_path()) {
+        app.state.set3d.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "B in Set 3D");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(1));
+    assert_eq!(app.model.settings.layout.hdri_file, Some(b.clone()));
+    assert_eq!(app.meshes.v3.hdri_file(), Some(b.as_path()), "Meshes too");
+    assert_eq!(
+        app.meshes.v3.look.mode,
+        sdc_gui::model::viewport3d::BgMode::Hdri
+    );
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(4));
+    let text = std::fs::read_to_string(d.path().join("gui.toml")).unwrap();
+    assert!(text.contains("b.hdr") && !text.contains("a.hdr"), "{text}");
+}
+
+/// A pick still decoding in one panel is not dropped when the other panel takes the saved file meanwhile: the saved
+/// file reaches it first, then the pick lands and is what both panels show and what is saved.
+#[test]
+fn a_pick_decoding_in_one_panel_survives_the_other_taking_the_saved_file() {
+    let d = tempfile::tempdir().unwrap();
+    let (a, b) = (hdr_file(d.path(), "a.hdr"), hdr_file(d.path(), "b.hdr"));
+    let mut app = hdri_app(d.path(), &a, "solid");
+    let ctx = egui::Context::default();
+    let t0 = Instant::now();
+    app.sync_layout_at(&ctx, t0);
+    // Meshes: the user picks B (its decode is out, Meshes not polled yet). Set 3D decodes the saved A meanwhile.
+    app.meshes.v3.load_hdri(b.clone(), true);
+    app.state.set3d.v3.look.mode = sdc_gui::model::viewport3d::BgMode::Hdri;
+    app.state.set3d.v3.decode_saved_hdri();
+    let t = Instant::now();
+    while app.state.set3d.v3.hdri_file() != Some(a.as_path()) || app.state.set3d.v3.busy() {
+        app.state.set3d.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "A in Set 3D");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    // Now the pick lands.
+    let t = Instant::now();
+    while app.meshes.v3.busy() {
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "B decoded");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(1));
+    assert_eq!(
+        app.meshes.v3.hdri_file(),
+        Some(b.as_path()),
+        "the pick stands"
+    );
+    assert_eq!(app.state.set3d.v3.hdri_file(), Some(b.as_path()));
+    assert_eq!(app.model.settings.layout.hdri_file, Some(b));
+}
+
+/// Final review: a saved file is not decoded while neither panel shows the HDRI background (its name shows), and
+/// once one does it is decoded once: the other panel holds the same environment.
+#[test]
+fn the_saved_hdri_is_decoded_once_when_a_panel_first_needs_it() {
+    use sdc_gui::model::viewport3d::BgMode;
+    let d = tempfile::tempdir().unwrap();
+    let a = hdr_file(d.path(), "a.hdr");
+    let mut app = hdri_app(d.path(), &a, "solid");
+    let ctx = egui::Context::default();
+    let t0 = Instant::now();
+    for _ in 0..20 {
+        hdri_frame(&mut app, &ctx, t0);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for v in [&app.meshes.v3, &app.state.set3d.v3] {
+        assert!(
+            v.hdri_env().is_none() && !v.busy(),
+            "nothing decoded in Solid"
+        );
+        assert_eq!(v.hdri_file(), Some(a.as_path()), "the name shows");
+    }
+    app.state.set3d.v3.look.mode = BgMode::Hdri;
+    let t = Instant::now();
+    while app.meshes.v3.hdri_env().is_none() || app.state.set3d.v3.hdri_env().is_none() {
+        hdri_frame(&mut app, &ctx, t0);
+        assert!(t.elapsed() < Duration::from_secs(20), "decoded");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(std::sync::Arc::ptr_eq(
+        app.meshes.v3.hdri_env().unwrap(),
+        app.state.set3d.v3.hdri_env().unwrap()
+    ));
+    assert_eq!(
+        app.meshes.v3.look.mode,
+        BgMode::Solid,
+        "the other panel's mode stays"
+    );
+    // Both panels on HDRI at start: still one decode.
+    let d = tempfile::tempdir().unwrap();
+    let a = hdr_file(d.path(), "a.hdr");
+    let mut app = hdri_app(d.path(), &a, "hdri");
+    let t = Instant::now();
+    while app.meshes.v3.hdri_env().is_none()
+        || app.state.set3d.v3.hdri_env().is_none()
+        || app.meshes.v3.busy()
+        || app.state.set3d.v3.busy()
+    {
+        hdri_frame(&mut app, &ctx, t0);
+        assert!(t.elapsed() < Duration::from_secs(20), "decoded");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(std::sync::Arc::ptr_eq(
+        app.meshes.v3.hdri_env().unwrap(),
+        app.state.set3d.v3.hdri_env().unwrap()
+    ));
 }
 
 /// Task 4 review: an untouched legacy look is saved back as it was loaded (`look_now`), so the load must already have

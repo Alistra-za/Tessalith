@@ -132,14 +132,21 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     Defines(d)
 }
 
+/// `LightingFlags::ShadowDir` (Permutation.hlsli:35): the sun reads the shadow mask's R (Lighting.hlsl:2280).
+pub const SHADOW_DIR: u32 = 1 << 13;
+/// `LightingFlags::DefShadow` (Permutation.hlsli:36): the mask is read at all (Lighting.hlsl:1714, 2280, 2401).
+pub const DEF_SHADOW: u32 = 1 << 14;
+
 /// The bits cb4 `PixelShaderDescriptor` still carries for this material. In installed CS 1.9 cb4 is
 /// `engine PS desc & ~CS compile key` (answers.md Q4.1): Specular/Soft/Rim/Back are compile-time defines and
-/// CharacterLight/DefShadow stay 0 in the preview. Only the Glowmap technique is read at run time
-/// (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`, Lighting.hlsl:2598), so type 2 → `2 << 24`, else 0.
-pub fn runtime_bits(m: &Material) -> u32 {
-    if m.shader_type == 2 {
-        2 << 24
+/// CharacterLight stays 0 in the preview. The Glowmap technique is read at run time
+/// (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`, Lighting.hlsl:2598), so type 2 → `2 << 24`. `shadows` (the
+/// scene's shadows are on and the shape receives them, Note IH3) adds [`SHADOW_DIR`] and [`DEF_SHADOW`].
+pub fn runtime_bits(m: &Material, shadows: bool) -> u32 {
+    let technique = if m.shader_type == 2 { 2 << 24 } else { 0 };
+    if shadows {
+        technique | SHADOW_DIR | DEF_SHADOW
     } else {
-        0
+        technique
     }
 }

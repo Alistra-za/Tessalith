@@ -365,7 +365,7 @@ fn window_rect(r: Rect, prev: Option<[f32; 4]>, area: Rect) -> Option<[f32; 4]> 
 /// The saved look when it still means `look` (a default look saves as nothing).
 fn look_now(look: &Look, prev: &Option<LookSettings>) -> Option<LookSettings> {
     if Look::from_settings(prev.as_ref()) == *look {
-        return *prev;
+        return prev.clone();
     }
     Some(LookSettings::of(look))
 }
