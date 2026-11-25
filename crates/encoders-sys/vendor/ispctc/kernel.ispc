@@ -48,7 +48,7 @@
 // Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
 // Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
 // Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
-// astra #6    bc6h_test_mode at the slow levels also widens the other channel whose window clips less, when it clips less.
+// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the widest's.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2930,11 +2930,13 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
             // spans can both overflow the single window: widening the one with a few far outliers leaves the other's
             // two clusters clipped, while widening that one clips only the outliers. At the slow levels each of the
             // other two channels' variants gets the S4 window bound on its own bounds; on lanes where the lower one is
-            // below the widest variant's bound, that variant (mode + alt, bounds rebuilt for it) runs one extra
-            // two-region search and competes through best_err. The widest variant's bound is taken before the loop
-            // overwrites qbounds, and a lane S4 pruned for the widest variant can still qualify. Cost per family and
-            // block: two more bounds of 48 terms, plus the extra search on qualifying lanes (the gang skips it when no
-            // lane qualifies). Nothing reads mode or qbounds before the next bc6h_test_mode call sets its own.
+            // below the widest variant's bound, that variant (mode + alt, q_wide = alt and its bounds rebuilt by
+            // bc6h_build_qbounds) runs one extra two-region search and competes through best_err. The widest
+            // variant's bound is taken before the loop overwrites qbounds, and a lane S4 pruned for the widest variant
+            // can still qualify. Cost per family and block: two more bounds of 48 terms per lane, up to three for the
+            // gang when its lanes disagree on max_span_idx, plus the extra search on qualifying lanes (the gang skips
+            // it when no lane qualifies). Nothing reads mode, q_wide or qbounds before the next bc6h_test_mode call
+            // sets its own.
             bc6h_build_qbounds(state);
             float wide_bound = bc6h_window_bound(state);
             if (!bc6h_mode_cannot_win(state, wide_bound)) bc6h_enc_2p(state);
@@ -2956,7 +2958,8 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
             if (alt != max_span_idx)
             {
                 state->mode = mode + alt;
-                compute_qbounds2(state, span, alt);
+                state->q_wide = alt;
+                bc6h_build_qbounds(state);
                 if (!bc6h_mode_cannot_win(state, alt_bound)) bc6h_enc_2p(state);
             }
         }

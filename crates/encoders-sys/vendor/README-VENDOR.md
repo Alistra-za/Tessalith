@@ -235,7 +235,7 @@ floor and stays unguarded. Test: `exact_black_alone_does_not_guard_a_block`. It 
 astra #6: at the slow levels (Slow, Veryslow, VeryslowPeak) `bc6h_test_mode` no longer widens only the widest channel
 for mode 2's and mode 6's families. After that variant's search it builds the other two channels' `qbounds` and their
 S4 window bounds (`bc6h_window_bound`); on lanes where the lower of them is below the widest variant's bound, that
-channel's variant (`mode + alt`, bounds rebuilt for it) runs one extra two-region search and competes through `best_err`
+channel's variant (`mode + alt`, `q_wide = alt` and its bounds rebuilt by `bc6h_build_qbounds`) runs one extra two-region search and competes through `best_err`
 (S4's prune test applies to it, with its own bound). Trying all three variants was measured too (about +0.004 dB mPSNR
 at Veryslow); this one-extra-search form keeps about a third of that gain. Test:
 `asymmetric_modes_try_the_better_wide_channel`. It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2

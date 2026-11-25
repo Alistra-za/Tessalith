@@ -2010,8 +2010,9 @@ fn exact_black_alone_does_not_guard_a_block() {
 /// UF16 units, about 99 and 1786 half codes (times 31 / 64), doubled about 198 and 3571. The wider channel has 2 to 4
 /// texels at its two ends and the rest within a sixteenth of its span of the middle; the other is split evenly, eight
 /// texels at each end, on a two-region partition with eight texels a side. Widening the wider channel (the only
-/// variant before astra #6) leaves all 16 texels of the split channel outside its window; widening the split channel
-/// leaves only the outliers outside. Up to 4 half codes of noise, inward from each end. Integer arithmetic only, so
+/// variant before astra #6) clips both clusters of the split channel at their outer texels (all 16 when its span is
+/// well over the window, fewer when it is just over and the dither moves texels inside); widening the split channel
+/// clips only the outliers. Up to 4 half codes of noise, inward from each end. Integer arithmetic only, so
 /// the blocks are the same on every machine.
 fn wide_pair(i: u32) -> [[u16; 4]; 16] {
     let mut r = Lcg(i.wrapping_mul(0x9E37_79B9) ^ 0x510E_527F);
@@ -2095,7 +2096,7 @@ fn search_wide_channel_witnesses() {
 /// Witnesses from `search_wide_channel_witnesses`: (`wide_pair` index, level, the bytes the objects before the astra #6
 /// fix wrote on SSE2, AVX2 and AVX-512, in `IspcTarget::ALL` order). Recorded on Windows on an AMD Ryzen 7 9800X3D,
 /// 2026-11-25. Five are mode 2's family (even index) and three mode 6's (odd); after the fix each writes a variant of
-/// its family that widens a channel other than the widest. The three paths agree on them.
+/// its family that widens a channel other than the widest (the test asserts it). The three paths agree on them.
 #[rustfmt::skip]
 const WIDE_CHANNEL_WITNESSES: &[(u32, Bc6hLevel, [[u8; 16]; 3])] = &[
     (1038, Bc6hLevel::Veryslow, [
@@ -2140,16 +2141,58 @@ const WIDE_CHANNEL_WITNESSES: &[(u32, Bc6hLevel, [[u8; 16]; 3])] = &[
     ]),
 ];
 
-/// astra #6 (Note LT): at the slow levels an asymmetric family (modes 2-4, 6-8) also tries widening the channel whose
-/// single window clips the block least, when that clips less than widening the widest channel. On each witness the
-/// encode is certainly better than the bytes the objects before the fix wrote (`err_bounds`: E_hi now < E_lo before),
-/// on every path in `paths()`. Before the fix the encode is those bytes, so the test fails there. Skipped on an Intel
-/// CPU, like the pins: the bytes are the Ryzen's (Note JC).
+/// The channel an asymmetric two-region mode widens (0 = R, 1 = G, 2 = B), read from the block's 5-bit mode field:
+/// mode 2's family `0b00010`, `0b00110`, `0b01010` and mode 6's `0b10010`, `0b10110`, `0b11010`; `None` for any other
+/// mode.
+fn widened_channel(b: &[u8; 16]) -> Option<usize> {
+    match b[0] & 0x1F {
+        0x02 | 0x12 => Some(0),
+        0x06 | 0x16 => Some(1),
+        0x0A | 0x1A => Some(2),
+        _ => None,
+    }
+}
+
+/// The kernel's `max_span_idx`: the channel with the largest span, the first on a tie (half codes map to UF16 by an
+/// increasing linear function, so the order is the same).
+fn widest_channel(px: &[[u16; 4]; 16]) -> usize {
+    let span =
+        |c: usize| px.iter().map(|t| t[c]).max().unwrap() - px.iter().map(|t| t[c]).min().unwrap();
+    (1..3).fold(0, |w, c| if span(c) > span(w) { c } else { w })
+}
+
+/// astra #6 (Note LT): at the slow levels an asymmetric family (modes 2-4, 6-8) also tries the variant that widens
+/// another channel, when that variant's S4 window bound (the lowest of the two others) is below the widest variant's.
+/// On each witness, on every path in `paths()`, the encode is certainly better than the bytes the objects before the
+/// fix wrote (`err_bounds`: E_hi now < E_lo before), and it is an asymmetric mode that widens a channel other than the
+/// widest. Before the fix the encode is those bytes, so the test fails there. Skipped on an Intel CPU, like the pins:
+/// the bytes are the Ryzen's (Note JC).
 #[test]
 fn asymmetric_modes_try_the_better_wide_channel() {
     if encoders_sys::skip_byte_pins() {
         return;
     }
+    let mut failures = Vec::new();
+    for target in paths() {
+        for (i, level, _) in WIDE_CHANNEL_WITNESSES {
+            let px = wide_pair(*i);
+            let now = encode_block(&px, *level, target);
+            let widest = widest_channel(&px);
+            let widened = widened_channel(&now);
+            if widened.is_none() || widened == Some(widest) {
+                failures.push(format!(
+                    "witness {i} {target:?} {level:?}: mode bits {:05b} widen {widened:?}, widest channel {widest}",
+                    now[0] & 0x1F
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} witnesses not in another channel's variant:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
     assert_witnesses_certainly_better(WIDE_CHANNEL_WITNESSES, wide_pair);
 }
 
