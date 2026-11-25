@@ -1372,3 +1372,138 @@ fn perceptual_bc7_takes_the_flat_tolerance() {
     );
     assert!(encode(&input, 128, 128, &explicit) == default);
 }
+
+/// An alpha-0 `_m` source for the zero-fix tests (Note LR, LR18): `xc_fixture`'s rmaos-like colour (R and B clusters on
+/// the p-bit G does not want), G flat at 255 in the top half and at 0 in the bottom half. `height` puts a varying
+/// alpha on blocks whose `(bx + by) % 3 != 0` and keeps the other blocks at alpha 0; without it alpha is 0 throughout.
+fn alpha_zero_m(height: bool) -> Rgba32F {
+    let (hi, lo) = (
+        xc_fixture(EXACT_SEED, [None, Some(255), None]),
+        xc_fixture(EXACT_SEED + 1, [None, Some(0), None]),
+    );
+    let px = (0..64 * 64usize)
+        .map(|i| {
+            let (x, y) = (i % 64, i / 64);
+            let [r, g, b, _] = if y < 32 { hi[i] } else { lo[i] };
+            let a = if height && (x / 4 + y / 4) % 3 != 0 {
+                (10 + (x * 5 + y * 3) % 200) as u8
+            } else {
+                0
+            };
+            [r, g, b, a].map(|c| f32::from(c) / 255.0)
+        })
+        .collect();
+    Rgba32F {
+        width: 64,
+        height: 64,
+        px,
+    }
+}
+
+/// What the zero-fix tests check at one mip: in every all-0 source block (alpha 0 at all 16 texels) every decoded alpha
+/// is 0, and in every block whose source G is 0 or 255 throughout every G decodes exactly. Returns the failures and
+/// the (alpha-0 blocks, flat-G blocks) it checked. G flat in only part of a block is best effort (BC7-C10) and is not
+/// asserted.
+fn zero_m_failures(
+    px: &[[u8; 4]],
+    w: u32,
+    h: u32,
+    out: &[u8],
+    what: &str,
+) -> (Vec<String>, usize, usize) {
+    let (mut bad, mut zero, mut flat) = (vec![], 0, 0);
+    let src = encoders_sys::gather_blocks(px, w, h);
+    for (i, (blk, s)) in out.chunks(16).zip(src.chunks(16)).enumerate() {
+        let mut d = [0u8; 64];
+        bcdec_rs::bc7(blk, &mut d, 16);
+        if s.iter().all(|t| t[3] == 0) {
+            zero += 1;
+            if d.chunks(4).any(|t| t[3] != 0) {
+                bad.push(format!("{what} block {i}: alpha decodes above 0"));
+            }
+        }
+        let g0 = s[0][1];
+        if (g0 == 0 || g0 == 255) && s.iter().all(|t| t[1] == g0) {
+            flat += 1;
+            if d.chunks(4).any(|t| t[1] != g0) {
+                bad.push(format!("{what} block {i}: G {g0} decodes off"));
+            }
+        }
+    }
+    (bad, zero, flat)
+}
+
+/// The profile of an alpha-0 `_m` (complex material on, parallax off) at `effort`, with A as given.
+fn zero_m_profile(effort: Effort, a: bool) -> Profile {
+    let mut p = profile(Subtype::ComplexMaterial);
+    p.alpha.parallax = Some(false);
+    p.alpha.exact_opaque = a;
+    p.encoder.effort = effort;
+    p
+}
+
+/// `zero_m_failures` over every mip of both sources at each effort, with A as given. Returns every failure and the
+/// totals checked.
+fn zero_m_run(a: bool) -> (Vec<String>, usize, usize) {
+    let (mut bad, mut zero, mut flat) = (vec![], 0, 0);
+    for effort in [
+        Effort::Ultrafast,
+        Effort::Veryfast,
+        Effort::Fast,
+        Effort::Basic,
+        Effort::Veryslow,
+        Effort::Slowest,
+        Effort::Max,
+    ] {
+        let p = zero_m_profile(effort, a);
+        for height in [false, true] {
+            let work = preprocess(alpha_zero_m(height), &p);
+            for (l, level) in build_chain(&work, &p).iter().enumerate() {
+                let EncoderInput::Ldr(px) = to_encoder_input(level, &work, &p) else {
+                    panic!("LDR input expected");
+                };
+                let (w, h) = (level.width, level.height);
+                let out = encode(&EncoderInput::Ldr(px.clone()), w, h, &p);
+                let what = format!("{effort:?} height {height} A {a} mip {l}");
+                let (b, z, f) = zero_m_failures(&px, w, h, &out, &what);
+                bad.extend(b);
+                (zero, flat) = (zero + z, flat + f);
+            }
+        }
+    }
+    (bad, zero, flat)
+}
+
+/// BC7-O29 (e2), G3 (Note LR, LR18): the profile `cs-quality` resolves for `complex_material` (A on, G guarded) keeps
+/// alpha 0 in every all-0 block and G exact in every flat-G block, at each effort and every mip. A pin of existing
+/// behaviour: A, not the zero fix, keeps the 0 (the fix has nothing left to do on these blocks).
+#[test]
+fn complex_m_keeps_alpha_zero_and_g_with_a_on() {
+    let p = profile(Subtype::ComplexMaterial);
+    assert!(p.alpha.exact_opaque, "cs-quality resolves A on for _m");
+    assert!(p.encoder.channel_guard.g, "and the G guard");
+    let (bad, zero, flat) = zero_m_run(true);
+    println!("checked {zero} all-0 blocks and {flat} flat-G blocks");
+    assert!(zero > 0 && flat > 0, "the sources hold no block to check");
+    assert!(
+        bad.is_empty(),
+        "{} failures, first: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(6)]
+    );
+}
+
+/// BC7-O29 (e2): an alpha-0 `_m` with A off is encoded as with A (the route), so the same two properties hold; before
+/// the route the zero fix kept alpha 0 and cleared a p-bit under a guarded G of 255 (G3).
+#[test]
+fn alpha_zero_m_with_a_off_keeps_alpha_and_g() {
+    let (bad, zero, flat) = zero_m_run(false);
+    println!("checked {zero} all-0 blocks and {flat} flat-G blocks");
+    assert!(zero > 0 && flat > 0, "the sources hold no block to check");
+    assert!(
+        bad.is_empty(),
+        "{} failures, first: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(6)]
+    );
+}

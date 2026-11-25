@@ -135,15 +135,22 @@ fn bc7_tune(e: &EncoderSpec) -> Option<Bc7Tune> {
 ///
 /// In blocks with alpha, A keeps a subset whose alpha is 0 or 255 throughout exact wherever bc7e finds such a
 /// solution, above any guarded R, G or B ([`bc7_tune`]).
+///
+/// A complex `_m` written with alpha 0 (`complex_material`, parallax off, alpha kept: `ops::complex_alpha_zero`) takes A
+/// whatever `alpha.exact_opaque` says (BC7-O29 (e2), Note LR, LR18): the file has no opaque block, so A only ranks
+/// alpha in its alpha blocks, and bc7e keeps alpha 0 itself. The exact-0 fix after the encode then rewrites only a
+/// block whose alpha still decodes above 0 ([`bc7_opaque_fix`]). The route reads the profile only, so it holds for a
+/// parallax-off profile; a parallax-on `_m` whose source has no alpha channel (alpha 0 written, a policy warning) keeps
+/// the profile's A and has no fix, as before.
 fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     let e = &p.encoder;
     match p.format {
         Format::Bc7 => {
-            // The channel guard's A (Note LR, LR17).
+            // The channel guard's A (Note LR, LR17), or the alpha-0 `_m` route.
             let params = Bc7Params {
                 level: bc7_level(e.effort),
                 perceptual: e.perceptual,
-                exact_opaque: p.alpha.exact_opaque,
+                exact_opaque: p.alpha.exact_opaque || crate::ops::complex_alpha_zero(p, true),
             };
             // Resolved once per band, before the 64-block calls.
             let tune = bc7_tune(e);
@@ -239,7 +246,9 @@ fn zero_fix(p: &Profile) -> bool {
 
 /// The BC7 opaque fix-ups on blocks `o` whose source texels `b` (16 per
 /// block) have alpha 255 throughout: the lossless rotated mode 4/5 fix. With `zero`, blocks whose source alpha is 0
-/// throughout get the exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1).
+/// throughout get the exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1), which rewrites a block
+/// only if its alpha decodes above 0 at some texel (the gate in `force_zero_alpha`, Note LR, LR18). It runs once per
+/// block of every mip, and only an all-0 source block pays for the gate's decode.
 fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], zero: bool) {
     for (blk, src) in o.chunks_mut(BC7_BLOCK_BYTES).zip(b.chunks(BLOCK_TEXELS)) {
         if zero && src.iter().all(|t| t[3] == 0) {
