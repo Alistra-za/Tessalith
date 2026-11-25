@@ -45,6 +45,7 @@
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
 // astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
 // Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
+// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2669,6 +2670,10 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     // best_ep is scratch: the helper never reads ep, and the refine below refits its own
     best_err = bc6h_bracket_collapsed(state, best_qep, best_ep, best_qblock, best_err, get_pattern(best_part_id), best_part_id, pairs);
 
+    // sdc patch 0007 (Q1): refit from the previous pass, as bc6h_enc_1p does since patch 0004 #3; refitting from the best repeated a failed pass exactly
+    uint32 cur_qblock[2];
+    for (uniform int k = 0; k<2; k++) cur_qblock[k] = best_qblock[k];
+
     // refine
     uniform int refineIterations = state->refineIterations_2p;
     for (uniform int _ = 0; _<refineIterations; _++)
@@ -2677,7 +2682,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
         for (uniform int j = 0; j<pairs; j++)
         {
             int mask = get_pattern_mask(best_part_id, j);
-            bc6h_opt_endpoints(&ep[j * 8], state->block, bits, best_qblock, mask); // sdc patch 0007 (astra #4): the decoder's weights
+            bc6h_opt_endpoints(&ep[j * 8], state->block, bits, cur_qblock, mask); // sdc patch 0007 (astra #4): the decoder's weights; sdc patch 0007 (Q1): from the last pass
         }
 
         int qep[24];
@@ -2687,6 +2692,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
         uint32 pattern = get_pattern(best_part_id);
         float err = block_quant(qblock, state->block, bits, ep, pattern, channels);
         err = bc6h_peak_guard(state, err, ep, qblock, pattern, bits);
+        for (uniform int k = 0; k<2; k++) cur_qblock[k] = qblock[k]; // sdc patch 0007 (Q1)
 
         if (err<best_err)
         {
