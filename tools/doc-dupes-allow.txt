@@ -33,3 +33,6 @@ f44f25a20df4	two see-also link lines to the GUI guide
 cc09ee024f9c	Diagnostic-Codes row for RESIZE-NO-REFERENCE and the key row that says when it fires
 473bdbac0c0f	Diagnostic-Codes row for PBR-GRASS-DETECT; PBR-Landscape says what to do about it on the grass page
 16bfff051de4	Diagnostic-Codes row for GEN-REPLACED; Texture-Types says when a generated file is skipped
+# Intended parallels: the two research headings "Audit follow-up, speed phase" and "Audit follow-up, quality phase" (Note LT).
+d31b94196c37	research: speed-phase heading of the BC6H audit follow-up, the intended parallel of the quality-phase heading
+9fe7c3b00837	research: quality-phase heading of the BC6H audit follow-up, the intended parallel of the speed-phase heading

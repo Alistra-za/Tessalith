@@ -78,7 +78,8 @@ numbered 0003 because 0001 and 0002 are bc7e's and 0001 is also ISPC TC's: 0003 
 under `vendor/`. It puts `#ifndef SDC_BC6H_ONLY` around the BC1-BC5, BC7 and ETC1 kernels and the helpers only they use
 in `ispctc/kernel.ispc`, and around their wrappers in `ispctc/ispc_texcomp.cpp` (marked "sdc patch 0003"); no line is
 moved or edited. Without the define the source behaves as upstream plus patches 0001, 0004, 0006 and 0007. The BC7 kernels
-call the same `block_quant`, so 0004's fix #1 would also reach them there. 0006's R2 helper changes (`block_pca_axis`
+call the same `block_quant`, so 0004's fix #1 would also reach them there (0007's S3 does not: BC7 keeps upstream's
+`block_quant`, and BC6H calls the fork `bc6h_block_quant`). 0006's R2 helper changes (`block_pca_axis`
 and `get_pca_bound` leave the unwritten covariance entries alone) reach BC7's three-channel calls, and its zero-div
 guard in `block_quant` reaches them too; by reading the code both are value-neutral there (R2 because the skipped
 covariance entries are never read with three channels, the guard because BC7's endpoints are integers), but that build
@@ -167,7 +168,7 @@ its span and widened channel in `state->q_span` and `state->q_wide` (-1 when no 
 `compute_qbounds2` otherwise), in `bc6h_test_mode` when `enc` is set and in `CompressBlockBC6H_core` right before
 `bc6h_enc_2p` and before `bc6h_enc_1p`. The slow levels (all `enc = true`) build once per mode as before. S3 (a BC6H
 `block_quant` that loads each region's endpoints once) was tried twice and dropped, because both attempts changed BC6H
-bytes, so it is not in the patch (Note LT). Both attempts changed `encode_versions`' `hdr_sky.dds`. The first (a hoisted
+bytes, so it is not in this patch (patch 0007 keeps it, below; Note LT). Both attempts changed `encode_versions`' `hdr_sky.dds`. The first (a hoisted
 reciprocal) left the pins and the random strips equal. The second (a per-texel division) changed some of the 22 measured
 images at every level, from the one-region path at Veryfast on, on AVX2. S4 prune: at Slow, Veryslow and VeryslowPeak,
 `bc6h_test_mode` computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum over the 16
@@ -190,9 +191,9 @@ before. It changes BC6H bytes: against the kernel of patches 0004 and 0006 (whic
 the 22 measured images (18 `hdr_real` and 4 `hdr_grad`) differs at all six levels on SSE2, AVX2 and AVX-512 (Q5 alone
 does that), and the pins of `tests/bc6h.rs` and `identity.json` `hdr_sky` moved as each item says; quality and time
 per level are in docs/research/encoder-benchmark.md ("Audit follow-up, quality phase"). Kept: the PCA re-seed, Q5,
-astra #4, Q2 (first quantisation only), Q1, Q4, Q6, astra #6, astra #5, Q3 (N = 2) and the S4 guard, which changes no
-byte. Not kept: R1 (dropped), astra #2 (skipped) and S3 (dropped in the speed phase above and not tried again). Each
-item's counts are against the kernel before it.
+astra #4, Q2 (first quantisation only), Q1, Q4, Q6, astra #6, astra #5, Q3 (N = 2), S3 (dropped in the speed phase
+above, kept here as a byte-changing speed item) and the S4 guard, which changes no byte. Not kept: R1 (dropped) and
+astra #2 (skipped). Each item's counts are against the kernel before it.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN.
@@ -273,12 +274,12 @@ too and costs 1.26 times the previous kernel's VM time at Veryslow and VeryslowP
 built.
 S4 guard (changes no byte): `bc6h_mode_cannot_win` prunes only when `state->best_err < 1e30f`, and the state's two
 `best_err` initialisers (`CompressBlockBC6H` and the reset in `bc6h_peak_retry`) are the finite `1e30f` instead of
-`1e99`, which is +inf in float, so no prune or `<` against the state's `best_err` reads an infinity. Every scored error
-is far below 1e30f (the largest, `bc6h_peak_guard`'s `(terr + 1) * 1e13f`, is about 2e24), so the first candidate still
-always wins. The local `best_err` and `cand_err` sentinels (1e99) in `bc6h_enc_2p_list` stay as upstream wrote them:
-they are only compared with `<` against finite errors and never feed the prune. Proof that no byte moved: the 22
-measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in every column but the time (132 of 132 rows
-each), the random strips (48 hashes, 72 with AVX-512), the pins and `identity.json` unchanged, and the scratch assert
+`1e99`, which is +inf in float, so the state's `best_err`, the value the S4 prune reads, is never an infinity. Every
+scored error is far below 1e30f (the largest, `bc6h_peak_guard`'s `(terr + 1) * 1e13f`, is about 2e24), so the first
+candidate still always wins. The local `best_err` and `cand_err` sentinels (1e99) in `bc6h_enc_2p_list` stay as
+upstream wrote them: they are only compared with `<` against finite errors and never feed the prune. Proof that no
+byte moved: the 22 measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in every column but the time
+(132 of 132 rows each), the random strips (48 hashes, 72 with AVX-512), the pins and `identity.json` unchanged, and the scratch assert
 build of S4 (above) fired on none of 15,970,493 lane encodes of the 22 images on AVX2 or of the lane encodes of
 `random_blocks_encode_at_every_level_on_every_path` (212,686; 319,029 with AVX-512).
 S3: every BC6H quantisation (`bc6h_enc_1p`, `bc6h_enc_2p_part_fast`, `bc6h_refine_2p`, `bc6h_bracket_collapsed`) calls
