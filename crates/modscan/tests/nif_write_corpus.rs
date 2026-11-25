@@ -393,7 +393,7 @@ fn env_path(var: &str) -> Option<PathBuf> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_NIF_CORPUS (a folder of the owner's NIFs)"]
 fn loose_corpus_identity() {
     let Some(root) = env_path("SDC_NIF_CORPUS") else {
         return;
@@ -411,7 +411,7 @@ fn loose_corpus_identity() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_BSA (a Meshes BSA of the owner's)"]
 fn bsa_identity() {
     let Some(path) = env_path("SDC_BSA") else {
         return;
@@ -428,7 +428,7 @@ fn bsa_identity() {
 
 #[cfg(windows)]
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn winners_identity() {
     use modscan::{mo2::Instance, scan::run, scan::Source, store::Store};
     use std::collections::HashMap;
@@ -679,7 +679,7 @@ fn sample_ops(b: &[u8]) -> Vec<SampleOp> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance); SDC_BSA adds BSA files"]
 fn real_file_edit_samples() {
     use nif::edit::{apply, Outcome};
     let Some(root) = env_path("SDC_ACHERUS") else {
@@ -767,10 +767,11 @@ fn real_file_edit_samples() {
 /// system temp folder.
 #[cfg(windows)]
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and SDC_BSA (a Meshes BSA)"]
 fn slsf_bit_census() {
     use modscan::{mo2::Instance, scan::run, scan::Source, store::Store};
     use std::collections::{BTreeMap, HashMap};
+    use std::fmt::Write as _;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
     type Open = Arc<(vfs::bsa::Bsa, HashMap<String, usize>)>;
     const BITS: [u32; 6] = [12, 24, 25, 26, 27, 30];
@@ -814,11 +815,11 @@ fn slsf_bit_census() {
     fn table(title: &str, files: u64, cells: &Cells) -> String {
         let mut s = format!("== {title}: {files} NIFs accepted ==\n");
         for ((t, pbr), c) in cells {
-            s += &format!("\ntype {t} pbr={pbr}\n");
+            let _ = writeln!(s, "\ntype {t} pbr={pbr}");
             for (n, (cnt, ex)) in c {
-                s += &format!("  {n}: {cnt}\n");
+                let _ = writeln!(s, "  {n}: {cnt}");
                 for e in ex {
-                    s += &format!("      {e}\n");
+                    let _ = writeln!(s, "      {e}");
                 }
             }
         }
@@ -912,7 +913,7 @@ fn slsf_bit_census() {
     for (o, h) in found {
         merge(&mut cells, h, &o);
     }
-    out += &format!("\n{}", table("mod winners", n, &cells));
+    let _ = write!(out, "\n{}", table("mod winners", n, &cells));
 
     println!("{out}");
     let _ = std::fs::write(std::env::temp_dir().join("slsf-census.txt"), &out);
@@ -923,10 +924,11 @@ fn slsf_bit_census() {
 /// also to sharing-census.txt in the system temp folder.
 #[cfg(windows)]
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and SDC_BSA (a Meshes BSA)"]
 fn sharing_census() {
     use modscan::{mo2::Instance, scan::run, scan::Source, store::Store};
     use std::collections::{BTreeMap, HashMap};
+    use std::fmt::Write as _;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
     type Open = Arc<(vfs::bsa::Bsa, HashMap<String, usize>)>;
     type Hit = (u64, u64, [bool; 5]);
@@ -983,9 +985,9 @@ fn sharing_census() {
             for (i, name) in CATS.iter().enumerate() {
                 let (n, ex) = &mut self.cat[i];
                 ex.sort_by_key(|(loose, o)| (!*loose, o.clone())); // loose mod files first
-                s += &format!("  {name}: {n} files\n");
+                let _ = writeln!(s, "  {name}: {n} files");
                 for (_, o) in ex.iter().take(10) {
-                    s += &format!("      {o}\n");
+                    let _ = writeln!(s, "      {o}");
                 }
             }
             s
@@ -1074,7 +1076,7 @@ fn sharing_census() {
     for (o, loose, r) in found {
         mods.add(&o, loose, r);
     }
-    out += &format!("\n{}", mods.table("mod winners"));
+    let _ = write!(out, "\n{}", mods.table("mod winners"));
 
     println!("{out}");
     let _ = std::fs::write(std::env::temp_dir().join("sharing-census.txt"), &out);
@@ -1083,9 +1085,10 @@ fn sharing_census() {
 /// Note CU8 census: NIFs with a NiControllerManager that lists no sequences (the game crashes on one the root's chain
 /// reaches, C6E). Every `*Meshes*.bsa` beside SDC_BSA, plus SDC_NIF_CORPUS loose. Asserts only that files were read.
 #[test]
-#[ignore]
+#[ignore = "needs SDC_BSA (a Meshes BSA) or SDC_NIF_CORPUS (a folder of the owner's NIFs)"]
 fn empty_manager_census() {
     use nif::edit::validate::{validate, EMPTY_MANAGER};
+    use std::fmt::Write as _;
     // (files read, files with an empty manager, of those on the root's chain)
     fn census(b: &[u8]) -> Option<(bool, bool)> {
         let m = read_model(b).ok()?;
@@ -1097,13 +1100,14 @@ fn empty_manager_census() {
     let mut add = |what: &str, hits: Vec<(String, (bool, bool))>| {
         let any: Vec<_> = hits.iter().filter(|h| h.1 .0).collect();
         let root = any.iter().filter(|h| h.1 .1).count();
-        out += &format!(
-            "{what}: {} NIFs read, {} with an empty manager, {root} on the root's chain\n",
+        let _ = writeln!(
+            out,
+            "{what}: {} NIFs read, {} with an empty manager, {root} on the root's chain",
             hits.len(),
             any.len()
         );
         for (p, (_, r)) in any {
-            out += &format!("  {p}{}\n", if *r { " (root chain)" } else { "" });
+            let _ = writeln!(out, "  {p}{}", if *r { " (root chain)" } else { "" });
         }
         hits.len()
     };

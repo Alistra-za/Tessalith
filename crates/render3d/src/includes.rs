@@ -55,6 +55,7 @@ fn target(line: &str) -> Option<&str> {
 }
 
 fn go(source: &ShaderSource, rel: &str, depth: u32, out: &mut Expanded) -> std::io::Result<()> {
+    use std::fmt::Write as _;
     if depth > 64 {
         return Err(std::io::Error::other(format!(
             "include depth > 64 at {rel}"
@@ -74,9 +75,9 @@ fn go(source: &ShaderSource, rel: &str, depth: u32, out: &mut Expanded) -> std::
             let beside = dir.map(|d| format!("{d}/{t}"));
             let found = beside.into_iter().chain([t]).find(|p| source.has(p));
             if let Some(found) = found {
-                out.text.push_str(&format!("#line 1 \"{found}\"\n"));
+                let _ = writeln!(out.text, "#line 1 \"{found}\"");
                 go(source, &found, depth + 1, out)?;
-                out.text.push_str(&format!("#line {} \"{rel}\"\n", n + 2));
+                let _ = writeln!(out.text, "#line {} \"{rel}\"", n + 2);
                 continue;
             }
         }

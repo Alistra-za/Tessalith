@@ -155,7 +155,7 @@ fn dll_version() -> Option<String> {
     use windows::Win32::System::LibraryLoader::{
         GetModuleFileNameW, GetModuleHandleW, LoadLibraryW,
     };
-    // SAFETY (whole block): `path` is zero-initialised and longer than the returned length, so it is NUL
+    // SAFETY: `path` is zero-initialised and longer than the returned length, so it is NUL
     // terminated; `buf` is as long as the size the API asked for; `VerQueryValueW` points into `buf`, which
     // outlives the unaligned read of the fixed-size struct.
     unsafe {
@@ -461,7 +461,7 @@ pub fn used_vars(bytecode: &[u8]) -> Result<Vec<(String, String)>, String> {
     let e = |e: windows::core::Error| e.to_string();
     let r = reflector(bytecode)?;
     let mut out = vec![];
-    // SAFETY (whole block): out-params are valid locals; indices are bounded by the shader desc counts.
+    // SAFETY: out-params are valid locals; indices are bounded by the shader desc counts.
     unsafe {
         let mut sd = D3D11_SHADER_DESC::default();
         r.GetDesc(&mut sd).map_err(e)?;
@@ -494,7 +494,7 @@ pub fn reflect(bytecode: &[u8]) -> Result<Reflection, String> {
     let e = |e: windows::core::Error| e.to_string();
     let r = reflector(bytecode)?;
     let mut out = Reflection::default();
-    // SAFETY (whole block): out-params are valid locals; indices are bounded by the shader desc counts.
+    // SAFETY: out-params are valid locals; indices are bounded by the shader desc counts.
     unsafe {
         let mut sd = D3D11_SHADER_DESC::default();
         r.GetDesc(&mut sd).map_err(e)?;

@@ -239,7 +239,7 @@ fn mrt_info_and_raw_readers() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_GOLDEN (the captured golden fixtures)"]
 fn real_root_smoke() {
     let Ok(root) = std::env::var("SDC_GOLDEN") else {
         println!("skipped: set SDC_GOLDEN");

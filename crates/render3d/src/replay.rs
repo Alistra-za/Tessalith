@@ -1287,7 +1287,7 @@ impl Renderer {
             .transpose()?;
         let dsv = seeded.as_ref().map_or(&target.dsv, |s| &s.0);
         let v = r.viewport;
-        // SAFETY (whole block): every bound object belongs to `gpu.device`; slices outlive the calls.
+        // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
         unsafe {
             let ctx = &gpu.ctx;
             // A frame's SRVs, cbuffers and samplers stay bound: a register the fixture leaves empty must read 0.

@@ -140,7 +140,7 @@ fn the_flags_survive_a_value_only_settings_change() {
 /// Owner data, read-only: the Arch head resolves `light/head_rfaos.dds` from its `_s` slot (the `_n`-derived root
 /// `head_rfaos.dds` does not exist). `SDC_ACHERUS` = the MO2 instance root.
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn arch_head_resolves_the_light_rfaos() {
     let root = PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");
@@ -216,7 +216,7 @@ fn an_srgb_tagged_rfaos_is_sampled_linear() {
 /// on. Prints the PS defines, the t71 / b7 reflection, the RFAOS candidate and its binding, the b7 bytes, and renders
 /// the head with and without the RFAOS (PNGs in %TEMP%\sdc-rfaos-diag).
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn diag_arch_head_on_bundled_cs() {
     let root = PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");
@@ -357,7 +357,7 @@ fn diag_arch_head_on_bundled_cs() {
 /// `CsSettings::default()` (ENABLE_LL only). Prints the scalp's flags, slots → registers, PS defines and the
 /// written `hairSpecularSettings.Enabled`; PNGs in %TEMP%\sdc-rfaos-diag.
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn diag_arch_scalp_on_bundled_cs() {
     let root = PathBuf::from(std::env::var("SDC_ACHERUS").expect("SDC_ACHERUS"));
     let mods = root.join("mods");

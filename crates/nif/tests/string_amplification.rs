@@ -160,13 +160,16 @@ struct Counting;
 unsafe impl std::alloc::GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: std::alloc::Layout) -> *mut u8 {
         let _ = ALLOCATED.try_with(|a| a.set(a.get() + l.size()));
+        // SAFETY: the caller's layout contract passes straight through to `System`.
         unsafe { std::alloc::System.alloc(l) }
     }
     unsafe fn dealloc(&self, p: *mut u8, l: std::alloc::Layout) {
+        // SAFETY: `p` and `l` come from this allocator, which only forwards to `System`.
         unsafe { std::alloc::System.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: std::alloc::Layout, n: usize) -> *mut u8 {
         let _ = ALLOCATED.try_with(|a| a.set(a.get() + n));
+        // SAFETY: `p`, `l` and `n` come from this allocator's caller and pass straight through to `System`.
         unsafe { std::alloc::System.realloc(p, l, n) }
     }
 }

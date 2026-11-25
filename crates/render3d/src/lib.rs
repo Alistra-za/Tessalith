@@ -175,7 +175,10 @@ impl Wanted {
     }
 }
 
-#[allow(clippy::large_enum_variant)] // a transient return value, never stored
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a transient return value, never stored"
+)]
 enum Lookup {
     Ready(Program),
     Failed(String),
@@ -2510,7 +2513,7 @@ impl Renderer {
             Background::Hdri => [0.0; 3],
         };
         target.clear(gpu, [clear[0], clear[1], clear[2], 1.0]);
-        // SAFETY (whole block): every bound object belongs to `gpu.device`; slices outlive the calls.
+        // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
         unsafe {
             let ctx = &gpu.ctx;
             ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);

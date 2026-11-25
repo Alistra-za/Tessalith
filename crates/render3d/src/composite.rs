@@ -223,7 +223,7 @@ impl Prefilter {
             .map(|l| crate::textures::uav_level(gpu, out, f, l, 6))
             .collect::<Result<Vec<_>, _>>()?;
         let [tx, ty, _] = self.threads;
-        // SAFETY (whole block): every bound object belongs to `gpu.device`; slices outlive the calls.
+        // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
         unsafe {
             let ctx = &gpu.ctx;
             ctx.CSSetShader(&self.cs, None);
@@ -445,7 +445,7 @@ impl Composite {
         }
         let sampler = inputs.sampler.unwrap_or(&self.linear);
         let [x, y, z] = self.groups(t.width, t.height);
-        // SAFETY (whole block): every bound object belongs to `gpu.device`; slices outlive the calls.
+        // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
         unsafe {
             let ctx = &gpu.ctx;
             // First: the depth SRV and RT0's UAV must not stay bound as DSV / RTV.

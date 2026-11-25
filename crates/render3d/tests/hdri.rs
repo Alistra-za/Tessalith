@@ -228,6 +228,7 @@ fn sample_cube(
             SysMemSlicePitch: 0,
         });
         let mut b = None;
+        // SAFETY: `d` is a valid buffer desc, `data` (when present) points at `init`, which outlives the call and holds `n` float4 values, so at least `d.ByteWidth` (n * 16) bytes, and `b` is a writable out-parameter.
         unsafe {
             gpu.device
                 .CreateBuffer(&d, data.as_ref().map(|x| x as *const _), Some(&mut b))
@@ -257,6 +258,7 @@ fn sample_cube(
         ..Default::default()
     };
     let (mut cs, mut smp, mut dsrv, mut uav) = (None, None, None, None);
+    // SAFETY: every object belongs to `gpu.device`; the buffers hold `n` float4 values, so the mapped read of `n` `[f32; 4]` stays inside the staging buffer and ends before Unmap.
     unsafe {
         gpu.device
             .CreateComputeShader(&c.bytecode, None, Some(&mut cs))

@@ -17,3 +17,6 @@ test-hooks = []
 
 [dev-dependencies]
 pgpsim = { path = ".", features = ["test-hooks"] }
+
+[lints]
+workspace = true

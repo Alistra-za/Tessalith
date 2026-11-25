@@ -1,5 +1,8 @@
 //! Helpers shared by the WARP integration tests: the repo-owned stand-in shader, nifly fixtures, tiny DDS files.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 use render3d::device::Gpu;
 use render3d::Renderer;
 use std::path::{Path, PathBuf};

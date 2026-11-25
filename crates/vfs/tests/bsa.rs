@@ -125,7 +125,7 @@ fn rejects_non_105_and_garbage() {
 
 /// Opt-in: `SDC_BSA=C:\...\Skyrim - Meshes0.bsa cargo test -p vfs -- --ignored real_bsa`
 #[test]
-#[ignore]
+#[ignore = "needs SDC_BSA (a real Meshes BSA)"]
 fn real_bsa() {
     let bsa = Bsa::open(std::path::Path::new(&std::env::var("SDC_BSA").unwrap())).unwrap();
     let nif = bsa

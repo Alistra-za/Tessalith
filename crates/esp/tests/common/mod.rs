@@ -1,6 +1,9 @@
 //! Plugin byte builder for tests (esp spec §6: fixtures are built in code, never binary blobs). The modscan tests
 //! include this file with `#[path]`.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 
 /// A subrecord. Data over 0xFFFF bytes is preceded by an `XXXX` subrecord carrying its u32 size, and its own u16
 /// size is 0.

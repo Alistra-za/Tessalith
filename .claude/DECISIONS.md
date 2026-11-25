@@ -22,15 +22,15 @@ A new note goes at the end of this file and adds its letter to the index line of
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA, JP, JQ, JT, JS, JY, LM, LG
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, HH, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JJ, JK, JL, JM, JN, JO, JP, JQ, JR, JT, JU, JS, JV, JW, JX, JY, LB, LC, LD, LM, LE, LF, LG, LI, LJ, LQ
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI, JL, JO, JR, JT, JU, JS, JY, LA, LM, LG, LI, LN, LQ
-- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY, LD, LM
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, JL, JT, JU, JY, LD, LM, IG
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX, JH, JI, JJ, JL, JO, JR, JT, JV, JY, LQ
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS, JA, JF, JI, JK, JL, JN, JO, JQ, JR, JT, JU, JS, JW, JY, LB, LC, LD, LG, LJ
-- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
-- vfs: AV, BP, BU, CV
-- esp: GG, GO, GQ
-- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, LD
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
-- pgpsim: AU, CM, GE
+- modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB, IG
+- vfs: AV, BP, BU, CV, IG
+- esp: GG, GO, GQ, IG
+- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, LD, IG
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL, IG
+- pgpsim: AU, CM, GE, IG
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU, JS, LA, LC, LM, LF, LH, LK, LL, LS
 
 ## Digest
@@ -2335,3 +2335,11 @@ Plan 4 of review E (`docs/superpowers/plans/2026-11-16-texture-panel-compact.md`
   - Green is not in `fields::FIELDS` or `bulk::panel_fields()`, so Copy settings never carries it (Z5).
 - **LQ14 Controller rulings TPC-R1, TPC-R2 and TPC-R3** (2026-11-22, on the drift report): quoted in LQ3 and LQ13.
 - **LQ15 Test data this plan removed (JT5).** The six "◀" `COLLAPSE` entries and the five `GROUP_ROW` entries ("Alpha", "Mipmaps") of `SHARED_NAME_ALLOWED` in `crates/gui/tests/accessible_names.rs` are gone, because the names they allowed are gone. The groups start closed, so the screens audited before this plan reach no grouped row; three audit screens open every group (a single texture, a cube, and a bulk selection of normal maps with its Green row), and the `ui_proof` texture-panel screen opens them too (marker "Alpha threshold"). Their only shared names are the Sets column's, allowed as on the other screens.
+
+## Note IG - NIF crates under the workspace lints (NIF team, 2026-11-24)
+
+The owner asked on 2026-11-24 for the NIF team's crates to follow main's lints, after `nif/main` was fast-forwarded to `main` 8f98807a. Branch `nif/f-lints`.
+
+- **IG1 `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim` opt into the workspace lints** (`[lints] workspace = true`, the opt-in JT2 left to us). The root `[workspace.lints.clippy]` table of Notes JT and LH now applies to all twelve crates, so `clippy -D warnings` fails a bare `#[allow]` or `#[ignore]`, an `unsafe` block with no `// SAFETY:` line, a `push_str(&format!(..))`, an `assigning_clones` case or an `exit` in the NIF crates too. A lint added to that table later reaches them without a change here.
+- **IG2 How clippy's findings were met, with no behaviour change.** Each `#[ignore = "..."]` names what the test needs (an `SDC_*` variable and the owner data behind it, a manual check, or "slow:"); each `#[allow(..., reason = "...")]` says why the lint does not apply; each `unsafe` block has a `// SAFETY:` line with its invariant, and render3d's `// SAFETY (whole block):` comments became `// SAFETY:`, the form clippy reads; appends use `write!`/`writeln!` into the `String` (`let _ =`, as `ui/actions.rs` does). The return scan (LH3) still reads only the main team's crates.
+- **IG3 The Meshes view says "1 NIF", "1 problem", "1 missing mod", "1 record", "… and 1 more plugin problem" and "1 of 1 NIF"** through `code_text::counted` (the plurals JO left to us). Plural forms are unchanged. Test: `model::meshes::tests::scan_lines_use_the_singular_for_one`.
