@@ -84,7 +84,10 @@ guard in `block_quant` reaches them too; by reading the code both are value-neut
 covariance entries are never read with three channels, the guard because BC7's endpoints are integers), but that build
 is neither compiled nor shipped, so the claim is not tested. 0007's `compute_axis` re-seed is also shared: BC7's PCA
 calls reach it without the define, but it acts only on a block whose power-iteration vector has an exactly zero norm,
-the same degenerate inputs as in BC6H (by reading; not compiled). `channel_opt_quant` keeps its own
+the same degenerate inputs as in BC6H (by reading; not compiled). 0007's R1 centring is in `compute_stats_masked` and
+`compute_covar_dc_masked`, which BC7's PCA axis and partition bounds call too: BC7's 8-bit sums are exact either way,
+but the covariance's `s * s / n` rounds differently from offsets, so BC7 values there can change (by reading; not
+compiled). `channel_opt_quant` keeps its own
 `int best_err`, as upstream. `tools/regen-ispc.ps1` passes `-DSDC_BC6H_ONLY` to ISPC for `kernel.ispc` only (both
 compilers), and `build.rs` defines it for the C++ build. At the time (before patch 0004), BC6H bytes were checked equal
 on every path (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one synthetic 64x64 HDR
@@ -184,7 +187,8 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, and Q1 none of the pins.
+(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 none of the pins,
+and R1 all of them.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
@@ -217,7 +221,14 @@ again (a failed pass repeated exactly); the best `(qep, qblock, err)` is updated
 packed once after the loop. Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at Basic, Slow, Veryslow
 and VeryslowPeak on SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images
 and 3 of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no
-earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower).
+earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower). R1: `compute_stats_masked`
+sums each texel's offset from texel 0 of the block (`(v - off) * flag`, the offset taken before the mask, one offset for
+the full block and every partition subset, so `block_pca_bound_split`'s `full_stats - stats` still holds), and
+`compute_covar_dc_masked` adds the offset back to the mean; float32 had lost the covariance of bright smooth blocks in
+the raw second moments (UF16 values near 38,000 square to about 1.4e9). The refit keeps raw moments. A region whose
+texel 0 lies in the other region (a smooth bright subset beside black) still sums values far from the offset, so part
+of the loss remains there. Test: `a_brighter_copy_is_not_worse`. It changes BC6H bytes at all six levels on SSE2, AVX2
+and AVX-512 (the 18 pins, which now agree across the three paths, `identity.json` `hdr_sky` and every measured image).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

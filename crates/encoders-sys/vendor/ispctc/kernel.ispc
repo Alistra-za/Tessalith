@@ -46,6 +46,7 @@
 // astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
 // Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
 // Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
+// R1 centre   compute_stats_masked sums offsets from texel 0, not raw values, so the covariance of a bright smooth block survives.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -920,6 +921,10 @@ inline void compute_stats_masked(float stats[15], float block[64], int mask, uni
 {
 	for (uniform int i=0; i<15; i++) stats[i] = 0;
 
+	// sdc patch 0007 (R1): sums of offsets from texel 0 (one offset for the full block and every subset, applied before the mask), not raw UF16 values: float32 lost the covariance of bright smooth blocks in the raw second moments
+	float off[4];
+	for (uniform int p=0; p<channels; p++) off[p] = block[p*16];
+
 	int mask_shifted = mask<<1;
 	for (uniform int k=0; k<16; k++)
 	{
@@ -928,7 +933,7 @@ inline void compute_stats_masked(float stats[15], float block[64], int mask, uni
 		int flag = (mask_shifted&1);
 
 		float rgba[4];
-		for (uniform int p=0; p<channels; p++) rgba[p] = block[k+p*16];
+		for (uniform int p=0; p<channels; p++) rgba[p] = block[k+p*16] - off[p]; // sdc patch 0007 (R1)
 		
 		for (uniform int p=0; p<channels; p++) rgba[p] *= flag;
 		stats[14] += flag;
@@ -984,7 +989,7 @@ inline void compute_covar_dc_masked(float covar[6], float dc[3], float block[64]
 	compute_stats_masked(stats, block, mask, channels);
 
 	covar_from_stats(covar, stats, channels);
-	for (uniform int p=0; p<channels; p++) dc[p] = stats[10+p]/stats[14];
+	for (uniform int p=0; p<channels; p++) dc[p] = stats[10+p]/stats[14] + block[p*16]; // sdc patch 0007 (R1): the sums are offsets from texel 0
 }
 
 void block_pca_axis(float axis[4], float dc[4], float block[64], int mask, uniform int channels)
