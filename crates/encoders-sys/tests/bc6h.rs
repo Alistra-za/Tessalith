@@ -115,7 +115,7 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "e2cfc53d375a1b4d487761b60d6d6413e11097a6d3abcc03071ec96e6e90e491",
+        "4fda8fd713725c2c3f0aa63d7aff6d9c02ac9e3b9f30e753330d2a29c8a75a77",
     ),
     (
         Bc6hLevel::Basic,
@@ -1265,19 +1265,11 @@ fn record_witness_search(
         eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
         return;
     };
-    let commit = std::process::Command::new("git")
-        .args(["describe", "--always", "--dirty", "--abbrev=8"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map_or("unknown".to_string(), |o| {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        });
     let mut file = std::fs::File::create(&path).unwrap();
     writeln!(
         file,
-        "# commit {commit} input {name} 0..{end} levels {levels:?}"
+        "# commit {} input {name} 0..{end} levels {levels:?}",
+        git_describe()
     )
     .unwrap();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
@@ -1314,6 +1306,19 @@ fn record_witness_search(
             );
         }
     }
+}
+
+/// `git describe --always --dirty --abbrev=8` of the crate's checkout (the objects a search ran on), or "unknown".
+fn git_describe() -> String {
+    std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty", "--abbrev=8"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map_or("unknown".to_string(), |o| {
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        })
 }
 
 /// Records Task 15's search (`refit_blocks`, `i in 0..1 << 16`, Fast, Basic and Veryslow) for `REFIT_WITNESSES`.
@@ -1406,6 +1411,269 @@ fn refit_uses_the_decoder_weights() {
     assert!(
         failures.is_empty(),
         "{} witnesses not certainly better:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Q2's two block generators (`collapsed_block`); the witnesses name theirs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CollapseKind {
+    OneRegionRamp,
+    TwoRegion,
+}
+
+/// Q2's seeded blocks from index `i` (alpha 1.0), with the texels of the region that must not decode flat.
+///
+/// `OneRegionRamp`: one smooth ramp along a random direction across the block in all three channels, each channel
+/// spanning 4 to 7 half codes in total (8.3 to 14.5 UF16 units: over mode 13's 6-unit gate and under mode 12's 16-unit
+/// code cell), every channel's UF16 range `(h + 0.5) * 64 / 31` inside one mode-12 cell `(16q, 16q + 16]` with a
+/// quarter unit to spare at each edge. Odd `i` has one channel falling where the other two rise. The region is the
+/// whole block.
+///
+/// `TwoRegion` (fable's scenario A): one of the 32 two-region partitions; one region is dim (half codes 0x0400 to
+/// 0x2400 plus a ramp of 8 to 120 half codes per channel), the other bright (1000 to 0x5000 half codes above the dim
+/// base, plus a ramp of up to 256). The region is the dim one.
+///
+/// Integer arithmetic only, so the blocks are the same on every machine.
+fn collapsed_block(i: u32, kind: CollapseKind) -> ([[u16; 4]; 16], u16) {
+    // A ramp's position along (dx, dy), for a random direction.
+    fn direction(r: &mut Lcg) -> impl Fn(usize) -> i64 {
+        let (mut dx, dy) = (r.range(0, 6) as i64 - 3, r.range(0, 6) as i64 - 3);
+        if dx == 0 && dy == 0 {
+            dx = 1;
+        }
+        move |t| (t % 4) as i64 * dx + (t / 4) as i64 * dy
+    }
+    let salt = match kind {
+        CollapseKind::OneRegionRamp => 0x1656_67B1,
+        CollapseKind::TwoRegion => 0x7FEB_352D,
+    };
+    let mut r = Lcg(i.wrapping_mul(0x27D4_EB2F) ^ salt);
+    r.next();
+    let mut planes = [[0u16; 16]; 3];
+    match kind {
+        CollapseKind::OneRegionRamp => {
+            // 8/31 UF16 units: u(h) = (64h + 32) / 31 must lie in (16q + 8/31, 16q + 16 - 8/31].
+            const MARGIN: i64 = 8;
+            let pos = direction(&mut r);
+            let pmin = (0..16).map(&pos).min().unwrap();
+            let pmax = (0..16).map(&pos).max().unwrap();
+            let falling = (i % 2 == 1).then(|| (r.next() % 3) as usize);
+            for (c, plane) in planes.iter_mut().enumerate() {
+                let s = r.range(4, 7) as i64;
+                let h = loop {
+                    let q = r.range(0x80, 0xE00) as i64;
+                    let lo = (496 * q + MARGIN - 32).div_euclid(64) + 1;
+                    let hi = (496 * q + 464 - MARGIN).div_euclid(64) - s;
+                    if lo <= hi {
+                        break r.range(lo as u32, hi as u32) as i64;
+                    }
+                };
+                for (t, v) in plane.iter_mut().enumerate() {
+                    let step = s * (pos(t) - pmin) / (pmax - pmin);
+                    *v = if falling == Some(c) {
+                        h + s - step
+                    } else {
+                        h + step
+                    } as u16;
+                }
+            }
+            (texels_of(&planes), 0xFFFF)
+        }
+        CollapseKind::TwoRegion => {
+            let mask = TWO_REGION_MASKS[(r.next() % 32) as usize];
+            let dim_side = (r.next() % 2) as u16;
+            let dim_base: [i64; 3] = std::array::from_fn(|_| r.range(0x0400, 0x2400) as i64);
+            for region in 0..2u16 {
+                let in_region = |t: &usize| (mask >> t) & 1 == region;
+                let pos = direction(&mut r);
+                let pmin = (0..16).filter(in_region).map(&pos).min().unwrap();
+                let pmax = (0..16).filter(in_region).map(&pos).max().unwrap();
+                for (c, plane) in planes.iter_mut().enumerate() {
+                    let (base, s) = if region == dim_side {
+                        (dim_base[c], r.range(8, 120) as i64)
+                    } else {
+                        (
+                            dim_base[c] + r.range(1000, 0x5000) as i64,
+                            r.range(0, 256) as i64,
+                        )
+                    };
+                    for t in (0..16).filter(in_region) {
+                        plane[t] = (base + s * (pos(t) - pmin) / (pmax - pmin).max(1)) as u16;
+                    }
+                }
+            }
+            let dim = if dim_side == 1 { mask } else { !mask };
+            (texels_of(&planes), dim)
+        }
+    }
+}
+
+/// Per channel, over the texels of `region`: (the source varies, the decode holds at least two distinct values).
+fn region_variation(px: &[[u16; 4]; 16], dec: &[[u16; 3]; 16], region: u16) -> [(bool, bool); 3] {
+    let texels: Vec<usize> = (0..16).filter(|t| (region >> t) & 1 == 1).collect();
+    std::array::from_fn(|c| {
+        let varies = |v: &dyn Fn(usize) -> u16| texels.iter().any(|&t| v(t) != v(texels[0]));
+        (varies(&|t| px[t][c]), varies(&|t| dec[t][c]))
+    })
+}
+
+/// Q2's levels: Veryfast and Fast write mode 12 for a one-region ramp; Basic and Veryslow search more modes.
+const COLLAPSE_LEVELS: [Bc6hLevel; 4] = [
+    Bc6hLevel::Veryfast,
+    Bc6hLevel::Fast,
+    Bc6hLevel::Basic,
+    Bc6hLevel::Veryslow,
+];
+
+/// For each generator and level in `COLLAPSE_LEVELS`, finds the `collapsed_block` indices in `0..1 << 16` whose region
+/// varies in all three source channels and decodes flat in all three (one value per channel over the region) on every
+/// path in `paths()` (run it with `SDC_TEST_AVX512=1` so AVX-512 is included), writes every hit as `<kind> <level> <i>`
+/// to the file `SDC_BC6H_WITNESS_OUT` names (the first line names the objects), and prints the count and the first
+/// four hits with and without a falling channel (odd and even `i`). With the variable unset it says so and returns.
+#[test]
+#[ignore = "search for collapsed-region witnesses: run on the objects before the Q2 fix, with SDC_TEST_AVX512=1"]
+fn search_collapsed_witnesses() {
+    use std::io::Write as _;
+    const END: u32 = 1 << 16;
+    let Some(path) = std::env::var_os("SDC_BC6H_WITNESS_OUT") else {
+        eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
+        return;
+    };
+    let targets: Vec<IspcTarget> = paths().collect();
+    let mut file = std::fs::File::create(&path).unwrap();
+    writeln!(
+        file,
+        "# commit {} input collapsed_block 0..{END} paths {targets:?}",
+        git_describe()
+    )
+    .unwrap();
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
+    for kind in [CollapseKind::OneRegionRamp, CollapseKind::TwoRegion] {
+        for level in COLLAPSE_LEVELS {
+            let mut hits: Vec<u32> = std::thread::scope(|s| {
+                let jobs: Vec<_> = (0..threads)
+                    .map(|t| {
+                        let targets = &targets;
+                        s.spawn(move || {
+                            (t..END)
+                                .step_by(threads as usize)
+                                .filter(|&i| {
+                                    let (px, region) = collapsed_block(i, kind);
+                                    // The decode argument is unused here: only the source columns are read.
+                                    let source = region_variation(&px, &[[0; 3]; 16], region);
+                                    source.iter().all(|&(src, _)| src)
+                                        && targets.iter().all(|&target| {
+                                            let dec =
+                                                decode_halves(&encode_block(&px, level, target));
+                                            region_variation(&px, &dec, region)
+                                                .iter()
+                                                .all(|&(_, dec)| !dec)
+                                        })
+                                })
+                                .collect::<Vec<u32>>()
+                        })
+                    })
+                    .collect();
+                jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+            });
+            hits.sort_unstable();
+            for i in &hits {
+                writeln!(file, "{kind:?} {level:?} {i}").unwrap();
+            }
+            file.flush().unwrap();
+            let first = |odd: bool| -> Vec<u32> {
+                hits.iter()
+                    .copied()
+                    .filter(|i| (i % 2 == 1) == odd)
+                    .take(4)
+                    .collect()
+            };
+            println!(
+                "{kind:?} {level:?}: {} of {END} decode flat on {targets:?}; rising {:?}, falling {:?}",
+                hits.len(),
+                first(false),
+                first(true)
+            );
+        }
+    }
+}
+
+/// Witnesses from `search_collapsed_witnesses`: (`collapsed_block` index, level, generator). On the objects before the
+/// Q2 fix each decoded flat on SSE2, AVX2 and AVX-512 (found on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25). Per
+/// level the first four hits with a falling channel (odd) and without (even); Veryslow had hits with a falling channel
+/// only (185 of 65,536). The two-region hit at Fast is the first one that decodes non-flat after the fix on every path
+/// (the first hit, 0, still decodes flat there).
+const COLLAPSED_WITNESSES: &[(u32, Bc6hLevel, CollapseKind)] = &[
+    (1, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (2, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (3, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (5, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (7, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (12, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (18, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (20, Bc6hLevel::Veryfast, CollapseKind::OneRegionRamp),
+    (1, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (2, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (3, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (5, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (7, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (12, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (18, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (20, Bc6hLevel::Fast, CollapseKind::OneRegionRamp),
+    (4, Bc6hLevel::Fast, CollapseKind::TwoRegion),
+    (1, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (2, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (3, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (5, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (7, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (12, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (18, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (20, Bc6hLevel::Basic, CollapseKind::OneRegionRamp),
+    (621, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (2345, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (2895, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (3187, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (4939, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (5155, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (5325, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+    (5747, Bc6hLevel::Veryslow, CollapseKind::OneRegionRamp),
+];
+
+/// Q2 (Note LT): a region whose span is shorter than one code cell got both endpoints on one code and decoded flat at
+/// the cell centre, and refinement could not leave (every texel takes one index, so the refit is singular and
+/// flattens to the mean, on the same code) (survey section 1, fable Q2). On each witness every source-varying channel
+/// of the region holds at least two distinct decoded values, at the witness's level on every path in `paths()`. Only
+/// a source-constant channel may decode flat (opus: a varying channel can regain variation through indices driven by
+/// the others). Before the fix every witness decoded flat in all three channels. Skipped on an Intel CPU, like the
+/// pins: the witnesses were selected on the Ryzen's output (Note JC).
+#[test]
+fn collapsed_regions_take_a_bracketing_pair() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for target in paths() {
+        for &(i, level, kind) in COLLAPSED_WITNESSES {
+            let (px, region) = collapsed_block(i, kind);
+            let dec = decode_halves(&encode_block(&px, level, target));
+            let flat: Vec<usize> = region_variation(&px, &dec, region)
+                .iter()
+                .enumerate()
+                .filter(|(_, &(src, dec))| src && !dec)
+                .map(|(c, _)| c)
+                .collect();
+            if !flat.is_empty() {
+                failures.push(format!(
+                    "witness {i} {kind:?} {target:?} {level:?}: channels {flat:?} vary in the source and decode flat"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} witnesses decode flat:\n{}",
         failures.len(),
         failures.join("\n")
     );
