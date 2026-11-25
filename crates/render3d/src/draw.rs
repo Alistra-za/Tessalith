@@ -216,7 +216,7 @@ impl ShapeDraw {
 
     /// A cbuffer edit (03 §1.3): every writer back to zero, then the material and the static block, so no field
     /// of the previous material survives. The light and view fields come back with the next update (`stale`).
-    /// `shadows`: the renderer's shadows are on (the shadow bits go to a [`shadow_receiver`] only, Note IH4).
+    /// `shadows`: the renderer's shadows are on (the shadow bits go to a [`shadow_receiver`] only, Note IH3).
     pub fn rewrite_material(
         &mut self,
         m: &MaterialState,
@@ -246,7 +246,7 @@ impl ShapeDraw {
         self.stale = true;
     }
 
-    /// Only the shadow bits of `PixelShaderDescriptor` for `shadows` (Note IH4), by this draw's own blend and depth
+    /// Only the shadow bits of `PixelShaderDescriptor` for `shadows` (Note IH3), by this draw's own blend and depth
     /// state ([`receives_shadows`]); every other field stays. A draw kept on screen while its shape's edit compiles,
     /// or after the edit failed, holds the constants of the material it last applied, which a rewrite from the
     /// shape's newer material would replace.

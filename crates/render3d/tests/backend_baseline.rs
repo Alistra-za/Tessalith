@@ -621,7 +621,7 @@ fn background_source() -> String {
     )
 }
 
-/// The repo-owned shadow-mask shader as `shadow.rs` compiles it (Note IH4).
+/// The repo-owned shadow-mask shader as `shadow.rs` compiles it (Note IH3).
 fn shadow_source() -> String {
     render3d::shadow::mask_source()
 }

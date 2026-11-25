@@ -1,4 +1,4 @@
-//! Note IH4: shadows from the sun and the point light through CS's own screen-space shadow mask (t14), on the
+//! Note IH3: shadows from the sun and the point light through CS's own screen-space shadow mask (t14), on the
 //! bundled CS on WARP. The built-in sphere (radius 32 at the origin) above the built-in plane turned to face +Z at
 //! z = -40 and scaled to ±160; the sun straight down. The maps are 512 (sun) and 256 (cube face) through
 //! `set_shadow_sizes`, so WARP stays fast. A GPU test file: run it alone.

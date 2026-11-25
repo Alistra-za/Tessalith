@@ -55,7 +55,7 @@ pub enum Background {
     /// replaces `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
     Hdri(Arc<hdri::Environment>),
     /// Black from the middle of the frame up, fading to [`crate::background::GRADIENT_FLOOR_SRGB`] at the bottom, and
-    /// a floor of that colour under the model that catches the sun and the point light's shadows (Note IH5). Ambient
+    /// a floor of that colour under the model that catches the sun and the point light's shadows (Note IH4). Ambient
     /// and environment are Solid's (the procedural one).
     Gradient,
 }
@@ -133,7 +133,7 @@ pub struct Scene {
     /// Seconds on the preview's animation clock, written to CS's `Timer` (v2 B3). 1.0 when nothing plays (the
     /// constant the preview always wrote).
     pub time: f32,
-    /// Shadows from the sun and the point light through CS's screen-space shadow mask at t14 (Note IH4). Off in
+    /// Shadows from the sun and the point light through CS's screen-space shadow mask at t14 (Note IH3). Off in
     /// [`Scene::neutral`]: an off frame draws no light pass or mask and keeps no map; it still writes `VPOSOffset`,
     /// which CS reads only with the mask.
     pub shadows: bool,
@@ -565,7 +565,7 @@ impl Scene {
 
 /// Camera fields that change with the eye or the target size, in [`ViewValues`] order. `World` and
 /// `PreviousWorld` depend on the shape too and are passed to [`SceneFields::write_view`] separately. `VPOSOffset`
-/// (b0 PerTechnique, `(1/w, 1/h, 0, 0)`) turns `SV_Position` into the shadow mask's UV (Lighting.hlsl:1716, Note IH4).
+/// (b0 PerTechnique, `(1/w, 1/h, 0, 0)`) turns `SV_Position` into the shadow mask's UV (Lighting.hlsl:1716, Note IH3).
 pub const VIEW_NAMES: [&str; 18] = [
     "ViewProj",
     "BonesPivot",
@@ -672,7 +672,7 @@ pub const POINT_NAMES: [&str; 4] = [
 ];
 
 /// The values of [`POINT_NAMES`] for one scene and view: light 0 is the scene's point light, 1-6 are zero. With
-/// shadows on and the light on, light 0 is a shadow light read from the mask's G (Note IH4).
+/// shadows on and the light on, light 0 is a shadow light read from the mask's G (Note IH3).
 pub struct PointValues {
     pub values: Vec<Vec<f32>>,
 }

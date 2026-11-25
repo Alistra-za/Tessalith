@@ -363,7 +363,7 @@ fn no_reader_shapes() -> Vec<ParsedShape> {
 }
 
 /// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, forward and deferred. Captured on base
-/// f9639a84 (before Note GX); re-pinned in Note IH2 when the reflected environment changed from the bundled studio
+/// f9639a84 (before Note GX); re-pinned in Note IH1 when the reflected environment changed from the bundled studio
 /// HDRI to the procedural one of the ambient (the deferred composite and the forward env registers read it), the
 /// old values being d3cddc82... (forward) and 7d1cef7a... (deferred). That the pre-pass changes nothing for a frame
 /// without a depth reader is held by the `last_prepass_draws` and `has_depth_copy` asserts below; byte-identity to
@@ -405,7 +405,7 @@ fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
         assert_eq!(
             got, want,
             "deferred {deferred}: the frame's bytes changed. The pin depends on WARP's rasteriser and the system \
-             d3dcompiler, so a Windows update can move it; so does a change to the reflected environment (Note IH2). \
+             d3dcompiler, so a Windows update can move it; so does a change to the reflected environment (Note IH1). \
              Do not re-pin to hide a pre-pass change: the asserts after it say whether one was drawn"
         );
         assert_eq!(r.last_prepass_draws(), 0, "deferred {deferred}");

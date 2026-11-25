@@ -1,4 +1,4 @@
-//! Note IH5: the Gradient background and its shadow-catching floor, on the bundled CS on WARP, forward and deferred
+//! Note IH4: the Gradient background and its shadow-catching floor, on the bundled CS on WARP, forward and deferred
 //! (the GUI default is deferred). The built-in sphere (radius 32 at the origin) hovers over a pebble (the same sphere
 //! at 1 %) 40 units below it: the pebble is the model's lowest point, so the floor lies under the sphere. The sun
 //! straight down unless a test says otherwise; the maps are 512 / 256 through `set_shadow_sizes`. A GPU test file: run

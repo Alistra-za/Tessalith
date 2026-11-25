@@ -1,9 +1,9 @@
-//! Shadows from the sun and the point light (Note IH4), through Community Shaders' own route: Lighting.hlsl reads a
+//! Shadows from the sun and the point light (Note IH3), through Community Shaders' own route: Lighting.hlsl reads a
 //! screen-space shadow mask at t14 (`shadowColor`, Lighting.hlsl:1714-1719), the sun takes its R
 //! (`dirDetailedShadow`, 2280-2281) and point light `i` its `ShadowLightMaskSelect[i]` channel (2401-2403).
 //!
 //! The renderer draws the casters (the depth pre-pass's shapes: not blended, writing depth, alpha test through their
-//! own programs) into a sun depth map, orthographic and fitted to the model's bounding sphere (with the Gradient floor's quad, Note IH5), and, while the point
+//! own programs) into a sun depth map, orthographic and fitted to the model's bounding sphere (with the Gradient floor's quad, Note IH4), and, while the point
 //! light is on, into a depth cube around it. This module's pass then turns the camera's depth into the mask: each
 //! pixel back to its camera-relative position (inverse view-projection), into each light's map, 3×3 PCF. Every
 //! [`View`] here is camera-relative like the camera's: `eye` is the camera's, so `World`, the point light and the

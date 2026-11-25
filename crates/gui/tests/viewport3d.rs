@@ -1032,7 +1032,7 @@ fn changing_the_look_sends_a_render_and_no_load() {
 fn the_default_look_is_the_unchanged_scene() {
     use render3d::scene::{Background, Camera, Scene};
     let l = v3::Look::default();
-    // The neutral scene with shadows on: the preview always draws them (Note IH4).
+    // The neutral scene with shadows on: the preview always draws them (Note IH3).
     assert_eq!(
         l.scene(Camera::Auto, None, None),
         Scene {
@@ -1085,7 +1085,7 @@ fn view_section_offers_background_and_lights() {
     assert_eq!(h.state().look, v3::Look::default());
 }
 
-/// Note IH5: the background row reads Solid, Gradient, HDRI file…, left to right; Gradient switches the mode and the
+/// Note IH4: the background row reads Solid, Gradient, HDRI file…, left to right; Gradient switches the mode and the
 /// look's scene then draws the Gradient background.
 #[test]
 fn the_background_radio_has_three_modes_in_order() {

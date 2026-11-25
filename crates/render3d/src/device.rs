@@ -309,7 +309,7 @@ pub struct Target {
     /// at t17 (Note GX1). A copy, because `depth` stays bound for writing while the shapes read it. Made by
     /// [`Target::ensure_depth_copy`] on the first pre-pass frame and dropped with the target.
     pub depth_copy: Option<(ID3D11Texture2D, ID3D11ShaderResourceView)>,
-    /// CS's screen-space shadow mask at t14 (Note IH4): R8G8B8A8_UNORM at the frame's size, R = sun, G = point
+    /// CS's screen-space shadow mask at t14 (Note IH3): R8G8B8A8_UNORM at the frame's size, R = sun, G = point
     /// light 0, B = A = 1. Made by [`Target::ensure_shadow_mask`] on a shadow frame, dropped on a frame without.
     pub shadow_mask: Option<(
         ID3D11Texture2D,

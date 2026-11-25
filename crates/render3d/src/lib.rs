@@ -444,7 +444,7 @@ pub struct Renderer {
     /// The load's bounding sphere: what the camera frames ([`Renderer::bounds`]).
     bounds: Option<([f32; 3], f32)>,
     /// The bounding sphere of the shapes that draw now and their lowest vertex's world Z: what the Gradient floor and
-    /// the sun's fit use (Note IH5). Taken again when that set of shapes changes (`sort_draw_order`).
+    /// the sun's fit use (Note IH4). Taken again when that set of shapes changes (`sort_draw_order`).
     scene_bounds: Option<(([f32; 3], f32), f32)>,
     /// The shapes `scene_bounds` was taken from; `None` after a load, so the next `sort_draw_order` takes it.
     scene_shapes: Option<Vec<ShapeId>>,
@@ -477,7 +477,7 @@ pub struct Renderer {
     /// The HDRI background pass for the environment it was made from (a `Weak`, so the address cannot be reused while
     /// it is kept), made on the first `Background::Hdri` frame and again when the `Arc` changes.
     backdrop: Option<(std::sync::Weak<hdri::Environment>, Result<Backdrop, String>)>,
-    /// The Gradient background pass and its floor (Note IH5), made on the first Gradient frame; a failure is kept, not
+    /// The Gradient background pass and its floor (Note IH4), made on the first Gradient frame; a failure is kept, not
     /// retried, and the frame draws without it ([`Renderer::backdrop_error`]).
     gradient: Option<Result<Gradient, String>>,
     floor: Option<Result<floor::Floor, String>>,
@@ -518,9 +518,9 @@ pub struct Renderer {
     glint_noise: Option<ID3D11ShaderResourceView>,
     /// The glint-noise failure was already logged ([glint_noise_or_fallback]).
     glint_noise_logged: bool,
-    /// `Scene::shadows` of the last frame: what every material cbuffer's shadow bits were written for (Note IH4).
+    /// `Scene::shadows` of the last frame: what every material cbuffer's shadow bits were written for (Note IH3).
     shadows: bool,
-    /// The light maps and the mask pass while shadows are on (Note IH4); `None` otherwise.
+    /// The light maps and the mask pass while shadows are on (Note IH3); `None` otherwise.
     shadow: Option<shadow::Shadows>,
     /// Sides of the sun map and of a cube face ([`shadow::SUN_SIZE`], [`shadow::POINT_SIZE`]; a test hook sets them).
     shadow_sizes: (u32, u32),
@@ -541,7 +541,7 @@ pub struct Renderer {
     last_sun_fit: Option<([f32; 3], f32)>,
 }
 
-/// Shadow resources that could not be made (Note IH4), each with the configuration it was tried at: the mask with the
+/// Shadow resources that could not be made (Note IH3), each with the configuration it was tried at: the mask with the
 /// target's size, the sun map and the cube with their sides. One is not made again until its configuration changes,
 /// and the frame draws without the shadows it serves. Kept per renderer, so a rebuilt device tries again.
 #[derive(Default)]
@@ -1267,7 +1267,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// Why a shadow resource could not be made, once per failure (Note IH4): the frame drew without the shadows it
+    /// Why a shadow resource could not be made, once per failure (Note IH3): the frame drew without the shadows it
     /// serves. `None` when nothing failed since the last call.
     pub fn take_shadow_error(&mut self) -> Option<String> {
         self.shadow_failed.untold.take()
@@ -2775,7 +2775,7 @@ impl Renderer {
                 Target::new(&self.gpu, w, h)?
             });
         }
-        // Note IH4: the shadow bits live in every material cbuffer (`PixelShaderDescriptor`), not in a per-frame field:
+        // Note IH3: the shadow bits live in every material cbuffer (`PixelShaderDescriptor`), not in a per-frame field:
         // a flip rewrites them through the cbuffer-edit path. A draw kept while its shape's edit compiles or after it
         // failed gets only its bits, by its own state: its other constants stay those of the material it applied.
         if scene.shadows != self.shadows {
@@ -2871,7 +2871,7 @@ impl Renderer {
             lights_changed,
             view_changed,
         };
-        // Note IH4: whether this frame draws shadows. Off: the maps and the mask are dropped (the mask is never bound
+        // Note IH3: whether this frame draws shadows. Off: the maps and the mask are dropped (the mask is never bound
         // past a frame); the depth copy a shadow frame made stays with the target, as after a hair frame (Note GX1).
         // On: false when the mask or the sun map could not be made, and the frame draws without them.
         let shadows = if scene.shadows {
@@ -2883,7 +2883,7 @@ impl Renderer {
             }
             false
         };
-        // The light passes (Note IH4) leave their views in the casters' cbuffers: the colour passes write the camera's
+        // The light passes (Note IH3) leave their views in the casters' cbuffers: the colour passes write the camera's
         // again.
         let colour_inputs = FrameInputs {
             view: &view,
@@ -2913,7 +2913,7 @@ impl Renderer {
                 self.backdrop = Some((Arc::downgrade(e), made));
             }
         }
-        // Note IH5: the gradient pass and the floor, made once; a failure is kept and the frame goes without.
+        // Note IH4: the gradient pass and the floor, made once; a failure is kept and the frame goes without.
         let mut plane = None;
         if matches!(scene.background, Background::Gradient) {
             if self.gradient.is_none() {
@@ -2941,7 +2941,7 @@ impl Renderer {
         // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
         // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
         // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy. A shadow frame
-        // (Note IH4) always draws it: the mask is made from that copy, and its casters are the pre-pass's shapes.
+        // (Note IH3) always draws it: the mask is made from that copy, and its casters are the pre-pass's shapes.
         let prepass = shadows
             || self.draw_order.iter().any(|id| {
                 self.shapes
@@ -3033,7 +3033,7 @@ impl Renderer {
                         bound_all = false;
                     }
                 }
-                // Note IH5: the Gradient floor is background. Drawn after the light passes it reads and before the
+                // Note IH4: the Gradient floor is background. Drawn after the light passes it reads and before the
                 // opaque shapes, RT0 alone (the blend state is shared by every bound target), testing the pre-pass's
                 // depth and writing none: every model pixel is drawn over it, and the deferred composite passes its
                 // pixels through as it does the gradient's.
@@ -3110,7 +3110,7 @@ impl Renderer {
                             ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
                         }
                     }
-                    // Note IH4: the mask over the 1×1 white default at t14, for the colour passes.
+                    // Note IH3: the mask over the 1×1 white default at t14, for the colour passes.
                     if let (Some(_), true, Some((_, _, mask))) =
                         (pass, shadows, &target.shadow_mask)
                     {
@@ -3151,7 +3151,7 @@ impl Renderer {
                     if let Some((copy, _)) = &target.depth_copy {
                         ctx.CopyResource(copy, &target.depth);
                     }
-                    // Note IH4: the light passes, then the mask from the copy, before any colour pass reads it (the
+                    // Note IH3: the light passes, then the mask from the copy, before any colour pass reads it (the
                     // DEFERRED opaque draws light the sun themselves).
                     if let (true, Some(sh), Some((_, mask_rtv, _)), Some((_, depth))) = (
                         shadows,

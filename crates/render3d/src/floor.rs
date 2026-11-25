@@ -1,4 +1,4 @@
-//! The Gradient background's floor (Note IH5): a horizontal quad at the model's lowest point that catches the sun's and
+//! The Gradient background's floor (Note IH4): a horizontal quad at the model's lowest point that catches the sun's and
 //! the point light's shadows and fades into the backdrop at its rim. Repo-owned shader (not CS's): the colour is the
 //! floor colour times the light the sun, the ambient from above and the point light bring, with the shadow maps read
 //! directly through [`crate::shadow`]'s lookups (the same PCF as the mask).

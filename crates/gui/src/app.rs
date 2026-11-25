@@ -84,7 +84,7 @@ impl SdcApp {
         );
         meshes.v3.look = Look::from_settings(layout.look.as_ref());
         set3d.v3.look = Look::from_settings(layout.set_look.as_ref());
-        // Note IH3: one saved HDRI file for both panels, known by name until a panel needs it; `route_3d` decodes it
+        // Note IH2: one saved HDRI file for both panels, known by name until a panel needs it; `route_3d` decodes it
         // once. A file that is gone or refused drops that panel to a solid background with a notice.
         if let Some(p) = layout.hdri_file.clone() {
             meshes.v3.set_saved_hdri(p.clone());
@@ -163,7 +163,7 @@ impl SdcApp {
     /// Both 3D panels' links to the Textures view: which missing texture paths are items of the open folder, and a
     /// "Open in Textures" click (selects the item and switches to the Textures view).
     pub fn route_3d(&mut self, ctx: &egui::Context) {
-        // Note IH3: a file one panel took (chosen there, or the saved one) is the saved path from this frame on, and the
+        // Note IH2: a file one panel took (chosen there, or the saved one) is the saved path from this frame on, and the
         // other panel's too, with the same decoded environment.
         let (m, s) = (&mut self.meshes.v3, &mut self.state.set3d.v3);
         if let Some((p, env)) = m.take_accepted_hdri() {

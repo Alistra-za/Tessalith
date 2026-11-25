@@ -268,7 +268,7 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
             }
             let file = v.hdri_file().map(std::path::Path::to_path_buf);
             let picker = v.picker.clone();
-            // A background choice made this frame: a chosen file still decoding then leaves the mode alone (Note IH3).
+            // A background choice made this frame: a chosen file still decoding then leaves the mode alone (Note IH2).
             let mut acted = false;
             let l = &mut v.look;
             ui.horizontal_wrapped(|ui| {

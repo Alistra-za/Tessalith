@@ -403,7 +403,7 @@ pub enum BgMode {
     #[default]
     Solid,
     /// Black above the middle of the frame, a warm grey at the bottom, and a floor of that grey under the model that
-    /// takes the sun's and the point light's shadows (Note IH5). No colour to pick.
+    /// takes the sun's and the point light's shadows (Note IH4). No colour to pick.
     Gradient,
     /// The user's HDRI file ([`Viewport3d::hdri_file`]) behind the model and as ambient light; a flat colour while
     /// none is loaded.
@@ -473,7 +473,7 @@ impl Look {
             },
             sun_brightness: self.sun.clamp(Self::SUN_RANGE.0, Self::SUN_RANGE.1),
             env_yaw: self.sun_yaw,
-            // Always on in the preview (Note IH4); `Scene::neutral` keeps them off for the renderer's pins.
+            // Always on in the preview (Note IH3); `Scene::neutral` keeps them off for the renderer's pins.
             shadows: true,
             ..Scene::neutral()
         };
@@ -824,7 +824,7 @@ pub struct Viewport3d {
     last_sent: Option<(Camera, u32, u32, u64, Look, f32)>,
     /// The environment of the last `Render` (Hdri mode only), compared by `Arc::ptr_eq`.
     last_env: Option<Arc<render3d::hdri::Environment>>,
-    /// The HDRI file decoded for this panel and its environment (the other panel holds the same `Arc`, Note IH3).
+    /// The HDRI file decoded for this panel and its environment (the other panel holds the same `Arc`, Note IH2).
     hdri: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
     /// The shared file this panel knows by name only (the saved one at start): decoded when the app finds the panel
     /// needs it (`wants_saved_hdri`).
@@ -2396,7 +2396,7 @@ fn render_loop(
         if let Some(e) = notice_once(&mut backdrop_told, r.backdrop_error()) {
             send(V3Reply::Notice(format!("Background unavailable: {e}")));
         }
-        // Note IH4: the renderer tells each shadow resource it could not make once, and draws without those shadows.
+        // Note IH3: the renderer tells each shadow resource it could not make once, and draws without those shadows.
         if let Some(e) = r.take_shadow_error() {
             send(V3Reply::Notice(format!("Shadows unavailable: {e}")));
         }

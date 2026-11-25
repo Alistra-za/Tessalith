@@ -370,7 +370,7 @@ pub fn write_skin_flags(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
 /// `CbWriter::new` or after `CbWriter::zero`): fields a branch does not write must read 0, never a previous
 /// material's value. `bound` = registers bound to a real texture in this draw. `projected`: the renderer's MATO
 /// layer and the shape's model, written when the layer applies to `m` ([`projected_eligible`]; the program then has
-/// `PROJECTED_UV`). `shadows`: the scene's shadows are on and `m` is a [`shadow_receiver`] (Note IH4).
+/// `PROJECTED_UV`). `shadows`: the scene's shadows are on and `m` is a [`shadow_receiver`] (Note IH3).
 pub fn write_material(
     w: &mut CbWriter,
     m: &MaterialState,
@@ -554,7 +554,7 @@ pub fn verified_blend(src: u8, dst: u8) -> bool {
     matches!((src, dst), (6, 7) | (0, 0) | (1, 2))
 }
 
-/// The shape reads the shadow mask when shadows are on (Note IH4): [`receives_shadows`] of its blend and depth state
+/// The shape reads the shadow mask when shadows are on (Note IH3): [`receives_shadows`] of its blend and depth state
 /// (`fixed`: a built-in, [`Pipe::FIXED`]).
 pub fn shadow_receiver(m: &MaterialState, fixed: bool) -> bool {
     let p = if fixed { Pipe::FIXED } else { pipe(m) };

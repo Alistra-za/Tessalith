@@ -141,7 +141,7 @@ pub const DEF_SHADOW: u32 = 1 << 14;
 /// `engine PS desc & ~CS compile key` (answers.md Q4.1): Specular/Soft/Rim/Back are compile-time defines and
 /// CharacterLight stays 0 in the preview. The Glowmap technique is read at run time
 /// (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`, Lighting.hlsl:2598), so type 2 → `2 << 24`. `shadows` (the
-/// scene's shadows are on and the shape receives them, Note IH4) adds [`SHADOW_DIR`] and [`DEF_SHADOW`].
+/// scene's shadows are on and the shape receives them, Note IH3) adds [`SHADOW_DIR`] and [`DEF_SHADOW`].
 pub fn runtime_bits(m: &Material, shadows: bool) -> u32 {
     let technique = if m.shader_type == 2 { 2 << 24 } else { 0 };
     if shadows {

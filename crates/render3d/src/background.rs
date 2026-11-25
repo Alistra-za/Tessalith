@@ -94,7 +94,7 @@ pub(crate) fn compile_source(
     }
 }
 
-/// The gradient background's bottom colour and the floor's colour, sRGB (Note IH5).
+/// The gradient background's bottom colour and the floor's colour, sRGB (Note IH4).
 pub const GRADIENT_FLOOR_SRGB: [f32; 3] = [0.42, 0.40, 0.39];
 
 /// [`GRADIENT_FLOOR_SRGB`] decoded to linear.
