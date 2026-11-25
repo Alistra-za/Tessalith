@@ -817,6 +817,8 @@ pub struct Viewport3d {
     /// The environment of the last `Render` (Hdri mode only), compared by `Arc::ptr_eq`.
     last_env: Option<Arc<render3d::hdri::Environment>>,
     /// The HDRI file loaded for this panel and its decoded environment. Each panel decodes the shared path itself.
+    // shortcut: the two 3D panels decode the same file twice (up to ~100 MB each at 4096 x 2048); share a cache keyed
+    // by path if memory shows it.
     hdri: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
     /// The latest decode asked for and how many are out: an older answer is dropped, and `busy` holds while any is.
     hdri_want: u64,

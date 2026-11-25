@@ -867,6 +867,59 @@ fn a_missing_hdri_file_at_start_falls_back_to_solid_with_a_notice() {
     assert_eq!(app.model.settings.layout.hdri_file, Some(gone));
 }
 
+/// Review Focus 1: a file the renderer refuses leaves the saved path alone (and the panel on the previous file).
+#[test]
+fn a_refused_hdri_file_leaves_the_saved_path() {
+    use sdc_gui::app::SdcApp;
+    let d = tempfile::tempdir().unwrap();
+    let write = |name: &str, w: usize, h: usize| {
+        let mut b = format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes();
+        for _ in 0..w * h {
+            b.extend([128, 128, 128, 129]);
+        }
+        let p = d.path().join(name);
+        std::fs::write(&p, b).unwrap();
+        p
+    };
+    let (good, bad) = (write("good.hdr", 128, 64), write("wide.hdr", 100, 64));
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            hdri_file: Some(good.clone()),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    let mut app = SdcApp::new(sdc_gui::model::AppModel::new(
+        settings,
+        None,
+        support::session(),
+    ));
+    let ctx = egui::Context::default();
+    let wait = |app: &mut SdcApp, done: &dyn Fn(&SdcApp) -> bool| {
+        let t = Instant::now();
+        while !done(app) {
+            app.meshes.v3.poll();
+            assert!(t.elapsed() < Duration::from_secs(20), "timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    wait(&mut app, &|a| a.meshes.v3.hdri_file().is_some());
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(app.model.settings.layout.hdri_file, Some(good.clone()));
+    // The user picks a refused file in the Meshes panel.
+    app.meshes.v3.load_hdri(bad, true);
+    wait(&mut app, &|a| a.meshes.v3.notice.is_some());
+    assert!(app.meshes.v3.notice.as_deref().unwrap().contains("2:1"));
+    assert_eq!(app.meshes.v3.hdri_file(), Some(good.as_path()));
+    assert!(app.meshes.v3.take_chosen_hdri().is_none());
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(
+        app.model.settings.layout.hdri_file,
+        Some(good),
+        "the saved path is unchanged"
+    );
+}
+
 /// Task 4 review: an untouched legacy look is saved back as it was loaded (`look_now`), so the load must already have
 /// turned `grey` into `bg`; an unrelated layout change then writes `bg` (same colour) and no `grey`.
 #[test]

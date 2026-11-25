@@ -467,7 +467,7 @@ fn composite_reads_the_bound_depth() {
     assert_eq!(r.bound_cs_views(), 0);
 }
 
-/// DYNAMIC_CUBEMAPS: the composite adds RT5 × the env cube's level-15 +Z sample (the HDRI cube, yaw 0).
+/// DYNAMIC_CUBEMAPS: the composite adds RT5 × the env cube's level-15 +Z sample (the neutral scene's procedural cube, yaw 0).
 #[test]
 fn dc_composite_adds_reflectance_times_the_env_cube() {
     let cache = tempfile::tempdir().unwrap();

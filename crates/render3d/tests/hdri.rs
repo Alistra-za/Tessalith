@@ -4,8 +4,7 @@ mod common;
 use common::hdr_bytes;
 use render3d::composite::EnvMaps;
 use render3d::hdri::{
-    cube_dir, cube_faces, dir_to_uv, mip_chain, procedural, specular_chain, uv_to_dir, Environment,
-    Hdr,
+    cube_dir, cube_faces, dir_to_uv, mip_chain, procedural, specular_chain, Environment, Hdr,
 };
 use std::f32::consts::PI;
 
@@ -34,6 +33,8 @@ fn refusals_name_the_reason() {
         ("too small", grey(32, 16), "64"),
         // Only a header: the size is refused before any pixel is decoded.
         ("too large", header_only(8192, 4096), "4096"),
+        // Just over the cap, so only the width rule can name 4096 (the decoder's own error would not).
+        ("just too large", header_only(4098, 2049), "4096"),
         (
             "not RGBE",
             b"just some text, not an image".to_vec(),
@@ -73,27 +74,34 @@ fn procedural_matches_the_ambient_axes() {
     ];
     let img = procedural(&six);
     assert_eq!((img.width, img.height), (128, 64));
-    let at = |x: usize, y: usize| [0, 1, 2].map(|k| img.rgb[(y * 128 + x) * 3 + k]);
+    let at = |x: usize, y: usize| [0, 1, 2].map(|k| img.rgb[(y * 128 + x % 128) * 3 + k]);
     let close = |a: [f32; 3], b: [f32; 3], what: &str| {
         for k in 0..3 {
-            assert!((a[k] - b[k]).abs() < 2e-2, "{what}: {a:?} vs {b:?}");
+            assert!((a[k] - b[k]).abs() < 1e-3, "{what}: {a:?} vs {b:?}");
         }
     };
-    // No pixel centre lies exactly on an axis (the nearest is ~0.025 rad off in each angle), so the blend's slope
-    // (up to 0.4 per unit of direction here) leaves up to ~0.015 against the axis colour; a wrong axis is off by 0.2+.
-    close(at(0, 0), six[4], "up");
-    close(at(0, 63), six[5], "down");
-    // The pixel that looks along +X (found through uv_to_dir).
-    let (mut best, mut at_x) = (-2.0f32, (0, 0));
-    for y in 0..64 {
-        for x in 0..128 {
-            let d = uv_to_dir((x as f32 + 0.5) / 128.0, (y as f32 + 0.5) / 64.0);
-            if d[0] > best {
-                (best, at_x) = (d[0], (x, y));
-            }
-        }
-    }
-    close(at(at_x.0, at_x.1), six[0], "+X");
+    // No pixel centre lies on an axis, so each axis is read where the blend's other terms cancel. At a pole the mean
+    // of the row next to it drops the x and y terms and leaves cos(1.4 degrees) on the z term.
+    let row_mean = |y: usize| [0, 1, 2].map(|k| (0..128).map(|x| at(x, y)[k]).sum::<f32>() / 128.0);
+    close(row_mean(0), six[4], "+Z");
+    close(row_mean(63), six[5], "-Z");
+    // On the equator rows 31 and 32 straddle it (their z terms cancel); the two columns around the direction are
+    // interpolated by where the direction falls between their centres.
+    let along = |d: [f32; 3]| {
+        let fx = dir_to_uv(d).0 * 128.0 - 0.5;
+        let (x0, w) = (fx.floor(), fx - fx.floor());
+        let (a, b) = (
+            (x0 as isize).rem_euclid(128) as usize,
+            (x0 as isize + 1).rem_euclid(128) as usize,
+        );
+        [0, 1, 2].map(|k| {
+            0.5 * ((1.0 - w) * (at(a, 31)[k] + at(a, 32)[k]) + w * (at(b, 31)[k] + at(b, 32)[k]))
+        })
+    };
+    close(along([1.0, 0.0, 0.0]), six[0], "+X");
+    close(along([-1.0, 0.0, 0.0]), six[1], "-X");
+    close(along([0.0, 1.0, 0.0]), six[2], "+Y");
+    close(along([0.0, -1.0, 0.0]), six[3], "-Y");
 }
 
 /// `w × h` image whose pixel (x, y) is (x, y, 0): the source pixel of any sample can be read back exactly.
