@@ -129,8 +129,12 @@ fn bc7_tune(e: &EncoderSpec) -> Option<Bc7Tune> {
 ///   and the alpha policy (fix batch 41), as the guarantee behind `remove`. Before bc7e patch 0005 bc7e could decode
 ///   such a block's alpha well below 254 (239 on white noise); since 0005 (Q2t) the four probe inputs give none (0 of
 ///   1210 to 2310 rotated blocks at veryslow, basic, slowest and max on SSE2, AVX2 and AVX-512; Note LR6).
-/// - `alpha.exact_opaque` controls only mode 6, the part that costs RGB: it is bc7e's native flag. With the flag
-///   off, mode 6 is the only source of alpha 254.
+/// - `alpha.exact_opaque`, the channel guard's A (bc7e's exact-constants mask bit 3, Note LR, LR17), reaches these
+///   blocks only through mode 6, whose p-bits it forces so alpha decodes 255: the part that costs RGB. With it off,
+///   mode 6 is the only source of alpha 254.
+///
+/// In blocks with alpha, A keeps a subset whose alpha is 0 or 255 throughout exact wherever bc7e finds such a
+/// solution, above any guarded R, G or B ([`bc7_tune`]).
 fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     let e = &p.encoder;
     match p.format {

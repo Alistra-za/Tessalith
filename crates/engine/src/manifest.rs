@@ -58,7 +58,7 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
         // 3.2: `sdc-base` gives these the per-type BC7 flat tolerance (Note LR, LR8), which changes their profile hash
-        // and BC7 bytes. Every other type it sets that for is on `ENGINE_VERSION` below already.
+        // and may change their BC7 bytes. Every other type it sets that for is on `ENGINE_VERSION` below already.
         Subtype::Msn | Subtype::SkinWet => ENGINE_VERSION,
         // XY-only normal outputs need unit directions even with Keep (Note LA7).
         Subtype::DetailNormal => ENGINE_VERSION,

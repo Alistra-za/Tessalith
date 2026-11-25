@@ -1508,28 +1508,30 @@ fn alpha_exact_off_warns_for_bc7_envmask_even_when_alpha_is_removed() {
     );
 }
 
-/// Note LR (LR8): A off on a BC7 `complex_material` still raises ALPHA-EXACT-OFF-M, whether written as
-/// `alpha.exact_opaque` or as its other name `encoder.channel_guard.a`, and the message names the channel guard's A.
+/// Note LR (LR8): A off on a BC7 `complex_material`, written as `encoder.channel_guard.a`, still raises
+/// ALPHA-EXACT-OFF-M, and the message names the channel guard's A. (`golden::exact_opaque_m_decodes_alpha_255_at_every_mip`
+/// covers the block with `alpha.exact_opaque = false`.)
 #[test]
 fn complex_material_without_a_still_blocks() {
-    for key in ["alpha.exact_opaque=false", "encoder.channel_guard.a=false"] {
-        let j = run(
-            Target::Cs,
-            "textures/a/x_m.png",
-            Some("m"),
-            &["m"],
-            Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 0.5]),
-            &["subtype=complex_material", "alpha.parallax=true", key],
-            &[],
-        );
-        assert_eq!(j.profile.format, Format::Bc7, "{key}");
-        assert!(!j.profile.alpha.exact_opaque, "{key}");
-        assert_eq!(
-            warning(&j, Code::AlphaExactOffM).message,
-            "channel guard A is off on an _m written as BC7; alpha 0 and 255 may not stay exact for PGPatcher/ENB",
-            "{key}"
-        );
-    }
+    let j = run(
+        Target::Cs,
+        "textures/a/x_m.png",
+        Some("m"),
+        &["m"],
+        Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 0.5]),
+        &[
+            "subtype=complex_material",
+            "alpha.parallax=true",
+            "encoder.channel_guard.a=false",
+        ],
+        &[],
+    );
+    assert_eq!(j.profile.format, Format::Bc7);
+    assert!(!j.profile.alpha.exact_opaque);
+    assert_eq!(
+        warning(&j, Code::AlphaExactOffM).message,
+        "channel guard A is off on an _m written as BC7; alpha 0 and 255 may not stay exact for PGPatcher/ENB"
+    );
 }
 
 /// A diffuse `rel` resolved under `cs-quality` with `project` and `--set` strings `sets`.

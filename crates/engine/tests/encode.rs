@@ -1219,9 +1219,9 @@ fn rmaos_keeps_flat_metal_exact() {
 }
 
 /// Note LR (LR8): `complex_material` keeps A (exact opaque) and guards G. With alpha 255 every decoded alpha is 255;
-/// G is exact in every block whose mode is not 6, where the forced p-bits may lose G = 0 (A wins, BC7-C4). The
-/// resolved effort is `sdc-base`'s veryslow, which has p-bit-free opaque modes, so few or no mode-6 blocks are
-/// expected; the count is printed.
+/// G = 255 is exact in every block (the forced p-bit 1 decodes it), and G = 0 in every block whose mode is not 6,
+/// where the forced p-bits may lose it (A wins, BC7-C4). The resolved effort is `sdc-base`'s veryslow, which has
+/// p-bit-free opaque modes, so few or no mode-6 blocks are expected; the counts are printed.
 #[test]
 fn complex_material_keeps_alpha_and_flat_metal() {
     let p = profile(Subtype::ComplexMaterial);
@@ -1234,13 +1234,18 @@ fn complex_material_keeps_alpha_and_flat_metal() {
         assert_eq!(off_texels(&out, 3, 255), 0, "G {g}: alpha below 255");
         let blocks = decoded_blocks(&out);
         let mode6 = blocks.iter().filter(|(m, _)| *m == 6).count();
+        // Only G = 0 may lose to A's forced p-bits, and only in mode 6.
         let off: usize = blocks
             .iter()
-            .filter(|(m, _)| *m != 6)
+            .filter(|(m, _)| g == 255 || *m != 6)
             .map(|(_, d)| d.chunks(4).filter(|t| t[1] != g).count())
             .sum();
-        println!("G {g}: {mode6} mode-6 blocks of {}", blocks.len());
-        assert_eq!(off, 0, "G {g}: texels decoded off outside mode 6");
+        let off6 = off_texels(&out, 1, g) - off;
+        println!(
+            "G {g}: {mode6} mode-6 blocks of {}, {off6} texels off in them",
+            blocks.len()
+        );
+        assert_eq!(off, 0, "G {g}: texels decoded off");
     }
 }
 
@@ -1257,10 +1262,13 @@ fn a_user_guard_keeps_a_flat_channel() {
         assert_eq!(off_texels(&out, 2, b), 0, "B {b}: texels decoded off");
         // The fixture puts R and G on the p-bit B does not want, so unguarded it loses B somewhere.
         let plain = encode(&EncoderInput::Ldr(px), 64, 64, &base);
-        assert!(
-            off_texels(&plain, 2, b) > 0,
-            "B {b}: unguarded is exact too"
-        );
+        let lost = off_texels(&plain, 2, b);
+        let blocks = decoded_blocks(&plain)
+            .iter()
+            .filter(|(_, d)| d.chunks(4).any(|t| t[2] != b))
+            .count();
+        println!("B {b} unguarded: {lost} texels off in {blocks} blocks");
+        assert!(lost > 0, "B {b}: unguarded is exact too");
     }
 }
 
@@ -1351,7 +1359,13 @@ fn perceptual_bc7_takes_the_flat_tolerance() {
         .filter(|(a, b)| a != b)
         .count();
     println!("data changed {changed} of {} blocks", default.len() / 16);
-    assert!(changed > 0, "data wrote perceptual alone's bytes");
+    // Few blocks (4 of 1,024 on the AMD AVX2 and AVX-512 paths), so the count is AMD's bytes; an Intel CPU writes
+    // other bytes (Note JC) and could change none here.
+    if encoders_sys::intel_cpu() {
+        eprintln!("skipped: the changed-block control is AMD's bytes (Note JC)");
+    } else {
+        assert!(changed > 0, "data wrote perceptual alone's bytes");
+    }
     let explicit = with(
         &p,
         serde_json::json!({ "encoder": { "bc7_flat_tolerance": "default" } }),

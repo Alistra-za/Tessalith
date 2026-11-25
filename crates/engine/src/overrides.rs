@@ -600,6 +600,35 @@ mod tests {
     use super::*;
     use crate::discover::InputKind;
 
+    /// Note LR: `alias_channel_guard_a` walks the same paths that `CHANNEL_GUARD_A` and `EXACT_OPAQUE_FIELD` spell for
+    /// `parse_set`, so a rename of one spelling fails here: a table written at `CHANNEL_GUARD_A` comes back with the
+    /// value at `EXACT_OPAQUE_FIELD` and nothing left at the alias.
+    #[test]
+    fn the_alias_rewrite_follows_the_two_field_paths() {
+        let pointer = |f: &str| format!("/{}", f.replace('.', "/"));
+        for v in [true, false] {
+            let mut t = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            alias_channel_guard_a(&mut t).unwrap();
+            assert_eq!(
+                t.pointer(&pointer(EXACT_OPAQUE_FIELD)),
+                Some(&Value::Bool(v)),
+                "{t}"
+            );
+            assert!(t.pointer(&pointer(CHANNEL_GUARD_A)).is_none(), "{t}");
+            // The same value at both paths is accepted; the other value is refused.
+            let mut both = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            crate::presets::merge_json(&mut both, &to_patch(EXACT_OPAQUE_FIELD, &Value::Bool(v)));
+            assert!(alias_channel_guard_a(&mut both).is_ok());
+            let mut clash = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            crate::presets::merge_json(&mut clash, &to_patch(EXACT_OPAQUE_FIELD, &Value::Bool(!v)));
+            let e = alias_channel_guard_a(&mut clash).unwrap_err();
+            assert!(
+                e.contains(CHANNEL_GUARD_A) && e.contains(EXACT_OPAQUE_FIELD),
+                "{e}"
+            );
+        }
+    }
+
     #[test]
     fn a_removed_sub_type_scope_names_the_fix() {
         for s in [
