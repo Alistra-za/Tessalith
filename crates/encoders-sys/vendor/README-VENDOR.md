@@ -71,9 +71,9 @@ solid subset of an alpha block to a worse fit on a wrong score; proof tests `tes
 (Q1) and `mode7_table_keeps_each_p_bit_pairs_own_best` (Q4); changes bytes (alpha blocks only: opaque blocks never try
 mode 7, and ultrafast turns it off). XC: exact constants, the trailing params field `m_exact_mask` (R, G and B bits; 0
 at every level, set per call through the shim's tuning slot 15): when a subset's masked channel is 0 on every texel, or
-255 on every texel, a solution that does not decode it exactly scores 2^60 and a one-colour p-bit choice that misses it
-is skipped (a one-colour candidate with no such choice scores 2^60), except that with exact opaque on mode 6's
-one-colour choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs`
+255 on every texel, a solution that does not decode it exactly pays a penalty above any real error and a one-colour
+candidate takes the p-bit choice whose entries lose the least, except that with exact opaque on mode 6's one-colour
+choice stays in its forced p-bits (alpha 255 wins); proof test `tests/bc7.rs`
 `exact_constants_keep_a_flat_channel`; changes bytes only with the mask set (mask 0 is every level's default and writes
 the bytes it wrote before). The two fields change the generated header (Note LR). Q3 (all sixteen indices): with linear
 weights that are not all equal, `evaluate_solution` scores every palette entry of a mode-6 alpha block with the weighted
@@ -83,7 +83,13 @@ for linear weights that are not all equal (a user's `encoder.bc7_weights = "alph
 guarded: `evaluate_solution`'s linear projection factor, opaque and alpha, whose denominator is 0 whenever the trial's
 decoded endpoints coincide (a flat subset, and some subsets of low spread), and the two estimators' `scale`, whose
 denominator is 0 on a flat subset; the numerator is then 0 too, so the guard gives the index the clamp gave; unit check
-`tests/bc7.rs` `flat_subsets_decode_sane`; no byte change. These changes alter BC7 bytes (the
+`tests/bc7.rs` `flat_subsets_decode_sane`; no byte change. XC priority: when guarded channels cannot all be kept, a
+solution keeps the higher one, G before B before R, across every subset (penalties of 2^58, 2^56 and 2^54 per lost
+channel and subset, added to the solution's real error, so the closest solution wins within a tier: solutions that
+lose their channels in the same number of subsets), and a one-colour candidate charges only the channels its
+subset's source holds at 0 or 255, not a mean that rounds there; proof tests `tests/bc7.rs`
+`guarded_channels_conflict_by_priority`, `a_lost_channel_keeps_the_closest_solution` and
+`one_colour_packers_key_on_source_constants`; changes bytes only with the mask set. These changes alter BC7 bytes (the
 pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes`
 hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch file with its
 own tag.

@@ -2,8 +2,9 @@
 //!
 //!   cargo run --offline --release -p encoders-sys --example bc7_quality -- run
 //!       --class <name>=<path>[:<flags>] ... --out <csv> [--levels basic,veryslow,max] [--weights 1,16]
-//!       [--perceptual off|on|both] [--exact off|on] [--tuning default,data,x16,data_x16,data_exact_g_x16]
-//!       [--target sse2|avx2|avx512] [--threads N]
+//!       [--perceptual off|on|both] [--exact off|on]
+//!       [--tuning default,data,x16,data_x16,data_exact_g_x16,data_guard_<letters>] [--target sse2|avx2|avx512]
+//!       [--threads N]
 //!   cargo run --offline --release -p encoders-sys --example bc7_quality -- compare <before.csv> <after.csv>
 //!       [--class <name>]
 //!
@@ -19,11 +20,14 @@
 //! per call through `bc7e_compress_blocks_on`, or through the tuned call when the row overrides something (Note CP; a
 //! perceptual row runs once, at w 1). Each `--tuning` value is a row: `default` (the level as it is), `data` (flat
 //! tolerance `Bc7FlatTolerance::Data`), `x16` (weights scaled by 16 at the level's tolerance), `data_x16` and
-//! `data_exact_g_x16` (`data_x16` with exact constants on G, `Bc7Tune::exact_constants` 0b010). With perceptual off a
-//! row sends the weights `[s, s, s, s * w]` (s = 16 for the `x16` values, else 1; `[1, 1, 1, 1]` is sent unset), its
-//! flat tolerance and its exact-constants mask; with perceptual on only its flat tolerance, so `default` and `x16` are
-//! the plain call there (Note LR). Such a perceptual `x16` row repeats `default`'s bytes, and `data_x16` and
-//! `data_exact_g_x16` repeat `data`'s: they are encoded again and kept, so every tuning has its rows for `compare`.
+//! `data_exact_g_x16` (`data_x16` with exact constants on G, `Bc7Tune::exact_constants` 0b010), and
+//! `data_guard_<letters>` (`data_x16` with the channel guard on the letters' channels, in R, G, B order: `r`, `g`, `b`,
+//! `rg`, `rb`, `gb` or `rgb`; `data_guard_g` is `data_exact_g_x16`). With perceptual off a row sends the weights
+//! `[s, s, s, s * w]` (s = 16 for the `x16` and `data_guard` values, else 1; `[1, 1, 1, 1]` is sent unset), its flat
+//! tolerance and its exact-constants mask; with perceptual on only its flat tolerance, so `default` and `x16` are the
+//! plain call there (Note LR). Such a perceptual `x16` row repeats `default`'s bytes, and `data_x16`,
+//! `data_exact_g_x16` and the `data_guard` rows repeat `data`'s: they are encoded again and kept, so every tuning has
+//! its rows for `compare`.
 //! `bc7_fixup::force_opaque_rotated` is applied to every block whose source alpha is 255 throughout (no zero fix), then
 //! the blocks are decoded with `bcdec_rs::bc7` and scored against the source. The chunks of 64 blocks are spread over
 //! the threads, so the output does not depend on `--threads`.
@@ -75,18 +79,23 @@ const LEVELS: [(&str, Bc7Level); 8] = [
 /// A `--tuning` value: name, weight scale, flat tolerance (`None` keeps the level's) and exact-constants mask.
 type Tuning = (&'static str, u32, Option<Bc7FlatTolerance>, Option<u8>);
 
+/// The data maps' flat tolerance, T_data.
+const DATA: Option<Bc7FlatTolerance> = Some(Bc7FlatTolerance::Data);
+
 /// The `--tuning` values.
-const TUNINGS: [Tuning; 5] = [
+const TUNINGS: [Tuning; 12] = [
     ("default", 1, None, None),
-    ("data", 1, Some(Bc7FlatTolerance::Data), None),
+    ("data", 1, DATA, None),
     ("x16", 16, None, None),
-    ("data_x16", 16, Some(Bc7FlatTolerance::Data), None),
-    (
-        "data_exact_g_x16",
-        16,
-        Some(Bc7FlatTolerance::Data),
-        Some(0b010),
-    ),
+    ("data_x16", 16, DATA, None),
+    ("data_exact_g_x16", 16, DATA, Some(0b010)),
+    ("data_guard_r", 16, DATA, Some(0b001)),
+    ("data_guard_g", 16, DATA, Some(0b010)),
+    ("data_guard_b", 16, DATA, Some(0b100)),
+    ("data_guard_rg", 16, DATA, Some(0b011)),
+    ("data_guard_rb", 16, DATA, Some(0b101)),
+    ("data_guard_gb", 16, DATA, Some(0b110)),
+    ("data_guard_rgb", 16, DATA, Some(0b111)),
 ];
 
 fn parse_tuning(s: &str) -> Res<Tuning> {
@@ -961,7 +970,7 @@ fn main() {
     let res = match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("compare") => compare(&args[1..]),
-        _ => Err("usage: bc7_quality run --class <name>=<path>[:<flags>] ... --out <csv> [--levels l,..] [--weights w,..] [--perceptual off|on|both] [--exact off|on] [--tuning default,data,x16,data_x16,data_exact_g_x16] [--target sse2|avx2|avx512] [--threads N] | compare <before.csv> <after.csv> [--class <name>]".into()),
+        _ => Err("usage: bc7_quality run --class <name>=<path>[:<flags>] ... --out <csv> [--levels l,..] [--weights w,..] [--perceptual off|on|both] [--exact off|on] [--tuning default,data,x16,data_x16,data_exact_g_x16,data_guard_<letters>] [--target sse2|avx2|avx512] [--threads N] | compare <before.csv> <after.csv> [--class <name>]".into()),
     };
     if let Err(e) = res {
         eprintln!("error: {e}");
@@ -1133,6 +1142,36 @@ mod tests {
             ]
         );
         assert!(parse_tuning("exact").is_err());
+        // The channel guard rows: data_x16 with the letters' mask, in R, G, B order.
+        let guards = settings(
+            &["veryslow"],
+            &[1],
+            "both",
+            &["data_guard_rg", "data_guard_gb", "data_guard_rgb"],
+        )
+        .unwrap();
+        let got: Vec<(&str, bool, Option<Bc7Tune>)> = guards
+            .iter()
+            .map(|s| (s.tuning, s.perceptual, tune_of(s)))
+            .collect();
+        let x16 = Some([16, 16, 16, 16]);
+        assert_eq!(
+            got,
+            vec![
+                ("data_guard_rg", false, tune_x(x16, data, Some(0b011))),
+                ("data_guard_rg", true, tune(None, data)),
+                ("data_guard_gb", false, tune_x(x16, data, Some(0b110))),
+                ("data_guard_gb", true, tune(None, data)),
+                ("data_guard_rgb", false, tune_x(x16, data, Some(0b111))),
+                ("data_guard_rgb", true, tune(None, data)),
+            ]
+        );
+        let (g, xg) = (
+            parse_tuning("data_guard_g").unwrap(),
+            parse_tuning("data_exact_g_x16").unwrap(),
+        );
+        assert_eq!((g.1, g.2, g.3), (xg.1, xg.2, xg.3));
+        assert!(parse_tuning("data_guard_gr").is_err());
     }
 
     #[test]

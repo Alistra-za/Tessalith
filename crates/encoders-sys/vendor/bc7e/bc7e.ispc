@@ -19,14 +19,18 @@
 //   other p-bits.
 // - XC: exact constants. When bit c of bc7e_compress_block_params::m_exact_mask is set (R, G or B; 0 by default) and
 //   a subset's channel c is 0 on every texel, or 255 on every texel, a solution that does not decode it exactly at
-//   every texel scores 2^60 and a one-colour p-bit choice that cannot hit a 0 or 255 is skipped, so a solution that
-//   keeps the constant wins whenever the search finds one.
+//   every texel pays a penalty above any real error, and a one-colour candidate takes the p-bits whose entries lose
+//   the least, so a solution that keeps the constant wins whenever the search finds one.
 //   With exact opaque on, mode 6's one-colour p loop never leaves its forced p-bits: alpha 255 wins (BC7-C4).
-//   A one-colour candidate whose p loop finds no p that keeps a masked constant also scores 2^60.
 // - Q3: evaluate_solution picks mode 6's alpha-block indices in the weighted metric when the four linear weights are
 //   not all equal (all sixteen indices); equal weights run the unchanged code.
 // - DG: four float divisions by a flat subset's zero spread are guarded; the result equals what the clamp gave, so no
 //   byte changes.
+// - XC priority: when guarded channels cannot all be kept, a solution keeps the higher one, G before B before R,
+//   across every subset (graded penalties spaced by 4, per lost channel and subset, added to the real error so the
+//   closest solution wins within a tier: solutions that lose their channels in the same number of subsets); the
+//   one-colour packers charge only channels flat across the subset; exact opaque's alpha stays above them through
+//   its forced p-bits.
 // Patch 0005 changes BC7 bytes; the byte-identity sentences of patches 0001 and 0002 above describe those patches alone.
 // bc7e.ispc - Fast high quality SIMD BC7 encoder
 // Copyright (C) 2018-2020 Binomial LLC, All rights reserved. Apache 2.0 license - see LICENSE.
@@ -909,14 +913,27 @@ static inline color_quad_i scale_color(const varying color_quad_i *uniform pC, c
 	return results;
 }
 
-// sdc patch 0005 (XC): exact constants. A solution that does not keep a flagged constant scores XC_BAD: a sum over
-// three subsets cannot wrap, and it is never kept over one that does keep it.
-#define XC_BAD (((uint64_t)1) << 60)
+// sdc patch 0005 (XC): exact constants with a priority. A solution that loses flagged constants scores the sum of
+// XC_LOST_<channel> over the lost channels and subsets, G before B before R. The tiers are spaced by 4, so losing a
+// higher channel in one subset costs more than losing every lower channel in all three subsets (3 x 2^54 < 2^56,
+// 3 x (2^54 + 2^56) < 2^58), no sum wraps, and every penalty exceeds any real error (below 2^40). Round 6 (A1): the
+// penalty is added to the solution's real error, so the closest solution wins within a tier; three subsets of
+// errors below 2^40 cannot cross a tier (3 x 2^54 + 3 x 2^40 < 2^56, 3 x (2^54 + 2^56) + 3 x 2^40 < 2^58).
+#define XC_LOST_R (((uint64_t)1) << 54)
+#define XC_LOST_B (((uint64_t)1) << 56)
+#define XC_LOST_G (((uint64_t)1) << 58)
 
-// sdc patch 0005 (XC): a one-colour table entry (error e) for channel c's value v is allowed unless c is masked, v is
-// 0 or 255 and the entry does not reproduce it (e != 0).
-#define XC_ONE_OK(mask, c, v, e) ((((mask) & (1 << (c))) == 0) || (((v) != 0) && ((v) != 255)) || ((e) == 0))
-#define XC_ONE_COLOR_OK(mask, r, g, b, er, eg, eb) (((mask) == 0) || (XC_ONE_OK(mask, 0, r, er) && XC_ONE_OK(mask, 1, g, eg) && XC_ONE_OK(mask, 2, b, eb)))
+// sdc patch 0005 (XC): the penalty of a set of lost channels (bit c = channel c).
+static inline uint64_t xc_penalty(uint32_t lost)
+{
+	return ((((lost & 1) != 0) ? XC_LOST_R : (uint64_t)0) + (((lost & 2) != 0) ? XC_LOST_G : (uint64_t)0) + (((lost & 4) != 0) ? XC_LOST_B : (uint64_t)0));
+}
+
+// sdc patch 0005 (XC): a one-colour table entry (error e) loses channel c when c is flagged in the subset's
+// m_exact_const (0 or 255 on every texel, A3) and the entry does not reproduce it (e != 0). The flags, not the packed
+// value: a mean that rounds to 0 or 255 is not a source constant.
+#define XC_FLAG_LOST(flags, c, e) (((((flags) & (1 << (c))) != 0) && ((e) != 0)) ? (uint32_t)(1 << (c)) : (uint32_t)0)
+#define XC_FLAG_COLOR_LOST(flags, er, eg, eb) (XC_FLAG_LOST(flags, 0, er) | XC_FLAG_LOST(flags, 1, eg) | XC_FLAG_LOST(flags, 2, eb))
 
 // sdc patch 0005 (XC): the masked channels that are 0 on every texel, or 255 on every texel, of the subset.
 static inline uint32_t xc_constant_channels(uniform uint32_t mask, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
@@ -938,17 +955,18 @@ static inline uint32_t xc_constant_channels(uniform uint32_t mask, uint32_t num_
 	return flags;
 }
 
-// sdc patch 0005 (XC): whether every flagged channel decodes to its constant at every texel, from the endpoints as the
-// decoder expands them (pMin, pMax) and the selectors.
-static inline bool xc_decodes_exact(const uniform color_cell_compressor_params *uniform pParams, const varying color_quad_i *uniform pMin, const varying color_quad_i *uniform pMax,
+// sdc patch 0005 (XC): the flagged channels that do not decode to their constant at every texel (bit c = channel c),
+// from the endpoints as the decoder expands them (pMin, pMax) and the selectors.
+static inline uint32_t xc_lost_channels(const uniform color_cell_compressor_params *uniform pParams, const varying color_quad_i *uniform pMin, const varying color_quad_i *uniform pMax,
 	uint32_t flags, const varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
 {
-	bool ok = true;
+	uint32_t lost = 0;
 	for (uniform uint32_t c = 0; c < 3; c++)
 	{
 		if ((flags & (1 << c)) != 0)
 		{
 			const int32_t v0 = pPixels[0].m_c[c];
+			bool ok = true;
 			for (uniform uint32_t i = 0; i < 16; i++)
 			{
 				if (i < num_pixels)
@@ -960,9 +978,11 @@ static inline bool xc_decodes_exact(const uniform color_cell_compressor_params *
 					ok = ok && (d == v0);
 				}
 			}
+			if (!ok)
+				lost |= (uint32_t)(1 << c);
 		}
 	}
-	return ok;
+	return lost;
 }
 
 static const float pr_weight = (.5f / (1.0f - .2126f)) * (.5f / (1.0f - .2126f));
@@ -1032,15 +1052,23 @@ static uint64_t pack_mode1_to_one_color(const uniform color_cell_compressor_para
 {
 	uint32_t best_err = UINT_MAX;
 	uint32_t best_p = 0;
+	uint64_t best_pen = UINT64_MAX; // sdc patch 0005 (XC): the penalty of best_p's lost masked constants
+	uint32_t xc_flags = 0; // sdc patch 0005 (XC): A3, the subset's flagged constants (set only when the mask is)
+	if (pParams->m_exact_mask != 0)
+		xc_flags = pResults->m_exact_const;
 
 	for (uniform uint32_t p = 0; p < 2; p++)
 	{
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_1_optimal_endpoints[r][p].m_error + g_bc7_mode_1_optimal_endpoints[g][p].m_error + g_bc7_mode_1_optimal_endpoints[b][p].m_error;
-		// sdc patch 0005 (XC): with the mask set, skip a p whose entry misses a masked 0 or 255
+		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
+		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		if ((err < best_err) && XC_ONE_COLOR_OK(pParams->m_exact_mask, r, g, b, g_bc7_mode_1_optimal_endpoints[r][p].m_error, g_bc7_mode_1_optimal_endpoints[g][p].m_error, g_bc7_mode_1_optimal_endpoints[b][p].m_error))
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_1_optimal_endpoints[r][p].m_error, g_bc7_mode_1_optimal_endpoints[g][p].m_error, g_bc7_mode_1_optimal_endpoints[b][p].m_error);
+		const uint64_t pen = xc_penalty(lost);
+		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
+			best_pen = pen;
 			best_err = err;
 			best_p = p;
 		}
@@ -1079,12 +1107,12 @@ static uint64_t pack_mode1_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgb(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
-	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
-	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	// sdc patch 0005 (XC): no p keeps every masked constant (only with the mask set): the candidate scores the
+	// penalty of what its p loses plus its weighted error (A1), so it never beats a solution that keeps more (T5C-4)
 	if (pParams->m_exact_mask != 0)
 	{
-		if (best_err == UINT_MAX)
-			total_err = XC_BAD;
+		if (best_pen != 0)
+			total_err += best_pen;
 	}
 
 	pResults->m_best_overall_err = total_err;
@@ -1148,15 +1176,23 @@ static uint64_t pack_mode0_to_one_color(const uniform color_cell_compressor_para
 {
 	uint32_t best_err = UINT_MAX;
 	uint32_t best_p = 0;
+	uint64_t best_pen = UINT64_MAX; // sdc patch 0005 (XC): the penalty of best_p's lost masked constants
+	uint32_t xc_flags = 0; // sdc patch 0005 (XC): A3, the subset's flagged constants (set only when the mask is)
+	if (pParams->m_exact_mask != 0)
+		xc_flags = pResults->m_exact_const;
 
 	for (uniform uint32_t p = 0; p < 4; p++)
 	{
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_0_optimal_endpoints[r][p >> 1][p & 1].m_error + g_bc7_mode_0_optimal_endpoints[g][p >> 1][p & 1].m_error + g_bc7_mode_0_optimal_endpoints[b][p >> 1][p & 1].m_error;
-		// sdc patch 0005 (XC): with the mask set, skip a p whose entry misses a masked 0 or 255
+		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
+		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		if ((err < best_err) && XC_ONE_COLOR_OK(pParams->m_exact_mask, r, g, b, g_bc7_mode_0_optimal_endpoints[r][p >> 1][p & 1].m_error, g_bc7_mode_0_optimal_endpoints[g][p >> 1][p & 1].m_error, g_bc7_mode_0_optimal_endpoints[b][p >> 1][p & 1].m_error))
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_0_optimal_endpoints[r][p >> 1][p & 1].m_error, g_bc7_mode_0_optimal_endpoints[g][p >> 1][p & 1].m_error, g_bc7_mode_0_optimal_endpoints[b][p >> 1][p & 1].m_error);
+		const uint64_t pen = xc_penalty(lost);
+		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
+			best_pen = pen;
 			best_err = err;
 			best_p = p;
 		}
@@ -1197,12 +1233,12 @@ static uint64_t pack_mode0_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgb(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
-	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
-	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	// sdc patch 0005 (XC): no p keeps every masked constant (only with the mask set): the candidate scores the
+	// penalty of what its p loses plus its weighted error (A1), so it never beats a solution that keeps more (T5C-4)
 	if (pParams->m_exact_mask != 0)
 	{
-		if (best_err == UINT_MAX)
-			total_err = XC_BAD;
+		if (best_pen != 0)
+			total_err += best_pen;
 	}
 
 	pResults->m_best_overall_err = total_err;
@@ -1217,6 +1253,10 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 	// sdc patch 0005 (XC): start inside the loop's range, so a guard that rejects every p never leaves the forced
 	// p-bits of exact opaque (alpha 255 wins over an exact constant, ruling BC7-C4)
 	uint32_t best_p = pParams->m_force_pbit1 ? 3 : 0;
+	uint64_t best_pen = UINT64_MAX; // sdc patch 0005 (XC): the penalty of best_p's lost masked constants
+	uint32_t xc_flags = 0; // sdc patch 0005 (XC): A3, the subset's flagged constants (set only when the mask is)
+	if (pParams->m_exact_mask != 0)
+		xc_flags = pResults->m_exact_const;
 
 	for (uniform uint32_t p = (pParams->m_force_pbit1 ? 3 : 0); p < 4; p++)
 	{
@@ -1224,10 +1264,14 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error;
-		// sdc patch 0005 (XC): with the mask set, skip a p whose entry misses a masked 0 or 255
+		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
+		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		if ((err < best_err) && XC_ONE_COLOR_OK(pParams->m_exact_mask, r, g, b, g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error))
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error);
+		const uint64_t pen = xc_penalty(lost);
+		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
+			best_pen = pen;
 			best_err = err;
 			best_p = p;
 		}
@@ -1267,12 +1311,12 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgba(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
-	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
-	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	// sdc patch 0005 (XC): no p keeps every masked constant (only with the mask set): the candidate scores the
+	// penalty of what its p loses plus its weighted error (A1), so it never beats a solution that keeps more (T5C-4)
 	if (pParams->m_exact_mask != 0)
 	{
-		if (best_err == UINT_MAX)
-			total_err = XC_BAD;
+		if (best_pen != 0)
+			total_err += best_pen;
 	}
 
 	pResults->m_best_overall_err = total_err;
@@ -1285,6 +1329,10 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 {
 	uint32_t best_err = UINT_MAX;
 	uint32_t best_p = 0;
+	uint64_t best_pen = UINT64_MAX; // sdc patch 0005 (XC): the penalty of best_p's lost masked constants
+	uint32_t xc_flags = 0; // sdc patch 0005 (XC): A3, the subset's flagged constants (set only when the mask is)
+	if (pParams->m_exact_mask != 0)
+		xc_flags = pResults->m_exact_const;
 
 	for (uniform uint32_t p = 0; p < 4; p++)
 	{
@@ -1292,10 +1340,14 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error;
-		// sdc patch 0005 (XC): with the mask set, skip a p whose entry misses a masked 0 or 255
+		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
+		// then the smallest error; `<` on each, so the first such p wins a tie (mask 0: every penalty is 0)
 #pragma ignore warning(perf)
-		if ((err < best_err) && XC_ONE_COLOR_OK(pParams->m_exact_mask, r, g, b, g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error))
+		const uint32_t lost = XC_FLAG_COLOR_LOST(xc_flags, g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error, g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error);
+		const uint64_t pen = xc_penalty(lost);
+		if ((pen < best_pen) || ((pen == best_pen) && (err < best_err)))
 		{
+			best_pen = pen;
 			best_err = err;
 			best_p = p;
 		}
@@ -1338,12 +1390,12 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 	for (uniform uint32_t i = 0; i < num_pixels; i++)
 		total_err += compute_color_distance_rgba(&p, &pPixels[i], pParams->m_perceptual, pParams->m_weights);
 
-	// sdc patch 0005 (XC): the guard rejected every p (only with the mask set), so this candidate cannot keep a
-	// masked constant: it scores XC_BAD and never beats one that does (T5C-4)
+	// sdc patch 0005 (XC): no p keeps every masked constant (only with the mask set): the candidate scores the
+	// penalty of what its p loses plus its weighted error (A1), so it never beats a solution that keeps more (T5C-4)
 	if (pParams->m_exact_mask != 0)
 	{
-		if (best_err == UINT_MAX)
-			total_err = XC_BAD;
+		if (best_pen != 0)
+			total_err += best_pen;
 	}
 
 	pResults->m_best_overall_err = total_err;
@@ -1915,14 +1967,16 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 
 	uint64_t total_err = (int64)total_errf;
 
-	// sdc patch 0005 (XC): a solution that does not decode a flagged constant exactly scores XC_BAD. The mask test is
-	// uniform (mask 0: one branch); the flags are per lane, so the check runs, masked, when any lane's subset is flagged.
+	// sdc patch 0005 (XC): a solution that does not decode flagged constants exactly scores their penalty plus its real
+	// error (A1: added in uint64_t after the cast, so the closest solution wins within a tier). The mask test is uniform
+	// (mask 0: one branch); the flags are per lane, so the check runs, masked, when any lane's subset is flagged.
 	if (pParams->m_exact_mask != 0)
 	{
 		if (pResults->m_exact_const != 0)
 		{
-			if (!xc_decodes_exact(pParams, &actualMinColor, &actualMaxColor, pResults->m_exact_const, pResults->m_pSelectors_temp, num_pixels, pPixels))
-				total_err = XC_BAD;
+			const uint32_t lost = xc_lost_channels(pParams, &actualMinColor, &actualMaxColor, pResults->m_exact_const, pResults->m_pSelectors_temp, num_pixels, pPixels);
+			if (lost != 0)
+				total_err += xc_penalty(lost); // sdc patch 0005 (XC): A1
 		}
 	}
 
@@ -2658,6 +2712,8 @@ static uint64_t color_cell_compression(uniform uint32_t mode, const uniform colo
 		avg_results.m_best_overall_err = pResults->m_best_overall_err;
 		avg_results.m_pSelectors = pResults->m_pSelectors;
 		avg_results.m_pSelectors_temp = pResults->m_pSelectors_temp;
+		if (pParams->m_exact_mask != 0)
+			avg_results.m_exact_const = pResults->m_exact_const; // sdc patch 0005 (XC): A3, the subset's flags for the packers
 								 
 		const uint32_t r = (int)(.5f + meanColor.m_c[0] * 255.0f);
 		const uint32_t g = (int)(.5f + meanColor.m_c[1] * 255.0f);
