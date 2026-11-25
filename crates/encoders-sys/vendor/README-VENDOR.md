@@ -129,8 +129,8 @@ ISPC TC patch 0006 "BC6H speed" (`ispctc/patches/0006-bc6h-speed.patch`, 2026-11
 0003 and 0004. It is produced with `git diff --output=<patch> 8f98807a -- crates/encoders-sys/vendor/ispctc/kernel.ispc`
 (the patch file is always regenerated whole, never edited by hand), and it is built with both compilers as before. BC6H
 bytes do not change: after each item below, every pin, the random strips and the 22 measured images on SSE2, AVX2 and
-AVX-512 hash equal. R2: `ep_quant_bc6h` and `ep_dequant_bc6h` loop over the three channels of each endpoint (index `i *
-4 + p`) and no longer read or write slots 3 and 7 (11 and 15 with two pairs); `block_pca_axis` scales only the
+AVX-512 hash equal. R2: `ep_quant_bc6h` and `ep_dequant_bc6h` loop over the three channels of each endpoint (index
+`i * 4 + p`) and no longer read or write slots 3 and 7 (11 and 15 with two pairs); `block_pca_axis` scales only the
 covariance entries `covar_from_stats` wrote and adds its epsilon to `covar[9]` only for four channels; `get_pca_bound`
 scales only those entries (Note LT). S2's cache copy and `best_qep` still copy the unused slots, which changes no value.
 Zero-div guard: `block_quant` forms `div = max(div, 1.0f)` before `proj /= div`. Every BC6H endpoint is an integer UF16
@@ -146,8 +146,8 @@ per block at the end of `bc6h_setup` and once more in `bc6h_peak_retry` for a li
 same list before (six times at Slow, Veryslow and VeryslowPeak, twice at Basic, once at Fast). The `(bound, partition
 id)` order and `partial_sort_list` are unchanged. S2 pca-once: `bc6h_block_cache` also fills `state->pca_ep_1p[8]` (the
 one-region `block_segment_core` fit, at every level, in `bc6h_setup` and again for a lifted lane in `bc6h_peak_retry`)
-and, for each of the `n = bc6h_2p_depth(state) = min(fastSkipTreshold, 32)` ranked partitions k, `state->pca_ep_2p[k *
-16 ..]` (both regions' fits, when `fastSkipTreshold > 0`); the one helper gives the fill and `bc6h_enc_2p` the same
+and, for each of the `n = bc6h_2p_depth(state) = min(fastSkipTreshold, 32)` ranked partitions k,
+`state->pca_ep_2p[k * 16 ..]` (both regions' fits, when `fastSkipTreshold > 0`); the one helper gives the fill and `bc6h_enc_2p` the same
 depth. `bc6h_enc_2p_part_fast` (given the rank) and `bc6h_enc_1p` copy those floats into their local `ep` before
 `ep_quant_dequant_bc6h`, which overwrites it, so the cache stays immutable. The fit depends on the block alone, so each
 mode computed the same endpoints before: 2n fits per two-region mode (six modes at Slow and above, two at Basic, one at
@@ -166,8 +166,8 @@ patch (Note LT). Both attempts changed `encode_versions`' `hdr_sky.dds`. The fir
 and the random strips equal. The second (a per-texel division) changed some of the 22 measured images at every level,
 from the one-region path at Veryfast on, on AVX2. S4 prune: at Slow, Veryslow and VeryslowPeak, `bc6h_test_mode`
 computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum over the 16 texels and 3 channels
-of each texel channel's squared distance to the window `[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p],
-epb)]`, unpacked at the mode's endpoint bits. Every endpoint a candidate uses is clamped to `qbounds` before it is
+of each texel channel's squared distance to the window
+`[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p], epb)]`, unpacked at the mode's endpoint bits. Every endpoint a candidate uses is clamped to `qbounds` before it is
 unpacked and each decoded value lies between its two endpoints, so the bound is below every candidate's error. A lane
 skips the mode's encode when the bound exceeds `best_err * (1 + 1e-4) + 1` (a candidate replaces the best only on a
 strictly lower error; the slack covers float summation order), never in a guarded block (peak mode with `peak_k >= 0`,

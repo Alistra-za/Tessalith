@@ -28,11 +28,11 @@
 //! replicated in f32 and checked against the encoded modes, and a mismatch away from a threshold is an error unless it
 //! is an `idx_ties` block: the output is the neighbour mode of the pick's family because the two widest spans are
 //! within 1e-3 of each other and the kernel's fast-math rounding chose the other channel as `max_span_idx`),
-//! the guarded (peak) blocks (Q6, and the peak retry's lift), and the counts of astra #2, #5 and #6. `--gate` names the two-region gate
-//! the replication treats as the kernel's; `--centre` the kernel's UF16 conversion `(h + 0.5) / 31 * 64` instead of
-//! `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with D16's on the source spans converted
-//! as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the lift count and the astra #6 proxy
-//! do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` stops with an error otherwise).
+//! the guarded (peak) blocks (Q6, and the peak retry's lift), and the counts of astra #2, #5 and #6. `--gate` names
+//! the two-region gate the replication treats as the kernel's; `--centre` the kernel's UF16 conversion
+//! `(h + 0.5) / 31 * 64` instead of `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with
+//! D16's on the source spans converted as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the
+//! lift count and the astra #6 proxy do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` stops with an error otherwise).
 use encoders_sys::{bc6h_compress_rows_on, Bc6hLevel, IspcTarget};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -593,7 +593,8 @@ const SKIPS: [u8; 32] = [
 enum Gate {
     /// `max_span * margin > span` rejects.
     Today,
-    /// The proposed D16 gate: modes 2 and 6 pass when `max_span * margin <= 2 * span` and `second_span * margin <= span`.
+    /// The proposed D16 gate: modes 2 and 6 pass when `max_span * margin <= 2 * span` and
+    /// `second_span * margin <= span`.
     D16,
 }
 
