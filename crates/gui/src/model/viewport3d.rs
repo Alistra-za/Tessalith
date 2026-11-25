@@ -835,8 +835,9 @@ pub struct Viewport3d {
     /// A file this panel decoded and took (chosen here, or the saved one): the app saves its path and hands it to the
     /// other panel (`take_accepted_hdri`).
     hdri_accepted: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
-    /// Background actions taken here (`background_action`), and that count and the mode when the latest chosen file was
-    /// asked for: the file switches the background only if neither moved since.
+    /// Background actions taken here (`background_action`); and, while the latest decode asked for is a pick that has
+    /// not landed, that count and the mode when it was asked for: it switches the background only if neither moved
+    /// since, and a file the other panel takes meanwhile does not drop it (`adopt_hdri`).
     bg_actions: u64,
     hdri_choice: Option<(u64, BgMode)>,
     /// This panel's own file dialog; its result is taken in `poll`.
@@ -1318,9 +1319,10 @@ impl Viewport3d {
         self.hdri_out > 0
     }
 
-    /// Decodes the file known by name only ([`Viewport3d::load_hdri`], not chosen).
+    /// Decodes the file known by name only ([`Viewport3d::load_hdri`], not chosen). It keeps its name meanwhile (the
+    /// radio only switches, Change… shows); a failure forgets it.
     pub fn decode_saved_hdri(&mut self) {
-        if let Some(p) = self.hdri_saved.take() {
+        if let Some(p) = self.hdri_saved.clone() {
             self.load_hdri(p, false);
         }
     }
@@ -1339,9 +1341,8 @@ impl Viewport3d {
     pub fn load_hdri(&mut self, path: PathBuf, choose: bool) {
         self.hdri_want += 1;
         self.hdri_out += 1;
-        if choose {
-            self.hdri_choice = Some((self.bg_actions, self.look.mode));
-        }
+        // Some while the latest request is a pick and has not landed.
+        self.hdri_choice = choose.then_some((self.bg_actions, self.look.mode));
         let seq = self.hdri_want;
         let tx = self.tx.clone();
         let spawned = std::thread::Builder::new()
@@ -1377,10 +1378,13 @@ impl Viewport3d {
         self.hdri_accepted.take()
     }
 
-    /// The file the other panel took, decoded there: this panel shows it too, with its mode unchanged. A decode of this
-    /// panel's still out was asked for before it and is dropped when it lands.
+    /// The file the other panel took, decoded there: this panel shows it too, with its mode unchanged. A decode of the
+    /// saved file still out here is dropped when it lands; a file the user picked here and still decoding is not: when
+    /// it lands it is taken and handed over in turn.
     pub fn adopt_hdri(&mut self, path: PathBuf, env: Arc<render3d::hdri::Environment>) {
-        self.hdri_want += 1;
+        if self.hdri_choice.is_none() {
+            self.hdri_want += 1;
+        }
         self.hdri = Some((path, env));
         self.hdri_saved = None;
     }
@@ -1397,10 +1401,11 @@ impl Viewport3d {
         if seq != self.hdri_want {
             return; // a newer file was asked for since
         }
+        let choice = self.hdri_choice.take();
         match result {
             Ok(env) => {
                 // The picker's request is still the latest background choice: nothing since moved the count or the mode.
-                if choose && self.hdri_choice == Some((self.bg_actions, self.look.mode)) {
+                if choose && choice == Some((self.bg_actions, self.look.mode)) {
                     self.look.mode = BgMode::Hdri;
                 }
                 self.hdri = Some((path.clone(), env.clone()));
@@ -1413,6 +1418,10 @@ impl Viewport3d {
                     |n| n.to_string_lossy().into(),
                 );
                 self.notice = Some(format!("HDRI file {name} not used: {e}"));
+                // The saved file that failed is not offered by name any more.
+                if !choose && self.hdri_saved.as_ref() == Some(&path) {
+                    self.hdri_saved = None;
+                }
                 if self.hdri.is_none() && self.look.mode == BgMode::Hdri {
                     self.look.mode = BgMode::Solid;
                 }

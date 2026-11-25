@@ -1029,6 +1029,45 @@ fn a_file_chosen_in_set_3d_is_saved_from_the_frame_set_3d_takes_it() {
     assert!(text.contains("b.hdr") && !text.contains("a.hdr"), "{text}");
 }
 
+/// A pick still decoding in one panel is not dropped when the other panel takes the saved file meanwhile: the saved
+/// file reaches it first, then the pick lands and is what both panels show and what is saved.
+#[test]
+fn a_pick_decoding_in_one_panel_survives_the_other_taking_the_saved_file() {
+    let d = tempfile::tempdir().unwrap();
+    let (a, b) = (hdr_file(d.path(), "a.hdr"), hdr_file(d.path(), "b.hdr"));
+    let mut app = hdri_app(d.path(), &a, "solid");
+    let ctx = egui::Context::default();
+    let t0 = Instant::now();
+    app.sync_layout_at(&ctx, t0);
+    // Meshes: the user picks B (its decode is out, Meshes not polled yet). Set 3D decodes the saved A meanwhile.
+    app.meshes.v3.load_hdri(b.clone(), true);
+    app.state.set3d.v3.look.mode = sdc_gui::model::viewport3d::BgMode::Hdri;
+    app.state.set3d.v3.decode_saved_hdri();
+    let t = Instant::now();
+    while app.state.set3d.v3.hdri_file() != Some(a.as_path()) || app.state.set3d.v3.busy() {
+        app.state.set3d.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "A in Set 3D");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    // Now the pick lands.
+    let t = Instant::now();
+    while app.meshes.v3.busy() {
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "B decoded");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.route_3d(&ctx);
+    app.sync_layout_at(&ctx, t0 + Duration::from_secs(1));
+    assert_eq!(
+        app.meshes.v3.hdri_file(),
+        Some(b.as_path()),
+        "the pick stands"
+    );
+    assert_eq!(app.state.set3d.v3.hdri_file(), Some(b.as_path()));
+    assert_eq!(app.model.settings.layout.hdri_file, Some(b));
+}
+
 /// Final review: a saved file is not decoded while neither panel shows the HDRI background (its name shows), and
 /// once one does it is decoded once: the other panel holds the same environment.
 #[test]

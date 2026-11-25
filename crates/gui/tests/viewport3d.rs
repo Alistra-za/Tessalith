@@ -1353,6 +1353,36 @@ fn a_pick_that_lands_after_another_background_choice_keeps_that_choice() {
     }
 }
 
+/// The saved file keeps its name (and with it the switch-only radio and Change…) while it decodes; a saved file that
+/// fails leaves no name behind.
+#[test]
+fn a_saved_file_keeps_its_name_while_it_decodes() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = hdr_file(dir.path(), "a.hdr", 128, 64);
+    let mut v = Viewport3d::with_state(V3State::Ready);
+    v.set_saved_hdri(a.clone());
+    v.look.mode = v3::BgMode::Hdri;
+    v.decode_saved_hdri();
+    assert_eq!(v.hdri_file(), Some(a.as_path()), "named while it decodes");
+    assert!(!v.wants_saved_hdri(), "asked once");
+    poll_until(&mut v, "decoded", |v| v.hdri_env().is_some());
+    assert_eq!(v.hdri_file(), Some(a.as_path()));
+    let gone = dir.path().join("gone.hdr");
+    let mut v = Viewport3d::with_state(V3State::Ready);
+    v.set_saved_hdri(gone.clone());
+    v.look.mode = v3::BgMode::Hdri;
+    v.decode_saved_hdri();
+    assert_eq!(v.hdri_file(), Some(gone.as_path()));
+    poll_until(&mut v, "the failure", |v| v.notice.is_some());
+    assert_eq!(
+        v.hdri_file(),
+        None,
+        "a failed saved file is not offered again"
+    );
+    assert!(!v.wants_saved_hdri());
+    assert_eq!(v.look.mode, v3::BgMode::Solid);
+}
+
 /// A file dialog that stays open until the test drops the sender, then answers "cancel".
 struct Held(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
 
