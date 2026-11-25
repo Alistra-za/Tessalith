@@ -14,13 +14,13 @@
 //! 2026-11-25 when exact opaque became the channel guard's A (Note LR, LR17), and the veryfast and fast rows without
 //! perceptual weighting again that day when mode 4 gained the constant-scalar code pair (LR22; the smooth image's B is
 //! 128 throughout), and every row without perceptual weighting again that day, from veryfast up, with `RECORDED_S1`,
-//! when patch 0005's L16 (outcome D, the direct form) made every linear call rank as the same call with every weight x16
-//! would (LR15), over four deterministic 64x64 images (opaque colour, cutout, smooth alpha, normal-like) at every
+//! when patch 0005's L16 (outcome D, the direct form) made every linear call rank as the same call with every weight
+//! x16 would (LR15), over four deterministic 64x64 images (opaque colour, cutout, smooth alpha, normal-like) at every
 //! level, with and without perceptual weighting and exact opaque. `RECORDED_S1` pins a fifth image built to reach patch
 //! 0005's S1 shortcut. `X16_RECORDED` holds the same four images' hashes of the tuned x16 calls, recorded once before
-//! L16 and now pinning the plain and `[1, 1, 1, N]` calls (`linear_calls_write_the_x16_bytes`). The first recording (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and
-//! never matched a Windows machine. Run with `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded
-//! change is intended (needs a DECISIONS note).
+//! L16 and now pinning the plain and `[1, 1, 1, N]` calls (`linear_calls_write_the_x16_bytes`). The first recording
+//! (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and never matched a Windows machine. Run with
+//! `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change is intended (needs a DECISIONS note).
 
 use encoders_sys::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
@@ -685,13 +685,14 @@ fn s1_fixture_is_pinned() {
     );
 }
 
-/// [target][level][exact_opaque][N] of the tuned call with weights `[16, 16, 16, 16 * N]` (N = 1, 4, 16 and 64, perceptual
-/// off) over the four images of `RECORDED`, hashed as `RECORDED` is; the target rows as in `RECORDED`. Recorded once,
-/// from those calls on the objects before patch 0005's L16 (2026-11-25), and never again from them: since L16 a linear
-/// call ranks as the same call with every weight x16 would, so on this kernel those calls rank at x256. The table is the
-/// recorded evidence that L16 writes x16's bytes; its N = 1 rows equal `RECORDED`'s non-perceptual rows by design. A later
-/// kernel change that moves these bytes re-records it from the calls `linear_calls_write_the_x16_bytes` asserts (the
-/// plain call and `[1, 1, 1, N]`, in its record mode), and the table is then a plain pin (Note LR, LR5, LR15).
+/// [target][level][exact_opaque][N] of the tuned call with weights `[16, 16, 16, 16 * N]` (N = 1, 4, 16 and 64,
+/// perceptual off) over the four images of `RECORDED`, hashed as `RECORDED` is; the target rows as in `RECORDED`.
+/// Recorded once, from those calls on the objects before patch 0005's L16 (2026-11-25), and never again from them:
+/// since L16 a linear call ranks as the same call with every weight x16 would, so on this kernel those calls rank at
+/// x256. The table is the recorded evidence that L16 writes x16's bytes; its N = 1 rows equal `RECORDED`'s
+/// non-perceptual rows by design. A later kernel change that moves these bytes re-records it from the calls
+/// `linear_calls_write_the_x16_bytes` asserts (the plain call and `[1, 1, 1, N]`, in its record mode), and the table is
+/// then a plain pin (Note LR, LR5, LR15).
 const X16_RECORDED: [[[[&str; 4]; 2]; 8]; 3] = [
     [
         [
@@ -1038,11 +1039,12 @@ const X16_RECORDED: [[[[&str; 4]; 2]; 8]; 3] = [
 ];
 
 /// Patch 0005, L16 (outcome D, the direct form): a linear call ranks its errors as the same call with every weight x16
-/// would. Scaling every integer weight by 16 commutes with every float step, so x16 changes bytes at two sites only: the
-/// uber threshold, which a linear call now compares at 1/16, and the partition estimators' cast, which now takes 16 times
-/// their float error. On every path, every level and exact opaque off and on, the plain call writes `X16_RECORDED`'s
-/// N = 1 row (the old `[16, 16, 16, 16]` call) and the tuned `[1, 1, 1, N]` its row for N = 4, 16 and 64 (the old
-/// `[16, 16, 16, 16 * N]`). Before L16 those calls ranked at x1 and wrote other bytes from veryfast up (Note LR, LR15).
+/// would. Scaling every integer weight by 16 commutes with every float step, so x16 changes bytes at two sites only:
+/// the uber threshold, which a linear call now compares at 1/16, and the partition estimators' cast, which now takes 16
+/// times their float error. On every path, every level and exact opaque off and on, the plain call writes
+/// `X16_RECORDED`'s N = 1 row (the old `[16, 16, 16, 16]` call) and the tuned `[1, 1, 1, N]` its row for N = 4, 16 and
+/// 64 (the old `[16, 16, 16, 16 * N]`). Before L16 those calls ranked at x1 and wrote other bytes from veryfast up
+/// (Note LR, LR15).
 #[test]
 fn linear_calls_write_the_x16_bytes() {
     if encoders_sys::skip_byte_pins() {
@@ -1069,7 +1071,7 @@ fn linear_calls_write_the_x16_bytes() {
                         hash_by(|px, out| bc7e_compress_blocks_tuned_on(px, out, p, tune, target))
                     };
                     if record {
-                        println!("X16 {target:?} {li} {exact} {n} {got}");
+                        println!("X16 {target:?} {li} {level:?} {exact} {n} {got}");
                     }
                     if got == X16_RECORDED[row(target)][li][exact as usize][ni] {
                         equal += 1;

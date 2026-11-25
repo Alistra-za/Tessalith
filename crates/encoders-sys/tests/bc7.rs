@@ -295,9 +295,10 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 /// solid-beside-noisy and near-solid blocks (its solid blocks take bc7e's mode 5 solid path). Raw bytes, 64-block
 /// calls, the data maps' tune (T_data, exact G) with weights `[1; 4]` passed and with weights unset, the same ranking
 /// since L16 (both rank as x16, so the two rows are now duplicates: the first is the x16 row re-based, the second how
-/// the engine calls it), every level, exact opaque off and on, every path. Without the one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque
-/// on, alpha decodes 255 after the post-fix in every cell, and wins over G where both cannot hold (ruling BC7-C4):
-/// mode 6's forced p-bits cannot decode G 0, so G 0 is not asserted in `exact_g_waived`'s cells (Note LR, LR12).
+/// the engine calls it), every level, exact opaque off and on, every path. Without the one-colour p guard only
+/// ultrafast, veryfast and fast fail, so every level runs. With exact opaque on, alpha decodes 255 after the post-fix
+/// in every cell, and wins over G where both cannot hold (ruling BC7-C4): mode 6's forced p-bits cannot decode G 0, so
+/// G 0 is not asserted in `exact_g_waived`'s cells (Note LR, LR12).
 #[test]
 fn exact_constants_keep_a_flat_channel() {
     use encoders_sys::bc7_fixup::force_opaque_rotated;
@@ -1449,11 +1450,11 @@ const PACKER_FLAG_WITNESSES: &[(usize, Bc7Level)] = &[
 /// Round 6 (A3): the one-colour packers charge a guarded channel only where the subset's source holds it constant, not
 /// where the packed value is 0 or 255. Where A3c's near-255 G is constant in no subset of the unguarded output's
 /// partition (asserted), that solution pays no penalty and every other one pays at least its own unguarded score, so
-/// guarding G must write the unguarded bytes (weights `[1; 4]`, which since L16 rank as the x16 weights Task 6m2 ran them
-/// with). Keyed on the packed value, the mean
-/// colour's G rounded to 255 was forced and the subset decoded farther from its source. Each witness's unguarded
-/// output must still be mode 0 with a subset packed as one colour from a source that is not one colour (the mean-colour
-/// candidate), so a later kernel cannot pass it by leaving that path (Note LR, LR14).
+/// guarding G must write the unguarded bytes (weights `[1; 4]`, which since L16 rank as the x16 weights Task 6m2 ran
+/// them with). Keyed on the packed value, the mean colour's G rounded to 255 was forced and the subset decoded farther
+/// from its source. Each witness's unguarded output must still be mode 0 with a subset packed as one colour from a
+/// source that is not one colour (the mean-colour candidate), so a later kernel cannot pass it by leaving that path
+/// (Note LR, LR14).
 #[test]
 fn one_colour_packers_key_on_source_constants() {
     let tune = |mask| encoders_sys::Bc7Tune {

@@ -83,8 +83,9 @@ type Tuning = (&'static str, u32, Option<Bc7FlatTolerance>, Option<u8>);
 /// The data maps' flat tolerance, T_data.
 const DATA: Option<Bc7FlatTolerance> = Some(Bc7FlatTolerance::Data);
 
-/// The `--tuning` values. The `x16` names keep scale 1: since patch 0005's L16 the level's weights rank as x16 (Note LR,
-/// LR15), and a scale of 16 would rank at x256.
+/// The `--tuning` values. The `x16` names keep scale 1: since patch 0005's L16 the level's weights rank as x16 (Note
+/// LR, LR15), and a scale of 16 would rank at x256. The scale column is kept, though every value is 1 since L16,
+/// because the names and the earlier run lines and CSVs that `compare` joins on still name the x16 tunings.
 const TUNINGS: [Tuning; 12] = [
     ("default", 1, None, None),
     ("data", 1, DATA, None),
