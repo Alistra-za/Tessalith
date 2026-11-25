@@ -1303,6 +1303,7 @@ void ep_quant_dequant(int qep[], float ep[], uniform int mode, uniform int chann
 ///////////////////////////
 //   pixel quantization
 
+// sdc patch 0007 (S3): BC6H calls the fork bc6h_block_quant below, not this; a fix to either copy belongs in both.
 float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[], uint32 pattern, uniform int channels)
 {
 	float total_err = 0;
@@ -1370,7 +1371,8 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
 	return total_err;
 }
 
-// sdc patch 0007 (S3): block_quant for BC6H (three channels, one or two regions). It loads each region's endpoints once
+// sdc patch 0007 (S3): a fork of block_quant above for BC6H (three channels, one or two regions); a fix to either copy
+// belongs in both (the BC7 kernels keep block_quant, so their bytes do not move). It loads each region's endpoints once
 // and forms each region's reciprocal distance once, after the zero-div guard, where block_quant gathers 12 endpoint
 // values and divides once per texel; the projection multiplies by the reciprocal, which moves the last bit of some
 // projections and so some indices (BC6H bytes change). The rest is block_quant's: the rounding and clamp of q1, the two
@@ -1386,25 +1388,26 @@ float bc6h_block_quant(uint32 qblock[2], float block[64], uniform int bits, floa
 
     float a0[3], b0[3], a1[3], b1[3];
     float div0 = 0;
-    float div1 = 0;
     for (uniform int p = 0; p < 3; p++)
     {
         a0[p] = ep[p];
         b0[p] = ep[4 + p];
         div0 += sq(b0[p] - a0[p]);
     }
+    // as block_quant's zero-div guard: a zero-length segment gives proj = 0 and index 1
+    float rdiv0 = 1.0f / max(div0, 1.0f);
+    float rdiv1 = 0; // formed only for two regions; the one-region path never reads it
     if (pairs == 2)
     {
+        float div1 = 0;
         for (uniform int p = 0; p < 3; p++)
         {
             a1[p] = ep[8 + p];
             b1[p] = ep[12 + p];
             div1 += sq(b1[p] - a1[p]);
         }
+        rdiv1 = 1.0f / max(div1, 1.0f);
     }
-    // as block_quant's zero-div guard: a zero-length segment gives proj = 0 and index 1
-    float rdiv0 = 1.0f / max(div0, 1.0f);
-    float rdiv1 = 1.0f / max(div1, 1.0f);
 
     int pattern_shifted = pattern;
     for (uniform int k = 0; k < 16; k++)
@@ -3023,6 +3026,8 @@ void bc6h_build_qbounds(bc6h_enc_state state[])
 // channel lies inside [lo_p, hi_p] and its squared error is at least this distance.
 // sdc patch 0007 (Q2): bc6h_bracket_collapsed, the other writer of a candidate's codes, clamps its pairs to qbounds
 // too.
+// sdc patch 0007 (S3): BC6H candidates are quantised by bc6h_block_quant, whose decoded value is block_quant's, so the
+// bound holds for it too.
 float bc6h_window_bound(bc6h_enc_state state[])
 {
     float bound = 0;
