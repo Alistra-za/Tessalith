@@ -206,15 +206,15 @@ Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block 
 
 At radius 5, skipping the bound below radius 6 in two shapes, over the search with the bound: two calls of `searched` (the shipped shape; 6 was the probe's threshold and behaves the same at radius 4 and 5 as the shipped 10) 0.933 on base and 0.974 on avx2 for the first channel, 0.939 and 0.982 for the second; one call with the bound picked at run time 0.965 and 0.979, 0.973 and 0.985. A second quiet probe at radius 5: building one bound costs about 236 ns (59 table entries on average, 4.0 ns each), 8 to 9% of the search; the pruning saves 1.0 to 1.4% of it on base and 4.3 to 4.5% on avx2. Radii 6 to 9 were not measured; no engine setting uses them.
 
-`speed.exe --no-ref --rows=bc3,bc4,bc5,bc1-fast,bc3-fast`, 5 runs per round, 3 interleaved rounds, all clean: the build that builds the bound only from radius 10 (`d6d179fc`) over the one before it (`8f98807a`), ratio of the minima over the rounds:
+`speed.exe --no-ref --rows=bc3,bc4,bc5,bc1-fast,bc3-fast`, 5 runs per round, 3 interleaved rounds, all clean: the build that builds the bound only from radius 10 (`d6d179fc`) over the one before it (`8f98807a`), ratio of the minima over the rounds. The rows are those of the default-radius table above (radius 5, alpha cut 128; `bc3-fast` takes the fast colour search), and `bc1-fast` is untouched:
 
-| row | `--path=base` | `--path=avx2` |
+| `speed.exe` row | base | avx2 |
 |---|---|---|
-| bc3 (radius 5, cut 128) | 0.998 | 1.000 |
-| bc4 (radius 5) | 0.930 | 0.975 |
-| bc5 (radius 5) | 0.932 | 0.979 |
-| bc3-fast (fast colour search, alpha radius 5, cut 128) | 0.984 | 1.013 |
-| bc1-fast (untouched) | 1.005 | 1.004 |
+| `bc3` | 0.998 | 1.000 |
+| `bc4` | 0.930 | 0.975 |
+| `bc5` | 0.932 | 0.979 |
+| `bc3-fast` | 0.984 | 1.013 |
+| `bc1-fast` | 1.005 | 1.004 |
 
 Every variant of the probe and every `speed.exe` row wrote the same bytes (every hash equal on both paths and both builds).
 
