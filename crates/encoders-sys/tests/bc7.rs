@@ -758,22 +758,35 @@ const Q3_WITNESSES: [(u32, [u32; 4]); 16] = [
 /// Patch 0005, Q3: with linear weights that are not all equal (a user's alpha weight), mode 6's alpha-block selectors
 /// were chosen by a projection in the unweighted metric and scored on the two indices around it, so a texel could keep
 /// an index the weights rank below another; `evaluate_solution` now scores all sixteen palette entries with the weighted
-/// error. Equal weights run the unchanged code, so every level's default bytes stay. Each witness keeps the weighted
-/// nearest index on every texel at basic and veryslow on every path (Note LR, LR13).
+/// error. Equal weights run the unchanged code, so every level's default bytes stay. Each witness stays mode 6 (a block
+/// that left mode 6 proves nothing, so that fails too) and keeps the weighted nearest index on every texel at basic and
+/// veryslow on every path (Note LR, LR13).
 #[test]
 fn mode6_alpha_selectors_follow_the_weights() {
     let mut bad = vec![];
+    let mut checked = 0;
     for level in [Bc7Level::Basic, Bc7Level::Veryslow] {
         let p = Bc7Params { level, ..U5 };
         for target in paths() {
             for (i, w) in Q3_WITNESSES {
                 let out = q3_outputs(&[i], p, w, target)[0];
-                if !mode6_indices_are_weighted_nearest(&out, &q3_candidate(i), w) {
+                checked += 1;
+                if out[0] & 0x7f != 0x40 {
+                    bad.push(format!(
+                        "witness {i} weights {w:?} {level:?} {target:?} left mode 6 (mode {}): re-run \
+                         search_q3_witnesses",
+                        out[0].trailing_zeros()
+                    ));
+                } else if !mode6_indices_are_weighted_nearest(&out, &q3_candidate(i), w) {
                     bad.push(format!("candidate {i} weights {w:?} {level:?} {target:?}"));
                 }
             }
         }
     }
+    println!(
+        "checked {checked} witness encodes (16 witnesses, 2 levels, {} paths)",
+        paths().len()
+    );
     assert!(
         bad.is_empty(),
         "mode-6 texels not at the weighted nearest index:\n{}",
@@ -781,9 +794,10 @@ fn mode6_alpha_selectors_follow_the_weights() {
     );
 }
 
-/// Patch 0005, DG: the four divisions by a subset's spread (`evaluate_solution`'s linear `f`, opaque and alpha, and the
-/// estimators' `scale`) are 0 on a flat subset and are now guarded; the guard gives the index the clamp gave, so no byte
-/// changes. A unit check of that path, not a RED: an opaque block of (100, 100, 100) with one texel (101, 100, 100), and
+/// Patch 0005, DG: four divisions are now guarded: `evaluate_solution`'s linear `f`, opaque and alpha, whose denominator
+/// is 0 whenever the trial's decoded endpoints coincide (a flat subset, and some subsets of low spread), and the
+/// estimators' `scale`, 0 on a flat subset. The numerator is then 0 too, so the guard gives the index the clamp gave and
+/// no byte changes. A unit check of that path, not a RED: an opaque block of (100, 100, 100) with one texel (101, 100, 100), and
 /// an alpha block of two solid halves (texel columns 0-1 and 2-3), linear at basic, decode within 1 of the source in
 /// every channel on every path (Note LR, LR19).
 #[test]

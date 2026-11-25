@@ -79,10 +79,11 @@ the bytes it wrote before). The two fields change the generated header (Note LR)
 weights that are not all equal, `evaluate_solution` scores every palette entry of a mode-6 alpha block with the weighted
 error, where it projected each texel in the unweighted metric and scored the two indices around the projection; equal
 weights run the unchanged code; proof test `tests/bc7.rs` `mode6_alpha_selectors_follow_the_weights`; changes bytes only
-for linear weights that are not all equal (a user's `encoder.bc7_weights = "alphaN"`). DG: four float divisions by a
-subset's spread (`evaluate_solution`'s linear projection factor, opaque and alpha, and the two estimators' `scale`), which
-is 0 on a flat subset, are guarded and give the index the clamp gave; unit check `tests/bc7.rs`
-`flat_subsets_decode_sane`; no byte change. These changes alter BC7 bytes (the
+for linear weights that are not all equal (a user's `encoder.bc7_weights = "alphaN"`). DG: four float divisions are
+guarded: `evaluate_solution`'s linear projection factor, opaque and alpha, whose denominator is 0 whenever the trial's
+decoded endpoints coincide (a flat subset, and some subsets of low spread), and the two estimators' `scale`, whose
+denominator is 0 on a flat subset; the numerator is then 0 too, so the guard gives the index the clamp gave; unit check
+`tests/bc7.rs` `flat_subsets_decode_sane`; no byte change. These changes alter BC7 bytes (the
 pins in `tests/level_identity.rs`, `identity.json` and the measured images). The engine's BC7-only tag `bc7e_fixes`
 hashes this patch file whole, so the file is frozen once merged: a later bc7e change goes in a new patch file with its
 own tag.
