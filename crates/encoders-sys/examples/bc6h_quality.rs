@@ -31,8 +31,8 @@
 //! the guarded (peak) blocks (Q6, Task 5), and the counts of astra #2, #5 and #6. `--gate` names the two-region gate
 //! the replication treats as the kernel's; `--centre` the kernel's UF16 conversion `(h + 0.5) / 31 * 64` instead of
 //! `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with D16's on the source spans converted
-//! as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the lift count and the astra #6 proxy do. Image sides must be multiples
-//! of 4 (the block indexing assumes it; `diag` panics otherwise).
+//! as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the lift count and the astra #6 proxy
+//! do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` panics otherwise).
 use encoders_sys::{bc6h_compress_rows_on, Bc6hLevel, IspcTarget};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -958,15 +958,15 @@ fn diag_image(
     row: &mut ImgRow,
 ) {
     row.image = name.to_string();
-    let encs: Vec<Vec<u8>> = LEVELS
-        .iter()
-        .map(|&l| encode_image(img, l, target))
-        .collect();
     // Block indexing below (`bw`, `bi * 16`) assumes whole blocks, as `decode_image` does.
     assert!(
         img.width.is_multiple_of(4) && img.height.is_multiple_of(4),
         "{name}: diag needs image sides that are multiples of 4"
     );
+    let encs: Vec<Vec<u8>> = LEVELS
+        .iter()
+        .map(|&l| encode_image(img, l, target))
+        .collect();
     let w = img.width as usize;
     let bw = w / 4;
     for by in 0..(img.height as usize / 4) {

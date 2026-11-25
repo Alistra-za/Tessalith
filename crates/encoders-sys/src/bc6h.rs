@@ -69,7 +69,7 @@ pub fn bc6h_compress_rows_on(
     if rows == 0 {
         return;
     }
-    // Before the conversions below: with `rows >= 1` this bound implies each of them fits.
+    // Before the conversions below: with `rows, width >= 1` this bound implies each of them fits.
     assert!(
         strip_offsets_fit_i32(width, rows),
         "strip exceeds the kernel's 32-bit offsets: pass fewer rows"
