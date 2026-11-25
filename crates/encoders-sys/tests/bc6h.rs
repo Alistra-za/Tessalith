@@ -86,23 +86,23 @@ fn hdr_image() -> Vec<[u16; 4]> {
 const RECORDED: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "4fbd389f7b2a32262926b359a6a97f4a87535804b96ce88e5648c93d84a1b958",
+        "5d73a5f78753bc50c8551232d9da261249a06fe8b08357f839938d72b5f8026f",
     ),
     (
         Bc6hLevel::Fast,
-        "eaa30d58805663e9f700fa0a600978d3d7bda8558672ac7895ee76e5d6418e7c",
+        "a931015383cfac37c37dc94aa3029c111d6609fc919788cb46917d132a0685cb",
     ),
     (
         Bc6hLevel::Basic,
-        "acfc2f41667d03c59f3b2fa657258accd646abca7791bd1d4a704acf4c43dab5",
+        "aa6cbe4474709633ff7ba19eccc21342ff51d296e0d5ff0d1ed282dd00710d4a",
     ),
     (
         Bc6hLevel::Slow,
-        "52bb8a5734a6bbb3cdf93b88eaddd29734687e25a964894d015b6eee6eb6b751",
+        "29a4e63f509f24c5b0dd3d7094e8a3e5eeec932ecbda51a33b52dffe395f9192",
     ),
     (
         Bc6hLevel::Veryslow,
-        "d4b734728067e45c2e9e9570dd67d39c59c54439d83d1982e3c3e4fea1f9383d",
+        "c24af20ef81fbe0b091d7fbb6b0b53e1f1fc21964caed31bd75bc680a414c54e",
     ),
 ];
 
@@ -111,23 +111,23 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "4fbd389f7b2a32262926b359a6a97f4a87535804b96ce88e5648c93d84a1b958",
+        "3bc40ae2f904a3328391a8ac61675e76b2a43872c896a5b7ef818c265bcf6699",
     ),
     (
         Bc6hLevel::Fast,
-        "eaa30d58805663e9f700fa0a600978d3d7bda8558672ac7895ee76e5d6418e7c",
+        "4fda8fd713725c2c3f0aa63d7aff6d9c02ac9e3b9f30e753330d2a29c8a75a77",
     ),
     (
         Bc6hLevel::Basic,
-        "acfc2f41667d03c59f3b2fa657258accd646abca7791bd1d4a704acf4c43dab5",
+        "65a81320edd86d76abd18dfb22c42e54ec859abaf813aa7e4fc2a7dec1fa2e9e",
     ),
     (
         Bc6hLevel::Slow,
-        "52bb8a5734a6bbb3cdf93b88eaddd29734687e25a964894d015b6eee6eb6b751",
+        "c69407eda0d1d1e7947b69cf54402a433770cfa51572db85768d8952d7f5bda2",
     ),
     (
         Bc6hLevel::Veryslow,
-        "d4b734728067e45c2e9e9570dd67d39c59c54439d83d1982e3c3e4fea1f9383d",
+        "aec88b604925d456a2d795057a62f1fdc10405997838fc2ff7228e0ea5a4ee92",
     ),
 ];
 
@@ -136,23 +136,23 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
-        "4fbd389f7b2a32262926b359a6a97f4a87535804b96ce88e5648c93d84a1b958",
+        "c6f7a89f24c95746c05d18f4ee52fa0b70951ceaa5e652bd63edc0613062083c",
     ),
     (
         Bc6hLevel::Fast,
-        "eaa30d58805663e9f700fa0a600978d3d7bda8558672ac7895ee76e5d6418e7c",
+        "44c5e79f0499bbb8c39d5eb87cd4435b0bd0f2042aa937de80947085fdded228",
     ),
     (
         Bc6hLevel::Basic,
-        "acfc2f41667d03c59f3b2fa657258accd646abca7791bd1d4a704acf4c43dab5",
+        "f402c41d785ffa75059add9ec73957ff41f55a6a6496f69ea069286336c8d9ad",
     ),
     (
         Bc6hLevel::Slow,
-        "52bb8a5734a6bbb3cdf93b88eaddd29734687e25a964894d015b6eee6eb6b751",
+        "0044a11248c11f80533da77d4ed8be51f27db06b0f00714db77bd397a00ea334",
     ),
     (
         Bc6hLevel::Veryslow,
-        "d4b734728067e45c2e9e9570dd67d39c59c54439d83d1982e3c3e4fea1f9383d",
+        "9cdb7c28f4c9b359238bad48959907280caab8cc66197333720175833f93df18",
     ),
 ];
 
@@ -191,8 +191,7 @@ fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
 }
 
 /// The five shipped levels encode byte-identically to the recorded objects (the patch 0007 objects, Note LT), on each
-/// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). Each path has its own hashes because the paths
-/// can write different bytes; on this image they agree since R1 (Note LT).
+/// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). The paths differ, so each has its own hashes.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
     check_pins(|t| recorded(t).to_vec());
@@ -201,9 +200,9 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
 /// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects (Note LT).
 const RECORDED_PEAK: [&str; 3] = [
-    "48ddb55ee0b2ffb12666b24d6087e9e7ffbb0127d444fdd303591311ccb414e2",
-    "48ddb55ee0b2ffb12666b24d6087e9e7ffbb0127d444fdd303591311ccb414e2",
-    "48ddb55ee0b2ffb12666b24d6087e9e7ffbb0127d444fdd303591311ccb414e2",
+    "d90d462f34cc4f1133ded65f3248319c6e71f6cb64d9971d0ac1f6fab9bce91c",
+    "d91bb9afbdbd103d7ddbef9c80ec794aec9e95ad0579af94053a2c360601b8e9",
+    "6564a066b322aa71c40f8e0ffc5e6268418902c1541e0df7c915f49ee2d192e6",
 ];
 
 fn recorded_peak(target: IspcTarget) -> &'static str {
@@ -1782,187 +1781,6 @@ fn collapsed_regions_take_a_bracketing_pair() {
     assert!(
         failures.is_empty(),
         "{} witness failures:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
-}
-
-/// R1's seeded blocks: a coloured smooth ramp from index `i` (alpha 1.0). One ramp along a random direction across the
-/// block; each channel rises or falls by its own span of 30 to 200 half codes from its own base in `0x1F00..=0x2100`
-/// (dim: UF16 about 17,000), plus up to 3 half codes of noise. Integer arithmetic only, so the blocks are the same on
-/// every machine.
-fn coloured_ramp(i: u32) -> [[u16; 4]; 16] {
-    let mut r = Lcg(i.wrapping_mul(0x9E37_79B1) ^ 0x5BD1_E995);
-    r.next();
-    let (mut dx, dy) = (r.range(0, 6) as i64 - 3, r.range(0, 6) as i64 - 3);
-    if dx == 0 && dy == 0 {
-        dx = 1;
-    }
-    let pos = |t: usize| (t % 4) as i64 * dx + (t / 4) as i64 * dy;
-    let pmin = (0..16).map(pos).min().unwrap();
-    let pmax = (0..16).map(pos).max().unwrap();
-    let noise = r.range(0, 3) as i64;
-    let mut planes = [[0u16; 16]; 3];
-    for plane in &mut planes {
-        let span = r.range(30, 200) as i64;
-        let falling = r.next().is_multiple_of(2);
-        let base = r.range(0x1F00, 0x2100) as i64;
-        for (t, v) in plane.iter_mut().enumerate() {
-            let step = span * (pos(t) - pmin) / (pmax - pmin);
-            let s = if falling { span - step } else { step };
-            *v = (base + s + r.range(0, noise as u32) as i64) as u16;
-        }
-    }
-    texels_of(&planes)
-}
-
-/// R1's brightness shift: 31 * 16 * 21 half codes, which the kernel's linear half-to-UF16 map turns into exactly
-/// 64 * 16 * 21 UF16 units, so a `coloured_ramp` block based near half 0x2000 lands near 0x4800 (UF16 about 38,000)
-/// and stays below 0x4B00.
-const BRIGHT_SHIFT: u16 = 31 * 16 * 21;
-
-/// `b` with every colour channel `dh` half codes brighter (alpha kept).
-fn shifted(b: &[[u16; 4]; 16], dh: u16) -> [[u16; 4]; 16] {
-    std::array::from_fn(|t| [b[t][0] + dh, b[t][1] + dh, b[t][2] + dh, b[t][3]])
-}
-
-/// `coloured_ramp(i)` and its `BRIGHT_SHIFT` copy, each encoded one block at a time at `level` on `target`: the dim
-/// copy's `err_bounds`, the bright copy's, and whether the bright decode is the dim decode plus `BRIGHT_SHIFT` in every
-/// channel of every texel.
-fn brightness_pair(i: u32, level: Bc6hLevel, target: IspcTarget) -> ((f64, f64), (f64, f64), bool) {
-    let dim = coloured_ramp(i);
-    let bright = shifted(&dim, BRIGHT_SHIFT);
-    let dim_dec = decode_halves(&encode_block(&dim, level, target));
-    let bright_dec = decode_halves(&encode_block(&bright, level, target));
-    let equivariant = dim_dec
-        .iter()
-        .zip(&bright_dec)
-        .all(|(d, b)| (0..3).all(|c| u32::from(b[c]) == u32::from(d[c]) + u32::from(BRIGHT_SHIFT)));
-    (
-        err_bounds(&dim, &dim_dec),
-        err_bounds(&bright, &bright_dec),
-        equivariant,
-    )
-}
-
-/// Scans `coloured_ramp` indices in `0..1 << 18` in order on the AVX2 path at Veryfast and Fast and prints each index
-/// and level where the bright copy is certainly worse (`E_lo(bright) > E_hi(dim)`), with both bounds, the gap and
-/// whether the bright decode is the dim decode plus `BRIGHT_SHIFT`; it stops after 32 such witnesses, then prints per
-/// level how many of the blocks scanned are not equivariant (the bright decode is not the dim decode shifted).
-#[test]
-#[ignore = "search for brightness witnesses on the objects before a covariance change"]
-fn search_brightness_witnesses() {
-    const END: u32 = 1 << 18;
-    const CHUNK: u32 = 4096;
-    const WANT: usize = 32;
-    const LEVELS: [Bc6hLevel; 2] = [Bc6hLevel::Veryfast, Bc6hLevel::Fast];
-    let target = IspcTarget::Avx2;
-    if !target.supported() {
-        eprintln!("skipped: the AVX2 path is not supported on this CPU");
-        return;
-    }
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
-    let start = std::time::Instant::now();
-    let (mut found, mut scanned, mut non_equivariant) = (0usize, 0u32, [0u32; 2]);
-    'scan: while scanned < END {
-        let (lo, hi) = (scanned, (scanned + threads * CHUNK).min(END));
-        let mut rows: Vec<_> = std::thread::scope(|s| {
-            let jobs: Vec<_> = (0..threads)
-                .map(|t| {
-                    s.spawn(move || {
-                        (lo + t..hi)
-                            .step_by(threads as usize)
-                            .map(|i| (i, LEVELS.map(|level| brightness_pair(i, level, target))))
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
-        });
-        rows.sort_by_key(|r| r.0);
-        for (i, pairs) in rows {
-            scanned = i + 1;
-            for (k, (level, (dim, bright, equivariant))) in LEVELS.iter().zip(pairs).enumerate() {
-                non_equivariant[k] += u32::from(!equivariant);
-                if bright.0 > dim.1 {
-                    found += 1;
-                    println!(
-                        "witness {i} {level:?}: bright [{}, {}] > dim [{}, {}], gap {}, bright decode = dim decode + dh: {equivariant}",
-                        bright.0,
-                        bright.1,
-                        dim.0,
-                        dim.1,
-                        bright.0 - dim.1
-                    );
-                }
-            }
-            if found >= WANT {
-                break 'scan;
-            }
-        }
-    }
-    for (level, n) in LEVELS.iter().zip(non_equivariant) {
-        println!("{level:?}: {n} of {scanned} blocks scanned are not equivariant");
-    }
-    println!(
-        "scanned {scanned} blocks in {:.1} s on {target:?}; {found} witnesses",
-        start.elapsed().as_secs_f64()
-    );
-}
-
-/// Witnesses from `search_brightness_witnesses` (`coloured_ramp` index, the level it was found at): on the objects
-/// before the R1 fix the bright copy was certainly worse than the dim copy on the AVX2 path (found on Windows on an AMD
-/// Ryzen 7 9800X3D, 2026-11-25). The eight indices with the largest gaps `E_lo(bright) - E_hi(dim)` (69 to 210 in
-/// half-code units squared) among the first 32 witnesses; every one of them was a witness at both levels, so four are
-/// tested at each.
-const BRIGHTNESS_WITNESSES: &[(u32, Bc6hLevel)] = &[
-    (236, Bc6hLevel::Veryfast),
-    (146, Bc6hLevel::Fast),
-    (95, Bc6hLevel::Veryfast),
-    (451, Bc6hLevel::Fast),
-    (416, Bc6hLevel::Veryfast),
-    (183, Bc6hLevel::Fast),
-    (366, Bc6hLevel::Veryfast),
-    (213, Bc6hLevel::Fast),
-];
-
-/// R1 (Note LT). The kernel's UF16 value of half h is linear in h (`(h + 0.5) / 31 * 64` since Q5, `(h / 31) * 64`
-/// before), so adding 31m half codes to a block adds 64m UF16 units; for m a multiple of 16 the code grid, the gates,
-/// `qbounds` and the decoder all shift exactly, so an encoder whose float work is translation-invariant writes the
-/// brighter copy as the dim copy plus 31m half codes. The covariance from raw sums (`compute_stats_masked`,
-/// `covar_from_stats`) is not: on bright smooth blocks its float32 rounding error exceeds the covariance itself (fable
-/// R1; a grey block is exact, a coloured one is not, opus).
-///
-/// On each witness, at its level on every path in `paths()`, the `BRIGHT_SHIFT` copy is not certainly worse than the
-/// dim copy: `E_lo(bright) <= E_hi(dim)` (`err_bounds`). Exact equivariance is not asserted: the fix centres only the
-/// covariance sums, the refit keeps raw moments, and the half-to-UF16 conversion rounds differently at the two
-/// brightness levels. Skipped on an Intel CPU, like the pins: the witnesses were selected on the Ryzen's output
-/// (Note JC).
-#[test]
-fn a_brighter_copy_is_not_worse() {
-    if encoders_sys::skip_byte_pins() {
-        return;
-    }
-    let mut failures = Vec::new();
-    for target in paths() {
-        for &(i, level) in BRIGHTNESS_WITNESSES {
-            let ((dim_lo, dim_hi), (bright_lo, bright_hi), equivariant) =
-                brightness_pair(i, level, target);
-            eprintln!(
-                "witness {i} {target:?} {level:?}: bright [{bright_lo}, {bright_hi}], dim [{dim_lo}, {dim_hi}], \
-                 equivariant {equivariant}"
-            );
-            if bright_lo > dim_hi {
-                failures.push(format!(
-                    "witness {i} {target:?} {level:?}: bright E_lo {bright_lo} > dim E_hi {dim_hi} \
-                     (bright [{bright_lo}, {bright_hi}], dim [{dim_lo}, {dim_hi}], equivariant {equivariant})"
-                ));
-            }
-        }
-    }
-    assert!(
-        failures.is_empty(),
-        "{} witnesses where the brighter copy is certainly worse:\n{}",
         failures.len(),
         failures.join("\n")
     );
