@@ -52,6 +52,7 @@
 // astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code.
 // Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions, not only the lowest.
 // S4 guard    best_err starts at the finite 1e30f, not 1e99, and bc6h_mode_cannot_win prunes only once it is below it.
+// S3 quant    bc6h_block_quant loads each region's endpoints and reciprocal distance once per call, not per texel.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -1369,6 +1370,106 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
 	return total_err;
 }
 
+// sdc patch 0007 (S3): block_quant for BC6H (three channels, one or two regions). It loads each region's endpoints once
+// and forms each region's reciprocal distance once, after the zero-div guard, where block_quant gathers 12 endpoint
+// values and divides once per texel; the projection multiplies by the reciprocal, which moves the last bit of some
+// projections and so some indices (BC6H bytes change). The rest is block_quant's: the rounding and clamp of q1, the two
+// candidates with the strict err0 < err1 tie rule, the per-texel error sum and the packing. pairs is the uniform region
+// count; with 1, region 1 is never read (bc6h_enc_1p passes an 8-float ep). bc6h_peak_guard keeps its own loop.
+float bc6h_block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[], uint32 pattern, uniform int pairs)
+{
+    float total_err = 0;
+    uniform const int* uniform unquant_table = get_unquant_table(bits);
+    int levels = 1 << bits;
+
+    for (uniform int k = 0; k < 2; k++) qblock[k] = 0;
+
+    float a0[3], b0[3], a1[3], b1[3];
+    float div0 = 0;
+    float div1 = 0;
+    for (uniform int p = 0; p < 3; p++)
+    {
+        a0[p] = ep[p];
+        b0[p] = ep[4 + p];
+        div0 += sq(b0[p] - a0[p]);
+    }
+    if (pairs == 2)
+    {
+        for (uniform int p = 0; p < 3; p++)
+        {
+            a1[p] = ep[8 + p];
+            b1[p] = ep[12 + p];
+            div1 += sq(b1[p] - a1[p]);
+        }
+    }
+    // as block_quant's zero-div guard: a zero-length segment gives proj = 0 and index 1
+    float rdiv0 = 1.0f / max(div0, 1.0f);
+    float rdiv1 = 1.0f / max(div1, 1.0f);
+
+    int pattern_shifted = pattern;
+    for (uniform int k = 0; k < 16; k++)
+    {
+        int j = pattern_shifted & 3;
+        pattern_shifted >>= 2;
+
+        float ea[3], eb[3];
+        float rdiv = rdiv0;
+        if (pairs == 2)
+        {
+            rdiv = (j == 0) ? rdiv0 : rdiv1;
+            for (uniform int p = 0; p < 3; p++)
+            {
+                ea[p] = (j == 0) ? a0[p] : a1[p];
+                eb[p] = (j == 0) ? b0[p] : b1[p];
+            }
+        }
+        else
+        {
+            for (uniform int p = 0; p < 3; p++)
+            {
+                ea[p] = a0[p];
+                eb[p] = b0[p];
+            }
+        }
+
+        float proj = 0;
+        for (uniform int p = 0; p < 3; p++)
+            proj += (block[k + p * 16] - ea[p]) * (eb[p] - ea[p]);
+        proj *= rdiv;
+
+        int q1 = (int)(proj * levels + 0.5);
+        q1 = clamp(q1, 1, levels - 1);
+
+        float err0 = 0;
+        float err1 = 0;
+        int w0 = gather_int(unquant_table, q1 - 1);
+        int w1 = gather_int(unquant_table, q1);
+
+        for (uniform int p = 0; p < 3; p++)
+        {
+            float dec_v0 = (int)(((64 - w0) * ea[p] + w0 * eb[p] + 32) / 64);
+            float dec_v1 = (int)(((64 - w1) * ea[p] + w1 * eb[p] + 32) / 64);
+            err0 += sq(dec_v0 - block[k + p * 16]);
+            err1 += sq(dec_v1 - block[k + p * 16]);
+        }
+
+        float best_err = err1;
+        int best_q = q1;
+        if (err0 < err1)
+        {
+            best_err = err0;
+            best_q = q1 - 1;
+        }
+
+        assert(best_q >= 0 && best_q <= levels - 1);
+
+        qblock[k / 8] += ((uint32)best_q) << 4 * (k % 8);
+        total_err += best_err;
+    }
+
+    return total_err;
+}
+
 ///////////////////////////
 // LS endpoint refinement
 
@@ -2513,7 +2614,7 @@ float bc6h_peak_guard(bc6h_enc_state state[], float err, float ep[], uint32 qblo
 // integer compares only.
 float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint32 qblock[2], float err, uint32 pattern, int part_id, uniform int pairs)
 {
-    uniform int bits = (pairs == 2) ? 3 : 4; // index bits, as block_quant and bc6h_peak_guard take them
+    uniform int bits = (pairs == 2) ? 3 : 4; // index bits, as bc6h_block_quant and bc6h_peak_guard take them
     bool collapsed[2] = { false, false };
     bool any = false;
     for (uniform int j = 0; j < pairs; j++)
@@ -2614,7 +2715,7 @@ float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint
     float nep[16];
     ep_dequant_bc6h(nep, nqep, epb, pairs);
     uint32 nqblock[2];
-    float nerr = block_quant(nqblock, state->block, bits, nep, pattern, 3);
+    float nerr = bc6h_block_quant(nqblock, state->block, bits, nep, pattern, pairs); // sdc patch 0007 (S3)
     nerr = bc6h_peak_guard(state, nerr, nep, nqblock, pattern, bits);
     if (nerr < err)
     {
@@ -2645,7 +2746,6 @@ float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2
 {
     uint32 pattern = get_pattern(part_id);
     uniform int bits = 3;
-    uniform int channels = 3;
 
     float ep[16];
     // sdc patch 0006 (S2): copy, ep_quant_dequant_bc6h overwrites ep
@@ -2653,7 +2753,7 @@ float bc6h_enc_2p_part_fast(bc6h_enc_state state[], int qep[16], uint32 qblock[2
 
     ep_quant_dequant_bc6h(state, qep, ep, 2);
 
-    float total_err = block_quant(qblock, state->block, bits, ep, pattern, channels);
+    float total_err = bc6h_block_quant(qblock, state->block, bits, ep, pattern, 2); // sdc patch 0007 (S3)
     return bc6h_peak_guard(state, total_err, ep, qblock, pattern, bits);
 
 }
@@ -2668,7 +2768,6 @@ inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 bes
 {
     uniform int bits = 3;
     uniform int pairs = 2;
-    uniform int channels = 3;
 
     // sdc patch 0007 (Q2): the candidate's first quantisation (the ranking is not bracketed)
     float best_ep[24];
@@ -2697,7 +2796,7 @@ inline float bc6h_refine_2p(bc6h_enc_state state[], int best_qep[16], uint32 bes
         ep_quant_dequant_bc6h(state, qep, ep, 2);
 
         uint32 pattern = get_pattern(best_part_id);
-        float err = block_quant(qblock, state->block, bits, ep, pattern, channels);
+        float err = bc6h_block_quant(qblock, state->block, bits, ep, pattern, pairs); // sdc patch 0007 (S3)
         err = bc6h_peak_guard(state, err, ep, qblock, pattern, bits);
         for (uniform int k = 0; k<2; k++) cur_qblock[k] = qblock[k]; // sdc patch 0007 (Q1)
 
@@ -2843,7 +2942,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     ep_quant_dequant_bc6h(state, qep, ep, 1);
 
     uint32 qblock[2];
-    float err = block_quant(qblock, state->block, 4, ep, 0, 3);
+    float err = bc6h_block_quant(qblock, state->block, 4, ep, 0, 1); // sdc patch 0007 (S3)
     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
     // sdc patch 0007 (Q2): the next pass refits from the kept indices
     err = bc6h_bracket_collapsed(state, qep, ep, qblock, err, 0, 0, 1);
@@ -2863,7 +2962,7 @@ void bc6h_enc_1p(bc6h_enc_state state[])
     {
         bc6h_opt_endpoints(ep, state->block, 4, qblock, -1); // sdc patch 0007 (astra #4): the decoder's weights
         ep_quant_dequant_bc6h(state, qep, ep, 1);
-        err = block_quant(qblock, state->block, 4, ep, 0, 3);
+        err = bc6h_block_quant(qblock, state->block, 4, ep, 0, 1); // sdc patch 0007 (S3)
         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
 
         if (err < best_err) // sdc patch 0004

@@ -281,6 +281,12 @@ measured images on SSE2, AVX2 and AVX-512 equal the previous kernel's in every c
 each), the random strips (48 hashes, 72 with AVX-512), the pins and `identity.json` unchanged, and the scratch assert
 build of S4 (above) fired on none of 15,970,493 lane encodes of the 22 images on AVX2 or of the lane encodes of
 `random_blocks_encode_at_every_level_on_every_path` (212,686; 319,029 with AVX-512).
+S3: every BC6H quantisation (`bc6h_enc_1p`, `bc6h_enc_2p_part_fast`, `bc6h_refine_2p`, `bc6h_bracket_collapsed`) calls
+`bc6h_block_quant`, which loads each region's endpoints once and multiplies by each region's reciprocal distance, formed
+once after the zero-div guard, instead of gathering 12 endpoint values and dividing per texel; the tie rule and the
+per-texel error sum are `block_quant`'s, and the BC7 kernels keep upstream's `block_quant`. It changes BC6H bytes in
+some of the 22 measured images at every level on SSE2, AVX2 and AVX-512 (every quality mean delta +0.000), but no pin,
+random strip or `identity.json` entry; Veryslow and VeryslowPeak take about 5.5 % less time, Slow 5 % more (Note LT).
 R1 (dropped): centring the covariance sums of the PCA (`compute_stats_masked`, `compute_covar_dc_masked`) would have
 kept the covariance of bright smooth coloured blocks, which float32 raw second moments lose (test
 `a_brighter_copy_is_not_worse`: without it the bright copy is certainly worse on all 8 witnesses on AVX2, with it all 8
