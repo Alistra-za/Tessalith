@@ -43,12 +43,12 @@
 // second audit. Changes are marked "sdc patch 0007". They change BC6H bytes; the S4 guard does not.
 // PCA re-seed compute_axis restarts the power iteration at the largest-variance coordinate when the norm is zero.
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
-// astra #4    bc6h_enc_1p and _2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
-// Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a region the first quantisation collapsed.
-// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does.
+// astra #4    bc6h_enc_1p and _refine_2p refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
+// Q2 pair     bc6h_enc_1p and bc6h_refine_2p try a bracketing pair for a region the first quantisation collapsed.
+// Q1 refine   bc6h_refine_2p refits each pass from the previous pass's indices, as bc6h_enc_1p does.
 // Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next fits one.
 // Q6 floor    bc6h_setup floors a texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
-// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest bound below the widest's.
+// astra #6    at the slow levels bc6h_test_mode tries the widened variant with the lowest bound, if below the widest's.
 // astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code.
 // Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions, not only the lowest.
 // S4 guard    best_err starts at the finite 1e30f, not 1e99, and bc6h_mode_cannot_win prunes only once it is below it.
@@ -2824,8 +2824,8 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
     float best_err = 1e99;
 
     // sdc patch 0007 (Q3): the `keep` lowest-error first quantisations, in ascending error. keep is 1 below the slow
-    // levels, so they refine only the lowest, as before. Each slot starts empty and zeroed, so the swap below reads
-    // no uninitialised memory.
+    // levels, so they refine only the lowest, as before. Each slot starts empty and zeroed, so no slot is read before
+    // it is written in the used channels.
     uniform int keep = 1;
     if (state->slow_mode) keep = min(Q3_N, part_count);
     int cand_qep[Q3_N * 16];
@@ -2837,7 +2837,9 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
         for (uniform int i = 0; i<8 * pairs; i++) cand_qep[c * 16 + i] = 0;
         for (uniform int k = 0; k<2; k++) cand_qblock[c * 2 + k] = 0;
         cand_part[c] = -1;
-        cand_err[c] = 1e99;
+        // sdc patch 0007 (S4 guard): finite, so the first compare err < cand_err reads no infinity; the largest
+        // scored error is about 2e24 (bc6h_peak_guard), far below it, so the first candidate still takes slot 0
+        cand_err[c] = 1e30f;
     }
 
     for (uniform int part = 0; part<part_count; part++)
