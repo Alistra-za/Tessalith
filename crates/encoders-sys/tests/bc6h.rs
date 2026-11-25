@@ -2196,6 +2196,174 @@ fn asymmetric_modes_try_the_better_wide_channel() {
     assert_witnesses_certainly_better(WIDE_CHANNEL_WITNESSES, wide_pair);
 }
 
+/// astra #5's seeded blocks from index `i` (alpha 1.0): one to three "blue-zero sun" texels, each with one channel
+/// exactly 0 (the same channel in all of them, blue in half the blocks), its largest channel at half code 0x2800 to
+/// 0x33FF (0.031 to 0.25, below the 12-stop lift's normal range) and the others coloured below it; the other texels a
+/// darker sky whose largest channel is at least 7 stops (7 * 1024 half codes) under every sun texel's, a third of them
+/// with one channel exactly 0. Integer arithmetic only, so the blocks are the same on every machine.
+fn dim_sun(i: u32) -> [[u16; 4]; 16] {
+    let mut r = Lcg(i.wrapping_mul(0x9E37_79B1) ^ 0xA5A5_1F3D);
+    r.next();
+    let suns = r.range(1, 3) as usize;
+    let mut order: [usize; 16] = std::array::from_fn(|t| t);
+    for t in (1..16).rev() {
+        order.swap(t, r.next() as usize % (t + 1));
+    }
+    let zero = if r.next().is_multiple_of(2) {
+        2
+    } else {
+        (r.next() % 3) as usize
+    };
+    let sun_top = r.range(0x2800, 0x33FF) as i64;
+    let sky_top = sun_top - 64 - 7 * 1024 - r.range(0, 2048) as i64;
+    let mut px = [[0u16, 0, 0, f16::ONE.to_bits()]; 16];
+    for (rank, &t) in order.iter().enumerate() {
+        let sun = rank < suns;
+        let top = if sun {
+            sun_top - r.range(0, 64) as i64
+        } else {
+            sky_top - r.range(0, 512) as i64
+        };
+        let largest = loop {
+            let c = (r.next() % 3) as usize;
+            if !sun || c != zero {
+                break c;
+            }
+        };
+        let skyzero = !sun && r.next().is_multiple_of(3);
+        let sky_zero_channel = (r.next() % 3) as usize;
+        for (c, v) in px[t].iter_mut().take(3).enumerate() {
+            *v = if c == largest {
+                top
+            } else if (sun && c == zero) || (skyzero && c == sky_zero_channel) {
+                0
+            } else {
+                (top - r.range(0, 1536) as i64).max(1)
+            } as u16;
+        }
+    }
+    px
+}
+
+/// Whether the replication of `bc6h_setup`'s peak gate (f32, the relative floor) guards `px` with neither gate value
+/// within 1e-3 (relative) of `ln 32` (Task 2's tie band).
+fn dim_sun_guarded(px: &[[u16; 4]; 16]) -> bool {
+    let limit = 32.0f32.ln();
+    let g = black_gate_value(px, true);
+    (g - limit).abs() > 1e-3 * limit && g >= limit
+}
+
+/// The decode's luminance at the source's brightest texel divided by that texel's source luminance (the quantity
+/// `peak_mode_keeps_a_blue_zero_sun` bounds at 0.9, per block).
+fn peak_texel_ratio(px: &[[u16; 4]; 16], b: &[u8; 16]) -> f32 {
+    let lum = |c: &[f32]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let src: [f32; 16] =
+        std::array::from_fn(|t| lum(&[0, 1, 2].map(|c| f16::from_bits(px[t][c]).to_f32())));
+    let peak = (1..16).fold(0, |p, t| if src[t] > src[p] { t } else { p });
+    let mut d = [0f32; 48];
+    bcdec_rs::bc6h_float(b, &mut d, 12, false);
+    lum(&d[peak * 3..peak * 3 + 3]) / src[peak]
+}
+
+/// Records Task 23's search (`dim_sun`, `i in 0..1 << 16`, VeryslowPeak) for `DIM_SUN_WITNESSES`: for each index the
+/// gate replication guards, one line `<i> <peak texel ratio on each path in paths()>` in the file
+/// `SDC_BC6H_WITNESS_OUT` names (run it with `SDC_TEST_AVX512=1` so AVX-512 is included).
+#[test]
+#[ignore = "record dim sun witnesses: run on the objects before the change, then after"]
+fn search_dim_sun_witnesses() {
+    use std::io::Write as _;
+    const END: u32 = 1 << 16;
+    let Some(path) = std::env::var_os("SDC_BC6H_WITNESS_OUT") else {
+        eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
+        return;
+    };
+    let targets: Vec<IspcTarget> = paths().collect();
+    let mut file = std::fs::File::create(&path).unwrap();
+    writeln!(
+        file,
+        "# commit {} input dim_sun 0..{END} paths {targets:?}",
+        git_describe()
+    )
+    .unwrap();
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
+    let mut lines: Vec<(u32, String)> = std::thread::scope(|s| {
+        let jobs: Vec<_> = (0..threads)
+            .map(|t| {
+                let targets = &targets;
+                s.spawn(move || {
+                    (t..END)
+                        .step_by(threads as usize)
+                        .filter_map(|i| {
+                            let px = dim_sun(i);
+                            dim_sun_guarded(&px).then(|| {
+                                let ratios: Vec<String> = targets
+                                    .iter()
+                                    .map(|&target| {
+                                        let b = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
+                                        peak_texel_ratio(&px, &b).to_string()
+                                    })
+                                    .collect();
+                                (i, format!("{i} {}", ratios.join(" ")))
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+    });
+    lines.sort_unstable();
+    for (_, l) in &lines {
+        writeln!(file, "{l}").unwrap();
+    }
+    file.flush().unwrap();
+    println!("{} of {END} blocks are guarded", lines.len());
+}
+
+/// Witnesses from `search_dim_sun_witnesses`: `dim_sun` indices that the gate replication guards and whose peak texel
+/// decoded below 0.9 of its source luminance at VeryslowPeak on SSE2, AVX2 and AVX-512 before the astra #5 fix and at
+/// 0.9 or more after it (found on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25).
+const DIM_SUN_WITNESSES: &[u32] = &[1528, 3652, 5836, 35189, 50572, 53100, 62762, 63433];
+
+/// astra #5 (Note LT): the peak lift raised every channel to at least 2^-12 of its texel's largest, but 12 half
+/// exponent steps below a sun of half 0.25 or less leave the normal range, so the lift fell short there and, below
+/// 0.125, `lo` was at or below 0 and lifted nothing. A blue-zero sun that dim kept its exact-zero channel in the second
+/// search and the peak texel decoded dark. On each witness VeryslowPeak keeps the peak texel at 0.9 or more of its
+/// source luminance on every path in `paths()` (the threshold of `peak_mode_keeps_a_blue_zero_sun`), and the gate
+/// replication still guards the block. Skipped on an Intel CPU, like the pins: the witnesses were selected on the
+/// Ryzen's output (Note JC).
+#[test]
+fn peak_mode_keeps_a_dim_blue_zero_sun() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for &i in DIM_SUN_WITNESSES {
+        let px = dim_sun(i);
+        if !dim_sun_guarded(&px) {
+            failures.push(format!(
+                "witness {i}: the gate replication no longer guards"
+            ));
+        }
+        for target in paths() {
+            let b = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
+            let ratio = peak_texel_ratio(&px, &b);
+            if ratio < 0.9 {
+                failures.push(format!(
+                    "witness {i} {target:?}: the peak texel decodes at {ratio} of its source luminance (bytes {})",
+                    hex::encode(b)
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty() && !DIM_SUN_WITNESSES.is_empty(),
+        "{} witness failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 #[test]
 #[should_panic(expected = "multiple of 4")]
 fn rejects_unaligned_width() {

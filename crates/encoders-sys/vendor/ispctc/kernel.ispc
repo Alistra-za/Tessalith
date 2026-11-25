@@ -49,6 +49,7 @@
 // Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
 // Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
 // astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the widest's.
+// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code, not 12 exponent steps.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -3747,7 +3748,10 @@ void bc6h_peak_retry(bc6h_enc_state state[])
         for (uniform int k = 0; k < 16; k++)
         {
             float m = max(state->block[k], max(state->block[16 + k], state->block[32 + k]));
-            float lo = m - 12 * 1024 * 64 / 31.0f;
+            // sdc patch 0007 (astra #5): below half 0.25, 12 exponent steps leave the normal range: take 2^-12 of the value as a subnormal half code instead.
+            float hm = max(round(m * (31.0f / 64) - 0.5f), 0.0f);
+            float hlo = round(half_to_float((unsigned int16)(int)hm) * 4096);
+            float lo = (hm >= 0x3400) ? m - 12 * 1024 * 64 / 31.0f : m - (hm - hlo) * 64 / 31.0f;
             for (uniform int p = 0; p < 3; p++) if (lo > state->block[p * 16 + k]) lifted = true; // sdc patch 0006 (Q6 skip-retry): compare before the max below
             for (uniform int p = 0; p < 3; p++) state->block[p * 16 + k] = max(state->block[p * 16 + k], lo);
         }

@@ -184,7 +184,7 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, and Q6 none of them.
+(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 and astra #6 none of the pins, Q4 only Fast's and Basic's, Q6 none of them, and astra #5 none of them.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
@@ -241,6 +241,13 @@ at Veryslow); this one-extra-search form keeps about a third of that gain. Test:
 `asymmetric_modes_try_the_better_wide_channel`. It changes BC6H bytes at Slow, Veryslow and VeryslowPeak on SSE2, AVX2
 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3 of the 4 `hdr_grad` ones at
 those levels); Veryfast, Fast and Basic keep their bytes.
+astra #5: the lift in `bc6h_peak_retry` (a guarded block's second search) raised each channel to 12 half exponent steps
+below its texel's largest, which leaves the normal range under half 0.25: the lift fell short there and, under 0.125,
+changed nothing. For a texel whose largest channel's half code `hm` is below `0x3400` the lift now takes `2^-12` of the
+value as a subnormal half code (`hm - hlo` codes below, `hlo = round(half(hm) * 4096)`); at or above `0x3400` the old
+expression is kept, so blocks whose lifted texels are all that bright keep their bytes. Test:
+`peak_mode_keeps_a_dim_blue_zero_sun`. It changes BC6H bytes only at VeryslowPeak and only for guarded blocks with such
+a texel: none of the 18 pins, `identity.json` `hdr_sky`, the 18 `hdr_real` or the 4 `hdr_grad` images.
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette
