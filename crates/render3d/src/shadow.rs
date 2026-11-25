@@ -269,27 +269,36 @@ pub struct ShadowMaps {
     pub sampler: ID3D11SamplerState,
 }
 
+/// The floats of [`LOOKUP`]'s cbuffer fields: `SunViewProj` (16), then `Point`, `Params` and `Bias` (4 each).
+pub(crate) const LOOKUP_FLOATS: usize = 28;
+
 impl ShadowMaps {
-    /// The values of `SunViewProj`, `Point`, `Params` and `Bias` ([`LOOKUP`]'s cbuffer fields, 28 floats).
-    pub(crate) fn lookup_floats(&self) -> Vec<f32> {
+    /// The values of `SunViewProj`, `Point`, `Params` and `Bias`, in [`LOOKUP`]'s order.
+    pub(crate) fn lookup_floats(&self) -> [f32; LOOKUP_FLOATS] {
         let (point_on, cube) = match &self.point {
             Some(c) => (1.0, c.size as f32),
             None => (0.0, 1.0),
         };
         let p = self.point_pos;
-        self.sun_view_proj
-            .iter()
-            .flatten()
-            .copied()
-            .chain([p[0], p[1], p[2], point_on])
-            .chain([
-                self.point_far * POINT_NEAR,
-                self.point_far,
-                1.0 / self.sun_size as f32,
-                1.0 / cube,
-            ])
-            .chain([BIAS_TEXELS, 0.0, 0.0, 0.0])
-            .collect()
+        let mut f = [0.0; LOOKUP_FLOATS];
+        for (d, s) in f.iter_mut().zip(self.sun_view_proj.iter().flatten()) {
+            *d = *s;
+        }
+        f[16..].copy_from_slice(&[
+            p[0],
+            p[1],
+            p[2],
+            point_on,
+            self.point_far * POINT_NEAR,
+            self.point_far,
+            1.0 / self.sun_size as f32,
+            1.0 / cube,
+            BIAS_TEXELS,
+            0.0,
+            0.0,
+            0.0,
+        ]);
+        f
     }
 
     /// Binds the sun map, the cube (none while the light is off) and the sampler where [`LOOKUP`] reads them.
@@ -313,6 +322,9 @@ impl ShadowMaps {
         }
     }
 }
+
+/// The mask pass's cbuffer: `InvViewProj` (16), then the lookups' fields.
+const MASK_FLOATS: usize = 16 + LOOKUP_FLOATS;
 
 /// The maps and the mask pass, made on the first shadow frame and dropped on a frame without.
 pub struct Shadows {
@@ -416,7 +428,7 @@ impl Shadows {
         let vs_code = compile_source(&source, c"shadow.hlsl", "vs", "vs_5_0")?;
         let ps_code = compile_source(&source, c"shadow.hlsl", "ps", "ps_5_0")?;
         let bd = D3D11_BUFFER_DESC {
-            ByteWidth: 176,
+            ByteWidth: (MASK_FLOATS * 4) as u32,
             Usage: D3D11_USAGE_DEFAULT,
             BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
             CPUAccessFlags: 0,
@@ -506,17 +518,19 @@ impl Shadows {
     /// of the pixel stage unbound, the default depth state and no input layout.
     pub fn draw_mask(&self, gpu: &Gpu, depth: &ID3D11ShaderResourceView, view: &View) {
         let m = &self.maps;
-        let floats: Vec<f32> = inverse4(&view.view_proj)
-            .iter()
-            .flatten()
-            .copied()
-            .chain(m.lookup_floats())
-            .collect();
-        let bytes: Vec<u8> = floats.iter().flat_map(|v| v.to_le_bytes()).collect();
-        // SAFETY: every object belongs to `gpu.device`; `bytes` holds the buffer's 176 bytes.
+        let mut floats = [0.0f32; MASK_FLOATS];
+        for (d, s) in floats
+            .iter_mut()
+            .zip(inverse4(&view.view_proj).iter().flatten())
+        {
+            *d = *s;
+        }
+        floats[16..].copy_from_slice(&m.lookup_floats());
+        // SAFETY: every object belongs to `gpu.device`; `floats` holds the buffer's `MASK_FLOATS` × 4 bytes
+        // (little-endian `f32`, as the GPU reads them).
         unsafe {
             let ctx = &gpu.ctx;
-            ctx.UpdateSubresource(&self.cb, 0, None, bytes.as_ptr() as _, 0, 0);
+            ctx.UpdateSubresource(&self.cb, 0, None, floats.as_ptr() as _, 0, 0);
             ctx.OMSetDepthStencilState(&self.no_depth, 0);
             ctx.OMSetBlendState(None, None, 0xffff_ffff);
             ctx.IASetInputLayout(None);

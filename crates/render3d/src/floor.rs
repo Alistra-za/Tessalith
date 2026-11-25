@@ -8,7 +8,7 @@
 use crate::background::{compile_source, gradient_floor_linear};
 use crate::device::Gpu;
 use crate::scene::{dot, sub, Scene, View};
-use crate::shadow::{lookup_source, ShadowMaps};
+use crate::shadow::{lookup_source, ShadowMaps, LOOKUP_FLOATS};
 use windows::Win32::Graphics::Direct3D::{
     D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
 };
@@ -224,29 +224,48 @@ impl Floor {
         let p = scene.point_light;
         let point_pos = sub(p.position, view.eye);
         let point_col = [p.brightness.max(0.0); 3];
-        let mut floats: Vec<f32> = view.view_proj.iter().flatten().copied().collect();
-        floats.extend(match maps {
-            Some(m) => m.lookup_floats(),
-            None => vec![0.0; LOOKUP_FLOATS],
-        });
-        floats.extend([rel[0], rel[1], rel[2], plane.half]);
-        floats.extend([c[0], c[1], c[2], if encode { 1.0 } else { 0.0 }]);
-        floats.extend([
+        let own: [f32; OWN_FLOATS] = [
+            rel[0],
+            rel[1],
+            rel[2],
+            plane.half,
+            c[0],
+            c[1],
+            c[2],
+            if encode { 1.0 } else { 0.0 },
             sun_dir[0],
             sun_dir[1],
             sun_dir[2],
             if maps.is_some() { 1.0 } else { 0.0 },
-        ]);
-        floats.extend([sc[0], sc[1], sc[2], 0.0]);
-        floats.extend([ambient[0], ambient[1], ambient[2], 0.0]);
-        floats.extend([point_pos[0], point_pos[1], point_pos[2], p.radius.max(1e-3)]);
-        floats.extend([point_col[0], point_col[1], point_col[2], 0.0]);
-        debug_assert_eq!(floats.len(), FLOATS);
-        let bytes: Vec<u8> = floats.iter().flat_map(|v| v.to_le_bytes()).collect();
-        // SAFETY: every object belongs to `gpu.device`; `bytes` holds the buffer's bytes.
+            sc[0],
+            sc[1],
+            sc[2],
+            0.0,
+            ambient[0],
+            ambient[1],
+            ambient[2],
+            0.0,
+            point_pos[0],
+            point_pos[1],
+            point_pos[2],
+            p.radius.max(1e-3),
+            point_col[0],
+            point_col[1],
+            point_col[2],
+            0.0,
+        ];
+        let mut floats = [0.0f32; FLOATS];
+        for (d, s) in floats.iter_mut().zip(view.view_proj.iter().flatten()) {
+            *d = *s;
+        }
+        floats[16..16 + LOOKUP_FLOATS]
+            .copy_from_slice(&maps.map_or([0.0; LOOKUP_FLOATS], ShadowMaps::lookup_floats));
+        floats[16 + LOOKUP_FLOATS..].copy_from_slice(&own);
+        // SAFETY: every object belongs to `gpu.device`; `floats` holds the buffer's `FLOATS` × 4 bytes (little-endian
+        // `f32`, as the GPU reads them).
         unsafe {
             let ctx = &gpu.ctx;
-            ctx.UpdateSubresource(&self.cb, 0, None, bytes.as_ptr() as _, 0, 0);
+            ctx.UpdateSubresource(&self.cb, 0, None, floats.as_ptr() as _, 0, 0);
             ctx.OMSetDepthStencilState(&self.depth, 0);
             ctx.OMSetBlendState(&self.blend, None, 0xffff_ffff);
             ctx.RSSetState(&self.raster);
@@ -270,10 +289,10 @@ impl Floor {
     }
 }
 
-/// `ShadowMaps::lookup_floats`' length.
-const LOOKUP_FLOATS: usize = 28;
-/// The cbuffer: the view-projection, the lookups' fields, then seven float4s.
-const FLOATS: usize = 16 + LOOKUP_FLOATS + 7 * 4;
+/// The floor's own fields: the seven float4s from `Plane` to `PointCol`.
+const OWN_FLOATS: usize = 7 * 4;
+/// The cbuffer: the view-projection, the lookups' fields, then the floor's own.
+const FLOATS: usize = 16 + LOOKUP_FLOATS + OWN_FLOATS;
 
 #[cfg(test)]
 mod tests {

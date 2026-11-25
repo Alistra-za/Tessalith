@@ -2928,17 +2928,15 @@ impl Renderer {
                         let p = scene.point_light;
                         sh.maps.point_pos = scene::sub(p.position, view.eye);
                         sh.maps.point_far = p.radius.max(1e-3);
-                        let mut light_views =
-                            vec![(sun, sh.maps.sun_dsv.clone(), sh.maps.sun_size)];
-                        if let Some(c) = &sh.maps.point {
-                            let faces = shadow::point_views(p.position, p.radius, view.eye);
-                            light_views.extend(
-                                faces
-                                    .into_iter()
-                                    .zip(c.dsvs.iter().cloned())
-                                    .map(|(v, d)| (v, d, c.size)),
-                            );
-                        }
+                        // The sun, then the cube's six faces while the point light is on.
+                        let faces = sh.maps.point.iter().flat_map(|c| {
+                            shadow::point_views(p.position, p.radius, view.eye)
+                                .into_iter()
+                                .zip(&c.dsvs)
+                                .map(|(v, d)| (v, d, c.size))
+                        });
+                        let light_views =
+                            std::iter::once((sun, &sh.maps.sun_dsv, sh.maps.sun_size)).chain(faces);
                         ctx.RSSetState(&sh.raster);
                         ctx.OMSetDepthStencilState(&self.depth_states[3], 0);
                         ctx.OMSetBlendState(None, None, 0xffff_ffff);
@@ -2953,8 +2951,8 @@ impl Renderer {
                                 lights_changed: false,
                                 view_changed: true,
                             };
-                            ctx.ClearDepthStencilView(&dsv, D3D11_CLEAR_DEPTH.0, 1.0, 0);
-                            ctx.OMSetRenderTargets(None, &dsv);
+                            ctx.ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH.0, 1.0, 0);
+                            ctx.OMSetRenderTargets(None, dsv);
                             ctx.RSSetViewports(Some(&[viewport(size, size)]));
                             for id in &self.draw_order {
                                 let Some(s) =
