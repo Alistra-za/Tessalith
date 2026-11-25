@@ -2037,12 +2037,13 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
             ],
         );
         let at = format!("at {w}x{h_px}");
-        // The RMAOS settings panel draws two checkbox rows, "Exact opaque alpha" and "Mipmaps" (measured); the column
-        // toggles left the header for the Settings tab (Note JI1). All must have a name.
-        let named = h
-            .query_all_by_role_and_label(Role::CheckBox, "Exact opaque alpha")
-            .count();
-        assert_eq!(named, 1, "{at}: one CheckBox named Exact opaque alpha");
+        // The RMAOS settings panel draws two checkbox rows, the Channel guard row's four ticks and "Mipmaps"
+        // (measured; Task 6g); the column toggles left the header for the Settings tab (Note JI1). All must have a name.
+        for tick in ["R", "G", "B", "A"] {
+            let name = format!("Channel guard {tick}");
+            let named = h.query_all_by_role_and_label(Role::CheckBox, &name).count();
+            assert_eq!(named, 1, "{at}: one CheckBox named {name}");
+        }
         let empty: Vec<_> = h
             .query_all_by_role(Role::CheckBox)
             .filter(|n| n.accesskit_node().label().unwrap_or_default().is_empty())

@@ -18,7 +18,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | Helper (images only) | `helper.role`: [Texture packing](Texture-Packing.md#helper-settings) |
 | Alpha, Threshold, Comparison | `alpha.policy`, `alpha.threshold`, `alpha.compare` |
 | Enable parallax (complex `_m` only) | `alpha.parallax`: ticked keeps the `_m` alpha as parallax height, unticked writes alpha 0 |
-| Coverage, 1-bit alpha, Exact opaque alpha | `mips.coverage`, `encoder.bc1_alpha`, `alpha.exact_opaque` |
+| Coverage, 1-bit alpha | `mips.coverage`, `encoder.bc1_alpha` |
 | Normal handling, Normal base level | `mips.normal`, `mips.normal_base` |
 | Baked in (`msn` only) | `channels.msn_source`: [Texture types](Texture-Types.md#model-space-normals-msn) |
 | Mipmaps: Levels, Filter, Edge | `mips.levels`, `mips.filter`, `mips.edge` |
@@ -27,6 +27,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | Input content, DDS tag (under Compression) | `color.content`, `color.tag` |
 | Effort | The search setting of the texture's format: [below](#effort) |
 | BC7 weighting, Perceptual | `encoder.bc7_weights`, `encoder.perceptual` |
+| Channel guard R, G, B, A (BC7 only) | `encoder.channel_guard.r`, `.g`, `.b` and `alpha.exact_opaque`: [below](#channel-guard) |
 | DDS header | `header` |
 
 - Under **Normal base level**, choose **Keep as authored** to carry deliberately short normals into the smaller mips of an XYZ base or coat normal. See [Normal length by output](Project-Config.md#normal-length-by-output) for other normal types.
@@ -46,6 +47,15 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | **Alpha ×2**, **×4**, **×8**, **×16**, **×32**, **×64** | Alpha error counts 2, 4, 8, 16, 32 or 64 times. | `bc7_weights` |
 
 I'd reach for ×8 as the alternative to BC3 on delicate alpha, because it keeps more RGB than BC3 does. ×16 suits a `_n` with specular in its alpha. ×32 and ×64 trade more colour for a little more alpha: on colour with smooth alpha they gain only +0.3 and +0.45 dB of alpha over ×16. The measurements are in [Research](Research.md) ([BC7 alpha weights](../research/bc7e-tuning.md#bc7-alpha-weights-against-bc3-2026-10-21)).
+
+### Channel guard
+
+*Channel guard* keeps a flat 0 or 255 exact in BC7. It shows only for BC7, in Compression, as four ticks. Tick the one channel your map needs exact, such as G for the metalness of an `_rmaos`. <!-- D:LR8 -->
+
+- **R**, **G**, **B** (`encoder.channel_guard.r`, `.g`, `.b`): where the channel is exactly 0 or exactly 255 across part of a block, BC7 keeps that value wherever the encoder can.
+- **A** (`alpha.exact_opaque`, which `encoder.channel_guard.a` also sets): fully opaque 4x4 blocks decode as exactly 255, and blocks whose alpha is 0 throughout as exactly 0. Where only part of a block is 0 or 255, the encoder keeps it when it can, ahead of R, G and B.
+- Guard one channel at a time. The design assumes one, and if you tick several you sort out the trade-offs yourself. When they clash, A wins, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.
+- A complex `_m` and a BC7 env mask keep **A** on, because PGPatcher and ENB read their alpha: the tick is greyed while on (`ALPHA-EXACT-OFF-M`).
 
 ### Effort
 

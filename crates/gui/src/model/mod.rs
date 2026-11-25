@@ -5068,7 +5068,12 @@ impl AppModel {
         let k = item_key.to_string();
         let f = field.to_string();
         self.edit(&field_step_label("Change", field), move |p| {
-            p.set_file_value(&k, &f, &value)
+            p.set_file_value(&k, &f, &value);
+            // Task 6g: the guard's A is one setting under two names; the entry keeps the one the row writes, so a
+            // hand-written `encoder.channel_guard.a` there can never disagree with it (the engine refuses that).
+            if f == "alpha.exact_opaque" {
+                p.clear_file_value(&k, fields::GUARD_A_ALIAS);
+            }
         });
     }
 
@@ -5095,6 +5100,15 @@ impl AppModel {
             // The BC7 weighting row stands for both of its fields (Note CP).
             if f == fields::WEIGHTING {
                 p.clear_file_value(&k, "encoder.perceptual");
+            }
+            // Task 6g: the Channel guard row stands for its four fields, and the guard's A for its alias too.
+            if f == fields::CHANNEL_GUARD {
+                for (g, _) in fields::GUARD_FIELDS {
+                    p.clear_file_value(&k, g);
+                }
+            }
+            if f == fields::CHANNEL_GUARD || f == "alpha.exact_opaque" {
+                p.clear_file_value(&k, fields::GUARD_A_ALIAS);
             }
         });
     }

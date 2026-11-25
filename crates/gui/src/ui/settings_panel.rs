@@ -8,11 +8,12 @@ use crate::model::code_text::{
     alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for,
 };
 use crate::model::fields::{
-    auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
-    field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_on,
-    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM,
-    BC3_SEARCH, EXR_STRAIGHT_HOVER, FILTER_OPTIONS, HELPER_HELP, NOT_VALID, PARALLAX_HOVER,
-    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_help,
+    field_hidden, field_views, filter_option_lock, filter_view, format_choices, group_of,
+    guard_channel_lock, levels_view, mips_on, provenance_text, weighting_option_lock, FieldView,
+    BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD, EXR_STRAIGHT_HOVER,
+    FILTER_OPTIONS, GUARD_A_HOVER, GUARD_FIELDS, GUARD_LETTERS, GUARD_RGB_HOVER, HELPER_HELP,
+    NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::labels::{
@@ -775,7 +776,11 @@ fn checkbox_hover(field: &str) -> Option<Option<&'static str>> {
         "encoder.bc1_alpha" => Some(BC1_ALPHA_HOVER),
         "encoder.perceptual" => Some(PERCEPTUAL_HOVER),
         "alpha.exr_straight" => Some(EXR_STRAIGHT_HOVER),
-        "alpha.exact_opaque" => None,
+        // Task 6g: the Channel guard row's fields, as the bulk panel's rows draw them.
+        "alpha.exact_opaque" => Some(GUARD_A_HOVER),
+        "encoder.channel_guard.r" | "encoder.channel_guard.g" | "encoder.channel_guard.b" => {
+            Some(GUARD_RGB_HOVER)
+        }
         _ => return None,
     })
 }
@@ -977,7 +982,23 @@ fn control_cell(
     help: Option<&str>,
     add: impl FnOnce(&mut egui::Ui) -> (Option<Value>, egui::Response),
 ) -> (Option<Value>, egui::Response) {
-    let l = if !cx.compact {
+    let l = row_label(ui, cx, label, help);
+    let (v, r) = control_slot(ui, control_width(ui, cx), add);
+    (v, r.labelled_by(l.id))
+}
+
+/// A row's width of control cell: `COMPACT_CONTROL_W` in the strip, else the grid's control column.
+fn control_width(ui: &egui::Ui, cx: &Ctx) -> f32 {
+    if cx.compact {
+        COMPACT_CONTROL_W
+    } else {
+        column_widths(ui).1
+    }
+}
+
+/// A row's label cell (Note HI1, HI3), in the grid's label column or, in the strip, in what the control leaves.
+fn row_label(ui: &mut egui::Ui, cx: &Ctx, label: &str, help: Option<&str>) -> egui::Response {
+    if !cx.compact {
         field_label(ui, true, label, help)
     } else {
         // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut
@@ -992,14 +1013,72 @@ fn control_cell(
             Some(t) => help_hover(l, t),
             None => l,
         }
+    }
+}
+
+/// The Channel guard row (Task 6g, Note LR, LR8): its label, then four ticks, R, G, B and A, each over its own field
+/// of `GUARD_FIELDS`, then the row's provenance and ↺ (which clears the four). Not through `control_cell`: its
+/// `labelled_by` would take each tick's own name, "Channel guard R", away. Drawn once per frame for the selected
+/// texture, so it builds nothing but the four boxes (no `format!`, hover text on `on_hover_ui`, which runs only
+/// while a tooltip shows).
+fn guard_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
+    let p = &cx.job.profile;
+    let g = &p.encoder.channel_guard;
+    let on = [g.r, g.g, g.b, p.alpha.exact_opaque];
+    row_label(ui, cx, f.label, field_help(CHANNEL_GUARD));
+    control_slot(ui, control_width(ui, cx), |ui| {
+        ui.scope(|ui| {
+            // Four boxes with their letters fit the strip's 140 px with a tighter gap.
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if f.lock.is_some() {
+                ui.disable();
+            }
+            for (i, (field, name)) in GUARD_FIELDS.into_iter().enumerate() {
+                let letter = GUARD_LETTERS[i];
+                let lock = guard_channel_lock(p, letter.chars().next().unwrap_or(' '));
+                let mut b = on[i];
+                let r = ui.add_enabled(lock.is_none(), egui::Checkbox::new(&mut b, letter));
+                // The box's text is the letter alone; a screen reader hears "Channel guard A".
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), b, name)
+                });
+                let hover = if i == 3 {
+                    GUARD_A_HOVER
+                } else {
+                    GUARD_RGB_HOVER
+                };
+                let r = if r.enabled() {
+                    r.on_hover_ui(|ui| {
+                        ui.label(hover);
+                    })
+                } else {
+                    // A disabled box shows only its disabled hover: the text, then why it is off.
+                    r.on_disabled_hover_ui(|ui| {
+                        ui.label(hover);
+                        if let Some(why) = lock.or(cx.edit_off.as_deref()) {
+                            ui.label(why);
+                        }
+                    })
+                };
+                if r.changed() {
+                    actions.push(Action::Set(field, json!(b)));
+                }
+            }
+        });
+    });
+    let hint = |ui: &mut egui::Ui| {
+        if cx.compact {
+            ui.label("");
+        } else if let Some(reason) = f.lock {
+            hint_label(ui, reason);
+        } else {
+            hint_label(ui, &provenance_text(&f.provenance));
+        }
     };
-    let w = if cx.compact {
-        COMPACT_CONTROL_W
-    } else {
-        column_widths(ui).1
-    };
-    let (v, r) = control_slot(ui, w, add);
-    (v, r.labelled_by(l.id))
+    if hint_and_reset(ui, f.edited, hint) {
+        actions.push(Action::Clear(CHANNEL_GUARD));
+    }
+    ui.end_row();
 }
 
 /// One grid row of a field: its label, its editor (disabled with the reason when locked), where the value came from
@@ -1340,7 +1419,9 @@ fn group(
                     {
                         // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
                         let t = tick.filter(|_| f.field == "subtype");
-                        if t.is_some_and(|t| t.on) {
+                        if f.field == CHANNEL_GUARD {
+                            guard_row(ui, cx, f, actions);
+                        } else if t.is_some_and(|t| t.on) {
                             helper_role_row(ui, cx.key, &cx.edit_off, actions);
                         } else {
                             match field_row(ui, cx, f) {

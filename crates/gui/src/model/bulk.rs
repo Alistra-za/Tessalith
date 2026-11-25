@@ -3,8 +3,8 @@
 use super::fields::{
     all_fields, bc3_pair, effort_field, encoding_options, field_view, filter_option_lock,
     hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
-    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, FILTER_OPTIONS, LEVELS_FIELD, NOT_VALID,
-    NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
+    CHANNEL_GUARD, EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, FILTER_OPTIONS, GUARD_FIELDS,
+    LEVELS_FIELD, NOT_VALID, NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use super::items::TextureItem;
 use super::labels::UNORM_LABEL;
@@ -411,7 +411,14 @@ pub enum Change {
 /// The bulk panel's rows, in the single panel's order: the Mipmaps rows, then `FIELDS` (design 3.2).
 pub fn panel_fields() -> Vec<(&'static str, &'static str)> {
     let mut v = vec![LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD];
-    v.extend(FIELDS);
+    // Task 6g: the Channel guard row is four tick rows here (R, G, B and A), each over its own field.
+    for row in FIELDS {
+        if row.0 == CHANNEL_GUARD {
+            v.extend(GUARD_FIELDS);
+        } else {
+            v.push(row);
+        }
+    }
     v
 }
 

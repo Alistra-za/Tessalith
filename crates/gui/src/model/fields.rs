@@ -16,7 +16,6 @@ pub const FIELDS: [(&str, &str); 21] = [
     ("mips.coverage", "Coverage"),
     // Note FM: shown only for BC1 (`hidden_reason`).
     ("encoder.bc1_alpha", "1-bit alpha"),
-    ("alpha.exact_opaque", "Exact opaque alpha"),
     ("alpha.parallax", "Enable parallax"),
     ("mips.normal", "Normal handling"),
     ("mips.normal_base", "Normal base level"),
@@ -26,6 +25,8 @@ pub const FIELDS: [(&str, &str); 21] = [
     ("color.content", "Input content"),
     ("encoder.effort", "Effort"),
     (WEIGHTING, "BC7 weighting"),
+    // Task 6g (Note LR, LR8): R, G, B and A in one row, over `GUARD_FIELDS`.
+    (CHANNEL_GUARD, "Channel guard"),
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
     ("encoder.perceptual", "Perceptual"),
     ("header", "DDS header"),
@@ -44,6 +45,50 @@ pub const PERCEPTUAL_HOVER: &str =
 
 /// The BC7 weighting row (DECISIONS Note CP): one dropdown over `encoder.perceptual` and `encoder.bc7_weights`.
 pub const WEIGHTING: &str = "encoder.bc7_weights";
+
+/// The Channel guard row (Note LR, LR8): four ticks over `GUARD_FIELDS`. A row id like `WEIGHTING`: never written to
+/// `[files]` itself, and not in `all_fields`.
+pub const CHANNEL_GUARD: &str = "encoder.channel_guard";
+
+/// The Channel guard row's four fields, in the order of its ticks (R, G, B, A), with the label each has in the bulk
+/// panel and Copy settings. A is `alpha.exact_opaque`, where the engine stores it. Kept in `all_fields` so lookups,
+/// bulk labels and Copy settings keep every field, as `SEARCH_FIELDS` is (Note JI4, FM44).
+pub const GUARD_FIELDS: [(&str, &str); 4] = [
+    ("encoder.channel_guard.r", "Channel guard R"),
+    ("encoder.channel_guard.g", "Channel guard G"),
+    ("encoder.channel_guard.b", "Channel guard B"),
+    ("alpha.exact_opaque", "Channel guard A"),
+];
+
+/// A hand-written spelling of the A field that the same entry must not keep beside `alpha.exact_opaque` (the engine
+/// refuses two keys that disagree; `overrides::CHANNEL_GUARD_A`).
+pub const GUARD_A_ALIAS: &str = "encoder.channel_guard.a";
+
+/// The tick letters, in `GUARD_FIELDS` order.
+pub const GUARD_LETTERS: [&str; 4] = ["R", "G", "B", "A"];
+
+/// Hover of the A tick (owner, BC7-O29 (c)).
+pub const GUARD_A_HOVER: &str = "On: fully opaque 4x4 blocks decode as exactly 255 in BC7, and blocks whose alpha is 0 throughout as exactly 0. Where only part of a block is 0 or 255, the encoder keeps it when it can, ahead of R, G and B.";
+
+/// Hover of the R, G and B ticks.
+pub const GUARD_RGB_HOVER: &str = "On: where this channel is exactly 0 or exactly 255 across part of a block, BC7 keeps that value wherever the encoder can. With several channels on, A wins, then G, then B, then R.";
+
+/// Help of the Channel guard row, on its label and its `?` (owner, BC7-O30): one guarded channel at a time, the
+/// priority order, and what a channel guarded flat at 255 costs another.
+pub const GUARD_HELP: &str = "Keeps a channel's flat 0 or 255 exact in BC7, such as G for metalness in an _rmaos. Tick the one channel you need exact: the design assumes one guarded channel at a time, and if you tick several you sort out the trade-offs yourself. When blocks clash, the priority is A, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.";
+
+/// Why the A tick of a complex `_m` or an env mask written as BC7 cannot be turned off (`ALPHA-EXACT-OFF-M`).
+pub const GUARD_A_LOCK: &str = "this map keeps alpha 0 and 255 exact wherever the encoder can, and opaque alpha exactly 255: PGPatcher and ENB read it (ALPHA-EXACT-OFF-M)";
+
+/// Why a Channel guard tick cannot be changed for `p`, or `None`. `channel` is the tick's letter: only A is ever
+/// locked, and only while it is on, on a `complex_material` or `envmask` written as BC7. Off, it stays editable.
+pub fn guard_channel_lock(p: &Profile, channel: char) -> Option<&'static str> {
+    (channel == 'A'
+        && p.format == Format::Bc7
+        && matches!(p.subtype, Subtype::ComplexMaterial | Subtype::Envmask)
+        && p.alpha.exact_opaque)
+        .then_some(GUARD_A_LOCK)
+}
 
 /// The BC7 weighting row's options: the row's value, its label, its hover text.
 pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 8] = [
@@ -66,7 +111,7 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 8] = [
     (
         "alpha8",
         "Alpha ×8",
-        "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. Costs about 1 dB of RGB per 3 dB of alpha.",
+        "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. On colour it costs about 1 dB of RGB per 2 dB of alpha gained.",
     ),
     (
         "alpha16",
@@ -286,6 +331,10 @@ pub fn group_of(field: &str) -> &'static str {
     if field == MSN_SOURCE {
         return "Type";
     }
+    // Task 6g: the guard's A is stored under `alpha.` but sits in its row, in Compression.
+    if GUARD_FIELDS.iter().any(|g| g.0 == field) {
+        return "Compression";
+    }
     match field.split('.').next().unwrap_or("") {
         // Note JI3: the Size group; `header` stays in Compression.
         "resize" | "resize_relative_to" | "resize_floor" => "Size",
@@ -401,6 +450,17 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         MSN_SOURCE if p.subtype != Subtype::Msn => Some("model-space normal (msn) only"),
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
+        // Task 6g: the guard reaches bc7e only (the engine ignores it silently elsewhere, LR8); its four fields
+        // are hidden and skipped by a bulk write alike.
+        CHANNEL_GUARD
+        | "encoder.channel_guard.r"
+        | "encoder.channel_guard.g"
+        | "encoder.channel_guard.b"
+        | "alpha.exact_opaque"
+            if p.format != Format::Bc7 =>
+        {
+            Some("BC7 only")
+        }
         "encoder.bc1_alpha" if p.format != Format::Bc1 => Some("BC1 only"),
         "encoder.perceptual" if !matches!(p.format, Format::Bc1 | Format::Bc3) => {
             Some("BC1 and BC3 only (BC7: the BC7 weighting row)")
@@ -457,6 +517,9 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         }
         // Note CP (fix round 1, I2): shown for a non-BC7 texture, the row is locked; it does nothing there.
         WEIGHTING => hidden_reason(p, WEIGHTING),
+        CHANNEL_GUARD => hidden_reason(p, CHANNEL_GUARD),
+        // The row's ticks lock one by one (`guard_channel_lock`): only A, only while on.
+        "alpha.exact_opaque" => guard_channel_lock(p, 'A'),
         "mips.edge" if p.mips.filter == MipFilter::Box => {
             Some("only tent, Mitchell and Kaiser read the edge")
         }
@@ -554,7 +617,6 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "alpha.threshold" => "The alpha-test threshold the mesh uses. Mipmaps are built to keep the same coverage at this value.",
         "alpha.compare" => "How the mesh tests alpha against the threshold: greater than, or greater than or equal.",
         "mips.coverage" => "Keeps a cutout from thinning out in smaller mipmaps. Applies to Cutout, Cutout + Blend, and Blend with BC1 1-bit alpha; Auto and On both turn it on there.",
-        "alpha.exact_opaque" => "On: fully opaque alpha decodes as exactly 255 in BC7, not a value just under it.",
         "mips.levels" => "How many mipmaps to write: the smaller copies the game shows at a distance.",
         "mips.filter" => "How each smaller mipmap is averaged. Box is the default. Tent, Mitchell and Kaiser are for sRGB colour. With see-through alpha the only other choice is Tent.",
         "mips.edge" => "How Tent, Mitchell and Kaiser read past the texture's edge: Wrap for a tiling texture, Clamp for one that doesn't tile. Box ignores it.",
@@ -563,6 +625,11 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
+        CHANNEL_GUARD => GUARD_HELP,
+        "alpha.exact_opaque" => GUARD_A_HOVER,
+        "encoder.channel_guard.r" | "encoder.channel_guard.g" | "encoder.channel_guard.b" => {
+            GUARD_RGB_HOVER
+        }
         "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Fast a radius of 4, Default 5, Slowest 10. Max runs the Slowest search, then tries every endpoint pair near the block's values; it takes longer for a small gain.",
         "encoder.bc1_search" => "How long the encoder searches. On BC1 it sets the colour search: Fast takes a fraction of the time and is a little less exact; use it for previews.",
         BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Slowest searches the alpha at radius 10, and Max also tries every alpha endpoint pair near the block's values.",
@@ -605,9 +672,15 @@ pub fn mips_on(levels: &Value) -> bool {
 
 /// Every field the settings panel edits, each once, in display order (F3a: bulk lookups and copy-from-active).
 pub fn all_fields() -> Vec<(&'static str, &'static str)> {
-    let mut v = FIELDS.to_vec();
+    // The Channel guard row is no field: its four fields stand for it.
+    let mut v: Vec<_> = FIELDS
+        .iter()
+        .copied()
+        .filter(|(f, _)| *f != CHANNEL_GUARD)
+        .collect();
     v.extend([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD]);
     v.extend(SEARCH_FIELDS);
+    v.extend(GUARD_FIELDS);
     v
 }
 
@@ -639,6 +712,10 @@ pub(crate) fn unset_default(field: &str) -> Value {
         "resize_relative_to" => Value::from("self"),
         "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
         "encoder.bc1_alpha" => Value::from(false),
+        // Task 6g: the profile serialises a guarded channel only when it is on.
+        "encoder.channel_guard.r" | "encoder.channel_guard.g" | "encoder.channel_guard.b" => {
+            Value::from(false)
+        }
         "encoder.bc1_search" => Value::from("default"),
         MSN_SOURCE => Value::from("skyrim"),
         _ => Value::Null,
@@ -656,6 +733,9 @@ pub(crate) fn views_of(
         .map(|&(field, label)| {
             if field == WEIGHTING {
                 return weighting_view(target, job, label);
+            }
+            if field == CHANNEL_GUARD {
+                return guard_view(target, job, label);
             }
             let value = profile
                 .pointer(&format!("/{}", field.replace('.', "/")))
@@ -704,6 +784,30 @@ fn weighting_view(target: Target, job: &ResolvedJob, label: &'static str) -> Fie
             .iter()
             .any(|f| prov(f).as_deref() == Some("project_file")),
         lock: field_lock(target, &job.profile, WEIGHTING),
+    }
+}
+
+/// The Channel guard row's view: its value is the four ticks (R, G, B, A), and its provenance and edited mark come
+/// from the fields that are on, the highest priority first (A, G, B, R), else from the first field the row has a
+/// provenance for. Any of the four set in the texture's own entry marks it edited.
+fn guard_view(target: Target, job: &ResolvedJob, label: &'static str) -> FieldView {
+    let prov = |f: &str| job.provenance.get(f).map(ToString::to_string);
+    let g = &job.profile.encoder.channel_guard;
+    let on = [g.r, g.g, g.b, job.profile.alpha.exact_opaque];
+    let decided_by = (0..4)
+        .rev()
+        .find(|&i| on[i])
+        .and_then(|i| prov(GUARD_FIELDS[i].0))
+        .or_else(|| GUARD_FIELDS.iter().find_map(|f| prov(f.0)));
+    FieldView {
+        field: CHANNEL_GUARD,
+        label,
+        value: Value::from(on.to_vec()),
+        provenance: decided_by.unwrap_or_else(|| "builtin".into()),
+        edited: GUARD_FIELDS
+            .iter()
+            .any(|f| prov(f.0).as_deref() == Some("project_file")),
+        lock: field_lock(target, &job.profile, CHANNEL_GUARD),
     }
 }
 

@@ -32,7 +32,8 @@ const COMBOS: [&str; 17] = [
     "BC7 weighting",
     "DDS header",
 ];
-const CHECKS: [&str; 2] = ["Exact opaque alpha", "Mipmaps"];
+// Task 6g: "Channel guard R" is the first tick of the Channel guard row, where "Exact opaque alpha" stood.
+const CHECKS: [&str; 2] = ["Channel guard R", "Mipmaps"];
 
 /// The fixture's rock01 decided as a CS diffuse (BC7) and selected.
 fn model(dir: &std::path::Path) -> AppModel {

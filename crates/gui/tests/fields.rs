@@ -163,7 +163,12 @@ fn format_choices_keep_a_stray_pair_marked() {
 
 #[test]
 fn every_field_is_a_real_engine_path() {
-    for (f, _) in FIELDS {
+    // The Channel guard row is no field of its own: its four fields are the paths (Task 6g).
+    for (f, _) in FIELDS
+        .into_iter()
+        .filter(|(f, _)| *f != CHANNEL_GUARD)
+        .chain(GUARD_FIELDS)
+    {
         assert!(engine::overrides::FIELD_PATHS.contains(&f), "{f}");
     }
     let d = tempfile::tempdir().unwrap();
@@ -658,9 +663,15 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
         Format::Bc1
     );
     assert_eq!(top(&h, "1-bit alpha"), None, "no row outside BC1");
-    // Offsets from the Coverage row: what is drawn above the Alpha group may change with the format.
-    let next_row =
-        top(&h, "Exact opaque alpha").expect("the row after it") - top(&h, "Coverage").unwrap();
+    // Offsets from the Coverage row: what is drawn above the Alpha group may change with the format. Nothing follows
+    // the 1-bit alpha row in the Alpha group (the Channel guard row sits in Compression, Task 6g), so the thing after
+    // it is the Mipmaps tick.
+    let mipmaps = |h: &egui_kittest::Harness<'_, sdc_gui::model::AppModel>| {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Mipmaps")
+            .rect()
+            .top()
+    };
+    let next_row = mipmaps(&h) - top(&h, "Coverage").unwrap();
 
     h.state_mut()
         .set_field(LEAF, "format", serde_json::json!("bc1"));
@@ -669,11 +680,15 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     let coverage = top(&h, "Coverage").unwrap();
     let row = top(&h, "1-bit alpha").expect("the row under BC1") - coverage;
     assert!(row > 0.0, "inside the Alpha group, after Coverage");
+    // Shown, the row pushes the Mipmaps tick down by one row: hidden, it left no gap. `row` is the pitch of the
+    // Coverage combo's row and the tick row is a pixel shorter (measured 21.5 and 20.5), so the margin is 2 px; a
+    // gap or a missing row is a whole row.
+    let after = mipmaps(&h) - coverage;
     assert!(
-        (row - next_row).abs() < 1.0,
-        "hidden, the row left a gap: {row} vs {next_row}"
+        (after - (next_row + row)).abs() < 2.0,
+        "hidden, the row left a gap: {after} vs {next_row} + {row}"
     );
-    assert!(top(&h, "Exact opaque alpha").unwrap() - coverage > row);
+    assert!(after > row);
 }
 
 /// Note FM38: RGB8 is listed beside RGBA8 UNORM, linear only; a cubemap and a Gray map keep their own lists.

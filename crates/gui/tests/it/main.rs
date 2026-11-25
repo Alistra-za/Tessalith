@@ -50,6 +50,8 @@ mod bulk_ui;
 mod by_hand_rows;
 #[path = "../centre_tabs.rs"]
 mod centre_tabs;
+#[path = "../channel_guard.rs"]
+mod channel_guard;
 #[path = "../checks.rs"]
 mod checks;
 #[path = "../checks_corpus.rs"]
