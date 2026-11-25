@@ -47,6 +47,7 @@
 // Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
 // Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
 // Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
+// Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -3634,19 +3635,25 @@ void bc6h_setup(bc6h_enc_state state[])
         // least 32 times the block's geometric-mean luminance; otherwise peak_k = -1 and the block encodes as veryslow.
         state->peak_k = 0;
         state->peak_lum = -1;
-        float log_sum = 0;
+        float lums[16];
         for (uniform int k = 0; k < 16; k++)
         {
             float lum = 0.2126f * half_to_float((unsigned int16)(int)state->block[k])
                       + 0.7152f * half_to_float((unsigned int16)(int)state->block[16 + k])
                       + 0.0722f * half_to_float((unsigned int16)(int)state->block[32 + k]);
-            log_sum += log(max(lum, 1e-6f));
+            lums[k] = lum;
             if (lum > state->peak_lum)
             {
                 state->peak_k = k;
                 state->peak_lum = lum;
             }
         }
+        // sdc patch 0007 (Q6): floor each texel at max(2^-12 of the peak, 1e-6), not 1e-6 alone: exact-black texels
+        // pulled the geometric mean down 13.8 / 16 each and guarded blocks with no highlight; an all-black block keeps
+        // the 1e-6 floor and stays unguarded.
+        float lum_floor = max(state->peak_lum * (1.0f / 4096), 1e-6f);
+        float log_sum = 0;
+        for (uniform int k = 0; k < 16; k++) log_sum += log(max(lums[k], lum_floor));
         if (log(max(state->peak_lum, 1e-6f)) - log_sum / 16 < log(32.0f)) state->peak_k = -1;
     }
 

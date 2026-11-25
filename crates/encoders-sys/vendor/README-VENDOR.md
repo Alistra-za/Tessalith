@@ -184,7 +184,7 @@ ISPC TC patch 0007 "BC6H quality" (`ispctc/patches/0007-bc6h-quality.patch`, 202
 (9c452929 is the speed phase's last kernel; the patch file is always regenerated whole, never edited by hand), and it is
 built with both compilers as before. Fixes in this patch may change BC6H bytes (the pins in `tests/bc6h.rs`, `identity.json` and the
 measured images; per-level counts in docs/research/encoder-benchmark.md); the PCA re-seed changes none of them, Q5
-(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 none of the pins, and Q4 only Fast's and Basic's.
+(below) changes all of them, astra #4 all but Veryfast's, Q2 one pin and most measured images, Q1 none of the pins, Q4 only Fast's and Basic's, and Q6 none of them.
 PCA re-seed: `compute_axis` renormalises the power-iteration vector every second iteration; when its squared norm is
 exactly 0 (a covariance whose rows sum to 0 with the epsilon absorbed) it now restarts from the unit vector of the
 channel with the largest covariance diagonal (the first on a tie) instead of multiplying by `RSQRT(0)`, which was NaN. A non-zero norm
@@ -225,7 +225,13 @@ more blocks, and the later admitted mode replaces the earlier one without a comp
 keep the old test. The slow levels pass margin 0 and never return from either test, and Veryfast has no two-region
 search (its `fastSkipTreshold` is 0, so the gate is never run). Test:
 `a_wide_channel_block_takes_the_doubled_window`. It changes BC6H bytes at Fast and Basic on SSE2, AVX2 and AVX-512 (6 of
-the 18 pins; `identity.json` `hdr_sky` and the Veryfast, Slow, Veryslow and VeryslowPeak levels keep their bytes).
+the 18 pins; `identity.json` `hdr_sky` and the Veryfast, Slow, Veryslow and VeryslowPeak levels keep their bytes). Q6: `bc6h_setup`
+floors each texel's luminance at `max(peak * 2^-12, 1e-6)`, not `1e-6` alone, in the geometric mean of the peak gate,
+so exact-black texels (each pulled the mean down by 13.8 / 16) no longer guard a block with no highlight: four to six
+of them did at luminance 0.5 to 20, and seven or more now guard by darkness alone. An all-black block keeps the `1e-6`
+floor and stays unguarded. Test: `exact_black_alone_does_not_guard_a_block`. It changes BC6H bytes only at VeryslowPeak
+(the other levels run no peak mode), and only for blocks the old floor guarded wrongly: none of the 18 pins,
+`identity.json` `hdr_sky`, the 18 `hdr_real` or the 4 `hdr_grad` images (0 of 256 guarded blocks change gate).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

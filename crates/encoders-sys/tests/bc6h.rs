@@ -1840,6 +1840,170 @@ fn collapsed_regions_take_a_bracketing_pair() {
     );
 }
 
+/// Q6's seeded blocks from index `i` (alpha 1.0): 4 to 8 exact-black texels (all channels 0) and the others one
+/// coloured value of luminance 0.5 to 20, scaled per texel by 0.6 to 1.0, a third of them with one channel exactly 0
+/// (as RGBE skies and suns have, so the lift in `bc6h_peak_retry` changes the block). Integer arithmetic and exact
+/// float scalings only, so the blocks are the same on every machine.
+fn black_gate_block(i: u32) -> [[u16; 4]; 16] {
+    let mut r = Lcg(i.wrapping_mul(0x9E37_79B1) ^ 0x85EB_CA6B);
+    r.next();
+    let blacks = r.range(4, 8) as usize;
+    let mut order: [usize; 16] = std::array::from_fn(|t| t);
+    for t in (1..16).rev() {
+        order.swap(t, r.next() as usize % (t + 1));
+    }
+    let lum = 0.5 + r.range(0, 1000) as f32 * 0.0195;
+    let w: [f32; 3] = std::array::from_fn(|_| 0.1 + r.range(0, 900) as f32 * 0.001);
+    let norm = lum / (0.2126 * w[0] + 0.7152 * w[1] + 0.0722 * w[2]);
+    let mut px = [[0u16, 0, 0, f16::ONE.to_bits()]; 16];
+    for &t in &order[blacks..] {
+        let s = 0.6 + r.range(0, 8) as f32 * 0.05;
+        let zero = r.next().is_multiple_of(3).then(|| (r.next() % 3) as usize);
+        for c in 0..3 {
+            if zero != Some(c) {
+                px[t][c] = f16::from_f32(w[c] * norm * s).to_bits();
+            }
+        }
+    }
+    px
+}
+
+/// The gate value of `bc6h_setup`, `ln(peak) - mean(ln(floored luminance))`, in f32. The old floor is `1e-6`; with
+/// `relative` each texel is floored at `max(peak * 2^-12, 1e-6)` (Q6).
+fn black_gate_value(px: &[[u16; 4]; 16], relative: bool) -> f32 {
+    let l: [f32; 16] = std::array::from_fn(|t| {
+        let v = |c: usize| f16::from_bits(px[t][c]).to_f32();
+        0.2126 * v(0) + 0.7152 * v(1) + 0.0722 * v(2)
+    });
+    let peak = l.iter().copied().fold(-1.0f32, f32::max);
+    let floor = if relative {
+        (peak * (1.0 / 4096.0)).max(1e-6)
+    } else {
+        1e-6
+    };
+    let log_sum: f32 = l.iter().map(|&v| v.max(floor).ln()).sum();
+    peak.max(1e-6).ln() - log_sum / 16.0
+}
+
+/// Whether `black_gate_block(i)` guards under the old floor, not under the relative one, and neither gate value lies
+/// within 1e-3 (relative) of `ln 32` (Task 2's tie band: the kernel's fast-math `log` may decide those differently).
+fn black_gate_candidate(px: &[[u16; 4]; 16]) -> bool {
+    let limit = 32.0f32.ln();
+    let (old, new) = (black_gate_value(px, false), black_gate_value(px, true));
+    let clear = |g: f32| (g - limit).abs() > 1e-3 * limit;
+    clear(old) && clear(new) && old >= limit && new < limit
+}
+
+/// Finds the `black_gate_block` indices in `0..1 << 16` that `black_gate_candidate` accepts and whose VeryslowPeak
+/// bytes differ from Veryslow's on every path in `paths()` (run it with `SDC_TEST_AVX512=1` so AVX-512 is included),
+/// writes each as `<i> <black texels>` to the file `SDC_BC6H_WITNESS_OUT` names, and prints the count and the first
+/// hits per black-texel count. With the variable unset it says so and returns.
+#[test]
+#[ignore = "search for black-gate witnesses: run on the objects before the Q6 fix, with SDC_TEST_AVX512=1"]
+fn search_black_gate_witnesses() {
+    use std::io::Write as _;
+    const END: u32 = 1 << 16;
+    let Some(path) = std::env::var_os("SDC_BC6H_WITNESS_OUT") else {
+        eprintln!("skipped: SDC_BC6H_WITNESS_OUT is not set");
+        return;
+    };
+    let targets: Vec<IspcTarget> = paths().collect();
+    let mut file = std::fs::File::create(&path).unwrap();
+    writeln!(
+        file,
+        "# commit {} input black_gate_block 0..{END} paths {targets:?}",
+        git_describe()
+    )
+    .unwrap();
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8)) as u32;
+    let mut hits: Vec<u32> = std::thread::scope(|s| {
+        let jobs: Vec<_> = (0..threads)
+            .map(|t| {
+                let targets = &targets;
+                s.spawn(move || {
+                    (t..END)
+                        .step_by(threads as usize)
+                        .filter(|&i| {
+                            let px = black_gate_block(i);
+                            black_gate_candidate(&px)
+                                && targets.iter().all(|&target| {
+                                    encode_block(&px, Bc6hLevel::VeryslowPeak, target)
+                                        != encode_block(&px, Bc6hLevel::Veryslow, target)
+                                })
+                        })
+                        .collect::<Vec<u32>>()
+                })
+            })
+            .collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap()).collect()
+    });
+    hits.sort_unstable();
+    let blacks = |i: u32| {
+        black_gate_block(i)
+            .iter()
+            .filter(|p| p[..3] == [0; 3])
+            .count()
+    };
+    for &i in &hits {
+        writeln!(file, "{i} {}", blacks(i)).unwrap();
+    }
+    file.flush().unwrap();
+    println!("{} of {END} are witnesses on {targets:?}", hits.len());
+    for n in 4..=8 {
+        let first: Vec<u32> = hits
+            .iter()
+            .copied()
+            .filter(|&i| blacks(i) == n)
+            .take(4)
+            .collect();
+        println!("{n} black texels: {first:?}");
+    }
+}
+
+/// Witnesses from `search_black_gate_witnesses`: `black_gate_block` indices. On the objects before the Q6 fix each
+/// guarded under the `1e-6` floor and not under the relative one, and VeryslowPeak's bytes differed from Veryslow's on
+/// SSE2, AVX2 and AVX-512 (found on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25).
+/// Per black-texel count (4, 5, 6) the first hits: 19,872 of 65,536 blocks qualified, none with 7 or 8 black texels.
+const BLACK_GATE_WITNESSES: &[u32] = &[25, 27, 17, 30, 49, 11, 13, 28];
+
+/// Q6 (Note LT): the peak gate should fire on a highlight, not on exact black. Each exact-black texel was floored at
+/// `1e-6` in the geometric mean and pulled it down by 13.8 / 16, so four to eight of them guarded a block with no
+/// highlight; an unguarded block encodes exactly as Veryslow (`peak_k = -1` returns early from every peak path). On
+/// each witness VeryslowPeak's bytes equal Veryslow's on every path in `paths()`, and the replication of the gate
+/// guards the block under the old floor and not under the new one (so a witness cannot pass because it is no longer
+/// guarded by the replication's own count). Skipped on an Intel CPU, like the pins: the witnesses were selected on
+/// the Ryzen's output (Note JC).
+#[test]
+fn exact_black_alone_does_not_guard_a_block() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
+    let mut failures = Vec::new();
+    for &i in BLACK_GATE_WITNESSES {
+        let px = black_gate_block(i);
+        if !black_gate_candidate(&px) {
+            failures.push(format!("witness {i}: the gate replication no longer fits"));
+        }
+        for target in paths() {
+            let peak = encode_block(&px, Bc6hLevel::VeryslowPeak, target);
+            let plain = encode_block(&px, Bc6hLevel::Veryslow, target);
+            if peak != plain {
+                failures.push(format!(
+                    "witness {i} {target:?}: VeryslowPeak {} differs from Veryslow {}",
+                    hex::encode(peak),
+                    hex::encode(plain)
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty() && !BLACK_GATE_WITNESSES.is_empty(),
+        "{} witness failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 #[test]
 #[should_panic(expected = "multiple of 4")]
 fn rejects_unaligned_width() {
