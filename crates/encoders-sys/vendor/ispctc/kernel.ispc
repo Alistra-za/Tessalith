@@ -34,34 +34,24 @@
 // R2 the endpoint quantiser and dequantiser, block_pca_axis and get_pca_bound no longer read or write unused slots.
 // zero-div block_quant never divides by a zero endpoint distance.
 // Q6 skip-retry bc6h_peak_retry runs no second search for a block the lift left unchanged.
-// S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not once per
-//   mode.
+// S1 rank-once bc6h_block_cache ranks the two-region partitions once per block (and once after a lift), not per mode.
 // S2 pca-once bc6h_block_cache computes the PCA endpoints once per block (and once after a lift), not once per mode.
 // 7a qbounds-once bc6h_build_qbounds builds the endpoint bounds once per encode, not once per admitted selector.
 // S4 prune the slow levels skip a mode whose endpoint window cannot beat the best error so far.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Modified for Tessalith (sdc patch 0007, 2026-11-25, patches/0007-bc6h-quality.patch): BC6H quality fixes from a
-// second audit. Changes are marked "sdc patch 0007". They change BC6H bytes.
-// PCA re-seed compute_axis restarts the power iteration from the largest-variance coordinate when the vector's norm
-//   is zero.
+// second audit. Changes are marked "sdc patch 0007". They change BC6H bytes; the S4 guard does not.
+// PCA re-seed compute_axis restarts the power iteration at the largest-variance coordinate when the norm is zero.
 // Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
-// astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not
-//   q / (levels - 1).
-// Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
-// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the
-//   best's again.
-// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits
-//   the window.
-// Q6 floor    bc6h_setup floors each texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric
-//   mean.
-// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest window bound below the
-//   widest's.
-// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code,
-//   not 12 exponent steps.
-// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions of the ranking, not only
-//   the lowest.
-// S4 guard    bc6h_mode_cannot_win prunes only once a candidate has been scored (best_err < 1e30f), not through the
-//   1e99 infinity.
+// astra #4    bc6h_enc_1p and _2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
+// Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a region the first quantisation collapsed.
+// Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does.
+// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next fits one.
+// Q6 floor    bc6h_setup floors a texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
+// astra #6    at the slow levels bc6h_test_mode also tries the widened variant with the lowest bound below the widest's.
+// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code.
+// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions, not only the lowest.
+// S4 guard    best_err starts at the finite 1e30f, not 1e99, and bc6h_mode_cannot_win prunes only once it is below it.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2953,17 +2943,19 @@ float bc6h_window_bound(bc6h_enc_state state[])
 // sdc patch 0006 (S4): at the slow levels a mode whose window bound exceeds the best error so far cannot win, so the
 // lane skips its encode. It is exact: the bound is below every candidate's error (bc6h_window_bound), and a candidate
 // replaces the best only on a strictly lower error, so a skipped mode would not have replaced it; the slack covers
-// float summation order. best_err starts at 1e99, so nothing is skipped before the first candidate (see the guard
-// below). A guarded block (peak mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not
-// apply there; peak_mode is uniform and tested first because peak_k is written only in peak mode. The if is varying:
-// a skipped lane is masked off, and the gang skips the call only when every lane skips.
+// float summation order. Nothing is skipped before the first candidate (see the guard below). A guarded block (peak
+// mode, peak_k >= 0) is scored against orig by bc6h_peak_guard, so the bound does not apply there; peak_mode is
+// uniform and tested first because peak_k is written only in peak mode. The if is varying: a skipped lane is masked
+// off, and the gang skips the call only when every lane skips.
 // sdc patch 0007 (astra #6): the test on a bound the caller computed.
 bool bc6h_mode_cannot_win(bc6h_enc_state state[], float bound)
 {
-    // sdc patch 0006 (S4): nothing prunes before the first candidate. Upstream's own first-candidate rule, err <
-    // best_err, relies on best_err = 1e99 being +inf in float under fast-math.
-    // sdc patch 0007 (S4 guard): the best_err < 1e30f test keeps this rule from relying on that: while best_err is
-    // still the sentinel no candidate has been scored, so nothing prunes.
+    // sdc patch 0006 (S4): nothing prunes before the first candidate.
+    // sdc patch 0007 (S4 guard): best_err starts at the finite 1e30f (upstream's 1e99 is +inf in float, which the
+    // first-candidate rule err < best_err would rely on under fast-math), so no infinity is read here or in the
+    // compares against best_err. Every scored error is far below 1e30f (the largest, bc6h_peak_guard's
+    // (terr + 1) * 1e13f, is about 2e24), so the first candidate always wins, and best_err < 1e30f means exactly
+    // that a candidate has been scored. A change to that guard scale must keep it below 1e30f.
     bool prune = state->best_err < 1e30f && bound > state->best_err * (1 + 1e-4f) + 1;
     if (state->peak_mode) { if (state->peak_k >= 0) prune = false; }
     return prune;
@@ -3877,7 +3869,7 @@ void bc6h_peak_retry(bc6h_enc_state state[])
             bc6h_bounds(state);
             // sdc patch 0006 (S1, S2): the lift changed the block, rank and fit again (lifted lanes only)
             bc6h_block_cache(state);
-            state->best_err = 1e99;
+            state->best_err = 1e30f; // sdc patch 0007 (S4 guard): finite "nothing scored yet", see bc6h_mode_cannot_win
             bc6h_search_slow(state);
 
             if (state->best_err > err0)
@@ -3940,7 +3932,7 @@ inline void CompressBlockBC6H(uniform rgba_surface src[], int xx, uniform int yy
 
     bc6h_enc_copy_settings(state, settings);
     load_block_interleaved_16bit(state->block, src, xx, yy);
-    state->best_err = 1e99;
+    state->best_err = 1e30f; // sdc patch 0007 (S4 guard): finite "nothing scored yet", see bc6h_mode_cannot_win
 
     CompressBlockBC6H_core(state);
 
