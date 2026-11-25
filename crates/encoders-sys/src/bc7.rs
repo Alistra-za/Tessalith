@@ -20,9 +20,10 @@ pub struct Bc7Params {
     pub level: Bc7Level,
     pub perceptual: bool,
     /// The channel guard's A: bit 3 of bc7e's exact-constants mask (patch 0005, Note LR, LR17). On a block whose alpha
-    /// is 255 throughout, mode 6 takes p-bits 1, so alpha decodes exactly 255; in an alpha block, a subset whose alpha
-    /// is 0 or 255 on every texel decodes it exactly wherever the kernel finds such a solution, above any guarded R, G
-    /// or B ([`Bc7Tune::exact_constants`]).
+    /// is 255 throughout, mode 6 takes p-bits 1, so alpha decodes exactly 255 (a rotated mode 4/5 winner needs
+    /// [`crate::bc7_fixup::force_opaque_rotated`], LR6); in an alpha block, a subset whose alpha is 0 or 255 on every
+    /// texel decodes it exactly wherever the kernel finds such a solution, above any guarded R, G or B
+    /// ([`Bc7Tune::exact_constants`]).
     pub exact_opaque: bool,
 }
 

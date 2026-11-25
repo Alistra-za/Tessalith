@@ -1541,7 +1541,9 @@ fn tuned_on(
     tune: encoders_sys::Bc7Tune,
     target: IspcTarget,
 ) -> Vec<u8> {
-    let mut out = vec![0u8; blocks.len()];
+    // 16 texels in, 16 bytes out per block: 64 blocks are 64 * 16 texels and 64 * 16 output bytes.
+    let n = blocks.len() / 16;
+    let mut out = vec![0u8; n * 16];
     for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
         encoders_sys::bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
     }
