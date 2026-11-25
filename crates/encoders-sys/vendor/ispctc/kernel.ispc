@@ -46,6 +46,7 @@
 // astra #4    bc6h_enc_1p and bc6h_enc_2p_list refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
 // Q2 pair     bc6h_enc_1p and bc6h_enc_2p_list try a bracketing pair for a collapsed region of the first quantisation.
 // Q1 refine   bc6h_enc_2p_list refits each pass from the previous pass's indices, as bc6h_enc_1p does, not from the best's again.
+// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next widest fits the window.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef ISPC_UINT_IS_DEFINED
@@ -2865,7 +2866,21 @@ void bc6h_test_mode(bc6h_enc_state state[], uniform int mode, uniform bool enc, 
     float max_span = state->max_span;
     int max_span_idx = state->max_span_idx;
 
-    if (max_span * margin > span) return;
+    if (mode >= 10 || mode <= 1 || mode == 5 || mode == 9)
+    {
+        if (max_span * margin > span) return;
+    }
+    else
+    {
+        // sdc patch 0007 (Q4): modes 2 and 6 give the widest channel twice the window (the other two keep span), so the gate tests the widest against 2 * span and the next widest against span; it only admits more blocks (compute_qbounds2 keeps the narrow bounds on the other two channels). The slow levels pass margin 0 and never return here
+        float second_span = 0;
+        for (uniform int p = 0; p < 3; p++)
+        {
+            float sp = state->rgb_bounds[3+p] - state->rgb_bounds[p];
+            if (p != max_span_idx) second_span = max(second_span, sp);
+        }
+        if (max_span * margin > 2 * span || second_span * margin > span) return;
+    }
 
     if (mode >= 10)
     {

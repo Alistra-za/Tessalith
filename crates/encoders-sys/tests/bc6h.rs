@@ -90,11 +90,11 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "a931015383cfac37c37dc94aa3029c111d6609fc919788cb46917d132a0685cb",
+        "4c36698b3ec1d07dfa8ede975d1f09e53a1fe096097c4c754f6a2c7bced07be5",
     ),
     (
         Bc6hLevel::Basic,
-        "aa6cbe4474709633ff7ba19eccc21342ff51d296e0d5ff0d1ed282dd00710d4a",
+        "5386955b2f795c5b5119d80627b4d538db40bfd61e5165840ec1a5f2fbd4ba17",
     ),
     (
         Bc6hLevel::Slow,
@@ -115,11 +115,11 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "4fda8fd713725c2c3f0aa63d7aff6d9c02ac9e3b9f30e753330d2a29c8a75a77",
+        "be1c8043d19f1df4a57012f932185f95be2f168b178dcec70a0397de821ee3a8",
     ),
     (
         Bc6hLevel::Basic,
-        "65a81320edd86d76abd18dfb22c42e54ec859abaf813aa7e4fc2a7dec1fa2e9e",
+        "1ec0f623b9694c3c21217a40222f7939cb5bc4169e09ebe5b70ac6cd46292d6a",
     ),
     (
         Bc6hLevel::Slow,
@@ -140,11 +140,11 @@ const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     ),
     (
         Bc6hLevel::Fast,
-        "44c5e79f0499bbb8c39d5eb87cd4435b0bd0f2042aa937de80947085fdded228",
+        "b0b48d3ac80f31f91dacdffee6dde490a6d57d4ef68fa167f1a5dc367ab89b24",
     ),
     (
         Bc6hLevel::Basic,
-        "f402c41d785ffa75059add9ec73957ff41f55a6a6496f69ea069286336c8d9ad",
+        "73b31868a6a14c2c327ca2359faed67f5697cb3ec4b993d595413f5f6a3a9c56",
     ),
     (
         Bc6hLevel::Slow,
@@ -382,6 +382,47 @@ fn mode_2_takes_a_span_inside_its_fractional_limit() {
         assert!(
             one_region || mode == 2,
             "{target:?}: a two-region mode other than mode 2 with R widest: {mode}"
+        );
+    }
+}
+
+/// Modes 2-4 and 6-8 give the widest channel twice the window but were gated on the single span, so a block with R span
+/// 6000 and G, B 2000 fell to mode 1 at Fast although mode 6's R window of 7372.6 fits (fable Q4, opus's trace).
+#[test]
+fn a_wide_channel_block_takes_the_doubled_window() {
+    // R spans 2906 half codes (about 6000 UF16 units), G and B 968 (about 2000). The left two columns (one region of
+    // BC6H partition 0) vary R alone; the right two vary G and B together with R fixed: two clusters, two directions.
+    const BASE: u16 = 0x3C00;
+    const R_SPAN: u32 = 2906;
+    const GB_SPAN: u32 = 968;
+    let step = |span: u32, i: usize| BASE + (span * i as u32 / 7) as u16;
+    let one = f16::ONE.to_bits();
+    let mut px = [[BASE, BASE, BASE, one]; 16];
+    for row in 0..4usize {
+        for col in 0..2usize {
+            px[row * 4 + col][0] = step(R_SPAN, row * 2 + col);
+        }
+        for col in 2..4usize {
+            let v = step(GB_SPAN, row * 2 + col - 2);
+            px[row * 4 + col][1] = v;
+            px[row * 4 + col][2] = v;
+        }
+    }
+    let modes: Vec<(IspcTarget, u32, u32)> = paths()
+        .map(|target| {
+            let b = encode_block(&px, Bc6hLevel::Fast, target);
+            let two = field(&b, 0, 2);
+            let mode = if two < 2 { two } else { field(&b, 0, 5) };
+            eprintln!("{target:?} mode {mode}");
+            (target, two, mode)
+        })
+        .collect();
+    for (target, two, mode) in modes {
+        assert_ne!(two, 1, "{target:?}: mode 1 kept the block out of mode 6");
+        let one_region = matches!(mode, 3 | 7 | 11 | 15);
+        assert!(
+            one_region || matches!(mode, 18 | 22 | 26),
+            "{target:?}: a two-region mode outside the mode 6 family: {mode}"
         );
     }
 }
