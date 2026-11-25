@@ -169,9 +169,9 @@ random strips and the 22 measured images hash equal on SSE2, AVX2 and AVX-512. S
 region's endpoints once) was tried twice and dropped, because both attempts changed BC6H bytes, so it is not in the
 patch (Note LT). Both attempts changed `encode_versions`' `hdr_sky.dds`. The first (a hoisted reciprocal) left the pins
 and the random strips equal. The second (a per-texel division) changed some of the 22 measured images at every level,
-from the one-region path at Veryfast on, on AVX2. S4 prune: at Slow, Veryslow and
-VeryslowPeak, `bc6h_test_mode` computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum
-over the 16 texels and 3 channels of each texel channel's squared distance to the window
+from the one-region path at Veryfast on, on AVX2. S4 prune: at Slow, Veryslow and VeryslowPeak, `bc6h_test_mode`
+computes `bc6h_window_bound` after `bc6h_build_qbounds` and before the encode: the sum over the 16 texels and 3 channels
+of each texel channel's squared distance to the window
 `[unpack_to_uf16(qbounds[p], epb), unpack_to_uf16(qbounds[4 + p], epb)]`, unpacked at the mode's endpoint bits. Every
 endpoint a candidate uses is clamped to `qbounds` before it is unpacked and each decoded value lies between its two
 endpoints, so the bound is below every candidate's error. A lane skips the mode's encode when the bound exceeds
