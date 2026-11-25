@@ -22,7 +22,10 @@ fn step64(s: u64) -> u64 {
 }
 
 /// Acklam's inverse standard normal CDF (relative error < 1.2e-9).
-#[allow(clippy::excessive_precision)]
+#[allow(
+    clippy::excessive_precision,
+    reason = "Acklam's coefficients are kept to the digits the reference gives"
+)]
 fn inv_norm(p: f64) -> f64 {
     let a = [
         -3.969683028665376e+01,

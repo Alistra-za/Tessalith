@@ -21,7 +21,10 @@ fn xorshift_float(s: &mut u32) -> f32 {
 }
 
 // Giles' single-precision erfinv, as noisegen.cs.hlsl writes it.
-#[allow(clippy::excessive_precision)]
+#[allow(
+    clippy::excessive_precision,
+    reason = "the constants are kept to the digits noisegen.cs.hlsl gives"
+)]
 fn erf_inv(x: f32) -> f32 {
     let mut w = -((1.0 - x) * (1.0 + x)).ln();
     let p = if w < 5.0 {

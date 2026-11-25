@@ -104,6 +104,7 @@ fn create(adapter: Option<&IDXGIAdapter>, driver: D3D_DRIVER_TYPE) -> Result<Gpu
         // SAFETY: plain COM getters on live interfaces.
         .and_then(|d| unsafe { d.GetAdapter() })
         .and_then(|a| a.cast::<IDXGIAdapter1>())
+        // SAFETY: plain COM getter on the live adapter.
         .and_then(|a| unsafe { a.GetDesc1() })
         .ok();
     let software = desc
@@ -128,9 +129,11 @@ fn hardware_adapters() -> Vec<(IDXGIAdapter1, DXGI_ADAPTER_DESC1)> {
     };
     for i in 0.. {
         // EnumAdapters1 fails with DXGI_ERROR_NOT_FOUND past the last one.
+        // SAFETY: plain COM enumeration on the live factory; an index past the last adapter fails, which ends the loop.
         let Ok(a) = (unsafe { factory.EnumAdapters1(i) }) else {
             break;
         };
+        // SAFETY: plain COM getter on the live adapter `a`.
         let Ok(desc) = (unsafe { a.GetDesc1() }) else {
             continue;
         };

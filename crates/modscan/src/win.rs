@@ -24,6 +24,7 @@ fn new_entry() -> PROCESSENTRY32W {
 /// All running process names, lowercase.
 pub fn process_names() -> Vec<String> {
     let mut out = vec![];
+    // SAFETY: the snapshot handle comes from CreateToolhelp32Snapshot and is closed before the block ends; `e` is a PROCESSENTRY32W whose dwSize `new_entry` sets, as Process32FirstW and Process32NextW require.
     unsafe {
         let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
             return out;
@@ -48,6 +49,7 @@ pub fn process_names() -> Vec<String> {
 /// folder still comes from the parent process image, and if the parent is not ModOrganizer.exe
 /// (for example a launcher in between) the answer is `None`.
 pub fn mo2_exe_dir() -> Option<PathBuf> {
+    // SAFETY: each snapshot handle comes from CreateToolhelp32Snapshot and is closed before the block ends or returns; `e` and `m` are entry structs whose dwSize is set, as the Process32 and Module32 calls require.
     unsafe {
         let me = std::process::id();
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
@@ -89,6 +91,7 @@ pub fn mo2_exe_dir() -> Option<PathBuf> {
 
 /// HKCU\Software\Mod Organizer Team\Mod Organizer\CurrentInstance.
 pub fn current_instance_name() -> Option<String> {
+    // SAFETY: `buf` is a live 260-element u16 array and `len` is its size in bytes, as RegGetValueW requires; the key and value names are static wide strings and both out-pointers outlive the call.
     unsafe {
         let mut buf = [0u16; 260];
         let mut len = std::mem::size_of_val(&buf) as u32;
@@ -113,6 +116,7 @@ pub fn current_instance_name() -> Option<String> {
 pub fn documents_dir() -> Option<PathBuf> {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath, KNOWN_FOLDER_FLAG};
+    // SAFETY: the folder id is a static; the PWSTR SHGetKnownFolderPath returns is NUL terminated, converted to a String before CoTaskMemFree frees it, and not used afterwards.
     unsafe {
         let p = SHGetKnownFolderPath(&FOLDERID_Documents, KNOWN_FOLDER_FLAG(0), None).ok()?;
         let s = p.to_string().ok();

@@ -435,7 +435,7 @@ pub fn read_cube_level(
     use windows::Win32::Graphics::Direct3D11::{
         D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_USAGE_STAGING,
     };
-    // SAFETY (whole block): every object belongs to `gpu.device`; the mapped rows are read inside Map/Unmap.
+    // SAFETY: every object belongs to `gpu.device`; the mapped rows are read inside Map/Unmap.
     unsafe {
         let t: ID3D11Texture2D = v
             .GetResource()

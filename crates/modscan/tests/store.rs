@@ -1309,7 +1309,7 @@ fn delete_unseen_drops_texsets_no_shape_uses() {
 /// Note GC (brief §8): the Meshes list's winner read on 100k paths. Prints the time; the ruling records it.
 /// `cargo test -p modscan --test store winners_read_time -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "slow: times a read of 100k paths and prints the time; run on demand"]
 fn winners_read_time_on_100k_paths() {
     let (_d, mut s, a) = store();
     let b = origin(&mut s, "B", 1);

@@ -33,7 +33,7 @@ fn le_fixture_is_flagged() {
 
 /// Opt-in: walks a real mesh folder. `SDC_NIF_CORPUS=C:\path\to\meshes cargo test -p nif -- --ignored corpus`
 #[test]
-#[ignore]
+#[ignore = "needs SDC_NIF_CORPUS (a folder of real meshes)"]
 fn corpus() {
     let root = std::env::var("SDC_NIF_CORPUS").expect("set SDC_NIF_CORPUS");
     let (mut files, mut bad) = (0, vec![]);
