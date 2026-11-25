@@ -32,7 +32,8 @@
 //! the two-region gate the replication treats as the kernel's; `--centre` the kernel's UF16 conversion
 //! `(h + 0.5) / 31 * 64` instead of `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with
 //! D16's on the source spans converted as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the
-//! lift count and the astra #6 proxy do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` stops with an error otherwise).
+//! lift count and the astra #6 proxy do. Image sides must be multiples of 4 (the block indexing assumes it; `diag`
+//! stops with an error otherwise).
 use encoders_sys::{bc6h_compress_rows_on, Bc6hLevel, IspcTarget};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
