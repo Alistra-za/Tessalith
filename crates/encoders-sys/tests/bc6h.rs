@@ -2040,9 +2040,9 @@ const BLACK_GATE_WITNESSES: &[u32] = &[25, 27, 17, 30, 49, 11, 13, 28];
 /// Q6 (Note LT): the peak gate should fire on a highlight, not on exact black. Each exact-black texel was floored at
 /// `1e-6` in the geometric mean and pulled it down by 13.8 / 16, so four to eight of them guarded a block with no
 /// highlight; an unguarded block encodes exactly as Veryslow (`peak_k = -1`: `bc6h_peak_guard` returns the plain
-/// error, `bc6h_peak_retry` runs no second search, and S4's prune applies as at Veryslow, where a guarded block is
-/// exempt from it). On each witness VeryslowPeak's bytes equal Veryslow's on every path in `paths()`, and the
-/// replication of the gate guards the block under the old floor and not under the new one (so a witness cannot pass
+/// error, `bc6h_peak_retry` runs no second search, and S4's prune applies as at Veryslow; only a guarded block
+/// (`peak_k >= 0`) is exempt from it). On each witness VeryslowPeak's bytes equal Veryslow's on every path in
+/// `paths()`, and the replication of the gate guards the block under the old floor and not under the new one (so a witness cannot pass
 /// because it is no longer guarded by the replication's own count). Skipped on an Intel CPU, like the pins: the
 /// witnesses were selected on the Ryzen's output (Note JC).
 #[test]
@@ -2339,8 +2339,8 @@ fn peak_texel_ratio(px: &[[u16; 4]; 16], b: &[u8; 16]) -> f32 {
 }
 
 /// Records Task 23's search (`dim_sun`, `i in 0..1 << 16`, VeryslowPeak) for `DIM_SUN_WITNESSES`: for each index the
-/// gate replication guards, one line per path in `paths()` in the form the other witness searches write,
-/// `<path> VeryslowPeak <i> <hex bytes> <peak texel ratio>`, in the file `SDC_BC6H_WITNESS_OUT` names (run it with
+/// gate replication guards, one line per path in `paths()` in the form the other witness searches write plus a
+/// peak-ratio column, `<path> VeryslowPeak <i> <hex bytes> <peak texel ratio>`, in the file `SDC_BC6H_WITNESS_OUT` names (run it with
 /// `SDC_TEST_AVX512=1` so AVX-512 is included).
 #[test]
 #[ignore = "record dim sun witnesses: run on the objects before the change, then after"]
