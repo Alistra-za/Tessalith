@@ -1057,7 +1057,7 @@ fn one_region_endpoints_take_the_nearest_code() {
 /// `(q + 0.5) * 64`, so each colour lands about 32 UF16 units (some 16 half codes) from its source: 256 is a loose
 /// bound that only a black or near-white NaN decode breaks; do not tighten it.
 #[test]
-#[ignore = "RED for the PCA zero-norm re-seed (Note LT): passes once Task 13 lands"]
+#[ignore = "RED for the PCA zero-norm re-seed (Note LT): passes once the PCA re-seed (patch 0007) lands"]
 fn pca_survives_a_zero_covariance_row_sum() {
     let a = [7936u16, 7936, 0];
     let b = [0u16, 0, 15872];
@@ -1101,7 +1101,7 @@ fn pca_survives_a_zero_covariance_row_sum() {
 /// at every level on every path every decoded channel of every texel equals `h`. The failure message names `h`, the
 /// level, the path and the decoded half, and the counts per level and path are printed.
 #[test]
-#[ignore = "RED for BC6H-Q5 (Note LT): passes once Task 14 lands"]
+#[ignore = "RED for BC6H-Q5 (Note LT): passes once the Q5 rounding fix (patch 0007) lands"]
 fn constant_blocks_decode_to_their_half_code() {
     let mut hs: Vec<u16> = (1..=0x7BFFu16).step_by(7).collect();
     hs.push(0x7BFF);

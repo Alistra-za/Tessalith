@@ -24,15 +24,15 @@
 //! `diag` encodes the same images at every level and counts, from the source and the decoded halves, what the audit
 //! of the vendored kernel asked about (it changes no kernel byte): the decode bias d = decoded - source half per
 //! channel (Q5), regions whose decoded texels collapse to one colour (Q2), the picks of the Fast and Basic two-region
-//! gate under today's and spec D16's rule and how often Slow's output is in the family D16 picks (Q4; the gate is
+//! gate under today's and the proposed D16 rule and how often Slow's output is in the family D16 picks (Q4; the gate is
 //! replicated in f32 and checked against the encoded modes, and a mismatch away from a threshold is an error unless it
 //! is an `idx_ties` block: the output is the neighbour mode of the pick's family because the two widest spans are
 //! within 1e-3 of each other and the kernel's fast-math rounding chose the other channel as `max_span_idx`),
-//! the guarded (peak) blocks (Q6, Task 5), and the counts of astra #2, #5 and #6. `--gate` names the two-region gate
+//! the guarded (peak) blocks (Q6, and the peak retry's lift), and the counts of astra #2, #5 and #6. `--gate` names the two-region gate
 //! the replication treats as the kernel's; `--centre` the kernel's UF16 conversion `(h + 0.5) / 31 * 64` instead of
 //! `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with D16's on the source spans converted
 //! as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the lift count and the astra #6 proxy
-//! do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` panics otherwise).
+//! do. Image sides must be multiples of 4 (the block indexing assumes it; `diag` stops with an error otherwise).
 use encoders_sys::{bc6h_compress_rows_on, Bc6hLevel, IspcTarget};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -593,7 +593,7 @@ const SKIPS: [u8; 32] = [
 enum Gate {
     /// `max_span * margin > span` rejects.
     Today,
-    /// Spec D16: modes 2 and 6 pass when `max_span * margin <= 2 * span` and `second_span * margin <= span`.
+    /// The proposed D16 gate: modes 2 and 6 pass when `max_span * margin <= 2 * span` and `second_span * margin <= span`.
     D16,
 }
 
@@ -777,7 +777,7 @@ fn near_threshold(max: f32, second: f32, fast: bool, gate: Gate) -> bool {
 }
 
 /// The peak gate of `bc6h_setup`: `(guarded, peak texel)`. With `floor` each texel's luminance is floored at
-/// `max(peak * 2^-12, 1e-6)` (Task 21) before the geometric mean.
+/// `max(peak * 2^-12, 1e-6)` (the planned luminance floor) before the geometric mean.
 fn guard_of(src: &[[u16; 3]; 16], floor: bool) -> (bool, usize, f32) {
     let l: [f32; 16] = std::array::from_fn(|k| lum(src[k]));
     let (mut pk, mut pl) = (0usize, -1.0f32);
@@ -800,7 +800,7 @@ fn guard_of(src: &[[u16; 3]; 16], floor: bool) -> (bool, usize, f32) {
     (guarded, pk, pl)
 }
 
-/// Task 5: the lift (`max(x, m - 12 * 1024 * 64 / 31)` per channel, in the kernel's UF16) changes no channel.
+/// The peak retry's lift (`max(x, m - 12 * 1024 * 64 / 31)` per channel, in the kernel's UF16) changes no channel.
 fn lift_changes_nothing(src: &[[u16; 3]; 16], centre: bool) -> bool {
     let drop = (12 * 1024 * 64) as f32 / 31.0;
     src.iter().all(|t| {
@@ -894,56 +894,46 @@ impl LevelAcc {
     }
 }
 
-/// One image's level-independent counts (Q6, astra #5) and its VeryslowPeak decoder-side counts (astra #2).
-#[derive(Default)]
-struct ImgRow {
-    image: String,
-    blocks: u64,
-    guarded: u64,
-    not_under_floor: u64,
-    no_lift: u64,
-    a5: u64,
-    a5_deep: u64,
-    a2_below: u64,
-    a2_anchor: u64,
-    a2_anchor_alt: u64,
-    a2_other: u64,
-    a2_other_alt: u64,
+// The field list is written once, in the `img_row!` call below; the macro makes the struct, the table's column order
+// (`cells`, which must hold as many entries as there are fields) and the TOTAL line's sum (`add`).
+macro_rules! img_row {
+    ($($f:ident),+ $(,)?) => {
+        /// One image's level-independent counts (Q6, astra #5) and its VeryslowPeak decoder-side counts (astra #2).
+        #[derive(Default)]
+        struct ImgRow {
+            image: String,
+            $($f: u64,)+
+        }
+
+        impl ImgRow {
+            /// The counts in the table's column order.
+            fn cells(&self) -> [u64; IMG_COLUMNS] {
+                [$(self.$f),+]
+            }
+
+            /// Adds another row's counts (the table's TOTAL line).
+            fn add(&mut self, o: &ImgRow) {
+                $(self.$f += o.$f;)+
+            }
+        }
+    };
 }
 
-impl ImgRow {
-    /// The counts in the table's column order.
-    fn cells(&self) -> [u64; 11] {
-        [
-            self.blocks,
-            self.guarded,
-            self.not_under_floor,
-            self.no_lift,
-            self.a5,
-            self.a5_deep,
-            self.a2_below,
-            self.a2_anchor,
-            self.a2_anchor_alt,
-            self.a2_other,
-            self.a2_other_alt,
-        ]
-    }
+const IMG_COLUMNS: usize = 11;
 
-    /// Adds another row's counts (the table's TOTAL line).
-    fn add(&mut self, o: &ImgRow) {
-        self.blocks += o.blocks;
-        self.guarded += o.guarded;
-        self.not_under_floor += o.not_under_floor;
-        self.no_lift += o.no_lift;
-        self.a5 += o.a5;
-        self.a5_deep += o.a5_deep;
-        self.a2_below += o.a2_below;
-        self.a2_anchor += o.a2_anchor;
-        self.a2_anchor_alt += o.a2_anchor_alt;
-        self.a2_other += o.a2_other;
-        self.a2_other_alt += o.a2_other_alt;
-    }
-}
+img_row!(
+    blocks,
+    guarded,
+    not_under_floor,
+    no_lift,
+    a5,
+    a5_deep,
+    a2_below,
+    a2_anchor,
+    a2_anchor_alt,
+    a2_other,
+    a2_other_alt,
+);
 
 fn in_family(mode: Option<usize>, fam: usize) -> bool {
     matches!((fam, mode), (0, Some(2..=4)) | (1, Some(6..=8)))
@@ -956,13 +946,12 @@ fn diag_image(
     opts: DiagOpts,
     accs: &mut [LevelAcc],
     row: &mut ImgRow,
-) {
+) -> Res<()> {
     row.image = name.to_string();
     // Block indexing below (`bw`, `bi * 16`) assumes whole blocks, as `decode_image` does.
-    assert!(
-        img.width.is_multiple_of(4) && img.height.is_multiple_of(4),
-        "{name}: diag needs image sides that are multiples of 4"
-    );
+    if !(img.width.is_multiple_of(4) && img.height.is_multiple_of(4)) {
+        return Err(format!("{name}: diag needs image sides that are multiples of 4").into());
+    }
     let encs: Vec<Vec<u8>> = LEVELS
         .iter()
         .map(|&l| encode_image(img, l, target))
@@ -1105,6 +1094,7 @@ fn diag_image(
             }
         }
     }
+    Ok(())
 }
 
 /// Mean and median of d over the histogram's indices `lo..=hi` (the median of an even count is the mean of the
@@ -1227,7 +1217,7 @@ fn diag_report(set: &str, accs: &[LevelAcc], rows: &[ImgRow], opts: DiagOpts) ->
     .unwrap();
     writeln!(
         s,
-        "\n-- astra #6 (source-side PROXY; the deciding count is Task 22's all-variants build) --"
+        "\n-- astra #6 (source-side PROXY; the deciding count is the planned all-variants build) --"
     )
     .unwrap();
     writeln!(
@@ -1252,12 +1242,12 @@ fn diag_report(set: &str, accs: &[LevelAcc], rows: &[ImgRow], opts: DiagOpts) ->
     }
     writeln!(
         s,
-        "\n-- Q6 guarded blocks, Task 5 and astra #5 and #2, per image --"
+        "\n-- Q6 guarded blocks, the peak retry's lift and astra #5 and #2, per image --"
     )
     .unwrap();
     writeln!(
         s,
-        "guarded: peak >= 32 x geometric mean luminance; floor: guarded today but not under Task 21's floor; no_lift: Task 5's lift changes no channel;"
+        "guarded: peak >= 32 x geometric mean luminance; floor: guarded today but not under the planned luminance floor; no_lift: the peak retry's lift changes no channel;"
     )
     .unwrap();
     writeln!(
@@ -1296,7 +1286,7 @@ fn diag_report(set: &str, accs: &[LevelAcc], rows: &[ImgRow], opts: DiagOpts) ->
 }
 
 /// One line of the per-image table: the name, then the 11 columns of `ImgRow::cells`.
-fn img_line<T: std::fmt::Display>(name: &str, c: [T; 11]) -> String {
+fn img_line<T: std::fmt::Display>(name: &str, c: [T; IMG_COLUMNS]) -> String {
     format!(
         "{name:<48} {:>9} {:>8} {:>6} {:>8} {:>5} {:>8} {:>8} {:>10} {:>9} {:>9} {:>8}",
         c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10]
@@ -1361,7 +1351,7 @@ fn diag(args: &[String]) -> Res<()> {
             let name = path.file_stem().unwrap().to_string_lossy().into_owned();
             let (img, _) = clamp_image(&load_f16(&path)?);
             let mut row = ImgRow::default();
-            diag_image(&name, &img, target, opts, &mut accs, &mut row);
+            diag_image(&name, &img, target, opts, &mut accs, &mut row)?;
             eprintln!("{set} {name} done");
             rows.push(row);
         }
