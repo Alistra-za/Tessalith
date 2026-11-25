@@ -1428,7 +1428,8 @@ enum CollapseKind {
 /// `OneRegionRamp`: one smooth ramp along a random direction across the block in all three channels, each channel
 /// spanning 4 to 7 half codes in total (8.3 to 14.5 UF16 units: over mode 13's 6-unit gate and under mode 12's 16-unit
 /// code cell), every channel's UF16 range `(h + 0.5) * 64 / 31` inside one mode-12 cell `(16q, 16q + 16]` with a
-/// quarter unit to spare at each edge. Odd `i` has one channel falling where the other two rise. The region is the
+/// quarter unit to spare at each edge. That is the range `ep_quant_bc6h` maps to code q: `ceil(e / 16) - 1`, so a tie at
+/// 16q + 16 keeps q and 16q itself goes to q - 1. Odd `i` has one channel falling where the other two rise. The region is the
 /// whole block.
 ///
 /// `TwoRegion` (fable's scenario A): one of the 32 two-region partitions; one region is dim (half codes 0x0400 to
@@ -1510,13 +1511,31 @@ fn collapsed_block(i: u32, kind: CollapseKind) -> ([[u16; 4]; 16], u16) {
     }
 }
 
-/// Per channel, over the texels of `region`: (the source varies, the decode holds at least two distinct values).
-fn region_variation(px: &[[u16; 4]; 16], dec: &[[u16; 3]; 16], region: u16) -> [(bool, bool); 3] {
-    let texels: Vec<usize> = (0..16).filter(|t| (region >> t) & 1 == 1).collect();
-    std::array::from_fn(|c| {
-        let varies = |v: &dyn Fn(usize) -> u16| texels.iter().any(|&t| v(t) != v(texels[0]));
-        (varies(&|t| px[t][c]), varies(&|t| dec[t][c]))
-    })
+/// The texels of `region` (bit t set: texel t).
+fn region_texels(region: u16) -> Vec<usize> {
+    (0..16).filter(|t| (region >> t) & 1 == 1).collect()
+}
+
+/// Whether `v` holds at least two distinct values over the texels of `region`.
+fn varies(region: u16, v: impl Fn(usize) -> u16) -> bool {
+    let texels = region_texels(region);
+    texels.iter().any(|&t| v(t) != v(texels[0]))
+}
+
+/// Per channel, whether the source varies over the texels of `region`.
+fn source_varies(px: &[[u16; 4]; 16], region: u16) -> [bool; 3] {
+    std::array::from_fn(|c| varies(region, |t| px[t][c]))
+}
+
+/// The covariance sum of channels `a` and `b` of `v` over the texels of `region`: Σ (v_a - mean_a)(v_b - mean_b).
+fn region_covariance(v: impl Fn(usize, usize) -> u16, region: u16, a: usize, b: usize) -> f64 {
+    let texels = region_texels(region);
+    let mean = |c: usize| texels.iter().map(|&t| v(t, c) as f64).sum::<f64>() / texels.len() as f64;
+    let (ma, mb) = (mean(a), mean(b));
+    texels
+        .iter()
+        .map(|&t| (v(t, a) as f64 - ma) * (v(t, b) as f64 - mb))
+        .sum()
 }
 
 /// Q2's levels: Veryfast and Fast write mode 12 for a one-region ramp; Basic and Veryslow search more modes.
@@ -1561,15 +1580,11 @@ fn search_collapsed_witnesses() {
                                 .step_by(threads as usize)
                                 .filter(|&i| {
                                     let (px, region) = collapsed_block(i, kind);
-                                    // The decode argument is unused here: only the source columns are read.
-                                    let source = region_variation(&px, &[[0; 3]; 16], region);
-                                    source.iter().all(|&(src, _)| src)
+                                    source_varies(&px, region).iter().all(|&v| v)
                                         && targets.iter().all(|&target| {
                                             let dec =
                                                 decode_halves(&encode_block(&px, level, target));
-                                            region_variation(&px, &dec, region)
-                                                .iter()
-                                                .all(|&(_, dec)| !dec)
+                                            (0..3).all(|c| !varies(region, |t| dec[t][c]))
                                         })
                                 })
                                 .collect::<Vec<u32>>()
@@ -1646,8 +1661,12 @@ const COLLAPSED_WITNESSES: &[(u32, Bc6hLevel, CollapseKind)] = &[
 /// flattens to the mean, on the same code) (survey section 1, fable Q2). On each witness every source-varying channel
 /// of the region holds at least two distinct decoded values, at the witness's level on every path in `paths()`. Only
 /// a source-constant channel may decode flat (opus: a varying channel can regain variation through indices driven by
-/// the others). Before the fix every witness decoded flat in all three channels. Skipped on an Intel CPU, like the
-/// pins: the witnesses were selected on the Ryzen's output (Note JC).
+/// the others). Before the fix every witness decoded flat in all three channels.
+///
+/// The pair is oriented: where two source-varying channels run against each other in the region (a negative source
+/// covariance, the falling channel of an odd `OneRegionRamp` against the two rising ones), their decoded covariance over
+/// the region is negative too. A componentwise low-to-high pair would make it positive. Skipped on an Intel CPU, like
+/// the pins: the witnesses were selected on the Ryzen's output (Note JC).
 #[test]
 fn collapsed_regions_take_a_bracketing_pair() {
     if encoders_sys::skip_byte_pins() {
@@ -1658,22 +1677,33 @@ fn collapsed_regions_take_a_bracketing_pair() {
         for &(i, level, kind) in COLLAPSED_WITNESSES {
             let (px, region) = collapsed_block(i, kind);
             let dec = decode_halves(&encode_block(&px, level, target));
-            let flat: Vec<usize> = region_variation(&px, &dec, region)
-                .iter()
-                .enumerate()
-                .filter(|(_, &(src, dec))| src && !dec)
-                .map(|(c, _)| c)
+            let source = source_varies(&px, region);
+            let flat: Vec<usize> = (0..3)
+                .filter(|&c| source[c] && !varies(region, |t| dec[t][c]))
                 .collect();
             if !flat.is_empty() {
                 failures.push(format!(
                     "witness {i} {kind:?} {target:?} {level:?}: channels {flat:?} vary in the source and decode flat"
                 ));
             }
+            for (a, b) in [(0, 1), (0, 2), (1, 2)] {
+                if !(source[a] && source[b]) {
+                    continue;
+                }
+                let src = region_covariance(|t, c| px[t][c], region, a, b);
+                let got = region_covariance(|t, c| dec[t][c], region, a, b);
+                if src < 0.0 && got >= 0.0 {
+                    failures.push(format!(
+                        "witness {i} {kind:?} {target:?} {level:?}: channels {a} and {b} run against each other \
+                         in the source (covariance {src}) but not in the decode ({got})"
+                    ));
+                }
+            }
         }
     }
     assert!(
         failures.is_empty(),
-        "{} witnesses decode flat:\n{}",
+        "{} witness failures:\n{}",
         failures.len(),
         failures.join("\n")
     );

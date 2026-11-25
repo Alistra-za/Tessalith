@@ -2576,7 +2576,7 @@ float bc6h_bracket_collapsed(bc6h_enc_state state[], int qep[], float ep[], uint
                         lo = clamp((int)floor(vmin[p] * levels / 65536.0f - 0.5f), 0, levels - 2);
                         if (unpack_to_uf16(lo + 1, epb) <= vmin[p]) lo += 1; // only the top code can pass
                         hi = clamp((int)ceil(vmax[p] * levels / 65536.0f - 0.5f), 1, levels - 1);
-                        if (unpack_to_uf16(hi - 1, epb) >= vmax[p]) hi -= 1; // only code 0 can pass
+                        // no hi - 1 check: code 0 rebuilds 0, below vmax (> vmin >= 0), and ceil is exact above it
                     }
                     lo = clamp(lo, state->qbounds[p], state->qbounds[4 + p]);
                     hi = clamp(hi, state->qbounds[p], state->qbounds[4 + p]);
@@ -2666,7 +2666,7 @@ void bc6h_enc_2p_list(bc6h_enc_state state[], int part_list[], uniform int part_
 
     // sdc patch 0007 (Q2): the chosen partition's first candidate (the ranking above is not bracketed)
     float best_ep[24];
-    ep_dequant_bc6h(best_ep, best_qep, state->epb, pairs);
+    // best_ep is scratch: the helper never reads ep, and the refine below refits its own
     best_err = bc6h_bracket_collapsed(state, best_qep, best_ep, best_qblock, best_err, get_pattern(best_part_id), best_part_id, pairs);
 
     // refine
