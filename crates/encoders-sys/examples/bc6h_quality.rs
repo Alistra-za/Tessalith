@@ -25,10 +25,14 @@
 //! of the vendored kernel asked about (it changes no kernel byte): the decode bias d = decoded - source half per
 //! channel (Q5), regions whose decoded texels collapse to one colour (Q2), the picks of the Fast and Basic two-region
 //! gate under today's and spec D16's rule and how often Slow's output is in the family D16 picks (Q4; the gate is
-//! replicated in f32 and checked against the encoded modes, and a mismatch away from a threshold is an error),
+//! replicated in f32 and checked against the encoded modes, and a mismatch away from a threshold is an error unless it
+//! is an `idx_ties` block: the output is the neighbour mode of the pick's family because the two widest spans are
+//! within 1e-3 of each other and the kernel's fast-math rounding chose the other channel as `max_span_idx`),
 //! the guarded (peak) blocks (Q6, Task 5), and the counts of astra #2, #5 and #6. `--gate` names the two-region gate
 //! the replication treats as the kernel's; `--centre` the kernel's UF16 conversion `(h + 0.5) / 31 * 64` instead of
-//! `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with D16's on the source spans.
+//! `(h / 31) * 64`. The Q4 "changed picks" table always compares today's gate with D16's on the source spans converted
+//! as `(h / 31) * 64`, so it does not change with `--centre`; the self-check, the lift count and the astra #6 proxy do. Image sides must be multiples
+//! of 4 (the block indexing assumes it; `diag` panics otherwise).
 use encoders_sys::{bc6h_compress_rows_on, Bc6hLevel, IspcTarget};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -907,6 +911,40 @@ struct ImgRow {
     a2_other_alt: u64,
 }
 
+impl ImgRow {
+    /// The counts in the table's column order.
+    fn cells(&self) -> [u64; 11] {
+        [
+            self.blocks,
+            self.guarded,
+            self.not_under_floor,
+            self.no_lift,
+            self.a5,
+            self.a5_deep,
+            self.a2_below,
+            self.a2_anchor,
+            self.a2_anchor_alt,
+            self.a2_other,
+            self.a2_other_alt,
+        ]
+    }
+
+    /// Adds another row's counts (the table's TOTAL line).
+    fn add(&mut self, o: &ImgRow) {
+        self.blocks += o.blocks;
+        self.guarded += o.guarded;
+        self.not_under_floor += o.not_under_floor;
+        self.no_lift += o.no_lift;
+        self.a5 += o.a5;
+        self.a5_deep += o.a5_deep;
+        self.a2_below += o.a2_below;
+        self.a2_anchor += o.a2_anchor;
+        self.a2_anchor_alt += o.a2_anchor_alt;
+        self.a2_other += o.a2_other;
+        self.a2_other_alt += o.a2_other_alt;
+    }
+}
+
 fn in_family(mode: Option<usize>, fam: usize) -> bool {
     matches!((fam, mode), (0, Some(2..=4)) | (1, Some(6..=8)))
 }
@@ -924,6 +962,11 @@ fn diag_image(
         .iter()
         .map(|&l| encode_image(img, l, target))
         .collect();
+    // Block indexing below (`bw`, `bi * 16`) assumes whole blocks, as `decode_image` does.
+    assert!(
+        img.width.is_multiple_of(4) && img.height.is_multiple_of(4),
+        "{name}: diag needs image sides that are multiples of 4"
+    );
     let w = img.width as usize;
     let bw = w / 4;
     for by in 0..(img.height as usize / 4) {
@@ -931,7 +974,14 @@ fn diag_image(
             let bi = by * bw + bx;
             let src = src_block(&img.px, w, bx, by);
             row.blocks += 1;
+            // The self-check below uses the spans the kernel is assumed to see (`--centre`); the Q4 table of
+            // changed picks always uses the default conversion, so it does not move with that option.
             let (max, idx, second) = rank_spans(&src, opts.centre);
+            let (tmax, tidx, tsecond) = if opts.centre {
+                rank_spans(&src, false)
+            } else {
+                (max, idx, second)
+            };
             let (guarded, peak_k, peak_lum) = guard_of(&src, false);
             if guarded {
                 row.guarded += 1;
@@ -985,8 +1035,8 @@ fn diag_image(
                 // Q4: the gate replication at Fast (1) and Basic (2).
                 if li == 1 || li == 2 {
                     let fast = li == 1;
-                    let pt = gate_pick(max, idx, second, fast, Gate::Today);
-                    let pd = gate_pick(max, idx, second, fast, Gate::D16);
+                    let pt = gate_pick(tmax, tidx, tsecond, fast, Gate::Today);
+                    let pd = gate_pick(tmax, tidx, tsecond, fast, Gate::D16);
                     let g = &mut acc.gate;
                     g.blocks += 1;
                     if pt != pd {
@@ -996,7 +1046,7 @@ fn diag_image(
                             g.changed_slow_in_family += 1;
                         }
                     }
-                    let pick = if opts.gate == Gate::Today { pt } else { pd };
+                    let pick = gate_pick(max, idx, second, fast, opts.gate);
                     let near = near_threshold(max, second, fast, opts.gate);
                     g.near += u64::from(near);
                     if let Some(m) = modes[li].filter(|&m| m <= 9) {
@@ -1172,7 +1222,7 @@ fn diag_report(set: &str, accs: &[LevelAcc], rows: &[ImgRow], opts: DiagOpts) ->
     }
     writeln!(
         s,
-        "(changed_slow_in_new_family: Slow's output is in the family D16 newly picks, kernel modes 2-4 or 6-8; at Basic the output may also be mode 1;\ntie_mismatches: output differs from the pick and a span is within 1e-3 of a gate threshold; idx_ties: the output is the neighbour mode of the pick's family (a different max_span_idx) and the two widest spans are within 1e-3 of each other; both are fast-math rounding, outside the stop rule)"
+        "(changed_slow_in_new_family: Slow's output is in the family D16 newly picks, kernel modes 2-4 or 6-8;\ntie_mismatches: output differs from the pick and a span is within 1e-3 of a gate threshold; idx_ties: the output is the neighbour mode of the pick's family (a different max_span_idx) and the two widest spans are within 1e-3 of each other; both are fast-math rounding, outside the stop rule;\nself-check: at Basic an output of mode 1 is not a mismatch)"
     )
     .unwrap();
     writeln!(
@@ -1217,70 +1267,40 @@ fn diag_report(set: &str, accs: &[LevelAcc], rows: &[ImgRow], opts: DiagOpts) ->
     .unwrap();
     writeln!(
         s,
-        "{:<48} {:>9} {:>8} {:>6} {:>8} {:>5} {:>8} {:>8} {:>10} {:>9} {:>9} {:>8}",
-        "image",
-        "blocks",
-        "guarded",
-        "floor",
-        "no_lift",
-        "a5",
-        "a5_deep",
-        "a2_below",
-        "a2_anchor",
-        "anchor_alt",
-        "a2_other",
-        "other_alt"
+        "{}",
+        img_line(
+            "image",
+            [
+                "blocks",
+                "guarded",
+                "floor",
+                "no_lift",
+                "a5",
+                "a5_deep",
+                "a2_below",
+                "a2_anchor",
+                "anchor_alt",
+                "a2_other",
+                "other_alt"
+            ]
+        )
     )
     .unwrap();
     let mut tot = ImgRow::default();
     for r in rows {
-        writeln!(
-            s,
-            "{:<48} {:>9} {:>8} {:>6} {:>8} {:>5} {:>8} {:>8} {:>10} {:>9} {:>9} {:>8}",
-            r.image,
-            r.blocks,
-            r.guarded,
-            r.not_under_floor,
-            r.no_lift,
-            r.a5,
-            r.a5_deep,
-            r.a2_below,
-            r.a2_anchor,
-            r.a2_anchor_alt,
-            r.a2_other,
-            r.a2_other_alt
-        )
-        .unwrap();
-        tot.blocks += r.blocks;
-        tot.guarded += r.guarded;
-        tot.not_under_floor += r.not_under_floor;
-        tot.no_lift += r.no_lift;
-        tot.a5 += r.a5;
-        tot.a5_deep += r.a5_deep;
-        tot.a2_below += r.a2_below;
-        tot.a2_anchor += r.a2_anchor;
-        tot.a2_anchor_alt += r.a2_anchor_alt;
-        tot.a2_other += r.a2_other;
-        tot.a2_other_alt += r.a2_other_alt;
+        writeln!(s, "{}", img_line(&r.image, r.cells())).unwrap();
+        tot.add(r);
     }
-    writeln!(
-        s,
-        "{:<48} {:>9} {:>8} {:>6} {:>8} {:>5} {:>8} {:>8} {:>10} {:>9} {:>9} {:>8}\n",
-        "TOTAL",
-        tot.blocks,
-        tot.guarded,
-        tot.not_under_floor,
-        tot.no_lift,
-        tot.a5,
-        tot.a5_deep,
-        tot.a2_below,
-        tot.a2_anchor,
-        tot.a2_anchor_alt,
-        tot.a2_other,
-        tot.a2_other_alt
-    )
-    .unwrap();
+    writeln!(s, "{}\n", img_line("TOTAL", tot.cells())).unwrap();
     s
+}
+
+/// One line of the per-image table: the name, then the 11 columns of `ImgRow::cells`.
+fn img_line<T: std::fmt::Display>(name: &str, c: [T; 11]) -> String {
+    format!(
+        "{name:<48} {:>9} {:>8} {:>6} {:>8} {:>5} {:>8} {:>8} {:>10} {:>9} {:>9} {:>8}",
+        c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10]
+    )
 }
 
 fn diag(args: &[String]) -> Res<()> {
@@ -1351,7 +1371,7 @@ fn diag(args: &[String]) -> Res<()> {
     std::fs::write(&out, &text)?;
     if stop > 0 {
         return Err(format!(
-            "the gate replication disagrees with the kernel on {stop} blocks away from a threshold (see MISMATCH lines in {})",
+            "the gate replication disagrees with the kernel on {stop} blocks away from a threshold and from an idx_ties neighbour-mode tie (see MISMATCH lines in {})",
             out.display()
         )
         .into());

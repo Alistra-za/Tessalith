@@ -1081,8 +1081,6 @@ fn pca_survives_a_zero_covariance_row_sum() {
                 eprintln!("{target:?} {level:?} {name}: {} channels off", bad.len());
                 if !bad.is_empty() {
                     eprintln!("  decoded texels (half bits): {dec:?}");
-                }
-                if !bad.is_empty() {
                     failures.push(format!(
                         "{target:?} {level:?} {name}: {} channels off by more than 256 half codes, first {}",
                         bad.len(),
@@ -1110,7 +1108,7 @@ fn constant_blocks_decode_to_their_half_code() {
     let mut failures = Vec::new();
     for target in paths() {
         for level in RANDOM_STRIP_LEVELS {
-            let (mut count, mut first) = (0usize, String::new());
+            let (mut count, mut minus_one, mut first) = (0usize, 0usize, String::new());
             for chunk in hs.chunks(STRIP_BLOCKS) {
                 let mut it = chunk.iter().copied();
                 let px = strip(|| {
@@ -1124,6 +1122,9 @@ fn constant_blocks_decode_to_their_half_code() {
                     let dec = decode_halves(&b);
                     if let Some(&d) = dec.iter().flatten().find(|&&d| d != h) {
                         count += 1;
+                        // Q5's premise: the failure is exactly one half code low in every channel that misses.
+                        minus_one +=
+                            usize::from(dec.iter().flatten().all(|&c| c == h || c == h - 1));
                         if first.is_empty() {
                             first = format!("h = {h:#06x} decodes to {d:#06x}");
                         }
@@ -1131,12 +1132,12 @@ fn constant_blocks_decode_to_their_half_code() {
                 }
             }
             eprintln!(
-                "{target:?} {level:?}: {count} of {} constant blocks do not decode to h",
+                "{target:?} {level:?}: {count} of {} constant blocks do not decode to h, {minus_one} of them to exactly h - 1",
                 hs.len()
             );
             if count > 0 {
                 failures.push(format!(
-                    "{target:?} {level:?}: {count} of {} blocks, first {first}",
+                    "{target:?} {level:?}: {count} of {} blocks ({minus_one} exactly h - 1), first {first}",
                     hs.len()
                 ));
             }

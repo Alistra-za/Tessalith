@@ -37,7 +37,7 @@ fn strip_offsets_fit_i32(width: u32, rows: u32) -> bool {
 }
 
 /// `bc6h_compress_rows` on one ISPC code path instead of the CPU dispatch. Every plain encode goes through it with `ispc_target()`.
-/// Panics when the CPU cannot run `target`.
+/// Panics when the CPU cannot run `target`, and when `rows * width * 8` exceeds `i32::MAX` (2 GiB per strip).
 pub fn bc6h_compress_rows_on(
     rgba_f16: &[[u16; 4]],
     width: u32,
@@ -68,20 +68,21 @@ pub fn bc6h_compress_rows_on(
     if rows == 0 {
         return;
     }
-    let stride = i32::try_from(w * 8).expect("row stride exceeds i32");
-    let rows_i = i32::try_from(rows).expect("rows exceed i32");
-    let width_i = i32::try_from(width).expect("width exceeds i32");
+    // Before the conversions below: with `rows >= 1` this bound implies each of them fits.
     assert!(
         strip_offsets_fit_i32(width, rows),
         "strip exceeds the kernel's 32-bit offsets: pass fewer rows"
     );
+    let stride = i32::try_from(w * 8).expect("row stride exceeds i32");
+    let rows_i = i32::try_from(rows).expect("rows exceed i32");
+    let width_i = i32::try_from(width).expect("width exceeds i32");
     init();
     // SAFETY: `rgba_f16` holds `width * rows` RGBA16F texels (8 bytes each) and `stride` is the
     // row pitch in bytes, so the shim reads only within the slice; the byte offsets the kernel
     // forms in 32-bit `int` (`(yy * 4 + y) * stride`, `yy * width * data_size`) fit, by the
-    // assert above; `out` holds `(width/4)*(rows/4)`
-    // 16-byte blocks, the number ISPC TC writes; `level` comes from the closed `Bc6hLevel` enum
-    // (0..=5), which the shim indexes without a range check; `target` was checked above.
+    // assert above; `out` holds `(width/4)*(rows/4)` 16-byte blocks, the number ISPC TC writes;
+    // `level` comes from the closed `Bc6hLevel` enum (0..=5), which the shim indexes without a
+    // range check; `target` was checked above.
     unsafe {
         ffi::sdc_bc6h_compress(
             rgba_f16.as_ptr() as *const u16,
@@ -111,9 +112,14 @@ mod tests {
     }
 
     #[test]
-    fn two_gib_total_does_not_fit_and_just_under_does() {
-        // stride 8 MiB: 256 rows = 2 GiB, 252 rows = 1.97 GiB
+    fn two_gib_total_does_not_fit() {
+        // stride 8 MiB: 256 rows = 2 GiB
         assert!(!strip_offsets_fit_i32(1 << 20, 256));
+    }
+
+    #[test]
+    fn just_under_two_gib_fits() {
+        // stride 8 MiB: 252 rows = 1.97 GiB
         assert!(strip_offsets_fit_i32(1 << 20, 252));
     }
 
