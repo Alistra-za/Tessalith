@@ -101,11 +101,16 @@ pub struct WindowSettings {
 }
 
 /// `[layout.look]`: the 3D panel's View controls. A field that is missing or invalid keeps the default look.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LookSettings {
-    #[serde(deserialize_with = "lenient")]
+    /// The key of the studio HDRI toggle before the HDRI came from a file: read and ignored (`hdri = true` loads as
+    /// Solid), never written.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub hdri: Option<bool>,
+    /// What is behind the model: `solid` or `hdri`; none or an unknown name is Solid.
+    #[serde(deserialize_with = "lenient")]
+    pub mode: Option<String>,
     #[serde(deserialize_with = "lenient")]
     pub grey: Option<f32>,
     /// The solid background colour, sRGB 0..=1 per channel (GUI suggestions item 2). `grey` is read only when this is
@@ -137,6 +142,8 @@ impl LookSettings {
             .bg
             .filter(|c| c.iter().all(|f| f.is_finite()))
             .map(|c| c.map(|f| f.clamp(0.0, 1.0)));
+        // The legacy `hdri` flag is read and dropped, so a look saved back unchanged (`look_now`) never writes it.
+        self.hdri = None;
         // A legacy `grey` becomes `bg` on load, so a look saved back unchanged (`look_now`) never writes `grey`.
         self.bg = self.bg.or(self.grey.take().map(|g| [g; 3]));
         fix(&mut self.sun, (0.0, 4.0));
@@ -196,6 +203,9 @@ pub struct LayoutSettings {
     pub look: Option<LookSettings>,
     #[serde(deserialize_with = "lenient")]
     pub set_look: Option<LookSettings>,
+    /// The HDRI file behind both 3D panels' "HDRI file…" background: one path for the two panels.
+    #[serde(deserialize_with = "lenient")]
+    pub hdri_file: Option<std::path::PathBuf>,
     /// The 3D view settings window: x, y, width, height in points (AG132).
     #[serde(deserialize_with = "lenient")]
     pub settings_window: Option<[f32; 4]>,
@@ -224,6 +234,7 @@ impl Default for LayoutSettings {
             preview_channel: 0,
             look: None,
             set_look: None,
+            hdri_file: None,
             settings_window: None,
             details: vec![],
         }

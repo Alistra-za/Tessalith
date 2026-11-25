@@ -1,10 +1,11 @@
-//! Backgrounds (solid grey, studio HDRI) and the HDRI ambient, on WARP with the stand-in shader.
+//! Backgrounds (solid grey, a loaded HDRI) and the HDRI ambient, on WARP with the stand-in shader.
 mod common;
-use common::renderer;
+use common::{renderer, test_env};
 use nif::material::MaterialState;
 use render3d::hdri;
 use render3d::scene::{Background, Camera, Scene};
 use render3d::{Builtin, Renderer};
+use std::sync::Arc;
 
 fn sphere(cache: &std::path::Path) -> Renderer {
     let mut r = renderer(cache, &["STANDIN_OPAQUE_OK"]);
@@ -55,13 +56,13 @@ fn backgrounds_look_the_same_with_and_without_srgb_encoding() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), &["STANDIN_OPAQUE_OK"]);
     let mut s = Scene::neutral();
-    for bg in [Background::grey(0.5), Background::Hdri] {
-        s.background = bg;
+    for bg in [Background::grey(0.5), Background::Hdri(test_env())] {
+        s.background = bg.clone();
         r.set_encode_srgb(true);
         let on = r.render(&s, 48, 32).unwrap();
         r.set_encode_srgb(false);
         let off = r.render(&s, 48, 32).unwrap();
-        if bg != Background::Hdri {
+        if matches!(bg, Background::Solid(_)) {
             assert!((px(&off, 48, 5, 5)[0] as i32 - 128).abs() <= 1, "{bg:?}");
         }
         for (a, b) in on.chunks(4).zip(off.chunks(4)) {
@@ -80,7 +81,7 @@ fn hdri_background_varies_across_the_frame_and_is_not_black() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), &["STANDIN_OPAQUE_OK"]);
     let mut s = Scene::neutral();
-    s.background = Background::Hdri;
+    s.background = Background::Hdri(test_env());
     let f = r.render(&s, 96, 64).unwrap();
     let lit = f
         .chunks(4)
@@ -98,8 +99,8 @@ fn hdri_background_varies_across_the_frame_and_is_not_black() {
 
 /// The horizontal camera yaw whose view direction lands on the smoothest unclipped part of the image, and the image
 /// mean there (a 13×13 window), so a 1-pixel centre can be compared with it.
-fn smooth_azimuth() -> (f32, f32) {
-    let img = &hdri::studio().image;
+fn smooth_azimuth(env: &hdri::Environment) -> (f32, f32) {
+    let img = env.image();
     let at = |yaw: f32| -> Vec<f32> {
         // The camera sits at (sin yaw, -cos yaw, 0) from the target and looks along the opposite.
         let (u, v) = hdri::dir_to_uv([-yaw.sin(), yaw.cos(), 0.0]);
@@ -131,11 +132,11 @@ fn smooth_azimuth() -> (f32, f32) {
 }
 
 /// The centre pixel of a frame looking along camera yaw `cam_yaw` with the environment turned by `env_yaw`.
-fn centre_green(cam_yaw: f32, env_yaw: f32) -> f32 {
+fn centre_green(env: &Arc<hdri::Environment>, cam_yaw: f32, env_yaw: f32) -> f32 {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), &["STANDIN_OPAQUE_OK"]);
     let mut s = Scene::neutral();
-    s.background = Background::Hdri;
+    s.background = Background::Hdri(env.clone());
     s.env_yaw = env_yaw;
     s.camera = Camera::Orbit {
         target: [0.0; 3],
@@ -150,8 +151,9 @@ fn centre_green(cam_yaw: f32, env_yaw: f32) -> f32 {
 
 #[test]
 fn hdri_background_matches_the_cpu_lookup_of_the_same_direction() {
-    let (yaw, mean) = smooth_azimuth();
-    let got = centre_green(yaw, 0.0);
+    let env = test_env();
+    let (yaw, mean) = smooth_azimuth(&env);
+    let got = centre_green(&env, yaw, 0.0);
     assert!(
         (got - mean).abs() < 0.06,
         "rendered {got} vs image {mean} (yaw {yaw})"
@@ -162,9 +164,10 @@ fn hdri_background_matches_the_cpu_lookup_of_the_same_direction() {
 /// quarter turn on, where the camera turned by the same quarter finds it again.
 #[test]
 fn a_turned_hdri_shows_the_same_spot_a_quarter_turn_on() {
-    let (yaw, mean) = smooth_azimuth();
+    let env = test_env();
+    let (yaw, mean) = smooth_azimuth(&env);
     let q = std::f32::consts::FRAC_PI_2;
-    let got = centre_green(yaw + q, q);
+    let got = centre_green(&env, yaw + q, q);
     assert!(
         (got - mean).abs() < 0.06,
         "rendered {got} vs image {mean} (yaw {yaw} + π/2)"
@@ -196,12 +199,13 @@ fn hdri_ambient_lights_the_mesh_and_differs_from_the_neutral_ambient() {
     let mut s = Scene::neutral();
     s.dir_light.color = [0.0; 3]; // ambient only
     let neutral = r.render(&s, 64, 64).unwrap();
-    s.background = Background::Hdri;
+    let env = test_env();
+    s.background = Background::Hdri(env.clone());
     let hdri_frame = r.render(&s, 64, 64).unwrap();
     // The sphere's centre pixel (not background) changes with the ambient.
     assert_ne!(px(&neutral, 64, 32, 32), px(&hdri_frame, 64, 32, 32));
     // The ambient the scene reports is the HDRI's, scaled.
-    assert_eq!(s.ambient(), hdri::studio().ambient6);
+    assert_eq!(s.ambient(), env.ambient6_at(0.0));
     assert_ne!(s.ambient(), Scene::neutral().ambient6);
 }
 
@@ -212,11 +216,28 @@ fn the_mesh_is_drawn_over_the_hdri() {
     let cache2 = tempfile::tempdir().unwrap();
     let mut without = renderer(cache2.path(), &["STANDIN_OPAQUE_OK"]);
     let mut s = Scene::neutral();
-    s.background = Background::Hdri;
+    s.background = Background::Hdri(test_env());
     let (a, b) = (
         with.render(&s, 64, 64).unwrap(),
         without.render(&s, 64, 64).unwrap(),
     );
     assert_eq!(px(&a, 64, 0, 0), px(&b, 64, 0, 0), "background corner");
     assert_ne!(px(&a, 64, 32, 32), px(&b, 64, 32, 32), "sphere in front");
+}
+
+/// A new `Arc` (another file) builds the backdrop again: the frame shows the new image, not the first one.
+#[test]
+fn a_new_environment_replaces_the_backdrop() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path(), &["STANDIN_OPAQUE_OK"]);
+    let mut s = Scene::neutral();
+    s.background = Background::Hdri(test_env());
+    let a = r.render(&s, 48, 32).unwrap();
+    let red = common::hdr_bytes(128, 64, |_, _| [0.8, 0.05, 0.05]);
+    s.background = Background::Hdri(Arc::new(hdri::Environment::from_bytes(&red).unwrap()));
+    let b = r.render(&s, 48, 32).unwrap();
+    assert_ne!(px(&a, 48, 24, 16), px(&b, 48, 24, 16));
+    let p = px(&b, 48, 24, 16);
+    assert!(p[0] > 150 && p[1] < 80 && p[2] < 80, "the new image: {p:?}");
+    assert_eq!(r.backdrop_error(), None);
 }

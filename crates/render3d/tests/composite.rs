@@ -426,9 +426,18 @@ const DC: &str = "DYNAMIC_CUBEMAPS";
 /// The stand-in's RT5 (Reflectance) marker.
 const M5: [f32; 3] = [0.25, 0.125, 0.5];
 
-/// The 1×1 mip of face +Z of the studio env cube at yaw 0, as the GPU stores it (RGBA16F).
+/// The environment a frame with the neutral scene reflects: the procedural one of its ambient (solid background).
+fn env_image() -> render3d::hdri::Hdr {
+    render3d::hdri::procedural(&Scene::neutral().ambient6)
+}
+
+/// The 1×1 mip of face +Z of the neutral scene's env cube at yaw 0, as the GPU stores it (RGBA16F).
 fn env_last_z() -> [f32; 4] {
-    let faces = render3d::hdri::cube_faces(&render3d::hdri::studio().image, 256, 0.0);
+    env_last_z_of(&env_image())
+}
+
+fn env_last_z_of(img: &render3d::hdri::Hdr) -> [f32; 4] {
+    let faces = render3d::hdri::cube_faces(img, 256, 0.0);
     let chains = render3d::hdri::specular_chain(&faces, 256).unwrap();
     chains[4].last().unwrap()[0].map(|v| half::f16::from_f32(v).to_f32())
 }
@@ -569,6 +578,39 @@ fn env_cube_is_built_once_per_yaw() {
     assert_eq!(plain.env_builds(), 0);
 }
 
+/// With a solid background the env cube is the procedural environment of `ambient6`: built once, rebuilt when the
+/// ambient or the yaw changes, not when the frame is unchanged; and the reflection it gives follows the ambient.
+#[test]
+fn solid_frames_reflect_the_procedural_environment() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut plain = loaded(cache.path(), FLAT, vec![opaque()]);
+    plain.render(&Scene::neutral(), 64, 64).unwrap();
+    let base = px(&plain.read_mrt(0).unwrap(), 64, 32, 32);
+    let mut r = loaded(cache.path(), &feats(&[DC]), vec![opaque()]);
+    let mut s = Scene::neutral();
+    r.render(&s, 64, 64).unwrap();
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(
+        r.env_builds(),
+        1,
+        "built once, an unchanged frame reuses it"
+    );
+    s.ambient6 = s.ambient6.map(|c| c.map(|v| v * 2.0));
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(r.env_builds(), 2, "a new ambient rebuilds");
+    let e = env_last_z_of(&render3d::hdri::procedural(&s.ambient6));
+    let got = px(&r.read_mrt(0).unwrap(), 64, 32, 32);
+    assert_store(
+        got,
+        [base[0] + e[0], base[1] + e[1], base[2] + e[2], base[3]],
+    );
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(r.env_builds(), 2);
+    s.env_yaw = 0.5;
+    r.render(&s, 64, 64).unwrap();
+    assert_eq!(r.env_builds(), 3, "a yaw change rebuilds");
+}
+
 /// R3: a forward DC draw reads the env cube at its EnvReflectionsTexture register (the stand-in adds its level-15 +Z
 /// sample under DYNAMIC_CUBEMAPS && STANDIN_FLAT, forward only).
 #[test]
@@ -697,9 +739,9 @@ fn shaders_with_prefilter(prefilter: &str) -> tempfile::TempDir {
     d
 }
 
-/// Red of the studio cube's 1×1 box mip of face +X at yaw 0, as RGBA16F stores it.
-fn last_box_x(size: u32) -> f32 {
-    let faces = render3d::hdri::cube_faces(&render3d::hdri::studio().image, size, 0.0);
+/// Red of `img`'s cube's 1×1 box mip of face +X at yaw 0, as RGBA16F stores it.
+fn last_box_x(img: &render3d::hdri::Hdr, size: u32) -> f32 {
+    let faces = render3d::hdri::cube_faces(img, size, 0.0);
     let chain = render3d::hdri::mip_chain(&faces[0], size).unwrap();
     f16(chain.last().unwrap()[0][0])
 }
@@ -718,11 +760,11 @@ fn gpu_prefilter_writes_each_level_at_its_roughness() {
         shaders.path().to_path_buf(),
     ));
     let mut p = Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path()).unwrap();
-    let img = &render3d::hdri::studio().image;
+    let img = &env_image();
     let e = EnvMaps::new_gpu(&gpu, &mut p, img, 16, 0.0).unwrap();
     assert_eq!(cs_views(&gpu), 0);
     let faces = render3d::hdri::cube_faces(img, 16, 0.0);
-    let x = last_box_x(16);
+    let x = last_box_x(img, 16);
     for f in 0..6u32 {
         let mip0 = render3d::textures::read_cube_level(&gpu, &e.env, f, 0).unwrap();
         let want: Vec<[f32; 4]> = faces[f as usize].iter().map(|p| p.map(f16)).collect();
@@ -778,7 +820,7 @@ fn forward_dc_draw_samples_the_gpu_prefiltered_cube() {
     let mut r = renderer_at(shaders.path(), cache.path(), &feats(&[DC]));
     load(&mut r, vec![opaque()]);
     r.render(&Scene::neutral(), 64, 64).unwrap();
-    let e = [1.0, 0.5, last_box_x(render3d::hdri::ENV_SIZE)];
+    let e = [1.0, 0.5, last_box_x(&env_image(), render3d::hdri::ENV_SIZE)];
     let got = px(&r.read_mrt(0).unwrap(), 64, 32, 32);
     assert_store(
         got,
@@ -797,7 +839,14 @@ fn bundled_prefilter_matches_the_cpu_chain() {
     let src = render3d::source::SourceSet::new(render3d::ShaderSource::Bundled);
     let defines = ["CSHADER", "ENABLE_LL"].map(String::from);
     let mut p = Prefilter::new(&gpu, &src, &defines, cache.path()).unwrap();
-    let img = &render3d::hdri::studio().image;
+    // A textured image (a bright patch on a smooth sky), so the roughness levels differ and a slip shows.
+    let mut tex = common::test_image(512);
+    for y in 100..140 {
+        for x in 300..360 {
+            tex.rgb[(y * 512 + x) * 3..][..3].copy_from_slice(&[40.0, 38.0, 30.0]);
+        }
+    }
+    let img = &tex;
     let size = render3d::hdri::ENV_SIZE;
     EnvMaps::new_gpu(&gpu, &mut p, img, size, 0.3).unwrap();
     let t = std::time::Instant::now();

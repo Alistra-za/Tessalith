@@ -1008,7 +1008,7 @@ fn changing_the_look_sends_a_render_and_no_load() {
     v.request_frame(64, 64);
     assert!(cmds.try_recv().is_err());
     for change in [
-        (|l: &mut v3::Look| l.hdri = true) as fn(&mut v3::Look),
+        (|l: &mut v3::Look| l.mode = v3::BgMode::Hdri) as fn(&mut v3::Look),
         |l| l.bg = [0.5, 0.25, 0.0],
         |l| l.sun = 2.0,
         |l| l.point = 1.5,
@@ -1031,20 +1031,24 @@ fn changing_the_look_sends_a_render_and_no_load() {
 fn the_default_look_is_the_unchanged_scene() {
     use render3d::scene::{Background, Camera, Scene};
     let l = v3::Look::default();
-    assert_eq!(l.scene(Camera::Auto, None), Scene::neutral());
+    assert_eq!(l.scene(Camera::Auto, None, None), Scene::neutral());
     // With bounds the point light is placed but off.
-    let s = l.scene(Camera::Auto, Some(([1.0, 2.0, 3.0], 2.0)));
+    let s = l.scene(Camera::Auto, Some(([1.0, 2.0, 3.0], 2.0)), None);
     assert_eq!(s.point_light.brightness, 0.0);
     assert_eq!(s.background, Background::Solid([0.0; 3]));
-    let on = v3::Look {
-        hdri: true,
+    let env = test_env();
+    let hdri_look = v3::Look {
+        mode: v3::BgMode::Hdri,
         sun: 9.0,
         point: 1.0,
         radius: 2.0,
         ..l
-    }
-    .scene(Camera::Auto, Some(([1.0, 2.0, 3.0], 2.0)));
-    assert_eq!(on.background, Background::Hdri);
+    };
+    // Hdri mode without a loaded file draws the solid colour.
+    let none = hdri_look.scene(Camera::Auto, None, None);
+    assert_eq!(none.background, Background::Solid([0.0; 3]));
+    let on = hdri_look.scene(Camera::Auto, Some(([1.0, 2.0, 3.0], 2.0)), Some(&env));
+    assert_eq!(on.background, Background::Hdri(env.clone()));
     assert_eq!(on.sun_brightness, 4.0, "clamped to the slider range");
     assert_eq!(on.point_light.brightness, 1.0);
     assert!(
@@ -1052,9 +1056,9 @@ fn the_default_look_is_the_unchanged_scene() {
         "2 x bounds radius 2"
     );
     // The HDRI turns with the sun (owner D4): one yaw for both.
-    let turned = v3::Look { sun_yaw: 1.25, ..l }.scene(Camera::Auto, None);
+    let turned = v3::Look { sun_yaw: 1.25, ..l }.scene(Camera::Auto, None, None);
     assert_eq!(turned.env_yaw, 1.25);
-    assert_eq!(l.scene(Camera::Auto, None).env_yaw, 0.0);
+    assert_eq!(l.scene(Camera::Auto, None, None).env_yaw, 0.0);
 }
 
 #[test]
@@ -1064,12 +1068,238 @@ fn view_section_offers_background_and_lights() {
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
     h.run();
     h.get_by_label("Solid");
-    h.get_by_label("Studio HDRI").click();
+    h.get_by_label("HDRI file…");
+    h.state_mut().look.sun = 2.5;
+    h.state_mut().look.mode = v3::BgMode::Hdri;
     h.run();
-    assert!(h.state().look.hdri);
     h.get_by_label("Reset view").click();
     h.run();
     assert_eq!(h.state().look, v3::Look::default());
+}
+
+/// A flat RGBE `.hdr` of one grey, `w` × `h`.
+fn hdr_file(dir: &Path, name: &str, w: usize, h: usize) -> PathBuf {
+    let mut b = format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes();
+    for _ in 0..w * h {
+        b.extend([128, 128, 128, 129]); // 1.0
+    }
+    let p = dir.join(name);
+    std::fs::write(&p, b).unwrap();
+    p
+}
+
+fn test_env() -> Arc<render3d::hdri::Environment> {
+    Arc::new(
+        render3d::hdri::Environment::from_image(render3d::hdri::Hdr {
+            width: 64,
+            height: 32,
+            rgb: vec![0.5; 64 * 32 * 3],
+        })
+        .unwrap(),
+    )
+}
+
+/// A file dialog that answers the next path of `answers` (None: the user cancels) and counts its openings.
+struct Answers(
+    std::sync::Mutex<Vec<Option<PathBuf>>>,
+    std::sync::atomic::AtomicUsize,
+);
+
+impl sdc_gui::model::picker::PickerBackend for Answers {
+    fn pick(&self, _: &sdc_gui::model::picker::PickerSpec) -> Option<PathBuf> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.lock().unwrap().remove(0)
+    }
+}
+
+fn answers(a: Vec<Option<PathBuf>>) -> Arc<Answers> {
+    Arc::new(Answers(a.into(), 0.into()))
+}
+
+/// Polls `v` (picker results, decodes) until `done` holds; the dialog and the decode run on threads.
+fn poll_until(v: &mut Viewport3d, what: &str, done: impl Fn(&Viewport3d) -> bool) {
+    let t = Instant::now();
+    while !done(v) {
+        v.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "timed out: {what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn poll_until_h(
+    h: &mut Harness<'static, Viewport3d>,
+    what: &str,
+    done: impl Fn(&Viewport3d) -> bool,
+) {
+    let t = Instant::now();
+    while !done(h.state()) {
+        h.state_mut().poll();
+        h.run();
+        assert!(t.elapsed() < Duration::from_secs(20), "timed out: {what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn open_view_menu(h: &mut Harness<'static, Viewport3d>) {
+    h.run();
+    h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
+    h.run();
+}
+
+#[test]
+fn the_background_radio_offers_solid_and_hdri_file() {
+    let mut h = harness(Viewport3d::with_state(V3State::Ready));
+    open_view_menu(&mut h);
+    h.get_by_label("Solid");
+    h.get_by_label("HDRI file…");
+    assert!(h.query_by_label("Studio HDRI").is_none());
+    assert!(h.query_all_by_label_contains("Poly Haven").next().is_none());
+    assert!(h.query_all_by_label_contains("CC0").next().is_none());
+    // Turned on, the help line names the turn, not a credit.
+    h.state_mut().look.mode = v3::BgMode::Hdri;
+    h.run();
+    assert!(h.query_all_by_label_contains("Poly Haven").next().is_none());
+}
+
+#[test]
+fn choosing_hdri_file_opens_the_picker_and_a_good_file_shows() {
+    let dir = tempfile::tempdir().unwrap();
+    let (v, cmds) = rendered();
+    let backend = answers(vec![Some(hdr_file(dir.path(), "sky.hdr", 128, 64))]);
+    v.picker.set_backend(backend.clone());
+    let mut h = harness(v);
+    open_view_menu(&mut h);
+    h.get_by_label("HDRI file…").click();
+    poll_until_h(&mut h, "the file is loaded", |v| v.hdri_file().is_some());
+    assert_eq!(backend.1.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(h.state().look.mode, v3::BgMode::Hdri);
+    h.run();
+    h.get_by_label("sky.hdr");
+    h.get_by_label("Change…");
+    let last = cmds
+        .try_iter()
+        .filter_map(|c| match c {
+            v3::V3Cmd::Render { look, env, .. } => Some((look, env)),
+            _ => None,
+        })
+        .last()
+        .expect("a Render after the file loaded");
+    assert_eq!(last.0.mode, v3::BgMode::Hdri);
+    assert!(last.1.is_some(), "the render carries the environment");
+}
+
+#[test]
+fn a_second_file_sends_a_new_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (
+        hdr_file(dir.path(), "a.hdr", 128, 64),
+        hdr_file(dir.path(), "b.hdr", 64, 32),
+    );
+    let (mut v, cmds) = rendered();
+    let env_of = |cmds: &std::sync::mpsc::Receiver<v3::V3Cmd>| match cmds.try_recv() {
+        Ok(v3::V3Cmd::Render { env, .. }) => env.expect("Hdri mode carries the environment"),
+        Ok(_) => panic!("a Render was expected, got another command"),
+        Err(e) => panic!("a Render was expected: {e}"),
+    };
+    v.load_hdri(a.clone(), true);
+    poll_until(&mut v, "file A", |v| v.hdri_file() == Some(a.as_path()));
+    v.request_frame(64, 64);
+    let first = env_of(&cmds);
+    v.request_frame(64, 64);
+    assert!(cmds.try_recv().is_err(), "the same file sends nothing");
+    v.load_hdri(b.clone(), true);
+    poll_until(&mut v, "file B", |v| v.hdri_file() == Some(b.as_path()));
+    v.request_frame(64, 64);
+    let second = env_of(&cmds);
+    assert!(!Arc::ptr_eq(&first, &second), "a new file is a new frame");
+    assert_eq!(second.image().width, 64);
+}
+
+#[test]
+fn a_cancelled_picker_keeps_the_previous_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = hdr_file(dir.path(), "a.hdr", 128, 64);
+    // No file loaded: the radio asks, the user cancels, the background stays Solid.
+    let v = Viewport3d::with_state(V3State::Ready);
+    let backend = answers(vec![None, None]);
+    v.picker.set_backend(backend.clone());
+    let mut h = harness(v);
+    open_view_menu(&mut h);
+    h.get_by_label("HDRI file…").click();
+    h.run();
+    let t = Instant::now();
+    while backend.1.load(std::sync::atomic::Ordering::SeqCst) < 1 {
+        assert!(t.elapsed() < Duration::from_secs(20));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for _ in 0..20 {
+        h.state_mut().poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(h.state().look.mode, v3::BgMode::Solid);
+    assert!(h.state().hdri_file().is_none());
+    // A file loaded and in use: Change… cancelled keeps the file and the mode.
+    h.state_mut().load_hdri(a.clone(), true);
+    poll_until_h(&mut h, "file A", |v| v.hdri_file().is_some());
+    h.run();
+    h.get_by_label("Change…").click();
+    h.run();
+    let t = Instant::now();
+    while backend.1.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+        assert!(t.elapsed() < Duration::from_secs(20));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for _ in 0..20 {
+        h.state_mut().poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(h.state().look.mode, v3::BgMode::Hdri);
+    assert_eq!(h.state().hdri_file(), Some(a.as_path()));
+}
+
+#[test]
+fn a_refused_file_keeps_the_previous_hdri() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = hdr_file(dir.path(), "a.hdr", 128, 64);
+    let bad = hdr_file(dir.path(), "wide.hdr", 100, 64);
+    let mut v = Viewport3d::with_state(V3State::Ready);
+    v.picker.set_backend(answers(vec![Some(bad)]));
+    v.load_hdri(a.clone(), true);
+    poll_until(&mut v, "file A", |v| v.hdri_file().is_some());
+    assert_eq!(v.take_chosen_hdri(), Some(a.clone()));
+    let mut h = harness(v);
+    open_view_menu(&mut h);
+    h.get_by_label("Change…").click();
+    poll_until_h(&mut h, "the refusal", |v| v.notice.is_some());
+    let notice = h.state().notice.clone().unwrap();
+    assert!(
+        notice.contains("2:1") && notice.contains("wide.hdr"),
+        "{notice}"
+    );
+    assert_eq!(
+        h.state().hdri_file(),
+        Some(a.as_path()),
+        "the old file stays"
+    );
+    assert_eq!(h.state().look.mode, v3::BgMode::Hdri);
+    assert!(
+        h.state_mut().take_chosen_hdri().is_none(),
+        "a refused file is not handed to the other panel"
+    );
+    h.run();
+    h.get_by_label("a.hdr");
+}
+
+#[test]
+fn a_missing_file_with_no_hdri_loaded_drops_to_solid_with_a_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = Viewport3d::with_state(V3State::Ready);
+    v.look.mode = v3::BgMode::Hdri;
+    v.load_hdri(dir.path().join("gone.hdr"), false);
+    poll_until(&mut v, "the failure", |v| v.notice.is_some());
+    assert_eq!(v.look.mode, v3::BgMode::Solid);
+    assert!(v.notice.as_deref().unwrap().contains("gone.hdr"));
+    assert!(v.hdri_file().is_none());
 }
 
 #[test]
@@ -1870,9 +2100,9 @@ fn pan_moves_the_target_in_the_view_plane_scaled_by_distance() {
 fn shift_right_drag_turns_the_sun_about_the_vertical() {
     use render3d::scene::Camera;
     let mut l = v3::Look::default();
-    let a = l.scene(Camera::Auto, None).dir_light.direction;
+    let a = l.scene(Camera::Auto, None, None).dir_light.direction;
     l.rotate_sun(std::f32::consts::FRAC_PI_2 / 0.01);
-    let b = l.scene(Camera::Auto, None).dir_light.direction;
+    let b = l.scene(Camera::Auto, None, None).dir_light.direction;
     assert!((a[2] - b[2]).abs() < 1e-5, "the height stays");
     let dot = a[0] * b[0] + a[1] * b[1];
     let len_a = (a[0] * a[0] + a[1] * a[1]).sqrt();
@@ -2249,7 +2479,7 @@ fn a_saved_deferred_choice_is_sent_before_the_first_load() {
 fn deferred_toggle_is_in_the_view_menu() {
     let mut v = Viewport3d::with_state(V3State::Ready);
     v.look.sun = 3.0;
-    v.look.hdri = true;
+    v.look.mode = v3::BgMode::Hdri;
     let mut h = harness(v);
     h.run();
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();

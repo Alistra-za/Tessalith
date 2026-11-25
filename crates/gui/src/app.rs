@@ -82,6 +82,12 @@ impl SdcApp {
         );
         meshes.v3.look = Look::from_settings(layout.look.as_ref());
         set3d.v3.look = Look::from_settings(layout.set_look.as_ref());
+        // One saved HDRI file for both panels; each decodes it itself. A file that is gone or refused drops that panel
+        // to a solid background with a notice (`Viewport3d::load_hdri`).
+        if let Some(p) = layout.hdri_file.clone() {
+            meshes.v3.load_hdri(p.clone(), false);
+            set3d.v3.load_hdri(p, false);
+        }
         SdcApp {
             model,
             meshes,
@@ -120,8 +126,19 @@ impl SdcApp {
             &self.model.view,
             looks,
         );
-        if self.layout_probe.as_ref() != Some(&probe) {
-            let cur = crate::layout::capture(
+        // The shared HDRI file: what a panel has loaded; with none loaded (not decoded yet, or refused) the saved
+        // one stays.
+        let hdri_file = self
+            .meshes
+            .v3
+            .hdri_file()
+            .or_else(|| self.state.set3d.v3.hdri_file())
+            .map(std::path::Path::to_path_buf)
+            .or_else(|| self.model.settings.layout.hdri_file.clone());
+        if self.layout_probe.as_ref() != Some(&probe)
+            || self.model.settings.layout.hdri_file != hdri_file
+        {
+            let mut cur = crate::layout::capture(
                 ctx,
                 &self.model.settings.layout,
                 &self.model.filter,
@@ -130,6 +147,7 @@ impl SdcApp {
                 &self.model.view,
                 looks,
             );
+            cur.hdri_file = hdri_file;
             // The first frame is the starting point: what it reads that the file did not have is no change to write.
             if cur != self.model.settings.layout {
                 self.model.settings.layout = cur;
@@ -149,6 +167,13 @@ impl SdcApp {
     /// Both 3D panels' links to the Textures view: which missing texture paths are items of the open folder, and a
     /// "Open in Textures" click (selects the item and switches to the Textures view).
     pub fn route_3d(&mut self, ctx: &egui::Context) {
+        // A file one panel's picker chose is the other's too (one saved path); the other decodes it itself.
+        if let Some(p) = self.meshes.v3.take_chosen_hdri() {
+            self.state.set3d.v3.load_hdri(p, false);
+        }
+        if let Some(p) = self.state.set3d.v3.take_chosen_hdri() {
+            self.meshes.v3.load_hdri(p, false);
+        }
         let model = &mut self.model;
         for v in [&mut self.meshes.v3, &mut self.state.set3d.v3] {
             let missing = v

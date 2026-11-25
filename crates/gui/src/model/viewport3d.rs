@@ -396,12 +396,41 @@ impl Clock {
     }
 }
 
+/// The background of the 3D preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BgMode {
+    /// A flat colour ([`Look::bg`]).
+    #[default]
+    Solid,
+    /// The user's HDRI file ([`Viewport3d::hdri_file`]) behind the model and as ambient light; a flat colour while
+    /// none is loaded.
+    Hdri,
+}
+
+impl BgMode {
+    /// The name saved in `gui.toml` (`[layout.look] mode`).
+    pub fn name(self) -> &'static str {
+        match self {
+            BgMode::Solid => "solid",
+            BgMode::Hdri => "hdri",
+        }
+    }
+
+    /// The mode a saved name means; an unknown name is Solid.
+    pub fn from_name(s: &str) -> BgMode {
+        match s {
+            "hdri" => BgMode::Hdri,
+            _ => BgMode::Solid,
+        }
+    }
+}
+
 /// The "View" controls of the panel: background and lights. Saved in `gui.toml` (`[layout.look]`, AG17); a fresh
 /// install begins at the defaults (the look the preview always had).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Look {
-    /// The studio HDRI behind the model (and as ambient light) instead of a flat colour.
-    pub hdri: bool,
+    /// What is behind the model.
+    pub mode: BgMode,
     /// The flat background colour, sRGB 0..=1 per channel: `[0.0; 3]` = black (GUI suggestions item 2; was `grey`).
     pub bg: [f32; 3],
     /// Multiplier on the directional light, 0..=4.
@@ -410,7 +439,7 @@ pub struct Look {
     pub point: f32,
     /// Point light falloff radius in multiples of the model's bounding radius, [`Look::RADIUS_RANGE`].
     pub radius: f32,
-    /// The sun's turn about the vertical (world Z), radians in 0..2π (Shift+right drag). The studio HDRI turns with it
+    /// The sun's turn about the vertical (world Z), radians in 0..2π (Shift+right drag). The HDRI turns with it
     /// (owner D4: `Scene::env_yaw`).
     pub sun_yaw: f32,
     /// Opaque shapes through CS's deferred pass (v2 D8); `false` = forward.
@@ -422,14 +451,19 @@ impl Look {
     pub const POINT_RANGE: (f32, f32) = (0.0, 4.0);
     pub const RADIUS_RANGE: (f32, f32) = (0.1, 10.0);
 
-    /// The scene for this look: `camera`, and the point light placed around `bounds` (none loaded: off).
-    pub fn scene(&self, camera: Camera, bounds: Option<([f32; 3], f32)>) -> Scene {
+    /// The scene for this look: `camera`, and the point light placed around `bounds` (none loaded: off). In Hdri mode
+    /// `env` is the loaded file; without one the background is the solid colour.
+    pub fn scene(
+        &self,
+        camera: Camera,
+        bounds: Option<([f32; 3], f32)>,
+        env: Option<&Arc<render3d::hdri::Environment>>,
+    ) -> Scene {
         let mut s = Scene {
             camera,
-            background: if self.hdri {
-                Background::Hdri
-            } else {
-                Background::rgb(self.bg)
+            background: match (self.mode, env) {
+                (BgMode::Hdri, Some(e)) => Background::Hdri(e.clone()),
+                _ => Background::rgb(self.bg),
             },
             sun_brightness: self.sun.clamp(Self::SUN_RANGE.0, Self::SUN_RANGE.1),
             env_yaw: self.sun_yaw,
@@ -465,7 +499,8 @@ impl Look {
         let d = Look::default();
         let Some(s) = s else { return d };
         Look {
-            hdri: s.hdri.unwrap_or(d.hdri),
+            // The old `hdri` key is read and ignored: it meant the bundled studio image, which is gone.
+            mode: s.mode.as_deref().map_or(d.mode, BgMode::from_name),
             bg: s.bg.or(s.grey.map(|g| [g; 3])).unwrap_or(d.bg),
             sun: s.sun.unwrap_or(d.sun),
             point: s.point.unwrap_or(d.point),
@@ -479,7 +514,8 @@ impl Look {
 impl crate::settings::LookSettings {
     pub fn of(l: &Look) -> Self {
         Self {
-            hdri: Some(l.hdri),
+            hdri: None,
+            mode: Some(l.mode.name().to_owned()),
             grey: None,
             bg: Some(l.bg),
             sun: Some(l.sun),
@@ -494,7 +530,7 @@ impl crate::settings::LookSettings {
 impl Default for Look {
     fn default() -> Look {
         Look {
-            hdri: false,
+            mode: BgMode::Solid,
             bg: [0.0; 3],
             sun: 1.0,
             point: 0.0,
@@ -625,6 +661,8 @@ pub enum V3Cmd {
         look: Look,
         /// Scene time (`Scene.time`, CS's `Timer`): the clock's, else 1.0.
         time: f32,
+        /// The loaded HDRI, sent in Hdri mode only (`Look::scene` draws Solid without it).
+        env: Option<Arc<render3d::hdri::Environment>>,
     },
     /// A finished background compile, sent by the pool into the render loop's own queue.
     Compiled(CompileDone),
@@ -669,8 +707,15 @@ pub enum V3Reply {
         id: u64,
         message: String,
     },
-    /// A one-line problem the viewport shows above the frame (the Studio backdrop could not be made).
+    /// A one-line problem the viewport shows above the frame (the HDRI backdrop could not be made).
     Notice(String),
+    /// An HDRI file read on a spawned thread (`Viewport3d::load_hdri`): the environment, or why it is refused.
+    Hdri {
+        seq: u64,
+        path: PathBuf,
+        choose: bool,
+        result: Result<Arc<render3d::hdri::Environment>, String>,
+    },
     /// `n` features/settings commands are answered, after all the replies they caused (no wake-up otherwise).
     Reconfigured(u64),
     /// The shapes of the loaded `Parsed`/`Builtin` content: after each load and after each batch of edits.
@@ -769,6 +814,17 @@ pub struct Viewport3d {
     loaded: Option<u64>,
     pending_load: Option<u64>,
     last_sent: Option<(Camera, u32, u32, u64, Look, f32)>,
+    /// The environment of the last `Render` (Hdri mode only), compared by `Arc::ptr_eq`.
+    last_env: Option<Arc<render3d::hdri::Environment>>,
+    /// The HDRI file loaded for this panel and its decoded environment. Each panel decodes the shared path itself.
+    hdri: Option<(PathBuf, Arc<render3d::hdri::Environment>)>,
+    /// The latest decode asked for and how many are out: an older answer is dropped, and `busy` holds while any is.
+    hdri_want: u64,
+    hdri_out: u32,
+    /// A file this panel's picker chose and decoded: the app hands the path to the other panel (`take_chosen_hdri`).
+    hdri_chosen: Option<PathBuf>,
+    /// This panel's own file dialog; its result is taken in `poll`.
+    pub picker: crate::model::picker::Picker,
     render_sent: u64,
     render_done: u64,
     edits_sent: u64,
@@ -836,6 +892,12 @@ impl Viewport3d {
             loaded: None,
             pending_load: None,
             last_sent: None,
+            last_env: None,
+            hdri: None,
+            hdri_want: 0,
+            hdri_out: 0,
+            hdri_chosen: None,
+            picker: crate::model::picker::Picker::shared(),
             render_sent: 0,
             render_done: 0,
             next_id: 0,
@@ -909,6 +971,7 @@ impl Viewport3d {
             || self.edits_done < self.edits_sent
             || self.reconf_done < self.reconf_sent
             || self.compiling() > 0
+            || self.hdri_out > 0
     }
 
     /// The content is a Meshes-view mesh (the set preview lists its own shape errors).
@@ -1205,6 +1268,85 @@ impl Viewport3d {
         }
     }
 
+    /// The HDRI file this panel has loaded (the one shown beside "HDRI file…"), if any.
+    pub fn hdri_file(&self) -> Option<&Path> {
+        self.hdri.as_ref().map(|(p, _)| p.as_path())
+    }
+
+    /// Decodes `path` on a spawned thread and takes it as this panel's HDRI when it is good. `choose`: the user picked
+    /// it here, so the panel also switches to the HDRI background and the app hands the path to the other panel. A
+    /// refused file leaves the previous HDRI and mode and shows the reason; a file that fails with nothing loaded
+    /// (the saved one is gone) drops the HDRI background back to Solid.
+    pub fn load_hdri(&mut self, path: PathBuf, choose: bool) {
+        self.hdri_want += 1;
+        self.hdri_out += 1;
+        let seq = self.hdri_want;
+        let tx = self.tx.clone();
+        let spawned = std::thread::Builder::new()
+            .name("tessalith-hdri".into())
+            .spawn({
+                let (tx, path) = (tx.clone(), path.clone());
+                move || {
+                    let result = std::panic::catch_unwind(|| {
+                        render3d::hdri::Environment::from_path(&path).map(Arc::new)
+                    })
+                    .unwrap_or_else(|_| Err("internal error while reading it".into()));
+                    let _ = tx.send(WorkerMsg::Viewport3d(V3Reply::Hdri {
+                        seq,
+                        path,
+                        choose,
+                        result,
+                    }));
+                }
+            });
+        if spawned.is_err() {
+            let _ = tx.send(WorkerMsg::Viewport3d(V3Reply::Hdri {
+                seq,
+                path,
+                choose,
+                result: Err("no thread to read it on".into()),
+            }));
+        }
+    }
+
+    /// The file this panel's picker chose and decoded since the last call: the app loads it in the other panel.
+    pub fn take_chosen_hdri(&mut self) -> Option<PathBuf> {
+        self.hdri_chosen.take()
+    }
+
+    /// The decode of `path` landed (or failed).
+    fn hdri_loaded(
+        &mut self,
+        seq: u64,
+        path: PathBuf,
+        choose: bool,
+        result: Result<Arc<render3d::hdri::Environment>, String>,
+    ) {
+        self.hdri_out = self.hdri_out.saturating_sub(1);
+        if seq != self.hdri_want {
+            return; // a newer file was asked for since
+        }
+        match result {
+            Ok(env) => {
+                self.hdri = Some((path.clone(), env));
+                if choose {
+                    self.look.mode = BgMode::Hdri;
+                    self.hdri_chosen = Some(path);
+                }
+            }
+            Err(e) => {
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into(),
+                );
+                self.notice = Some(format!("HDRI file {name} not used: {e}"));
+                if self.hdri.is_none() && self.look.mode == BgMode::Hdri {
+                    self.look.mode = BgMode::Solid;
+                }
+            }
+        }
+    }
+
     pub fn debug(&self) -> DebugView {
         self.debug
     }
@@ -1321,7 +1463,16 @@ impl Viewport3d {
         let look = self.look;
         let time = self.clock.map_or(1.0, |c| c.t);
         let want = (camera, w, h, loaded, look, time);
-        if self.last_sent == Some(want) {
+        let env = match look.mode {
+            BgMode::Hdri => self.hdri.as_ref().map(|(_, e)| e.clone()),
+            BgMode::Solid => None,
+        };
+        let same_env = match (&self.last_env, &env) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if self.last_sent == Some(want) && same_env {
             return;
         }
         let id = self.id();
@@ -1333,10 +1484,12 @@ impl Viewport3d {
                 h,
                 look,
                 time,
+                env: env.clone(),
             })
             .is_ok()
         {
             self.last_sent = Some(want);
+            self.last_env = env;
             self.render_sent = id;
             self.state = V3State::Rendering;
         }
@@ -1357,6 +1510,12 @@ impl Viewport3d {
     /// Drain replies. True when anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        for d in self.picker.take() {
+            changed = true;
+            if let (crate::model::picker::PickerPurpose::HdriFile, Some(p)) = (d.purpose, d.path) {
+                self.load_hdri(p, true);
+            }
+        }
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
             match msg {
@@ -1457,6 +1616,12 @@ impl Viewport3d {
                 }
             }
             V3Reply::Notice(text) => self.notice = Some(text),
+            V3Reply::Hdri {
+                seq,
+                path,
+                choose,
+                result,
+            } => self.hdri_loaded(seq, path, choose, result),
             V3Reply::RenderError { id, message } => {
                 self.render_done = self.render_done.max(id);
                 if self.loaded.is_some() && self.pending_load.is_none() {
@@ -1777,6 +1942,16 @@ impl Drop for ReconfAck<'_> {
     }
 }
 
+/// The camera, size, look, scene time and HDRI of the last frame drawn.
+type DrawnView = (
+    Camera,
+    u32,
+    u32,
+    Look,
+    f32,
+    Option<Arc<render3d::hdri::Environment>>,
+);
+
 fn render_loop(
     rx: Receiver<V3Cmd>,
     self_tx: Sender<V3Cmd>,
@@ -1848,9 +2023,9 @@ fn render_loop(
     let mut edits: BTreeMap<ShapeId, MaterialState> = BTreeMap::new();
     let mut tex = TexState::default();
     // The last camera, size and look drawn: what a compile-triggered refresh renders with.
-    let mut view: Option<(Camera, u32, u32, Look, f32)> = None;
+    let mut view: Option<DrawnView> = None;
     let mut refresh_id: u64 = 1 << 62;
-    let mut backdrop_told = false;
+    let mut backdrop_told: Option<String> = None;
     // The deferred failure last reported (`Renderer::deferred_error`), so a late fallback is told once.
     let mut deferred_told: Option<String> = None;
     // The look's deferred choice (the last SetDeferred): a features change retries it after a fallback (D-P36). A failed retry is told by the check after render only when its error is new.
@@ -1991,8 +2166,9 @@ fn render_loop(
                     h,
                     look,
                     time,
+                    env,
                 } => {
-                    render = Some((id, camera, w, h, look, time));
+                    render = Some((id, camera, w, h, look, time, env));
                     None
                 }
             };
@@ -2110,11 +2286,13 @@ fn render_loop(
         // A landed program changed a shape and nothing above reported it: tell the panel.
         // Sent after the refresh frame: the panel stays busy (Pending) until it reads this, so it also reads the frame.
         let shapes_due = compiled_changed && !reload && pending_was_empty;
-        let (id, camera, w, h, look, time, refresh) = match (render, view) {
-            (Some((id, camera, w, h, look, time)), _) => (id, camera, w, h, look, time, false),
-            (None, Some((camera, w, h, look, time))) if compiled_changed => {
+        let (id, camera, w, h, look, time, env, refresh) = match (render, view.clone()) {
+            (Some((id, camera, w, h, look, time, env)), _) => {
+                (id, camera, w, h, look, time, env, false)
+            }
+            (None, Some((camera, w, h, look, time, env))) if compiled_changed => {
                 refresh_id += 1;
-                (refresh_id, camera, w, h, look, time, true)
+                (refresh_id, camera, w, h, look, time, env, true)
             }
             _ => {
                 if shapes_due {
@@ -2123,8 +2301,8 @@ fn render_loop(
                 continue;
             }
         };
-        view = Some((camera, w, h, look, time));
-        let mut scene = look.scene(camera, r.bounds());
+        let mut scene = look.scene(camera, r.bounds(), env.as_ref());
+        view = Some((camera, w, h, look, time, env));
         scene.time = time;
         let mut result = r.render(&scene, w, h);
         #[cfg(feature = "test-hooks")]
@@ -2137,15 +2315,15 @@ fn render_loop(
                 if let Err(e) = rebuild(&mut r, &last, &edits, &tex, &skins) {
                     return send(V3Reply::Failed(e));
                 }
-                backdrop_told = false;
+                backdrop_told = None;
                 pump(&mut r);
                 result = r.render(&scene, w, h);
             }
         }
-        if !backdrop_told {
-            if let Some(e) = r.backdrop_error() {
-                backdrop_told = true;
-                send(V3Reply::Notice(format!("Studio backdrop unavailable: {e}")));
+        if let Some(e) = r.backdrop_error() {
+            if backdrop_told.as_deref() != Some(e) {
+                backdrop_told = Some(e.to_owned());
+                send(V3Reply::Notice(format!("HDRI backdrop unavailable: {e}")));
             }
         }
         // A features change can turn deferred off during render (late fallback).

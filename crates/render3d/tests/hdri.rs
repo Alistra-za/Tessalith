@@ -1,8 +1,100 @@
 //! Environment cube from the HDRI (v2 Phase D, D5): CS's cube face convention (CaptureCommon.hlsli:48-76
 //! GetSamplingVector), the yaw turn, the box mips, the GGX-prefiltered specular chain, and the GPU's own cube addressing of the uploaded cube.
+mod common;
+use common::hdr_bytes;
 use render3d::composite::EnvMaps;
-use render3d::hdri::{cube_dir, cube_faces, dir_to_uv, mip_chain, specular_chain, studio, Hdr};
+use render3d::hdri::{
+    cube_dir, cube_faces, dir_to_uv, mip_chain, procedural, specular_chain, uv_to_dir, Environment,
+    Hdr,
+};
 use std::f32::consts::PI;
+
+fn grey(w: usize, h: usize) -> Vec<u8> {
+    hdr_bytes(w, h, |x, _| [0.25 + x as f32 / (4 * w) as f32; 3])
+}
+
+#[test]
+fn a_2_to_1_file_loads() {
+    let e = Environment::from_bytes(&grey(128, 64)).unwrap();
+    assert_eq!((e.image().width, e.image().height), (128, 64));
+    assert!(e.image().rgb.iter().all(|v| (0.2..0.55).contains(v)));
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("sky.HDR"); // the extension is case-insensitive
+    std::fs::write(&p, grey(128, 64)).unwrap();
+    assert_eq!(Environment::from_path(&p).unwrap().image().width, 128);
+}
+
+#[test]
+fn refusals_name_the_reason() {
+    let header_only = |w: usize, h: usize| {
+        format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes()
+    };
+    let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+        ("not 2:1", grey(100, 64), "2:1"),
+        ("too small", grey(32, 16), "64"),
+        // Only a header: the size is refused before any pixel is decoded.
+        ("too large", header_only(8192, 4096), "4096"),
+        (
+            "not RGBE",
+            b"just some text, not an image".to_vec(),
+            "Radiance",
+        ),
+    ];
+    for (what, bytes, needle) in cases {
+        let e = Environment::from_bytes(&bytes).unwrap_err();
+        assert!(e.contains(needle), "{what}: {e}");
+        assert!(!e.contains('\n'), "{what}: one line: {e}");
+    }
+    // RGBE bytes cannot hold a NaN, so the finite rule is checked on a decoded image.
+    let mut rgb = vec![0.5; 64 * 32 * 3];
+    rgb[100] = f32::NAN;
+    let e = Environment::from_image(Hdr {
+        width: 64,
+        height: 32,
+        rgb,
+    })
+    .unwrap_err();
+    assert!(e.contains("finite"), "{e}");
+    // The extension is checked before the file is read, so the path needs no file.
+    let e = Environment::from_path(std::path::Path::new("sky.png")).unwrap_err();
+    assert!(e.contains(".hdr"), "{e}");
+}
+
+#[test]
+fn procedural_matches_the_ambient_axes() {
+    // Opposite axes sum to 1.0 in every channel, so the six-axis blend returns each axis colour on its axis.
+    let six = [
+        [0.60, 0.50, 0.40], // +X
+        [0.40, 0.50, 0.60], // -X
+        [0.30, 0.70, 0.50], // +Y
+        [0.70, 0.30, 0.50], // -Y
+        [0.90, 0.20, 0.10], // +Z
+        [0.10, 0.80, 0.90], // -Z
+    ];
+    let img = procedural(&six);
+    assert_eq!((img.width, img.height), (128, 64));
+    let at = |x: usize, y: usize| [0, 1, 2].map(|k| img.rgb[(y * 128 + x) * 3 + k]);
+    let close = |a: [f32; 3], b: [f32; 3], what: &str| {
+        for k in 0..3 {
+            assert!((a[k] - b[k]).abs() < 2e-2, "{what}: {a:?} vs {b:?}");
+        }
+    };
+    // No pixel centre lies exactly on an axis (the nearest is ~0.025 rad off in each angle), so the blend's slope
+    // (up to 0.4 per unit of direction here) leaves up to ~0.015 against the axis colour; a wrong axis is off by 0.2+.
+    close(at(0, 0), six[4], "up");
+    close(at(0, 63), six[5], "down");
+    // The pixel that looks along +X (found through uv_to_dir).
+    let (mut best, mut at_x) = (-2.0f32, (0, 0));
+    for y in 0..64 {
+        for x in 0..128 {
+            let d = uv_to_dir((x as f32 + 0.5) / 128.0, (y as f32 + 0.5) / 64.0);
+            if d[0] > best {
+                (best, at_x) = (d[0], (x, y));
+            }
+        }
+    }
+    close(at(at_x.0, at_x.1), six[0], "+X");
+}
 
 /// `w × h` image whose pixel (x, y) is (x, y, 0): the source pixel of any sample can be read back exactly.
 fn index_image(w: usize, h: usize) -> Hdr {
@@ -61,7 +153,7 @@ fn cube_faces_agree_with_dir_to_uv() {
 #[test]
 fn yaw_rotates_the_cube() {
     const N: u32 = 8;
-    let img = index_image(studio().image.width, studio().image.height);
+    let img = index_image(1024, 512);
     let (a, b) = (cube_faces(&img, N, 0.0), cube_faces(&img, N, PI / 2.0));
     let w = img.width as f32;
     let mut moved = 0;

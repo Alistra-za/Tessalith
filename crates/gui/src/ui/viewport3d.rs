@@ -2,8 +2,9 @@
 //! orbit changes and uploads a new frame into an egui texture when its id changes (P0 CPU path).
 use crate::model::code_text::counted;
 use crate::model::meshes::LE_WARNING;
+use crate::model::picker::{self, PickerPurpose};
 use crate::model::viewport3d::{
-    off_line, Clock, Look, V3State, Viewport3d, DEFERRED_LABEL, FEATURES_LABEL, FRAME_LABEL,
+    off_line, BgMode, Clock, Look, V3State, Viewport3d, DEFERRED_LABEL, FEATURES_LABEL, FRAME_LABEL,
 };
 use crate::ui::status::{AMBER, RED};
 use eframe::egui;
@@ -265,12 +266,45 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
             {
                 v.set_deferred(on);
             }
+            let file = v.hdri_file().map(std::path::Path::to_path_buf);
+            let picker = v.picker.clone();
             let l = &mut v.look;
             ui.horizontal_wrapped(|ui| {
                 ui.label("Background");
-                ui.radio_value(&mut l.hdri, false, "Solid");
-                ui.radio_value(&mut l.hdri, true, "Studio HDRI");
-                if !l.hdri {
+                ui.radio_value(&mut l.mode, BgMode::Solid, "Solid");
+                // With no file loaded the radio asks for one; the mode switches when the file is good.
+                let r = ui.radio(l.mode == BgMode::Hdri, "HDRI file…");
+                if r.clicked() {
+                    if file.is_some() {
+                        l.mode = BgMode::Hdri;
+                    } else {
+                        picker.request(
+                            ui.ctx(),
+                            PickerPurpose::HdriFile,
+                            None,
+                            picker::hdri_spec(None),
+                        );
+                    }
+                }
+                if let Some(p) = &file {
+                    let name = p.file_name().map_or_else(
+                        || p.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate())
+                        .on_hover_text(p.display().to_string());
+                    let change = picker::button(ui, &picker, egui::Button::new("Change…"));
+                    if change {
+                        let start = p.parent().map(std::path::Path::to_path_buf);
+                        picker.request(
+                            ui.ctx(),
+                            PickerPurpose::HdriFile,
+                            None,
+                            picker::hdri_spec(start),
+                        );
+                    }
+                }
+                if l.mode == BgMode::Solid {
                     // GUI suggestions item 2: one sRGB colour; the swatch's square and the hex box replace the grey slider.
                     let id = egui::Id::unique("viewport3d-bg");
                     let shown = l.bg.map(super::color::unit_to_u8);
@@ -305,8 +339,8 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                 v.orbit.reset();
             }
             ui.weak("Drag: orbit · middle or Shift+drag: pan · Shift+right drag: turn the sun · wheel: zoom · double-click or Home: recentre");
-            if v.look.hdri {
-                ui.weak("Studio HDRI by Poly Haven (CC0): background and ambient light. Shift+right drag turns the sun and the HDRI.");
+            if v.look.mode == BgMode::Hdri {
+                ui.weak("The HDRI is the background and the ambient light; Shift+right drag turns it with the sun.");
             }
         });
 }

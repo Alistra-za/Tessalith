@@ -1,8 +1,8 @@
-//! The studio HDRI as a background: one full-screen triangle at the far plane that samples the equirectangular
+//! The user's HDRI as a background: one full-screen triangle at the far plane that samples the equirectangular
 //! image by the world direction of each pixel. Repo-owned shader (not CS's), compiled with `D3DCompile` once.
 //! The image is uploaded once as RGBA16F; the pass does not touch the depth buffer.
 use crate::device::Gpu;
-use crate::hdri::{self, YAW};
+use crate::hdri::{Hdr, YAW};
 use crate::scene::{inverse4, View};
 use std::ffi::CString;
 use windows::core::PCSTR;
@@ -106,9 +106,8 @@ pub struct Backdrop {
 }
 
 impl Backdrop {
-    /// Decodes the HDRI (first use) and creates the shaders, the image texture and the state.
-    pub fn new(gpu: &Gpu) -> Result<Backdrop, String> {
-        let img = &hdri::studio().image;
+    /// Creates the shaders, the texture of `img` and the state.
+    pub fn new(gpu: &Gpu, img: &Hdr) -> Result<Backdrop, String> {
         let half: Vec<u16> = img
             .rgb
             .as_chunks::<3>()

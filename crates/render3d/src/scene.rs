@@ -5,6 +5,8 @@
 //! zero-initialised cbuffer never zeroes a multiplier (directional/ambient light, colour clamp …).
 use crate::cbuffer::{CbWriter, Field};
 use crate::cs_settings::write_feature_data;
+use crate::hdri;
+use std::sync::Arc;
 
 /// Row-major 3×4 (`row r = [m_r0, m_r1, m_r2, t_r]`).
 pub type Mat3x4 = [[f32; 4]; 3];
@@ -43,15 +45,26 @@ pub struct DirLight {
 }
 
 /// What is drawn behind the model.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Background {
     /// A flat colour: **linear** RGB. With `Renderer::set_encode_srgb(true)` it is encoded with the rest of the frame
     /// at readback; without it (gamma-space output) the renderer writes its sRGB encoding, so the same value looks the
     /// same either way. A perceptual (sRGB) colour from the UI goes through [`Background::rgb`] / [`Background::grey`].
     Solid([f32; 3]),
-    /// The bundled studio HDRI ([`crate::hdri`]) by view direction, turned by `Scene::env_yaw`. It also replaces
-    /// `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
-    Hdri,
+    /// The user's HDRI file ([`crate::hdri::Environment`]) by view direction, turned by `Scene::env_yaw`. It also
+    /// replaces `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
+    Hdri(Arc<hdri::Environment>),
+}
+
+/// `Hdri` compares by identity (`Arc::ptr_eq`): a new file is a new `Arc`.
+impl PartialEq for Background {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Background::Solid(a), Background::Solid(b)) => a == b,
+            (Background::Hdri(a), Background::Hdri(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl Background {
@@ -109,7 +122,8 @@ pub struct Scene {
     /// Ambient (DALC) colours seen from +X, −X, +Y, −Y, +Z, −Z, world space.
     pub ambient6: [[f32; 3]; 6],
     /// Environment turn about world +Z, radians, in the sun's sense (a feature at azimuth φ shows at φ + yaw). Turns the
-    /// HDRI backdrop and the ambient taken from it; 0 = the image as bundled. No effect with a solid background.
+    /// HDRI backdrop and the ambient taken from it; 0 = the image as loaded. It also turns the reflected environment
+    /// whatever the background.
     pub env_yaw: f32,
     /// Seconds on the preview's animation clock, written to CS's `Timer` (v2 B3). 1.0 when nothing plays (the
     /// constant the preview always wrote).
@@ -146,9 +160,9 @@ impl Scene {
     }
 
     pub fn ambient(&self) -> [[f32; 3]; 6] {
-        match self.background {
+        match &self.background {
             Background::Solid(_) => self.ambient6,
-            Background::Hdri => crate::hdri::studio().ambient6_at(self.env_yaw),
+            Background::Hdri(e) => e.ambient6_at(self.env_yaw),
         }
     }
 

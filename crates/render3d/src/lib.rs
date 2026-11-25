@@ -70,6 +70,46 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16_UINT;
 
+/// What an env cube was built from: the HDRI's `Arc` (a `Weak`, so its address is not reused while it is the key) or
+/// the ambient bits for the procedural environment; plus the `env_yaw` bits it was turned by.
+struct EnvKey {
+    source: EnvSource,
+    yaw: u32,
+}
+
+enum EnvSource {
+    Hdri(std::sync::Weak<hdri::Environment>),
+    Ambient([u32; 18]),
+}
+
+impl EnvKey {
+    fn of(scene: &Scene) -> EnvKey {
+        let source = match &scene.background {
+            Background::Hdri(e) => EnvSource::Hdri(Arc::downgrade(e)),
+            Background::Solid(_) => {
+                let mut bits = [0u32; 18];
+                for (b, v) in bits.iter_mut().zip(scene.ambient6.iter().flatten()) {
+                    *b = v.to_bits();
+                }
+                EnvSource::Ambient(bits)
+            }
+        };
+        EnvKey {
+            source,
+            yaw: scene.env_yaw.to_bits(),
+        }
+    }
+
+    fn same(&self, other: &EnvKey) -> bool {
+        self.yaw == other.yaw
+            && match (&self.source, &other.source) {
+                (EnvSource::Hdri(a), EnvSource::Hdri(b)) => a.ptr_eq(b),
+                (EnvSource::Ambient(a), EnvSource::Ambient(b)) => a == b,
+                _ => false,
+            }
+    }
+}
+
 /// Result of [`Renderer::load`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadReport {
@@ -415,8 +455,9 @@ pub struct Renderer {
     /// Test hook: draw with P0's by-name writer (every field, every cbuffer, every frame).
     #[cfg(feature = "test-hooks")]
     reference_writer: bool,
-    /// The HDRI background pass, made on the first `Background::Hdri` frame.
-    backdrop: Option<Result<Backdrop, String>>,
+    /// The HDRI background pass for the environment it was made from (a `Weak`, so the address cannot be reused while
+    /// it is kept), made on the first `Background::Hdri` frame and again when the `Arc` changes.
+    backdrop: Option<(std::sync::Weak<hdri::Environment>, Result<Backdrop, String>)>,
     /// [`Renderer::set_missing_texture`]: the colour a missing colour-slot texture shows; `None` = neutral defaults.
     missing_fill: Option<[u8; 4]>,
     /// [`Renderer::set_debug_output`]: the term the next permutations write instead of the lit colour.
@@ -433,9 +474,9 @@ pub struct Renderer {
     /// Successful composite builds (test hook).
     #[cfg(feature = "test-hooks")]
     composite_builds: usize,
-    /// The env cube from the HDRI (v2 D5), keyed by `Scene::env_yaw` bits; built in `render` only when the composite
-    /// or a drawn program reads one.
-    env: Option<(u32, composite::EnvMaps)>,
+    /// The env cube (v2 D5) from the loaded HDRI or, with a solid background, from [`hdri::procedural`] of the ambient;
+    /// keyed by [`EnvKey`]. Built in `render` only when the composite or a drawn program reads one.
+    env: Option<(EnvKey, composite::EnvMaps)>,
     /// CS's GPU env prefilter (Note GM1) and the defines it was built for; Err = it does not build from these shaders
     /// (the CPU [`hdri::specular_chain`] runs instead). Rebuilt with the composite's defines.
     prefilter: Option<(Vec<String>, Result<composite::Prefilter, String>)>,
@@ -1007,9 +1048,9 @@ impl Renderer {
         self.sources.get_debug(Path::new("Lighting.hlsl")).is_ok()
     }
 
-    /// Why the Studio HDRI backdrop could not be made (kept, so it is tried once per renderer), if it could not.
+    /// Why the HDRI backdrop could not be made (kept, so it is tried once per environment), if it could not.
     pub fn backdrop_error(&self) -> Option<&str> {
-        self.backdrop.as_ref()?.as_ref().err().map(String::as_str)
+        self.backdrop.as_ref()?.1.as_ref().err().map(String::as_str)
     }
 
     /// Timing of the last successful [`Renderer::render`].
@@ -2411,8 +2452,8 @@ impl Renderer {
                 Target::new(&self.gpu, w, h)?
             });
         }
-        // D5: the env cube, before `gpu` and `target` are borrowed below. Any background (R7): the HDRI is the
-        // preview's environment.
+        // D5: the env cube, before `gpu` and `target` are borrowed below. Any background (R7): the loaded HDRI, or
+        // with a solid background the procedural environment of the ambient, is what the preview reflects.
         let want_env = (deferred_frame
             && self.debug == DebugOutput::Lit
             && self.composite.as_ref().is_some_and(Composite::needs_env))
@@ -2422,11 +2463,12 @@ impl Renderer {
                     .and_then(|s| s.draw.as_ref())
                     .is_some_and(|d| !d.env_regs.is_empty())
             });
-        let yaw = scene.env_yaw.to_bits();
+        let env_key = EnvKey::of(scene);
         let defines = self.composite_defines();
-        // A rebuild per yaw change: CS's GGX levels on the GPU (Note GM1), else on the CPU (~40 ms in release, Note GL1).
+        // A rebuild per new source or yaw: CS's GGX levels on the GPU (Note GM1), else on the CPU (~40 ms in release,
+        // Note GL1).
         if want_env
-            && (self.env.as_ref().is_none_or(|e| e.0 != yaw)
+            && (self.env.as_ref().is_none_or(|e| !e.0.same(&env_key))
                 || self.prefilter.as_ref().is_some_and(|p| p.0 != defines))
         {
             self.env = None;
@@ -2435,7 +2477,14 @@ impl Renderer {
                     composite::Prefilter::new(&self.gpu, &self.sources, &defines, &self.cache_dir);
                 self.prefilter = Some((defines, p));
             }
-            let img = &hdri::studio().image;
+            let procedural;
+            let img = match &scene.background {
+                Background::Hdri(e) => e.image(),
+                Background::Solid(_) => {
+                    procedural = hdri::procedural(&scene.ambient6);
+                    &procedural
+                }
+            };
             let built = match &mut self.prefilter {
                 Some((_, Ok(p))) => {
                     composite::EnvMaps::new_gpu(&self.gpu, p, img, self.env_size, scene.env_yaw)
@@ -2444,7 +2493,7 @@ impl Renderer {
             };
             match built {
                 Ok(e) => {
-                    self.env = Some((yaw, e));
+                    self.env = Some((env_key, e));
                     #[cfg(feature = "test-hooks")]
                     {
                         self.env_builds += 1;
@@ -2455,7 +2504,7 @@ impl Renderer {
                     // draw without rebuilding; a new yaw tries again. This frame reports the error.
                     let black = self.default_srv(SrvKind::Cube, [0, 0, 0, 255])?;
                     self.env = Some((
-                        yaw,
+                        env_key,
                         composite::EnvMaps {
                             env: black.clone(),
                             reflection: black,
@@ -2485,9 +2534,16 @@ impl Renderer {
             view_changed,
         };
         let mut uploads = 0;
-        if scene.background == Background::Hdri && self.backdrop.is_none() {
+        if let Background::Hdri(e) = &scene.background {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
-            self.backdrop = Some(Backdrop::new(&self.gpu));
+            // A new `Arc` (another file) builds it again.
+            if self
+                .backdrop
+                .as_ref()
+                .is_none_or(|(w, _)| w.as_ptr() != Arc::as_ptr(e))
+            {
+                self.backdrop = Some((Arc::downgrade(e), Backdrop::new(&self.gpu, e.image())));
+            }
         }
         // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
         // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
@@ -2506,11 +2562,11 @@ impl Renderer {
         }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
-        let clear = match scene.background {
+        let clear = match &scene.background {
             // The target is read back as is when not sRGB-encoding: give it the display value then.
-            Background::Solid(c) if self.encode_srgb => c,
+            Background::Solid(c) if self.encode_srgb => *c,
             Background::Solid(c) => c.map(scene::linear_to_srgb),
-            Background::Hdri => [0.0; 3],
+            Background::Hdri(_) => [0.0; 3],
         };
         target.clear(gpu, [clear[0], clear[1], clear[2], 1.0]);
         // SAFETY: every bound object belongs to `gpu.device`; slices outlive the calls.
@@ -2527,7 +2583,7 @@ impl Renderer {
             }]));
             ctx.RSSetState(&self.raster);
             ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            if let (Background::Hdri, Some(Ok(b))) = (scene.background, &self.backdrop) {
+            if let (Background::Hdri(_), Some((_, Ok(b)))) = (&scene.background, &self.backdrop) {
                 b.draw(gpu, &view, !self.encode_srgb, scene.env_yaw);
             }
             // RT0 alone until a DEFERRED draw: a forward program must never see RT1-7 (its PS_OUTPUT writes

@@ -37,7 +37,8 @@ fn full() -> LayoutSettings {
         sets_shader: Some("pbr_landscape".into()),
         preview_channel: 3,
         look: Some(LookSettings {
-            hdri: Some(true),
+            hdri: None,
+            mode: Some("hdri".into()),
             grey: None,
             bg: Some([0.25; 3]),
             sun: Some(2.0),
@@ -47,6 +48,7 @@ fn full() -> LayoutSettings {
             deferred: None,
         }),
         set_look: None,
+        hdri_file: None,
         settings_window: Some([300.0, 140.0, 460.0, 600.0]),
         details: vec!["set-3d-details".into()],
     }
@@ -132,7 +134,7 @@ radius = 0.0
         "width < 200, text, unknown names and absurd widths are dropped"
     );
     assert_eq!(l.window, None, "a window with a bad field is ignored");
-    let look = l.look.expect("the look table is read");
+    let look = l.look.clone().expect("the look table is read");
     assert_eq!(look.grey, None, "folded into bg on load");
     assert_eq!(
         look.bg,
@@ -166,7 +168,7 @@ fn channels_and_looks_convert_both_ways() {
     }
     assert_eq!(Channel::from_id(99), None);
     let look = Look {
-        hdri: true,
+        mode: sdc_gui::model::viewport3d::BgMode::Hdri,
         bg: [0.5, 0.25, 0.0],
         sun: 2.0,
         point: 1.0,
@@ -373,7 +375,7 @@ fn a_new_app_starts_from_the_saved_layout() {
     assert_eq!(
         app.meshes.v3.look,
         Look {
-            hdri: true,
+            mode: sdc_gui::model::viewport3d::BgMode::Hdri,
             bg: [0.25; 3],
             sun: 2.0,
             point: 1.5,
@@ -758,6 +760,111 @@ fn an_old_grey_background_loads_as_that_grey_and_a_bad_bg_falls_back() {
     }))
     .unwrap();
     assert!(text.contains("bg") && !text.contains("grey"), "{text}");
+}
+
+/// The studio HDRI is gone: the old `hdri` key is read and ignored, and what the app writes has `mode`, not `hdri`.
+#[test]
+fn old_hdri_true_loads_as_solid() {
+    use sdc_gui::model::viewport3d::BgMode;
+    let (s, err) = load_text("[layout.look]\nhdri = true\nsun = 2.0\n");
+    assert_eq!(err, None);
+    let look = Look::from_settings(s.layout.look.as_ref());
+    assert_eq!(look.mode, BgMode::Solid);
+    assert_eq!(look.sun, 2.0, "its siblings survive");
+    let text = toml::to_string(s.layout.look.as_ref().unwrap()).unwrap();
+    assert!(!text.contains("hdri"), "never written back: {text}");
+    // The new key: "hdri" turns it on, an unknown name or a wrong type is Solid.
+    for (toml_text, want) in [
+        ("mode = \"hdri\"", BgMode::Hdri),
+        ("mode = \"solid\"", BgMode::Solid),
+        ("mode = \"plaid\"", BgMode::Solid),
+        ("mode = 3", BgMode::Solid),
+    ] {
+        let (s, _) = load_text(&format!("[layout.look]\n{toml_text}\n"));
+        assert_eq!(
+            Look::from_settings(s.layout.look.as_ref()).mode,
+            want,
+            "{toml_text}"
+        );
+    }
+    let saved = toml::to_string(&LookSettings::of(&Look {
+        mode: BgMode::Hdri,
+        ..Look::default()
+    }))
+    .unwrap();
+    assert!(
+        saved.contains("mode = \"hdri\"") && !saved.contains("hdri = "),
+        "{saved}"
+    );
+}
+
+#[test]
+fn hdri_file_round_trips() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let s = GuiSettings {
+        layout: LayoutSettings {
+            hdri_file: Some(d.path().join("skies").join("studio sky.hdr")),
+            ..full()
+        },
+        ..GuiSettings::default()
+    };
+    s.save(&p).unwrap();
+    let (back, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert_eq!(back, s);
+    assert!(back.layout.hdri_file.is_some());
+    // A wrong type is ignored on its own.
+    let (s, _) = load_text("[layout]\nhdri_file = 5\nmeshes_view = true\n");
+    assert_eq!(s.layout.hdri_file, None);
+    assert!(s.layout.meshes_view);
+}
+
+#[test]
+fn a_missing_hdri_file_at_start_falls_back_to_solid_with_a_notice() {
+    use sdc_gui::app::SdcApp;
+    use sdc_gui::model::viewport3d::BgMode;
+    let d = tempfile::tempdir().unwrap();
+    let gone = d.path().join("gone.hdr");
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            look: Some(LookSettings {
+                mode: Some("hdri".into()),
+                ..LookSettings::default()
+            }),
+            hdri_file: Some(gone.clone()),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    let mut app = SdcApp::new(sdc_gui::model::AppModel::new(
+        settings,
+        None,
+        support::session(),
+    ));
+    assert_eq!(
+        app.meshes.v3.look.mode,
+        BgMode::Hdri,
+        "kept until the read fails"
+    );
+    let t = Instant::now();
+    while app.meshes.v3.notice.is_none() {
+        app.meshes.v3.poll();
+        assert!(t.elapsed() < Duration::from_secs(20), "no notice");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(app.meshes.v3.look.mode, BgMode::Solid);
+    assert!(app
+        .meshes
+        .v3
+        .notice
+        .as_deref()
+        .unwrap()
+        .contains("gone.hdr"));
+    // The saved path stays: a drive that is back later gets its file again.
+    let ctx = egui::Context::default();
+    app.sync_layout_at(&ctx, Instant::now());
+    assert_eq!(app.model.settings.layout.hdri_file, Some(gone));
 }
 
 /// Task 4 review: an untouched legacy look is saved back as it was loaded (`look_now`), so the load must already have
