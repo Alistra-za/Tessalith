@@ -585,8 +585,8 @@ fn random_strips() -> [Vec<[u16; 4]>; 4] {
 /// units (the encoder's UF16 error over the common factor (64/31)^2). The encoder scores the squared error of the
 /// decoded UF16 interpolant u against `(h_src + 0.5) * 64 / 31`, the centre of the source half code's decode range
 /// (Q5), unweighted over R, G and B. The decoder writes `h = (u * 31) >> 6`, so `u * 31 / 64` lies in [h, h + 1):
-/// with d = h - h_src a channel's term (u * 31 / 64 - (h_src + 0.5))^2 lies in [d - 0.5, d + 0.5) squared. The lower
-/// bound is 0 when d = 0 (the interval holds 0), else the smaller of (d - 0.5)^2 and (d + 0.5)^2; the upper bound is
+/// with e = h - h_src a channel's term (u * 31 / 64 - (h_src + 0.5))^2 lies in [e - 0.5, e + 0.5) squared. The lower
+/// bound is 0 when e = 0 (the interval holds 0), else the smaller of (e - 0.5)^2 and (e + 0.5)^2; the upper bound is
 /// the larger (survey #3).
 fn err_bounds(src: &[[u16; 4]; 16], dec: &[[u16; 3]; 16]) -> (f64, f64) {
     let (mut lo, mut hi) = (0.0f64, 0.0f64);
@@ -972,10 +972,11 @@ fn the_one_multiply_rule_takes_the_nearest_code_for_every_value() {
 /// are each constant. The test holds because that mode's 10-bit step is 64 UF16 units, and every input is at least 4
 /// units from an edge between two codes, so a small shift of the endpoint cannot change the nearest code.
 ///
-/// The inputs are half codes h (UF16 value v = (h + 0.5) * 64 / 31, the centre of h's decode range) where the shipped rule and the nearest code differ, the
-/// nearest code is strict, and v is at least 4 UF16 units from both edges of that mismatch window: G from nearest codes
-/// 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too low). Four more blocks take the end
-/// codes: G with nearest code 0 (shipped 1) and B with nearest 1023 (shipped 1022).
+/// The inputs are half codes h (UF16 value v = (h + 0.5) * 64 / 31, the centre of h's decode range) where the shipped
+/// rule and the nearest code differ, the nearest code is strict, and v is at least 4 UF16 units from both edges of that
+/// mismatch window: G from nearest codes 8..=150 (the shipped rule picks one too high), B from 870..=1015 (one too
+/// low). Four more blocks take the end codes: G with nearest code 0 (shipped 1) and B with nearest 1023 (shipped
+/// 1022).
 ///
 /// Not covered here, on purpose: a value midway between two codes (the kernel takes the lower, as `nearest_code`, but a
 /// tie is a knife edge that the encoder's float endpoint can fall either side of) and the delta modes 11 and 12 (an
