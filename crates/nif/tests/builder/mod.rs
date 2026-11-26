@@ -1,5 +1,8 @@
 //! Writes minimal Skyrim NIFs (20.2.0.7, user 12) for tests: header + raw blocks + footer.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 pub mod scenes;
 pub struct Nif {
     pub bsver: u32,

@@ -326,6 +326,8 @@ mod subtype_hints;
 mod target_mod;
 #[path = "../tessalith.rs"]
 mod tessalith;
+#[path = "../texture_groups.rs"]
+mod texture_groups;
 #[path = "../texture_panel_layout.rs"]
 mod texture_panel_layout;
 #[path = "../textures_filter.rs"]

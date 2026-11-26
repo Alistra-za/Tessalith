@@ -168,17 +168,26 @@ fn define_table() {
 }
 
 /// RB7 / answers.md Q4.1: cb4 `PixelShaderDescriptor` = engine PS desc & ~CS compile key. Specular/Soft/Rim/Back
-/// are compile-time defines in installed CS 1.9 and never reach cb4; CharacterLight/DefShadow stay 0 in the preview.
-/// The Glowmap technique is still read at run time (Lighting.hlsl:2598), so type 2 keeps `2 << 24`.
+/// are compile-time defines in installed CS 1.9 and never reach cb4; CharacterLight stays 0 in the preview.
+/// The Glowmap technique is still read at run time (Lighting.hlsl:2598), so type 2 keeps `2 << 24`. A shadow
+/// receiver adds ShadowDir and DefShadow (Note IH3).
 #[test]
 fn runtime_bits_table() {
-    let b = runtime_bits(&m(2, 1, (1 << 25) | (1 << 27), false));
+    let b = runtime_bits(&m(2, 1, (1 << 25) | (1 << 27), false), false);
     assert_eq!(b, 2 << 24);
     assert_eq!(
-        runtime_bits(&m(0, 1, (1 << 25) | (1 << 26) | (1 << 27), true)),
+        runtime_bits(&m(0, 1, (1 << 25) | (1 << 26) | (1 << 27), true), false),
         0
     );
-    assert_eq!(runtime_bits(&m(5, 1 << 12, 0, true)), 0);
+    assert_eq!(runtime_bits(&m(5, 1 << 12, 0, true), false), 0);
+    assert_eq!(
+        runtime_bits(&m(2, 1, 0, false), true),
+        (2 << 24) | (1 << 13) | (1 << 14)
+    );
+    assert_eq!(
+        runtime_bits(&m(0, 1, 0, false), true),
+        (1 << 13) | (1 << 14)
+    );
 }
 
 #[test]

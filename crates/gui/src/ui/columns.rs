@@ -122,12 +122,15 @@ pub const SETS_MIN: f32 =
 
 /// The arrow beside a column heading that collapses the column to its strip (the strip's own arrow expands it).
 pub fn collapse_arrow(ui: &mut egui::Ui, model: &mut AppModel, column: crate::ui::Column) {
-    let name = match column {
-        crate::ui::Column::Textures => "Textures",
-        crate::ui::Column::Sets => "Sets",
+    let (name, label) = match column {
+        crate::ui::Column::Textures => ("Textures", "Collapse Textures"),
+        crate::ui::Column::Sets => ("Sets", "Collapse Sets"),
     };
-    if ui
-        .small_button("◀")
+    let arrow = ui.small_button("◀");
+    // The name differs from the hover on purpose: the audit in `accessible_names.rs` counts an input whose name equals
+    // its description as named by the hover alone.
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    if arrow
         .on_hover_text(format!("Collapse the {name} column"))
         .clicked()
     {

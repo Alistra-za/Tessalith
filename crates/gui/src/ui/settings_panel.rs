@@ -4,24 +4,27 @@ use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
 use crate::look::Combo036 as _;
+use crate::model::bottom::{At, Level, Problem};
 use crate::model::code_text::{
-    alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for,
+    alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube,
 };
 use crate::model::fields::{
-    auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_help,
-    field_hidden, field_views, filter_option_lock, filter_view, format_choices, group_of,
-    guard_channel_lock, guard_on, levels_view, mips_on, provenance_text, weighting_option_lock,
-    FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD,
-    EXR_STRAIGHT_HOVER, FILTER_OPTIONS, GUARD_A_HOVER, GUARD_FIELDS, GUARD_LETTERS,
-    GUARD_RGB_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING,
-    WEIGHTING_OPTIONS,
+    auto_subtype_reason, bc3_pair, channel_text, encoding_options, field_help, filter_option_lock,
+    format_choices, guard_channel_lock, guard_on, mips_on, provenance_text, weighting_option_lock,
+    FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD, EDGE_FIELD,
+    EXR_STRAIGHT_HOVER, FILTER_FIELD, FILTER_OPTIONS, GUARD_A_HOVER, GUARD_FIELDS, GUARD_LETTERS,
+    GUARD_RGB_HOVER, HELPER_HELP, LEVELS_FIELD, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
+    WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::labels::{
-    effort_label, type_hover, RENORM_BAKE_HOVER, RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL,
-    VARIANCE_BAKE_HOVER,
+    effort_label, type_hover, GREEN_TO_DIRECTX, GREEN_TO_OPENGL, RENORM_BAKE_HOVER,
+    RENORM_BAKE_LABEL, UNORM_HOVER, UNORM_LABEL, VARIANCE_BAKE_HOVER,
 };
-use crate::model::{Answer, AppModel};
+use crate::model::nav::RevealField;
+use crate::model::panel_groups::{self, GroupSummary, PanelGroup, SummaryExtra};
+use crate::model::{Answer, AppModel, Selection, SetTarget};
+use crate::ui::group::{collapsing_group, GroupHead};
 use eframe::egui;
 use engine::codes::{Code, Warning};
 use engine::config::{
@@ -31,9 +34,12 @@ use engine::config::{
 use engine::helper::HelperRole;
 use engine::policy::{offered, Provenance, ResolvedJob};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 /// What a control asks of the model; applied once the drawing is over.
-enum Action {
+#[derive(Debug, PartialEq)]
+pub enum Action {
     Set(&'static str, Value),
     Clear(&'static str),
     Decide(Answer),
@@ -47,6 +53,31 @@ enum Action {
     ShowMesh(crate::model::used_by::MeshPick),
     /// "Show all in Meshes": the texture's scan path, as the Meshes texture filter takes it.
     ShowAllInMeshes(String),
+    /// A group header's click: write the open state to `gui.toml`.
+    SetGroupOpen(PanelGroup, bool),
+    /// "+{n} more" on the first screen: open Problems on this texture's set (`Some`), or unfiltered (`None`).
+    OpenProblems(Option<SetTarget>),
+    /// A row took the waiting Go to's focus: it is done.
+    RevealTaken,
+}
+
+/// Where the texture panel is drawn: the centre column, the 3D settings window, or the preview's 280 px strip.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Surface {
+    Centre,
+    Window,
+    Strip,
+}
+
+impl Surface {
+    /// The slot of this surface in each per-surface cache (`panel_cache`, `texture_problems`).
+    fn slot(self) -> usize {
+        match self {
+            Surface::Centre => 0,
+            Surface::Window => 1,
+            Surface::Strip => 2,
+        }
+    }
 }
 
 /// Note HI4: an image's Helper row. `on` is the ticked box before a role is picked, held only in egui temp data (HI5);
@@ -56,10 +87,12 @@ struct HelperTick {
     none: bool,
 }
 
-/// The groups the compact strip keeps (Task 17's preview).
-const COMPACT_GROUPS: [&str; 3] = ["Alpha", "Mipmaps", "Compression"];
-/// Also the bulk panel's groups. Note JI3: Size (Resize, Relative to, Size floor) after Mipmaps.
-pub(super) const GROUPS: [&str; 5] = ["Type", "Alpha", "Mipmaps", "Size", "Compression"];
+/// The groups the preview strip draws, in panel order.
+const STRIP_GROUPS: [PanelGroup; 3] = [
+    PanelGroup::Alpha,
+    PanelGroup::Mipmaps,
+    PanelGroup::Compression,
+];
 /// Note HI1: the label column's width, on the texture, helper and cubemap rows.
 pub(super) const LABEL_W: f32 = 150.0;
 /// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
@@ -269,7 +302,7 @@ pub fn alpha_hint(policy: AlphaPolicy) -> &'static str {
 }
 
 /// Options for the fields that pick from a list; `None` for the checkboxes and the slider.
-pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
+pub(crate) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Options> {
     Some(match field {
         "subtype" => subtype_groups(|s| s == p.subtype || offered(target, s))
             .into_iter()
@@ -444,6 +477,20 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         ],
         _ => return None,
     })
+}
+
+/// The label `options_of` gives `value` for `field`, or `None` for a field with no list or a value not in it. It builds
+/// the whole list, so a caller runs it only when its inputs change (the panel's summary cache), never per frame.
+pub(crate) fn option_label(
+    field: &str,
+    target: Target,
+    p: &Profile,
+    value: &Value,
+) -> Option<String> {
+    options_of(field, target, p)?
+        .into_iter()
+        .find(|(v, _)| v == value)
+        .map(|(_, label)| label)
 }
 
 /// Note JI4, Note LI: Fast and Default, then (with `slow`) Slowest and Max, the search fields' choices in that order.
@@ -852,6 +899,20 @@ pub struct Ctx<'a> {
     pub edit_off: Option<String>,
     /// The item's warnings (the Compression group shows the HDR reason).
     pub warnings: &'a [Warning],
+    /// Where this panel is drawn; `compact` is `surface == Surface::Strip`.
+    pub surface: Surface,
+    /// `model.settings.texture_groups`, read by `panel_groups::is_open_in`.
+    pub groups: &'a BTreeMap<String, bool>,
+    /// Groups opened for a problem or a Go to, until the user's click (`model.panel_forced`, for the selected item).
+    pub forced: &'a BTreeSet<PanelGroup>,
+    /// Groups that hold a field one of this texture's problems points at: each header's dot (`texture_problems`).
+    /// and the worst level of each (`panel_groups::problem_levels`).
+    pub problem_groups: &'a BTreeMap<PanelGroup, Level>,
+    /// The header summaries and marks, built with `views` (`panel_cache`).
+    pub summaries: &'a [(PanelGroup, GroupSummary)],
+    /// A Go to waiting for a row of this texture: only the centre holds one, so the window and the strip never take
+    /// the focus (`model.nav.reveal_field`).
+    pub reveal: Option<&'a RevealField>,
 }
 
 /// What a field row asks of the model.
@@ -1060,6 +1121,8 @@ fn guard_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Actio
                         }
                     })
                 };
+                // A Go to for one of the four fields (ALPHA-EXACT-OFF-M names the A) focuses its tick.
+                take_field_focus(cx, field, &r, actions);
                 if r.changed() {
                     actions.push(Action::Set(field, json!(b)));
                 }
@@ -1082,8 +1145,9 @@ fn guard_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Actio
 }
 
 /// One grid row of a field: its label, its editor (disabled with the reason when locked), where the value came from
-/// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank.
-pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> {
+/// (or the lock's reason), and a reset when the texture's own entry sets it. `compact` leaves the provenance blank. The
+/// row's edit goes to `actions`, and a waiting Go to for this field takes the focus here.
+pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     let mut edit = None;
     let help = crate::model::fields::field_help(f.field);
     let (set, r) = control_cell(ui, cx, f.label, help, |ui| {
@@ -1099,6 +1163,7 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         .inner
     });
     let r = own_name_after_link(r, f.field);
+    take_field_focus(cx, f.field, &r, actions);
     // Note CL40: on a `normal` in a complex material set, the bake is the opt-in gloss bake, so its hover shows
     // before the choice. Elsewhere the hover (and the variance line) belongs to the active bake only.
     let bake_active = f.field == "mips.normal" && f.value == json!("renormalize_bake");
@@ -1148,7 +1213,33 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         edit = Some(RowEdit::Clear);
     }
     ui.end_row();
-    edit
+    push_edit(actions, f.field, edit);
+}
+
+/// A Go to waiting for `field` (only the centre's `Ctx` holds one): focus its control, scroll it to the middle and tell
+/// the model it was taken. An `Option` test and one `&str` compare per row per frame.
+pub(super) fn take_field_focus(
+    cx: &Ctx,
+    field: &str,
+    r: &egui::Response,
+    actions: &mut Vec<Action>,
+) {
+    if focus_if(cx.reveal, field, r) {
+        actions.push(Action::RevealTaken);
+    }
+}
+
+/// The one rule every row that can be a `FIX_FIELDS` target follows (the field rows, the Filter row, the cube rows, the
+/// Channel guard row's ticks):
+/// when the waiting Go to names `field`, focus `r` (a disabled control keeps no focus; the group is open and the row
+/// scrolled to all the same) and scroll it to the middle. True when the request was for this row, so it is taken.
+pub(super) fn focus_if(reveal: Option<&RevealField>, field: &str, r: &egui::Response) -> bool {
+    let hit = reveal.is_some_and(|q| q.field == field);
+    if hit {
+        r.request_focus();
+        r.scroll_to_me(Some(egui::Align::Center));
+    }
+    hit
 }
 
 /// A row's hint, cut to the room left with the whole text on one tooltip (Note FI12, rule 3.4).
@@ -1208,8 +1299,22 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
 }
 
 /// The basic Mipmaps rows: the on/off tick box, the level count (Note JI3; not in the strip), then the filter.
-fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
-    let f = levels_view(cx.target, cx.job);
+fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, views: &[FieldView], actions: &mut Vec<Action>) {
+    // Each row is drawn when `panel_views` carries it (a profile may hide one); the cached views were read once.
+    let find = |field: &str| views.iter().find(|v| v.field == field);
+    if let Some(f) = find(LEVELS_FIELD.0) {
+        mips_tick_and_levels(ui, cx, f, actions);
+    }
+    if let Some(filter) = find(FILTER_FIELD.0) {
+        filter_row(ui, cx, filter, actions);
+    }
+    if let Some(e) = find(EDGE_FIELD.0) {
+        field_row(ui, cx, e, actions);
+    }
+}
+
+/// The Mipmaps tick row and, outside the strip, the Levels row under it.
+fn mips_tick_and_levels(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     let mut on = mips_on(&f.value);
     // Note HI1: "Mipmaps" in the label column, the tick in the control column, named for the tests and a screen reader.
     let help = Some(crate::model::fields::MIPMAPS_HELP);
@@ -1241,25 +1346,13 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     }
     ui.end_row();
     if !cx.compact {
-        match field_row(ui, cx, &f) {
-            Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
-            Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
-            None => {}
-        }
-    }
-    filter_row(ui, cx, actions);
-    let e = edge_view(cx.target, cx.job);
-    match field_row(ui, cx, &e) {
-        Some(RowEdit::Set(v)) => actions.push(Action::Set(e.field, v)),
-        Some(RowEdit::Clear) => actions.push(Action::Clear(e.field)),
-        None => {}
+        field_row(ui, cx, f, actions);
     }
 }
 
 /// The live Filter combo: every option is listed, the ones S-mips-2 bars for this profile disabled with the reason.
-fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
+fn filter_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView, actions: &mut Vec<Action>) {
     const OPTIONS: [(MipFilter, &str); 4] = FILTER_OPTIONS;
-    let f = filter_view(cx.target, cx.job);
     let current = cx.job.profile.mips.filter;
     let locks = OPTIONS.map(|(m, _)| filter_option_lock(&cx.job.profile, m));
     let mut picked = None;
@@ -1285,6 +1378,7 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
             .response;
         (None, r)
     });
+    take_field_focus(cx, f.field, &r, actions);
     // Only Box is open: say why on the combo itself.
     let r = match locks[1..]
         .iter()
@@ -1379,68 +1473,423 @@ fn helper_tick_row(
     ui.end_row();
 }
 
-/// One group's rows, from `views` (`field_views`, built once per draw).
-fn group(
+/// What a row edit asks of the model, as an action.
+fn push_edit(actions: &mut Vec<Action>, field: &'static str, edit: Option<RowEdit>) {
+    match edit {
+        Some(RowEdit::Set(v)) => actions.push(Action::Set(field, v)),
+        Some(RowEdit::Clear) => actions.push(Action::Clear(field)),
+        None => {}
+    }
+}
+
+/// A click on a group header (`Action::SetGroupOpen`), on this panel and on the bulk panel: store the state and save it.
+pub(super) fn set_group_open(model: &mut AppModel, g: PanelGroup, open: bool) {
+    panel_groups::set_open(&mut model.settings, g, open);
+    // Rule 4: the user's click ends a forced open of this group, so a closed group stays closed.
+    if !open {
+        model.panel_forced.groups.remove(&g);
+    }
+    model.save_settings();
+}
+
+/// Whether group `g` is drawn open: the user's saved state, or forced open (a problem or a Go to).
+pub(super) fn group_open(cx: &Ctx, g: PanelGroup) -> bool {
+    open_with(cx.groups, cx.forced, g)
+}
+
+/// [`group_open`] over its two inputs, for the header drawn after `Ctx` is gone (Sources).
+fn open_with(
+    groups: &BTreeMap<String, bool>,
+    forced: &BTreeSet<PanelGroup>,
+    g: PanelGroup,
+) -> bool {
+    panel_groups::is_open_in(groups, g) || forced.contains(&g)
+}
+
+/// The no-group set a draw of a key other than the selected item reads as `Ctx::forced`.
+static NO_GROUPS: BTreeSet<PanelGroup> = BTreeSet::new();
+
+/// The header of group `g` over its summary and marks, from the panel's cache.
+pub(super) fn group_head<'a>(cx: &'a Ctx, g: PanelGroup) -> GroupHead<'a> {
+    let s = cx.summaries.iter().find(|(x, _)| *x == g).map(|(_, s)| s);
+    GroupHead {
+        title: g.title(),
+        summary: s.map_or("", |s| s.text.as_str()),
+        summary_hover: s.and_then(|s| s.hover.as_deref()),
+        changed: s.is_some_and(|s| s.changed),
+        problem: cx
+            .problem_groups
+            .get(&g)
+            .map(|l| super::problems::status_of(*l)),
+    }
+}
+
+/// A group of the panel: its header, then `body` under it, disabled with the rows while `edit_off` is set (Note FK3:
+/// the header above stays clickable, so it is drawn outside the disabled scope). A click on the header is an action.
+fn grouped(
     ui: &mut egui::Ui,
-    name: &'static str,
+    cx: &Ctx,
+    g: PanelGroup,
+    actions: &mut Vec<Action>,
+    body: impl FnOnce(&mut egui::Ui, &mut Vec<Action>),
+) {
+    let open = group_open(cx, g);
+    let r = collapsing_group(
+        ui,
+        g.id(),
+        &group_head(cx, g),
+        open,
+        cx.forced.contains(&g),
+        |ui| {
+            if cx.edit_off.is_some() {
+                ui.disable();
+            }
+            body(ui, actions);
+        },
+    );
+    if r.toggled {
+        actions.push(Action::SetGroupOpen(g, !open));
+    }
+}
+
+/// One group's rows, from `views` (`panel_cache`, built once per input change). The Cubemap, Channels and Sources
+/// groups are drawn by `cube_section`, `channels` and `inspector_section`.
+pub fn group_section(
+    ui: &mut egui::Ui,
+    cx: &Ctx,
+    g: PanelGroup,
+    views: &[FieldView],
+    actions: &mut Vec<Action>,
+) {
+    grouped(ui, cx, g, actions, |ui, actions| {
+        egui::Grid::new((cx.key, g.id()))
+            .num_columns(3)
+            .show(ui, |ui| {
+                // Mipmaps draws its own three rows first; any other field routed to it takes the generic loop.
+                let own = [LEVELS_FIELD.0, FILTER_FIELD.0, EDGE_FIELD.0];
+                if g == PanelGroup::Mipmaps {
+                    mipmaps_rows(ui, cx, views, actions);
+                }
+                for f in views
+                    .iter()
+                    .filter(|f| panel_groups::panel_group(f.field) == Some(g))
+                    .filter(|f| !(g == PanelGroup::Mipmaps && own.contains(&f.field)))
+                    // Note LQ2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
+                    // nor DDS header (Note JI3).
+                    .filter(|f| {
+                        !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))
+                    })
+                {
+                    if f.field == CHANNEL_GUARD {
+                        guard_row(ui, cx, f, actions);
+                    } else {
+                        field_row(ui, cx, f, actions);
+                    }
+                }
+            });
+        if g == PanelGroup::Compression {
+            if let Some(w) = cx.warnings.iter().find(|w| w.code == Code::FmtHdrSource) {
+                ui.weak(&w.message);
+            }
+        }
+    });
+}
+
+/// The rows under the texture's name, before any group (Task 4): Texture type and the Helper rows (not in the strip),
+/// then Format, in `FIRST_SCREEN` order. While the Undecided card asks the type (`show_type` off) it has its own picker,
+/// so the Texture type row is left out and the Helper rows stay (the card has no Helper tick; TPC-T4-1).
+fn first_screen(
+    ui: &mut egui::Ui,
     cx: &Ctx,
     views: &[FieldView],
     tick: Option<&HelperTick>,
+    show_type: bool,
     actions: &mut Vec<Action>,
 ) {
-    egui::CollapsingHeader::new(name)
-        .default_open(true)
+    egui::Grid::new((cx.key, "first-screen"))
+        .num_columns(3)
         .show(ui, |ui| {
-            egui::Grid::new((cx.key, name))
-                .num_columns(3)
-                .show(ui, |ui| {
-                    // Note FK3: the rows wait, the header above stays clickable.
-                    if cx.edit_off.is_some() {
-                        ui.disable();
-                    }
-                    if name == "Mipmaps" {
-                        mipmaps_rows(ui, cx, actions);
-                    }
-                    // Note FC10 (BQ15): an EXR source's Straight alpha ends the Alpha group.
-                    let exr = (name == "Alpha")
-                        .then(|| crate::model::fields::exr_straight_view(cx.target, cx.job))
-                        .flatten();
-                    for f in views
-                        .iter()
-                        .filter(|f| {
-                            group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
-                        })
-                        // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
-                        // nor DDS header (Note JI3).
-                        .filter(|f| {
-                            !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))
-                        })
-                        .chain(exr.iter())
-                    {
-                        // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
-                        let t = tick.filter(|_| f.field == "subtype");
-                        if f.field == CHANNEL_GUARD {
-                            guard_row(ui, cx, f, actions);
-                        } else if t.is_some_and(|t| t.on) {
-                            helper_role_row(ui, cx.key, &cx.edit_off, actions);
-                        } else {
-                            match field_row(ui, cx, f) {
-                                Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
-                                Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
-                                None => {}
-                            }
-                        }
-                        if let Some(t) = t {
-                            helper_tick_row(ui, cx.key, t, &cx.edit_off, actions);
-                        }
-                    }
-                });
-            if name == "Compression" {
-                if let Some(w) = cx.warnings.iter().find(|w| w.code == Code::FmtHdrSource) {
-                    ui.weak(&w.message);
+            // Note FK3: the rows wait.
+            if cx.edit_off.is_some() {
+                ui.disable();
+            }
+            for f in panel_groups::FIRST_SCREEN
+                .iter()
+                .filter_map(|name| views.iter().find(|v| v.field == *name))
+            {
+                if f.field != "subtype" {
+                    field_row(ui, cx, f, actions);
+                    continue;
+                }
+                if cx.compact {
+                    continue;
+                }
+                // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
+                if tick.is_some_and(|t| t.on) {
+                    helper_role_row(ui, cx.key, &cx.edit_off, actions);
+                } else if show_type {
+                    field_row(ui, cx, f, actions);
+                }
+                if let Some(t) = tick {
+                    helper_tick_row(ui, cx.key, t, &cx.edit_off, actions);
                 }
             }
         });
+}
+
+/// How many of this texture's problems the first screen lists before "+{n} more".
+const PROBLEM_ROWS: usize = 3;
+
+/// The first screen's lines under a texture's problem rows, built with the rows (`texture_problems`' slot), never per
+/// frame (Note LH7): "+{n} more" with the set it opens Problems on, and "{m} notes in Problems".
+pub struct ProblemLines {
+    /// How many rows "+{n} more" stands for; 0 draws no button.
+    more: usize,
+    more_text: Arc<egui::RichText>,
+    /// The set "+{n} more" opens Problems on (`problems_target`), or `None` for the whole list.
+    target: Option<SetTarget>,
+    notes: Option<Arc<egui::RichText>>,
+}
+
+/// The lines under `rows` problem rows and `notes` notes; `target` is read only when there are more rows than
+/// `PROBLEM_ROWS`.
+pub fn problem_lines(rows: usize, notes: usize, target: Option<SetTarget>) -> ProblemLines {
+    let more = rows.saturating_sub(PROBLEM_ROWS);
+    let plural = if notes == 1 { "note" } else { "notes" };
+    ProblemLines {
+        more,
+        more_text: Arc::new(egui::RichText::new(format!("+{more} more"))),
+        target: target.filter(|_| more > 0),
+        notes: (notes > 0)
+            .then(|| Arc::new(egui::RichText::new(format!("{notes} {plural} in Problems")).weak())),
+    }
+}
+
+/// This texture's problems on the first screen: up to `PROBLEM_ROWS` one-line rows (the full text and the code on
+/// hover), then a "+{n} more" button that opens Problems on the texture's set (or unfiltered with none), then a weak
+/// line for the notes the panel does not list. `lines` holds the last two, built once (`problem_lines`).
+pub fn first_screen_problems(
+    ui: &mut egui::Ui,
+    rows: &[Problem],
+    lines: &ProblemLines,
+    actions: &mut Vec<Action>,
+) {
+    for p in rows.iter().take(PROBLEM_ROWS) {
+        let text = p.shown();
+        let r = ui.add(
+            egui::Label::new(egui::RichText::new(&*text))
+                .truncate()
+                .show_tooltip_when_elided(false),
+        );
+        r.on_hover_ui(|ui| {
+            ui.label(&*text);
+            if let Some(codes) = p.codes_text() {
+                ui.weak(codes);
+            }
+        });
+    }
+    if lines.more > 0 {
+        let more = lines.more;
+        let r = ui.small_button(lines.more_text.clone());
+        // Built only while AccessKit asks for it (Note LH7).
+        r.widget_info(|| {
+            let plural = if more == 1 { "problem" } else { "problems" };
+            egui::WidgetInfo::labeled(
+                egui::Role::Button,
+                true,
+                format!("{more} more {plural}: open Problems"),
+            )
+        });
+        let hover = if lines.target.is_some() {
+            "Show every problem of this texture's set in Problems."
+        } else {
+            "Show every problem in Problems."
+        };
+        if r.on_hover_text(hover).clicked() {
+            actions.push(Action::OpenProblems(lines.target.clone()));
+        }
+    }
+    if let Some(notes) = &lines.notes {
+        ui.label(notes.clone());
+    }
+}
+
+/// Everything the panel reads per frame that only an input change moves: the rows' views and the eight header
+/// summaries (`panel_cache`).
+struct PanelCache {
+    views: Vec<FieldView>,
+    summaries: Vec<(PanelGroup, GroupSummary)>,
+}
+
+/// A cache slot's inputs beside its value (rule 9.1): the drawn key and `AppModel::panel_cache_inputs`.
+struct PanelSlot {
+    key: String,
+    inputs: crate::model::bulk::PanelInputs,
+    /// The alpha proposal `draw` writes into the job it passes (display only): the builder reads it, so it is keyed.
+    proposal: Option<AlphaPolicy>,
+    cache: Arc<PanelCache>,
+}
+
+/// The ids of a per-surface cache slot, hashed once (`Id::unique` records a debug name for every call).
+fn slot_id(cache: &'static str, surface: Surface) -> egui::Id {
+    static IDS: std::sync::OnceLock<[[egui::Id; 3]; 2]> = std::sync::OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        ["panel-cache", "panel-problems"]
+            .map(|c| [0, 1, 2].map(|s| egui::Id::unique(("texture-panel-slot", c, s))))
+    });
+    ids[usize::from(cache == "panel-problems")][surface.slot()]
+}
+
+/// The views and summaries of `key`'s panel, kept in one slot per `Surface` and rebuilt only when the drawn key or
+/// one of `AppModel::panel_cache_inputs` moves. A hit clones one `Arc` and compares a `String` with a `&str` and six
+/// plain values: no allocation.
+fn panel_cache(
+    ctx: &egui::Context,
+    surface: Surface,
+    model: &AppModel,
+    key: &str,
+    job: &ResolvedJob,
+    proposal: Option<AlphaPolicy>,
+) -> Arc<PanelCache> {
+    let id = slot_id("panel-cache", surface);
+    let inputs = model.panel_cache_inputs();
+    if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<PanelSlot>>(id)) {
+        if slot.key == key && slot.inputs == inputs && slot.proposal == proposal {
+            return slot.cache.clone();
+        }
+    }
+    let views = panel_groups::panel_views(model.target, job);
+    // The Channels lines are read-only text no field carries: one per packed channel, from `pack.r` .. `pack.a`.
+    let lines = ["r", "g", "b", "a"].map(|ch| {
+        job.provenance
+            .get(&format!("pack.{ch}"))
+            .map(|p| channel_text(&p.to_string()))
+    });
+    let channels = lines
+        .iter()
+        .any(Option::is_some)
+        .then(|| lines.each_ref().map(|l| l.as_deref().unwrap_or("")));
+    let extra = SummaryExtra { channels };
+    let summaries = PanelGroup::ALL
+        .into_iter()
+        .map(|g| {
+            (
+                g,
+                panel_groups::summary(g, &views, model.target, &job.profile, &extra),
+            )
+        })
+        .collect();
+    let cache = Arc::new(PanelCache { views, summaries });
+    let slot = Arc::new(PanelSlot {
+        key: key.to_owned(),
+        inputs,
+        proposal,
+        cache: cache.clone(),
+    });
+    ctx.data_mut(|d| d.insert_temp(id, slot));
+    cache
+}
+
+/// A `texture_problems` slot: what it was built from beside what it holds.
+struct ProblemSlot {
+    key: String,
+    /// Whether `key` was the selected item: `problems_target` reads the selection.
+    selected: bool,
+    /// The whole list the rows were taken from; holding it keeps its address from being reused for a new list.
+    source: Arc<Vec<Problem>>,
+    rows: Vec<Problem>,
+    /// `panel_groups::problem_levels(rows)`, built with them: a header reads it every frame.
+    groups: BTreeMap<PanelGroup, Level>,
+    /// The "+{n} more" and notes lines, built with the rows.
+    lines: ProblemLines,
+}
+
+/// The codes whose first-screen widget is not the problem row: the card's low-confidence line and the green line.
+/// FMT-HDR-SOURCE is not one: its line is in the Compression group, which starts closed, and as an Info code it counts
+/// as a note (LQ7).
+const SAID_ELSEWHERE: [Code; 3] = [
+    Code::SugLowConfidence,
+    Code::InGreenUnstated,
+    Code::ChkGreenGuess,
+];
+
+/// This texture's problem rows (`panel_groups::is_panel_problem`, less what another widget says), the groups those
+/// rows point at with their worst level (`problem_levels`, for the header dots and the forced-open fill) and the lines
+/// under the rows (`problem_lines`), in the surface's slot. The slot is used while its key is the drawn one, the
+/// selection still is (or is not) that key, and its source list is `bottom::problems(model)` itself (`Arc::ptr_eq`:
+/// `problems` hands out the cached `Arc` until its key moves), so a frame neither rescans the list nor formats a line.
+/// What a rebuild reads besides the list moves it too: `alpha_asked` and the item's set are functions of the item, and
+/// the list's key holds `items_rev`; the selected item's set view comes from the set views, which the list's key holds
+/// too.
+fn texture_problems(
+    ctx: &egui::Context,
+    surface: Surface,
+    model: &AppModel,
+    key: &str,
+) -> Arc<ProblemSlot> {
+    let all = crate::model::bottom::problems(model);
+    let id = slot_id("panel-problems", surface);
+    let selected = matches!(&model.selection, Selection::Item(k) if k == key);
+    if let Some(slot) = ctx.data(|d| d.get_temp::<Arc<ProblemSlot>>(id)) {
+        if slot.key == key && slot.selected == selected && Arc::ptr_eq(&slot.source, &all) {
+            return slot;
+        }
+    }
+    let alpha_asked = model
+        .item(key)
+        .is_some_and(|i| crate::model::items::alpha_asked(i).is_some());
+    let (rows, notes) = panel_problem_rows(&all, key, alpha_asked);
+    let groups = panel_groups::problem_levels(&rows);
+    let target = (rows.len() > PROBLEM_ROWS)
+        .then(|| problems_target(model, key))
+        .flatten();
+    let slot = Arc::new(ProblemSlot {
+        key: key.to_owned(),
+        selected,
+        source: all,
+        lines: problem_lines(rows.len(), notes, target),
+        rows,
+        groups,
+    });
+    ctx.data_mut(|d| d.insert_temp(id, slot.clone()));
+    slot
+}
+
+/// The first screen's rows of texture `key` out of the whole problem list, and its note count. Left out, besides notes
+/// (`is_panel_problem`): rows another widget of the first screen already says (TPC-T4-2, as `other_warnings` left them
+/// out), namely the Decide row (the Undecided card is it) and the `SAID_ELSEWHERE` codes; and, while the alpha question
+/// is open (`alpha_asked`), a LOSS-ALPHA-DATA row, which the question answers (Note FM35).
+pub fn panel_problem_rows(all: &[Problem], key: &str, alpha_asked: bool) -> (Vec<Problem>, usize) {
+    let has = |p: &Problem, c: Code| p.code == Some(c) || p.also.contains(&c);
+    let mut rows = vec![];
+    let mut notes = 0;
+    for p in all
+        .iter()
+        .filter(|p| matches!(&p.at, At::Texture(k) if k == key))
+    {
+        if !panel_groups::is_panel_problem(p) {
+            notes += 1;
+        } else if p.level != Level::Decide
+            && !SAID_ELSEWHERE.iter().any(|c| has(p, *c))
+            && !(alpha_asked && has(p, Code::LossAlphaData))
+        {
+            rows.push(p.clone());
+        }
+    }
+    (rows, notes)
+}
+
+/// The set `+{n} more` opens Problems on: the selected item's set view (a key-less set by its id), or another drawn
+/// item's `set_key`; `None` when the texture is in no set.
+pub fn problems_target(model: &AppModel, key: &str) -> Option<SetTarget> {
+    let active = model.resolved_selection();
+    if matches!(&active.selection, crate::model::Selection::Item(k) if k == key) {
+        return active.view().map(SetTarget::view);
+    }
+    model
+        .item(key)
+        .and_then(|i| i.set_key.as_deref())
+        .map(SetTarget::from)
 }
 
 fn message_of(warnings: &[Warning], code: Code) -> Option<&str> {
@@ -1451,7 +1900,11 @@ fn message_of(warnings: &[Warning], code: Code) -> Option<&str> {
 }
 
 /// A small edit button that is off, with `off`'s reason on hover, while `off` is set (Note FK).
-fn waiting_button(ui: &mut egui::Ui, off: &Option<String>, text: &str) -> egui::Response {
+pub(super) fn waiting_button(
+    ui: &mut egui::Ui,
+    off: &Option<String>,
+    text: &str,
+) -> egui::Response {
     let r = ui.add_enabled(off.is_none(), egui::Button::new(text).small());
     match off {
         Some(why) => r.on_disabled_hover_text(why),
@@ -1469,8 +1922,9 @@ fn decision_box(
     likely: &[(Subtype, String)],
     actions: &mut Vec<Action>,
 ) {
-    // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
-    let left = (!cx.compact).then(|| ui.max_rect().left() + ui.spacing().indent);
+    // Note HI13: where the groups' grids start (a group's body is not indented, as the first screen's rows are not),
+    // so the box's rows line up with theirs.
+    let left = (!cx.compact).then(|| ui.max_rect().left());
     let frame = egui::Frame::new()
         .stroke(egui::Stroke::new(2.0, AMBER))
         .corner_radius(4.0)
@@ -1697,15 +2151,13 @@ fn subtype_decision(
     ui.data_mut(|d| d.insert_temp(id, chosen));
 }
 
-/// One line per packed channel, from the job's `pack.r` … `pack.a` provenance.
+/// One line per packed channel, from the job's `pack.r` … `pack.a` provenance, under the Channels header.
 fn channels(ui: &mut egui::Ui, job: &ResolvedJob) {
-    ui.label(egui::RichText::new("Channels").strong());
     for (ch, name) in [("r", "R"), ("g", "G"), ("b", "B"), ("a", "A")] {
         if let Some(p) = job.provenance.get(&format!("pack.{ch}")) {
             ui.label(format!("{name}: {}", channel_text(&p.to_string())));
         }
     }
-    ui.add_space(6.0);
 }
 
 /// A failed texture's line (Note FB8: the sentences, not the codes; the codes are the label's hover).
@@ -1726,34 +2178,6 @@ fn error_codes(codes: &[Code]) -> String {
         .map(|c| c.as_str())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// Warnings the decision box does not already show. Note FM35: while the alpha is asked, its line answers
-/// LOSS-ALPHA-DATA, so that warning is not listed a second time.
-fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool, job: &ResolvedJob) {
-    let rest: Vec<&Warning> = warnings
-        .iter()
-        .filter(|w| {
-            !matches!(
-                w.code,
-                Code::SugLowConfidence
-                    | Code::InGreenUnstated
-                    | Code::ChkGreenGuess
-                    | Code::FmtHdrSource
-            ) && !(alpha_asked && w.code == Code::LossAlphaData)
-        })
-        .collect();
-    if rest.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Warnings").strong());
-    for w in rest {
-        // As its Problems row reads it (a job-dependent sentence, final fix wave A3).
-        let text = crate::model::bottom::warning_text(Some(job), w);
-        ui.label(egui::RichText::new(&*shown_for(Some(w.code), &text)).small())
-            .on_hover_ui(|ui| code_hover(ui, &w.message, w.code.as_str()));
-    }
 }
 
 /// Why `sdc.toml` cannot take an edit, when its file is read-only.
@@ -1786,44 +2210,61 @@ fn used_by(ui: &mut egui::Ui, model: &mut AppModel, key: &str, actions: &mut Vec
         Some(u) => crate::model::used_by::header_line(u.total_copies),
         None => "Used by meshes".to_string(),
     };
-    egui::CollapsingHeader::new(title)
-        .id_salt("used-by-meshes")
-        .show(ui, |ui| {
-            let Some(u) = u else {
-                ui.weak("Reading the scan database…");
-                return;
-            };
-            if let Some(e) = &u.error {
-                ui.colored_label(RED, e);
-            }
-            if u.rows.is_empty() && u.error.is_none() {
-                ui.weak(format!("No mesh of the latest scan uses {}.", u.tex));
-            }
-            for r in &u.rows {
-                used_by_group(ui, r, &u.store, why_off, actions);
-            }
-            if u.more > 0 {
-                ui.weak(crate::model::used_by::more_line(u.more));
-            }
-            // The row facts are per copy above; this is the texture-wide filter.
-            if reading {
-                let link = ui.add_enabled(false, egui::Link::new("Reading meshes..."));
-                link.on_disabled_hover_text(USED_BY_READING_WHY);
-            } else if !u.rows.is_empty() {
-                let link = ui.add_enabled(why_off.is_none(), egui::Link::new("Show all in Meshes"));
-                match why_off {
-                    Some(why) => {
-                        link.on_disabled_hover_text(why);
-                    }
-                    None => {
-                        if link.clicked() {
-                            // Note GC: app.rs switches the view
-                            actions.push(Action::ShowAllInMeshes(u.tex.clone()));
-                        }
+    // The list's open state is not a setting: egui temp data, closed at start (planner's call, plan Task 4).
+    let open_id = used_by_open_id();
+    let open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+    let head = GroupHead {
+        title: &title,
+        summary: "",
+        summary_hover: None,
+        changed: false,
+        problem: None,
+    };
+    let r = collapsing_group(ui, "used-by-meshes", &head, open, false, |ui| {
+        let Some(u) = u else {
+            ui.weak("Reading the scan database…");
+            return;
+        };
+        if let Some(e) = &u.error {
+            ui.colored_label(RED, e);
+        }
+        if u.rows.is_empty() && u.error.is_none() {
+            ui.weak(format!("No mesh of the latest scan uses {}.", u.tex));
+        }
+        for r in &u.rows {
+            used_by_group(ui, r, &u.store, why_off, actions);
+        }
+        if u.more > 0 {
+            ui.weak(crate::model::used_by::more_line(u.more));
+        }
+        // The row facts are per copy above; this is the texture-wide filter.
+        if reading {
+            let link = ui.add_enabled(false, egui::Link::new("Reading meshes..."));
+            link.on_disabled_hover_text(USED_BY_READING_WHY);
+        } else if !u.rows.is_empty() {
+            let link = ui.add_enabled(why_off.is_none(), egui::Link::new("Show all in Meshes"));
+            match why_off {
+                Some(why) => {
+                    link.on_disabled_hover_text(why);
+                }
+                None => {
+                    if link.clicked() {
+                        // Note GC: app.rs switches the view
+                        actions.push(Action::ShowAllInMeshes(u.tex.clone()));
                     }
                 }
             }
-        });
+        }
+    });
+    if r.toggled {
+        ui.data_mut(|d| d.insert_temp(open_id, !open));
+    }
+}
+
+/// Where the Used by header keeps its open flag.
+fn used_by_open_id() -> egui::Id {
+    static ID: std::sync::OnceLock<egui::Id> = std::sync::OnceLock::new();
+    *ID.get_or_init(|| egui::Id::unique("used-by-meshes"))
 }
 
 /// Why they are off while a scan runs, or after one that did not finish.
@@ -1924,9 +2365,17 @@ fn used_by_group(
     }
 }
 
-/// Draw texture `key`'s settings. `compact` (the preview's strip) keeps the decision box and the Alpha, Mipmaps and
-/// Compression groups, without provenance text.
-pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
+/// Draw texture `key`'s settings on `surface`. The preview strip (`Surface::Strip`) keeps the decision box, the Format
+/// row and the Alpha, Mipmaps and Compression groups, without provenance text.
+pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, surface: Surface) {
+    let compact = surface == Surface::Strip;
+    // `panel_forced` rule 1: a new selection starts a new latch. Only the model's selection resets it, whichever key
+    // this call draws (the centre and the strip draw two items in one frame). `draw_with_scan` observes it too, every
+    // frame; this call covers a caller that draws the panel alone.
+    model.observe_panel_selection();
+    // The latch holds groups for this draw only when it is the selected item's (read once: every header uses it).
+    let forced_here = matches!(&model.selection, Selection::Item(k) if k == key)
+        && model.panel_forced.item == key;
     let Some(item) = model.item(key) else {
         ui.weak("This texture is no longer in the plan.");
         return;
@@ -2029,6 +2478,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             .and_then(|p| p.file_value(key, engine::helper::ROLE_FIELD))
             .is_some_and(|v| v == json!("none")),
     });
+    let mut cube_edits: super::cube_section::Edits = vec![];
     // Note FK3: with a job, each edit control waits on `edit_off` itself, so the headers stay usable read-only.
     ui.add_enabled_ui(!read_only || job.is_some(), |ui| match &job {
         None => {
@@ -2080,6 +2530,29 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
             }
         }
         Some(job) => {
+            // Once per input change, not once per frame: every row, header and summary below reads this.
+            let pc = panel_cache(ui.ctx(), surface, model, key, job, alpha);
+            // `size_of` needs `&mut model`, which `cx` below keeps shared: ask now, draw the line in its place.
+            let size = (!compact).then(|| model.size_of(key));
+            let problems = texture_problems(ui.ctx(), surface, model, key);
+            // Rule 2 (LQ5): the selected item's first draw after its job resolves (no open need of any kind: type, alpha,
+            // cube layout ...) on a settled plan adds its problems' groups, once, so a problem the answer or the plan
+            // raises opens its group.
+            // Settled is `plan_wait`, not `fix_off`: a read-only `sdc.toml` keeps edits off, never navigation (LQ2).
+            let settled = !model.plan_wait()
+                && !matches!(job.status, engine::policy::JobStatus::Unresolved { .. });
+            if forced_here && !model.panel_forced.filled && settled {
+                model
+                    .panel_forced
+                    .groups
+                    .extend(problems.groups.keys().copied());
+                model.panel_forced.filled = true;
+            }
+            let forced = if forced_here {
+                &model.panel_forced.groups
+            } else {
+                &NO_GROUPS
+            };
             let cx = Ctx {
                 key,
                 job,
@@ -2089,6 +2562,15 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 alpha_asked: alpha.is_some(),
                 edit_off: edit_off.clone(),
                 warnings: &warnings,
+                surface,
+                groups: &model.settings.texture_groups,
+                forced,
+                problem_groups: &problems.groups,
+                summaries: &pc.summaries,
+                reveal: (surface == Surface::Centre)
+                    .then_some(model.nav.reveal_field.as_ref())
+                    .flatten()
+                    .filter(|q| q.item == key),
             };
             match &status {
                 ItemStatus::Skipped(r) => {
@@ -2111,7 +2593,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(format!("{m}{hint}")).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::InGreenUnstated.as_str()));
-                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, GREEN_TO_OPENGL).clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -2120,7 +2602,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(m).small())
                         .on_hover_ui(|ui| code_hover(ui, m, Code::ChkGreenGuess.as_str()));
-                    if waiting_button(ui, &edit_off, "Treat as OpenGL (flip green)").clicked() {
+                    if waiting_button(ui, &edit_off, GREEN_TO_OPENGL).clicked() {
                         actions.push(Action::Decide(Answer::Green(GreenConvention::Opengl)));
                     }
                 });
@@ -2130,7 +2612,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                     if matches!(
                         job.provenance.get("channels.green_convention"),
                         Some(Provenance::ProjectFile | Provenance::User)
-                    ) && waiting_button(ui, &edit_off, "Treat as DirectX").clicked()
+                    ) && waiting_button(ui, &edit_off, GREEN_TO_DIRECTX).clicked()
                     {
                         actions.push(Action::Clear("channels.green_convention"));
                     }
@@ -2147,32 +2629,78 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 };
                 decision_box(ui, &cx, &decisions, &warnings, alpha, &likely, &mut actions);
             }
-            if kind == ItemKind::Packed && !compact {
-                channels(ui, job);
+            let asks_type = decisions
+                .iter()
+                .any(|d| matches!(d, Decision::Subtype { .. }));
+            first_screen(ui, &cx, &pc.views, tick.as_ref(), !asks_type, &mut actions);
+            if let Some(size) = size {
+                size_line(ui, size);
+                first_screen_problems(ui, &problems.rows, &problems.lines, &mut actions);
             }
-            if !compact {
-                size_line(ui, model, key);
-            }
-            let shown: &[&str] = if compact { &COMPACT_GROUPS } else { &GROUPS };
-            // Once per draw, not once per group: each build serialises the profile.
-            let views = field_views(target, job);
-            for g in shown {
-                group(ui, g, &cx, &views, tick.as_ref(), &mut actions);
-            }
-            if !compact {
-                for (k, f, v) in super::cube_section::cube_section(ui, model, key) {
-                    match v {
-                        Some(v) => model.set_field(&k, &f, v),
-                        None => model.clear_field(&k, &f),
+            // Panel order is `PanelGroup::ALL`; Sources is drawn last, after this closure (a jobless texture has it too).
+            for g in PanelGroup::ALL {
+                match g {
+                    PanelGroup::Sources => {}
+                    PanelGroup::Cubemap if !compact => {
+                        // Draws nothing unless the item is a cube map (`cube_section`'s own check), from the cached
+                        // views, which hold a cube's rows.
+                        let open = group_open(&cx, g);
+                        let (edits, toggled, taken) = super::cube_section::cube_section(
+                            ui,
+                            model,
+                            &cx,
+                            &pc.views,
+                            &group_head(&cx, g),
+                            open,
+                            cx.forced.contains(&g),
+                        );
+                        if toggled {
+                            actions.push(Action::SetGroupOpen(g, !open));
+                        }
+                        if taken {
+                            actions.push(Action::RevealTaken);
+                        }
+                        cube_edits = edits;
                     }
+                    PanelGroup::Channels if !compact && kind == ItemKind::Packed => {
+                        grouped(ui, &cx, g, &mut actions, |ui, _| channels(ui, job));
+                    }
+                    PanelGroup::Cubemap | PanelGroup::Channels => {}
+                    g if !compact || STRIP_GROUPS.contains(&g) => {
+                        group_section(ui, &cx, g, &pc.views, &mut actions);
+                    }
+                    _ => {}
                 }
-                other_warnings(ui, &warnings, alpha.is_some(), job);
             }
         }
     });
+    for (k, f, v) in cube_edits {
+        match v {
+            Some(v) => model.set_field(&k, &f, v),
+            None => model.clear_field(&k, &f),
+        }
+    }
     if !compact {
-        // Note JI3: the preset inspector, folded, last.
-        super::inspector_section::section(ui, model, key);
+        // Note JI3: the preset inspector, folded by default, last.
+        let g = PanelGroup::Sources;
+        // `Ctx` is gone here, so the header reads the same two inputs through `open_with`, the rule `group_open` is.
+        let forced = if forced_here {
+            &model.panel_forced.groups
+        } else {
+            &NO_GROUPS
+        };
+        let open = open_with(&model.settings.texture_groups, forced, g);
+        let instant = forced.contains(&g);
+        let head = GroupHead {
+            title: g.title(),
+            summary: panel_groups::SOURCES_SUMMARY,
+            summary_hover: None,
+            changed: false,
+            problem: None,
+        };
+        if super::inspector_section::section(ui, model, key, &head, open, instant) {
+            actions.push(Action::SetGroupOpen(g, !open));
+        }
     }
     for a in actions {
         match a {
@@ -2193,15 +2721,19 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 ui.data_mut(|d| d.remove_temp::<bool>(super::helper_panel::tick_id(key)));
                 model.set_helper_role(key, r);
             }
+            Action::SetGroupOpen(g, open) => set_group_open(model, g, open),
+            Action::OpenProblems(Some(target)) => model.open_set_problems(target),
+            Action::OpenProblems(None) => model.open_problems(None),
+            Action::RevealTaken => model.nav.reveal_field = None,
         }
     }
 }
 
 /// Item 22 (DECISIONS AG118): the DDS this texture writes: format, size after any resize, mips, bytes. A compressed
 /// size is also its video memory.
-fn size_line(ui: &mut egui::Ui, model: &mut AppModel, key: &str) {
+fn size_line(ui: &mut egui::Ui, size: Option<crate::model::out_size::SizeEst>) {
     use crate::model::{fields::format_name, out_size::human};
-    match model.size_of(key) {
+    match size {
         Some(e) => {
             ui.label(format!(
                 "Output: {} · {}×{} · {} mips · {} ≈ VRAM",

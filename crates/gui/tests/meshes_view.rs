@@ -1797,6 +1797,38 @@ fn scan_details_show_an_empty_plugin_pass() {
     h.get_by_label("Plugins: 0 (0 cached), 0 records");
 }
 
+/// Handoff 2026-11-17 (Note JO): one plugin problem past the listed ones reads "… and 1 more plugin problem".
+#[test]
+fn scan_details_say_one_more_plugin_problem_in_the_singular() {
+    let mut m = model_with(None);
+    let problems: Vec<(String, String)> = (0..201)
+        .map(|i| (format!("P{i}.esp"), "missing master".to_string()))
+        .collect();
+    m.report = Some(Report {
+        plugins: Some(PluginStats {
+            problems,
+            ..PluginStats::default()
+        }),
+        ..Default::default()
+    });
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Scan details").click();
+    h.run();
+    h.get_by_label("… and 1 more plugin problem");
+}
+
+/// Handoff 2026-11-17 (Note JO): one listed NIF reads "1 of 1 NIF", never "NIFs".
+#[test]
+fn the_list_count_says_nif_for_one() {
+    let mut m = model_with(None);
+    m.nifs = Arc::new(vec![nif(1, "meshes/x.nif")]);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("1 of 1 NIF");
+    assert!(h.query_by_label_contains("1 of 1 NIFs").is_none());
+}
+
 /// esp spec §4.2: records that use the mesh, and per re-textured shape `shape → TXST EDID`. No PGPatcher warning.
 #[test]
 fn plugin_overrides_list_records_and_shape_swaps() {

@@ -47,6 +47,9 @@ pub struct GuiSettings {
     /// group that is open is not stored.
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub group_collapsed: std::collections::BTreeSet<String>,
+    /// The texture panel's groups, open or closed, by `PanelGroup::id`; a group not listed takes its default. Always
+    /// written, even empty, so the `[texture_groups]` table merges per key (`merge`) and a hand edit survives a save.
+    pub texture_groups: std::collections::BTreeMap<String, bool>,
 }
 
 /// The analysis disk cache's limit when `analysis_cache_mb` is unset (Note HV2), in MB.

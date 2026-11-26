@@ -1,5 +1,6 @@
 //! The Meshes view (plan A Task 12): a flat list of meshes (Note GC) | shapes of the selected NIF. Draws `MeshesModel`; every store read happens in the model on a click, never here.
 use crate::look::Combo036 as _;
+use crate::model::code_text::counted;
 use crate::model::meshes::export::DocBadge;
 use crate::model::meshes::nif_edit::{Selection, ANIM_INVALID, EDIT_HIDDEN};
 use crate::model::meshes::pg_entries::{
@@ -377,8 +378,12 @@ fn bar(ui: &mut egui::Ui, m: &mut MeshesModel) {
                                 }
                                 if p.problems.len() > MAX_LISTED {
                                     ui.label(format!(
-                                        "… and {} more plugin problems",
-                                        p.problems.len() - MAX_LISTED
+                                        "… and {}",
+                                        counted(
+                                            p.problems.len() - MAX_LISTED,
+                                            "more plugin problem",
+                                            "more plugin problems"
+                                        )
                                     ));
                                 }
                             }
@@ -628,12 +633,16 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Rule 6.2: the filters hide rows and never deselect, so say when the selected NIF is one of the hidden.
     ui.weak(if m.selection_hidden() {
         format!(
-            "{} of {} NIFs (the selected NIF is hidden by the filters)",
+            "{} of {} (the selected NIF is hidden by the filters)",
             visible.len(),
-            m.listed()
+            counted(m.listed(), "NIF", "NIFs")
         )
     } else {
-        format!("{} of {} NIFs", visible.len(), m.listed())
+        format!(
+            "{} of {}",
+            visible.len(),
+            counted(m.listed(), "NIF", "NIFs")
+        )
     });
     let row_h = ui.spacing().interact_size.y;
     // Rule 3.7: a few pixels short of the column, so a full row never flips the scroll bar.

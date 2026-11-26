@@ -1,5 +1,8 @@
 //! Parent NiNode transforms (P1.1): ParsedShape.world, the bounds and the draw's model matrix.
-#![allow(clippy::needless_range_loop)]
+#![allow(
+    clippy::needless_range_loop,
+    reason = "the loops index two or more arrays by the same position"
+)]
 mod common;
 use common::{fixture, renderer, FLAT};
 use nif::graph::{read_graph, world};

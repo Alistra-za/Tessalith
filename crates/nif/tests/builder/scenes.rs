@@ -1,5 +1,8 @@
 //! Scene builders shared by tests. `all()` lists every scene builder so far.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 use super::{Nif, W};
 use nif::header::Header;
 

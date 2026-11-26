@@ -28,3 +28,6 @@ tempfile = { workspace = true }
 texcore = { workspace = true, features = ["load"] }
 image = { workspace = true }
 render3d = { path = ".", features = ["test-hooks"] }
+
+[lints]
+workspace = true

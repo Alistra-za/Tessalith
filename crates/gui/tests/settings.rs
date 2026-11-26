@@ -1,3 +1,4 @@
+use sdc_gui::model::panel_groups::{self, PanelGroup};
 use sdc_gui::settings::*;
 
 #[test]
@@ -182,6 +183,53 @@ fn a_hand_edit_made_while_running_survives_the_next_save() {
         "both changed: the app wins"
     );
     assert_eq!(m.settings, back, "the app now holds what it wrote");
+}
+
+#[test]
+fn texture_groups_round_trip() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let mut s = GuiSettings::default();
+    panel_groups::set_open(&mut s, PanelGroup::Mipmaps, false);
+    s.save(&p).unwrap();
+    let back = GuiSettings::load(&p).0;
+    assert!(!panel_groups::is_open(&back, PanelGroup::Mipmaps));
+    assert_eq!(back.texture_groups.get("mipmaps"), Some(&false));
+}
+
+#[test]
+fn a_hand_edited_texture_group_survives_a_toggle() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let mut m = running(&p, GuiSettings::default());
+    let mut text = std::fs::read_to_string(&p).unwrap();
+    text = text.replace(
+        "[texture_groups]\n",
+        "[texture_groups]\nalpha = true\nfuture-group = false\n",
+    );
+    assert!(
+        text.contains("future-group"),
+        "the default file writes an empty [texture_groups] table"
+    );
+    std::fs::write(&p, text).unwrap();
+    panel_groups::set_open(&mut m.settings, PanelGroup::Size, false);
+    m.save_settings();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(
+        back.texture_groups.get("alpha"),
+        Some(&true),
+        "the hand edit is kept"
+    );
+    assert_eq!(
+        back.texture_groups.get("future-group"),
+        Some(&false),
+        "an unknown id is kept"
+    );
+    assert_eq!(
+        back.texture_groups.get("size"),
+        Some(&false),
+        "the app's change is written"
+    );
 }
 
 /// Note HV2: a cache limit typed into gui.toml while the app runs survives the app's next save, and a limit set in

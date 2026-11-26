@@ -637,7 +637,7 @@ fn cancel_during_the_plugin_pass_is_a_noted_ok() {
 /// The owner's full load order (spec §1, §6). Read-only; the store is a temp file.
 /// `$env:SDC_ACHERUS='<your MO2 instance>'; cargo test -p modscan --release --test plugins owner_load_order -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_load_order() {
     let root = std::path::PathBuf::from(
         std::env::var("SDC_ACHERUS").expect("set SDC_ACHERUS to the MO2 instance root"),
@@ -719,9 +719,10 @@ fn owner_load_order() {
 /// A master that is in the load order but past the 254 full-plugin limit is not "missing".
 #[test]
 fn a_master_past_the_limit_is_not_reported_missing() {
+    use std::fmt::Write as _;
     let mut txt = String::from("*M.esp\n");
     for i in 0..255 {
-        txt += &format!("*P{i:03}.esp\n");
+        let _ = writeln!(txt, "*P{i:03}.esp");
     }
     let d = load_order(&txt);
     for i in 0..255 {

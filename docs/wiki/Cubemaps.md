@@ -158,7 +158,7 @@ The default is one source cell rounded to a power of two, at most 4096 ([`cubema
 
 ## The cube panel in the GUI
 
-A texture whose type is **Cubemap** (under *Other* in the type picker) gets a **Cubemap** section in its settings panel with the **Source**, **Orientation**, **Colour grade** and **Look** groups. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key.
+A texture whose type is **Cubemap** (under *Other* in the type picker) gets a **Cubemap** group in its settings panel, which holds the **Source**, **Orientation**, **Colour grade** and **Look** settings. Everything it writes goes to `sdc.toml` as the matching `cubemap.*` key.
 
 ![The panel of a six-face cubemap.](../img/gui/Cubemaps/cube-panel.png)
 

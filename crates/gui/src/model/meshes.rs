@@ -3,6 +3,7 @@
 //!
 //! The model owns its own worker channel, so the Textures view's model is untouched. Reads go through its own
 //! read-only `Store` connection and happen only on a selection change or when a scan ends, never per frame.
+use crate::model::code_text::counted;
 use crate::model::picker::PickerPurpose;
 use crate::model::viewport3d::{FileSource, MeshSpec, Viewport3d};
 use crate::settings::MeshesSettings;
@@ -421,8 +422,10 @@ pub fn gras_all_diffuses(db: &Path) -> Result<BTreeSet<String>, String> {
 /// The scan details line of the plugin pass (esp spec §4.3).
 pub fn plugins_line(p: &PluginStats) -> String {
     format!(
-        "Plugins: {} ({} cached), {} records",
-        p.n, p.cached, p.records
+        "Plugins: {} ({} cached), {}",
+        p.n,
+        p.cached,
+        counted(p.records, "record", "records")
     )
 }
 
@@ -2301,15 +2304,15 @@ fn texture_sources(
 pub fn report_summary(r: &Report) -> String {
     let ms: u64 = r.phase_ms.iter().map(|(_, ms)| ms).sum();
     format!(
-        "Scanned {} NIFs ({} parsed, {} reused) in {:.1} s · {} LE · {} not Skyrim · {} problems · {} missing mods{}",
-        r.nifs,
+        "Scanned {} ({} parsed, {} reused) in {:.1} s · {} LE · {} not Skyrim · {} · {}{}",
+        counted(r.nifs, "NIF", "NIFs"),
         r.parsed,
         r.reused,
         ms as f64 / 1000.0,
         r.le_meshes,
         r.not_skyrim,
-        r.problems.len(),
-        r.missing_mods.len(),
+        counted(r.problems.len(), "problem", "problems"),
+        counted(r.missing_mods.len(), "missing mod", "missing mods"),
         if r.tainted {
             " · PGPatcher started during the scan"
         } else {
@@ -2348,5 +2351,39 @@ pub fn alpha_line(flags: u16, threshold: u8) -> String {
         "Alpha: none".into()
     } else {
         format!("Alpha: {}", parts.join(" · "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Handoff 2026-11-17 (Note JO): the scan lines say "1 NIF", "1 problem", "1 missing mod" and "1 record".
+    #[test]
+    fn scan_lines_use_the_singular_for_one() {
+        let one = Report {
+            nifs: 1,
+            problems: vec![("a.nif".into(), "bad".into())],
+            missing_mods: vec!["m".into()],
+            ..Report::default()
+        };
+        let line = report_summary(&one);
+        assert!(line.starts_with("Scanned 1 NIF ("), "{line}");
+        assert!(line.contains(" · 1 problem · 1 missing mod"), "{line}");
+        let many = Report {
+            nifs: 2,
+            ..Report::default()
+        };
+        let line = report_summary(&many);
+        assert!(line.starts_with("Scanned 2 NIFs ("), "{line}");
+        assert!(line.contains(" · 0 problems · 0 missing mods"), "{line}");
+        let p = |records| PluginStats {
+            n: 3,
+            cached: 1,
+            records,
+            ..PluginStats::default()
+        };
+        assert_eq!(plugins_line(&p(1)), "Plugins: 3 (1 cached), 1 record");
+        assert_eq!(plugins_line(&p(5)), "Plugins: 3 (1 cached), 5 records");
     }
 }

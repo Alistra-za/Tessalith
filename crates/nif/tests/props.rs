@@ -30,7 +30,10 @@ fn lsp(shader_type: u32, name: i32, texset: i32) -> W {
 }
 
 #[test]
-#[allow(clippy::type_complexity)]
+#[allow(
+    clippy::type_complexity,
+    reason = "a one-off table of case tuples; a named type would only rename it"
+)]
 fn lighting_default_and_trailers() {
     let cases: Vec<(u32, Vec<f32>, fn(&LightingTrailer) -> bool)> = vec![
         (0, vec![], |t| matches!(t, LightingTrailer::None)),

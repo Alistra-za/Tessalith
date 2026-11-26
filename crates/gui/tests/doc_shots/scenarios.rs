@@ -7,6 +7,7 @@ use eframe::egui::{self, accesskit::Role, Pos2, Rect};
 use egui_kittest::kittest::{NodeT as _, Queryable};
 use image::{ImageBuffer, Rgb, RgbaImage};
 use sdc_gui::model::bottom::BottomTab;
+use sdc_gui::model::panel_groups::{self, PanelGroup};
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
@@ -304,7 +305,10 @@ fn tile_menu(dir: &Path) -> Frame {
 
 /// GUI-Texture-Panel: the settings of a diffuse with cut-out alpha.
 fn texture_panel(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |_| {});
+    // One open group (Mipmaps) shows what a group's rows look like beside the closed ones.
+    let mut h = opened_with(dir, |m| {
+        panel_groups::set_open(&mut m.settings, PanelGroup::Mipmaps, true)
+    });
     let r = reveal(&mut h, |h| {
         h.state_mut().model.select_item("plants/fern.png")
     });
@@ -449,6 +453,10 @@ fn cube_panel(dir: &Path) -> Frame {
             m.decide(f, Answer::Subtype(engine::config::Subtype::Cubemap));
             assert!(m.wait_idle(Duration::from_secs(60)));
         }
+        // A full chain, so no CUBE-NO-MIPS problem forces Mipmaps open beside the Cubemap group.
+        m.set_field("sky/env_px.png", "mips.levels", serde_json::json!("full"));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        panel_groups::set_open(&mut m.settings, PanelGroup::Cubemap, true);
     });
     let r = reveal(&mut h, |h| {
         h.state_mut().model.select_item("sky/env_px.png")
@@ -635,7 +643,8 @@ fn main_window(dir: &Path) -> Frame {
         (9, tl(rect_starting(&h, Role::Button, "Not ready"))),
         // The first slot chip of the first set card (a "D" button; the Textures column has none).
         (10, tl(rect_of(&h, "D")) + egui::vec2(-4.0, 0.0)),
-        (11, tl(rect_of(&h, "Type"))),
+        // The panel's first row: the groups under it carry no "Type" header any more.
+        (11, tl(rect_of(&h, "Texture type"))),
         (12, tl(rect_of(&h, "Settings…"))),
         (13, tl(rect_starting(&h, Role::Button, "Problems"))),
     ];

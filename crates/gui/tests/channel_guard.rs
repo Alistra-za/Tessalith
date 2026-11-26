@@ -41,6 +41,8 @@ fn ready(dir: &Path) -> AppModel {
 }
 
 fn harness(mut m: AppModel, key: &str) -> Harness<'static, AppModel> {
+    // The groups start closed (Note LQ5); the row sits in Compression.
+    open_texture_groups(&mut m);
     m.select_item(key);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -345,7 +347,7 @@ fn the_lock_covers_envmask_and_only_a_on_bc7() {
     }
 }
 
-/// Edits off (a plan in flight): the grid is disabled, so the ticks are too. (settings_panel.rs `group`, Note FK3.)
+/// Edits off (a plan in flight): the grid is disabled, so the ticks are too. (settings_panel.rs `grouped`, Note FK3.)
 #[test]
 fn the_ticks_are_off_while_a_plan_runs() {
     let d = tempfile::tempdir().unwrap();
@@ -359,6 +361,39 @@ fn the_ticks_are_off_while_a_plan_runs() {
         assert!(n.accesskit_node().is_disabled(), "{name}");
     }
     idle(h.state_mut());
+}
+
+/// Note LQ10 on the merged compact panel (ruling BC7-C42): `ALPHA-EXACT-OFF-M` points at `alpha.exact_opaque`, so a Go
+/// to opens Compression, which starts closed, focuses the A tick and takes the request.
+#[test]
+fn go_to_exact_opaque_opens_compression_and_focuses_the_a_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ready(d.path());
+    m.select_item(ROCK);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1400.0, 1000.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    h.run();
+    assert_eq!(
+        ticks(&h, "Channel guard A"),
+        0,
+        "premise: Compression is closed"
+    );
+    assert_eq!(
+        sdc_gui::model::panel_groups::fix_field("ALPHA-EXACT-OFF-M"),
+        Some(A)
+    );
+    let pass = h.ctx.cumulative_pass_nr();
+    h.state_mut().go_to_field(ROCK, A, pass);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Compression, expanded").is_some());
+    assert!(h
+        .get_by_role_and_label(Role::CheckBox, "Channel guard A")
+        .is_focused());
+    assert!(h.state().nav.reveal_field.is_none(), "taken once");
 }
 
 /// The four ticks fit the control column, and so the strip's 140 px control (`COMPACT_CONTROL_W`).

@@ -35,6 +35,7 @@ mod new_set_note;
 mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
+pub mod panel_groups;
 pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
@@ -199,12 +200,27 @@ pub enum CentreTab {
     Settings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Selection {
+    #[default]
     None,
     Item(String),
     Set(String),
     SetId(String),
+}
+
+/// The groups of the texture panel held open for `item`: by a problem it has (filled once per selection) or by a Go to.
+/// `settings_panel::draw` resets and fills it; `Action::SetGroupOpen(g, false)` takes a group out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForcedOpen {
+    /// The selection this latch was started for: any change of `AppModel::selection` (a set, nothing, another item,
+    /// the same item again) starts a new latch, whether or not a panel was drawn in between
+    /// (`AppModel::observe_panel_selection`). A writer that sets the latch after a `select_item` (Go to) sets this too.
+    pub seen: Selection,
+    pub item: String,
+    /// The problems' groups were added: the fill runs once per selection.
+    pub filled: bool,
+    pub groups: BTreeSet<panel_groups::PanelGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -580,15 +596,16 @@ pub(crate) fn cached<T: Clone>(
     put: impl FnOnce(&mut ViewCache, T),
     build: impl FnOnce() -> T,
 ) -> T {
-    let key = m.view_key();
     {
+        // A hit compares the stored key with the model in place (`view_key_matches`): no clone, so no allocation.
         let c = m.view_cache().borrow();
-        if c.key.as_ref() == Some(&key) {
+        if c.key.as_ref().is_some_and(|k| m.view_key_matches(k)) {
             if let Some(v) = get(&c) {
                 return v;
             }
         }
     }
+    let key = m.view_key();
     let v = build();
     let mut c = m.view_cache().borrow_mut();
     if c.key.as_ref() != Some(&key) {
@@ -619,6 +636,53 @@ pub(crate) struct ViewKey {
     target_mod_rev: u64,
     /// Note HF9: the export scope (`AppModel::scope_rev`): what `in_run` answers, so every cache here.
     scope: u64,
+}
+
+/// `AppModel::output_root()` kept with what it is worked out from, so `view_key_matches` can read it without building
+/// the path again. The inputs are the ones `review::writes_key` names for it: the Also ticks (`sdc.toml`, `project`),
+/// the Also location and the export folder (`sdc-project.toml`, `doc`), the folder names (`root`), `gui.toml`'s folder
+/// when there is no document (`settings_export`), the target, and whether either document is read-only.
+pub(crate) struct OutputMemo {
+    project: u64,
+    project_ro: bool,
+    doc: u64,
+    doc_ro: bool,
+    target: Target,
+    root: Option<PathBuf>,
+    settings_export: Option<PathBuf>,
+    path: PathBuf,
+}
+
+impl OutputMemo {
+    fn new(m: &AppModel) -> Self {
+        OutputMemo {
+            project: m
+                .project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev),
+            project_ro: m.project.as_ref().is_some_and(|p| p.read_only()),
+            doc: m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev),
+            doc_ro: m.sets_doc.as_ref().is_some_and(|d| d.read_only()),
+            target: m.target,
+            root: m.root.clone(),
+            settings_export: m.settings.export_folder.clone(),
+            path: m.output_root(),
+        }
+    }
+
+    /// Whether `path` was worked out from what the model holds now. No allocation.
+    fn current(&self, m: &AppModel) -> bool {
+        self.project
+            == m.project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev)
+            && self.project_ro == m.project.as_ref().is_some_and(|p| p.read_only())
+            && self.doc == m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev)
+            && self.doc_ro == m.sets_doc.as_ref().is_some_and(|d| d.read_only())
+            && self.target == m.target
+            && self.root == m.root
+            && self.settings_export == m.settings.export_folder
+    }
 }
 
 /// Ruling 3b-F24: everything the From another set rows' settled check (`AppModel::settled_wait`) reads, so a cached
@@ -1002,6 +1066,10 @@ pub struct AppModel {
     pub cs_pbr: cs_pbr::CsPbrScan,
     /// Keyboard navigation, the shortcut sheet and the command palette (items 5 and 19).
     pub nav: nav::Nav,
+    /// The texture panel's groups a problem (or a Go to) holds open for the selected item; never saved.
+    pub panel_forced: ForcedOpen,
+    /// `output_root()` with its inputs (`view_key_matches`).
+    output_root_memo: std::cell::RefCell<Option<OutputMemo>>,
     /// Explorer requests the app has not started yet (Task 5, `model::shell`).
     pub shell: Vec<shell::ShellRequest>,
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
@@ -1423,6 +1491,8 @@ impl AppModel {
             close_ready: false,
             cs_pbr: Default::default(),
             nav: Default::default(),
+            panel_forced: ForcedOpen::default(),
+            output_root_memo: Default::default(),
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
@@ -4280,6 +4350,46 @@ impl AppModel {
         )
     }
 
+    /// `view_key() == *k`, compared field by field in place: no clone and, once `output_root` is remembered, no path
+    /// built. A frame's cached views and problems ask this on every hit. `ViewKey` is destructured with no `..`, so a
+    /// field added to it does not compile until it is compared here.
+    pub(crate) fn view_key_matches(&self, k: &ViewKey) -> bool {
+        let ViewKey {
+            items,
+            inputs,
+            doc,
+            root,
+            export_root,
+            target,
+            scan_db,
+            scan,
+            known_rev,
+            target_mod_rev,
+            scope,
+        } = k;
+        *items == self.items_rev
+            && *inputs == self.inputs_rev
+            && *doc
+                == self
+                    .sets_doc
+                    .as_ref()
+                    .map_or(0, crate::sets_doc::SetsDoc::rev)
+            && *root == self.root
+            && *target == self.target
+            && *scan_db == self.scan_db
+            && *scan == self.scan_stamp
+            && *known_rev == self.known_rev
+            && *target_mod_rev == self.target_mod_rev
+            && *scope == self.view_scope_rev()
+            && {
+                let mut memo = self.output_root_memo.borrow_mut();
+                if !memo.as_ref().is_some_and(|o| o.current(self)) {
+                    *memo = Some(OutputMemo::new(self));
+                }
+                memo.as_ref().is_some_and(|o| o.path == *export_root)
+            }
+    }
+
     /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).
     pub(crate) fn view_key(&self) -> ViewKey {
         ViewKey {
@@ -4324,15 +4434,64 @@ impl AppModel {
         };
     }
 
+    /// `panel_forced` rule 1: a selection that differs from the one the latch was started for (through a set, through
+    /// nothing, another item, or the same item again) starts a new, empty latch for the selected item. Runs every frame
+    /// from `ui::draw_with_scan` and at the start of `settings_panel::draw`; a compare of two enums, and a clone only
+    /// when the selection moved.
+    pub fn observe_panel_selection(&mut self) {
+        if self.panel_forced.seen != self.selection {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: match &self.selection {
+                    Selection::Item(k) => k.clone(),
+                    _ => String::new(),
+                },
+                ..ForcedOpen::default()
+            };
+        }
+    }
+
     /// Select one texture; any multi-selection ends (F3a D1).
     pub fn select_item(&mut self, key: &str) {
-        self.selection = Selection::Item(key.to_string());
+        let next = Selection::Item(key.to_string());
+        // `panel_forced` rule 1: coming from anything else (a set, nothing, another item) is a new selection, even when
+        // no frame was drawn in between and the latch still holds this key. A click on the selected item is not.
+        if self.selection != next {
+            self.panel_forced = ForcedOpen::default();
+        }
+        self.selection = next;
         self.reset_multi();
         self.bulk = Default::default();
         // Note FB7: also a click on the texture already selected brings it to the front of the centre.
         self.centre_tab = CentreTab::Selection;
         // Review E10: a Go to set the set editor has not drawn yet ends here, so it never fires later.
         self.nav.reveal_slot = None;
+        self.nav.reveal_field = None;
+    }
+
+    /// Go to on a Problems row (after `select_item(key)`): ask the centre to focus `field`, and force its group open
+    /// (`panel_forced` rule 3). The latch's `seen` is set whenever it is rewritten, or `observe_panel_selection` would
+    /// take the write for a new selection and reset it.
+    pub fn go_to_field(&mut self, key: &str, field: &'static str, pass: u64) {
+        self.nav.reveal_field = Some(nav::RevealField {
+            item: key.to_string(),
+            field,
+            pass,
+        });
+        // A first-screen field opens nothing.
+        let Some(g) = panel_groups::panel_group(field) else {
+            return;
+        };
+        if self.panel_forced.item == key {
+            self.panel_forced.groups.insert(g);
+        } else {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: key.to_string(),
+                filled: false,
+                groups: BTreeSet::from([g]),
+            };
+        }
     }
 
     /// Select one set; any multi-selection ends (F3a D1).
@@ -4352,6 +4511,7 @@ impl AppModel {
         if self.expanded.is_some() {
             self.collapse();
         }
+        self.nav.reveal_field = None;
         self.nav.reveal_slot = slot.map(|slot| nav::RevealSlot {
             set: target.clone(),
             target: slot,

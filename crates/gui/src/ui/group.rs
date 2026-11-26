@@ -3,6 +3,17 @@
 use eframe::egui;
 use egui::collapsing_header::CollapsingState;
 
+/// The group's persistent id under `ui`.
+// shortcut: the id is the group's salt under `ui`, so two panel draws that share one parent `Ui` (two `ui.columns`
+// children) share header ids and merge their AccessKit nodes. The app draws each surface in its own panel; give each
+// draw a `push_id` scope if one parent ever holds two.
+// shortcut: the Debug bound of egui ids is dodged by hashing to a u64 first; upgrade to `make_persistent_id(id)` if egui
+// drops the Debug bound or every caller's id type derives Debug.
+fn persistent_id(ui: &egui::Ui, id: impl std::hash::Hash) -> egui::Id {
+    let hasher = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default();
+    ui.make_persistent_id(std::hash::BuildHasher::hash_one(&hasher, id))
+}
+
 /// `value` sits right-aligned in the header, styled by the caller (weak, or AMBER for a warning). K15: egui toggles
 /// on the icon only, so the title toggles too.
 pub fn group<R>(
@@ -43,6 +54,229 @@ pub fn group_closed_value<R>(
     group_impl(ui, id, title, values, default_open, false, body)
 }
 
+/// The header row's height: the Textures strip's width, and at least `interact_size.y` (the row is `max` of the two).
+pub const HEADER_H: f32 = 24.0;
+const _: () = assert!(HEADER_H == super::columns::STRIP_WIDTH);
+
+/// What one header shows. `summary` and `summary_hover` appear only while the group is closed (TPC-R1, Note JR6: an
+/// open group's rows show the values). `changed` and `problem` are marks, not values, and show open or closed.
+pub struct GroupHead<'a> {
+    pub title: &'a str,
+    pub summary: &'a str,
+    pub summary_hover: Option<&'a str>,
+    pub changed: bool,
+    pub problem: Option<super::status::Status>,
+}
+
+pub struct GroupResponse<R> {
+    pub header: egui::Response,
+    /// The header was clicked, or took Space or Enter, this frame. The caller flips its open state.
+    pub toggled: bool,
+    /// The body's result while it is shown (open, or still closing).
+    pub body: Option<R>,
+}
+
+/// The header's AccessKit name: `"{title}, {collapsed|expanded}[, changed][, has a problem][: {summary}]"`. The summary
+/// part is written only while closed and not empty (TPC-R1).
+pub fn header_name(head: &GroupHead<'_>, open: bool) -> String {
+    let mut s = String::with_capacity(head.title.len() + head.summary.len() + 48);
+    s.push_str(head.title);
+    s.push_str(if open { ", expanded" } else { ", collapsed" });
+    if head.changed {
+        s.push_str(", changed");
+    }
+    if head.problem.is_some() {
+        s.push_str(", has a problem");
+    }
+    if !open && !head.summary.is_empty() {
+        s.push_str(": ");
+        s.push_str(head.summary);
+    }
+    s
+}
+
+/// A group of the texture panel: a full-width header row (arrow, title, summary while closed, marks) over a body. The
+/// widget keeps no open state: the caller passes `open` and flips it on `toggled`. The header is drawn first, so in the
+/// frame of a toggle the body already follows it (`shown = open != toggled`). Draw it outside any disabled `Ui` and
+/// disable only the body: a widget takes its `Ui`'s enabled state (egui 0.37.0 `ui.rs:966`), and navigation is never
+/// gated (FK3). `instant` (the group is held open by force), the frame after a hold ends, reduced motion, or a toggle
+/// from Space or Enter open and close the body without sliding.
+///
+/// Runs once per header per frame (Note LH7): the AccessKit name is built inside `widget_info`, which runs only while
+/// AccessKit is on, and the summary is the caller's `&str`.
+pub fn collapsing_group<R>(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash,
+    head: &GroupHead<'_>,
+    open: bool,
+    instant: bool,
+    body: impl FnOnce(&mut egui::Ui) -> R,
+) -> GroupResponse<R> {
+    let id = persistent_id(ui, id_salt);
+    let height = HEADER_H.max(ui.spacing().interact_size.y);
+    let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    // The panel's floating scroll bar senses its full width over the content's right edge (rule 3.2): the header row
+    // ends before it, as `hint_and_reset` keeps ↺ clear (ui_proof's `scroll_bar_clearance`), so a click there and
+    // "● changed" are the header's.
+    let s = &ui.spacing().scroll;
+    let reserve = s.bar_width + s.bar_outer_margin;
+    let rect = row.with_max_x((row.right() - reserve).max(row.left()));
+    let header = ui.interact(rect, id, egui::Sense::click());
+    let toggled = header.clicked();
+    // egui turns Space or Enter on a focused click widget into a click (`context.rs`), so a key toggle is a click with
+    // the key down.
+    let by_key = toggled
+        && header.has_focus()
+        && ui.input(|i| i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Enter));
+    let shown = open != toggled;
+    let ctx = ui.ctx().clone();
+    let mut state = CollapsingState::load_with_default_open(&ctx, id, shown);
+    state.set_open(shown);
+    // LQ8: a forced group never slides. `instant` is the hold; a hold that ended without a click (a new selection reset
+    // `panel_forced`, and the group is closed there) snaps too, so the header keeps whether it was held last frame. The
+    // flag is stored once and rewritten in place (no allocation per frame).
+    let was_held = ctx.data_mut(|d| {
+        std::mem::replace(d.get_temp_mut_or_default::<bool>(id.with("held")), instant)
+    });
+    if instant || was_held || crate::ui::motion::reduced(&ctx) || by_key {
+        // Zero time: the animation lands on `shown` now, so `openness` below (the arrow's and the body's) is final.
+        ctx.animate_bool_with_time_and_easing(
+            state.id(),
+            shown,
+            0.0,
+            egui::emath::easing::cubic_out,
+        );
+    }
+    paint_header(ui, &header, rect, head, shown, state.openness(&ctx));
+    let body = state.show_body_unindented(ui, body).map(|r| r.inner);
+    GroupResponse {
+        header,
+        toggled,
+        body,
+    }
+}
+
+fn paint_header(
+    ui: &mut egui::Ui,
+    header: &egui::Response,
+    rect: egui::Rect,
+    head: &GroupHead<'_>,
+    shown: bool,
+    openness: f32,
+) {
+    header.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::DisclosureTriangle,
+            ui.is_enabled(),
+            header_name(head, shown),
+        )
+    });
+    ui.ctx().accesskit_node_builder(header.id, |node| {
+        node.set_expanded(shown);
+    });
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let visuals = ui.visuals();
+    if header.hovered() {
+        let w = &visuals.widgets.hovered;
+        ui.painter()
+            .rect_filled(rect, w.corner_radius, w.weak_bg_fill);
+    }
+    // The arrow, as `columns::strip_sensing` draws its own, turned a quarter turn when open (pointing down).
+    let color = if header.hovered() {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap("▶".to_owned(), egui::FontId::proportional(12.0), color);
+    let top_left = egui::pos2(rect.left() + HEADER_H / 2.0, rect.center().y) - galley.size() / 2.0;
+    ui.painter().add(
+        egui::epaint::TextShape::new(top_left, galley, color).with_angle_and_anchor(
+            openness * std::f32::consts::FRAC_PI_2,
+            egui::Align2::CENTER_CENTER,
+        ),
+    );
+    // The visible edge, as `group_impl` bounds its value: a wider row above widens max_rect, not the panel.
+    let inset = ui.spacing().item_spacing.x;
+    let left = rect.left() + HEADER_H;
+    let right = rect.right().min(ui.clip_rect().right() - inset).max(left);
+    let content = egui::Rect::from_min_max(
+        egui::pos2(left, rect.top()),
+        egui::pos2(right, rect.bottom()),
+    );
+    let strong = ui.visuals().strong_text_color();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
+        // The right side lays out first, so "changed" is never cut; the left side takes what is left and truncates.
+        egui::Sides::new()
+            .height(rect.height())
+            .shrink_left()
+            .truncate()
+            .show(
+                ui,
+                |ui| {
+                    if let Some(status) = head.problem {
+                        super::status::dot(ui, status);
+                    }
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(head.title).strong())
+                            .selectable(false),
+                    );
+                    if !shown && !head.summary.is_empty() {
+                        // A truncated label shows its full text on hover by itself; `summary_hover` replaces that.
+                        let label = egui::Label::new(egui::RichText::new(head.summary).weak())
+                            .truncate()
+                            .selectable(false);
+                        match head.summary_hover {
+                            // TPC-T2-1: an elided summary keeps its full text on hover, above the hover text.
+                            Some(hover) => {
+                                let r = ui.add(label.show_tooltip_when_elided(false));
+                                let width = r.rect.width();
+                                r.on_hover_ui(|ui| {
+                                    let natural = egui::WidgetText::from(head.summary)
+                                        .into_galley(
+                                            ui,
+                                            Some(egui::TextWrapMode::Extend),
+                                            f32::INFINITY,
+                                            egui::TextStyle::Body,
+                                        )
+                                        .size()
+                                        .x;
+                                    if natural > width + 0.5 {
+                                        ui.label(format!("{}\n{hover}", head.summary));
+                                    } else {
+                                        ui.label(hover);
+                                    }
+                                });
+                            }
+                            None => {
+                                ui.add(label);
+                            }
+                        }
+                    }
+                },
+                |ui| {
+                    if head.changed {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new("● changed").color(strong))
+                                .selectable(false),
+                        );
+                    }
+                },
+            );
+    });
+    if header.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            2.0,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
 /// The one header drawing: `values` is (`value`, `closed_value`).
 pub(super) fn group_impl<R, T: Into<egui::WidgetText>>(
     ui: &mut egui::Ui,
@@ -55,10 +289,7 @@ pub(super) fn group_impl<R, T: Into<egui::WidgetText>>(
 ) -> Option<R> {
     egui::Frame::group(ui.style())
         .show(ui, |ui| {
-            // shortcut: the Debug bound of egui ids is dodged by hashing to a u64 first; upgrade to `make_persistent_id(id)`
-            // if egui drops the Debug bound or every caller's id type derives Debug.
-            let hasher = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default();
-            let id = ui.make_persistent_id(std::hash::BuildHasher::hash_one(&hasher, id));
+            let id = persistent_id(ui, id);
             let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
             if open_now {
                 state.set_open(true);

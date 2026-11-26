@@ -109,6 +109,20 @@ impl CbWriter {
         true
     }
 
+    /// Sets (`on`) or clears `bits` in the `uint` at `var`, leaving its other bits. False if not in this build.
+    pub fn set_bits_u32(&mut self, var: &str, bits: u32, on: bool) -> bool {
+        let Some(f) = self.resolve(var) else {
+            return false;
+        };
+        let at = f.off as usize;
+        if let Some(d) = self.data.get_mut(at..at + 4) {
+            let v = u32::from_le_bytes([d[0], d[1], d[2], d[3]]);
+            let v = if on { v | bits } else { v & !bits };
+            d.copy_from_slice(&v.to_le_bytes());
+        }
+        true
+    }
+
     pub fn bytes(&self) -> &[u8] {
         &self.data
     }

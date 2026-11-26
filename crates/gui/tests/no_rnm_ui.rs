@@ -138,12 +138,14 @@ fn a_layer_files_helper_panel_has_no_blends_into_row() {
     let mut h = harness(m);
     h.run();
     h.run();
-    let drew = h.query_all_by_label("Texture type").count();
+    // Its type picker: the Undecided card's, else the decided texture's row (TPC-T4-1).
+    let drew = h.query_all_by_label("Type for this texture").count()
+        + h.query_all_by_label("Texture type").count();
     let blends = h.query_all_by_label("Blends into").count();
     let combos = h.query_all_by_label("Layer target").count();
     assert!(
         drew > 0,
-        "the plain file's settings panel drew (its Type row)"
+        "the plain file's settings panel drew (its type picker)"
     );
     assert_eq!(blends, 0, "a Blends into row");
     assert_eq!(combos, 0, "a layer-target combo");

@@ -142,6 +142,7 @@ fn new_deferred_makes_eight_targets_and_a_main_uav() {
     assert_eq!(t.rtvs().len(), 8);
     for (i, (tex, _, _)) in t.mrt.iter().enumerate() {
         let mut d = windows::Win32::Graphics::Direct3D11::D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: `tex` is a live texture of `gpu`'s device and `d` is a writable desc out-parameter.
         unsafe { tex.GetDesc(&mut d) };
         assert_eq!(d.Format, MRT_FORMATS[i].0, "RT{i}");
     }

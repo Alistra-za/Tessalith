@@ -22,9 +22,10 @@ pub const RELEASED_ENGINE_VERSION: &str = "3.1.0";
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version moves
 /// only the arms written as `ENGINE_VERSION`; every other arm is a literal and stays. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
 /// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
-/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`; `pbr_emissive` and `hdr_sky` moved to 3.1.0 with the BC6H
-/// kernel fixes (Note LO) and stay there until their bytes change again; `msn` and `skin_wet` moved to 3.2.0 with the
-/// per-type BC7 settings (Note LR). No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`; `pbr_emissive` and `hdr_sky` moved to the current version
+/// with the BC6H kernel fixes (Note LO) and moved again with ISPC TC patch 0007 (Note LT); `msn` and `skin_wet` moved
+/// to the current version with the per-type BC7 settings (Note LR). No `_` arm: a new `Subtype` fails to compile
+/// until it gets one.
 /// An output whose record names an older arm is kept by `if-changed` unless the run's `--ev` covers it (Note JA).
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -45,13 +46,12 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::ComplexGrass
         | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
-        // The built-in BC6H types: ISPC TC patch 0004 changes BC6H bytes (Note LO). A pbr_emissive written as BC7 is
+        // The built-in BC6H types: ISPC TC patch 0004 changed BC6H bytes (Note LO) and patch 0007 changes them again
+        // (Note LT), so they follow the current version until the release names it. A pbr_emissive written as BC7 is
         // reported as an older encode too (ruling BC6H-Q1); `--ev --property bc6h_uf16` re-encodes only the BC6H outputs.
         // shortcut: a format = "bc6h_uf16" set by hand on any other sub-type is not marked. If that is reported, add a
         // BC6H-scoped `ispctc_patch` tag compared like `rgbcx_patch` (in api::currency) instead of moving more arms.
-        // These two last changed in 3.1.0 (Note LO), so they name that version as a literal: written as
-        // `ENGINE_VERSION` they would follow every later bump and mark their released outputs as older.
-        Subtype::PbrEmissive | Subtype::HdrSky => "3.1.0",
+        Subtype::PbrEmissive | Subtype::HdrSky => ENGINE_VERSION,
         // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6). These are the sub-types a
         // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
@@ -625,16 +625,14 @@ mod tests {
         for st in Subtype::ALL {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
             // 3.1.0 changes kept normal lengths, XY bases and the angular variance bake (LA).
-            // 3.1.0 also changes BC6H bytes (ISPC TC patch 0004, Note LO): PbrEmissive and HdrSky stay at 3.1.0.
-            // The other 3.1.0 types above sit on `ENGINE_VERSION`, which is 3.2.0 from the per-type BC7 settings on;
-            // those settings also move Msn (from 2.0.0) and SkinWet (from 3.0.0) there (Note LR).
+            // 3.1.0 changed BC6H bytes (ISPC TC patch 0004, Note LO); the current version changes them again
+            // (patch 0007, Note LT). The per-type BC7 settings move Msn (from 2.0.0) and SkinWet (from 3.0.0) to the
+            // current version too (Note LR).
             let want = if matches!(
                 st,
                 Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo
             ) {
                 "3.0.0"
-            } else if matches!(st, Subtype::PbrEmissive | Subtype::HdrSky) {
-                "3.1.0"
             } else if matches!(
                 st,
                 Subtype::Normal
@@ -648,6 +646,8 @@ mod tests {
                     | Subtype::CoatNormal
                     | Subtype::Msn
                     | Subtype::SkinWet
+                    | Subtype::PbrEmissive
+                    | Subtype::HdrSky
             ) {
                 ENGINE_VERSION
             } else {

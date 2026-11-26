@@ -5,6 +5,8 @@
 //! zero-initialised cbuffer never zeroes a multiplier (directional/ambient light, colour clamp …).
 use crate::cbuffer::{CbWriter, Field};
 use crate::cs_settings::write_feature_data;
+use crate::hdri;
+use std::sync::Arc;
 
 /// Row-major 3×4 (`row r = [m_r0, m_r1, m_r2, t_r]`).
 pub type Mat3x4 = [[f32; 4]; 3];
@@ -43,15 +45,31 @@ pub struct DirLight {
 }
 
 /// What is drawn behind the model.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Background {
     /// A flat colour: **linear** RGB. With `Renderer::set_encode_srgb(true)` it is encoded with the rest of the frame
     /// at readback; without it (gamma-space output) the renderer writes its sRGB encoding, so the same value looks the
     /// same either way. A perceptual (sRGB) colour from the UI goes through [`Background::rgb`] / [`Background::grey`].
     Solid([f32; 3]),
-    /// The bundled studio HDRI ([`crate::hdri`]) by view direction, turned by `Scene::env_yaw`. It also replaces
-    /// `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
-    Hdri,
+    /// The user's HDRI file ([`crate::hdri::Environment`]) by view direction, turned by `Scene::env_yaw`. It also
+    /// replaces `Scene::ambient6`: the ambient light is taken from the same image ([`Scene::ambient`]).
+    Hdri(Arc<hdri::Environment>),
+    /// Black from the middle of the frame up, fading to [`crate::background::GRADIENT_FLOOR_SRGB`] at the bottom, and
+    /// a floor of that colour under the model that catches the sun and the point light's shadows (Note IH4). Ambient
+    /// and environment are Solid's (the procedural one).
+    Gradient,
+}
+
+/// `Hdri` compares by identity (`Arc::ptr_eq`): a new file is a new `Arc`.
+impl PartialEq for Background {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Background::Solid(a), Background::Solid(b)) => a == b,
+            (Background::Hdri(a), Background::Hdri(b)) => Arc::ptr_eq(a, b),
+            (Background::Gradient, Background::Gradient) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Background {
@@ -109,14 +127,19 @@ pub struct Scene {
     /// Ambient (DALC) colours seen from +X, −X, +Y, −Y, +Z, −Z, world space.
     pub ambient6: [[f32; 3]; 6],
     /// Environment turn about world +Z, radians, in the sun's sense (a feature at azimuth φ shows at φ + yaw). Turns the
-    /// HDRI backdrop and the ambient taken from it; 0 = the image as bundled. No effect with a solid background.
+    /// HDRI backdrop, the ambient taken from it and its reflected environment; 0 = the image as loaded. The procedural
+    /// environment of a solid background is not turned (the ambient is not either).
     pub env_yaw: f32,
     /// Seconds on the preview's animation clock, written to CS's `Timer` (v2 B3). 1.0 when nothing plays (the
     /// constant the preview always wrote).
     pub time: f32,
+    /// Shadows from the sun and the point light through CS's screen-space shadow mask at t14 (Note IH3). Off in
+    /// [`Scene::neutral`]: an off frame draws no light pass or mask and keeps no map; it still writes `VPOSOffset`,
+    /// which CS reads only with the mask.
+    pub shadows: bool,
 }
 
-fn norm(v: [f32; 3]) -> [f32; 3] {
+pub(crate) fn norm(v: [f32; 3]) -> [f32; 3] {
     let l = dot(v, v).sqrt();
     if l > 0.0 {
         [v[0] / l, v[1] / l, v[2] / l]
@@ -124,17 +147,17 @@ fn norm(v: [f32; 3]) -> [f32; 3] {
         v
     }
 }
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+pub(crate) fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+pub(crate) fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
 }
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+pub(crate) fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
@@ -146,9 +169,9 @@ impl Scene {
     }
 
     pub fn ambient(&self) -> [[f32; 3]; 6] {
-        match self.background {
-            Background::Solid(_) => self.ambient6,
-            Background::Hdri => crate::hdri::studio().ambient6_at(self.env_yaw),
+        match &self.background {
+            Background::Solid(_) | Background::Gradient => self.ambient6,
+            Background::Hdri(e) => e.ambient6_at(self.env_yaw),
         }
     }
 
@@ -179,6 +202,7 @@ impl Scene {
             ],
             env_yaw: 0.0,
             time: 1.0,
+            shadows: false,
         }
     }
 }
@@ -494,6 +518,7 @@ impl Scene {
         put(w, "SSRParams", &[0.1, 0.1, 1.0, 1.0]);
         let (fw, fh) = (v.width.max(1) as f32, v.height.max(1) as f32);
         put(w, "BufferDim", &[fw, fh, 1.0 / fw, 1.0 / fh]);
+        put(w, "VPOSOffset", &[1.0 / fw, 1.0 / fh, 0.0, 0.0]);
         // (far, near, far − near, far · near), as captured.
         put(
             w,
@@ -539,12 +564,14 @@ impl Scene {
 }
 
 /// Camera fields that change with the eye or the target size, in [`ViewValues`] order. `World` and
-/// `PreviousWorld` depend on the shape too and are passed to [`SceneFields::write_view`] separately.
-pub const VIEW_NAMES: [&str; 17] = [
+/// `PreviousWorld` depend on the shape too and are passed to [`SceneFields::write_view`] separately. `VPOSOffset`
+/// (b0 PerTechnique, `(1/w, 1/h, 0, 0)`) turns `SV_Position` into the shadow mask's UV (Lighting.hlsl:1716, Note IH3).
+pub const VIEW_NAMES: [&str; 18] = [
     "ViewProj",
     "BonesPivot",
     "PreviousBonesPivot",
     "BufferDim",
+    "VPOSOffset",
     "CameraData",
     "CameraView",
     "CameraProj",
@@ -588,6 +615,7 @@ impl ViewValues {
                 v.eye.to_vec(),
                 v.eye.to_vec(),
                 vec![fw, fh, 1.0 / fw, 1.0 / fh],
+                vec![1.0 / fw, 1.0 / fh, 0.0, 0.0],
                 vec![v.far, v.near, v.far - v.near, v.far * v.near],
                 rows(&v.view),
                 rows(&v.proj),
@@ -633,15 +661,18 @@ impl LightValues {
 
 /// The vanilla point-light fields of `PerGeometry` (`Lighting.hlsl` ~l.579-581) that the forward permutation
 /// without `LIGHT_LIMIT_FIX` reads: `float4 PointLightPosition[7]` (w = falloff radius), `float4
-/// PointLightColor[7]` and `float2 NumLightNumShadowLight` (x = lights, y = shadow lights). Positions are
-/// camera-relative like `World`, so they depend on the eye as well as the scene.
-pub const POINT_NAMES: [&str; 3] = [
+/// PointLightColor[7]` and `float2 NumLightNumShadowLight` (x = lights, y = shadow lights), and `float4
+/// ShadowLightMaskSelect` (the mask channel of each shadow light, Lighting.hlsl:2403). Positions are camera-relative
+/// like `World`, so they depend on the eye as well as the scene.
+pub const POINT_NAMES: [&str; 4] = [
     "PointLightPosition",
     "PointLightColor",
     "NumLightNumShadowLight",
+    "ShadowLightMaskSelect",
 ];
 
-/// The values of [`POINT_NAMES`] for one scene and view: light 0 is the scene's point light, 1-6 are zero.
+/// The values of [`POINT_NAMES`] for one scene and view: light 0 is the scene's point light, 1-6 are zero. With
+/// shadows on and the light on, light 0 is a shadow light read from the mask's G (Note IH3).
 pub struct PointValues {
     pub values: Vec<Vec<f32>>,
 }
@@ -652,6 +683,7 @@ impl PointValues {
         let mut pos = vec![0.0; 28];
         let mut col = vec![0.0; 28];
         let mut num = 0.0;
+        let (mut shadow_lights, mut select) = (0.0, vec![0.0; 4]);
         if p.brightness > 0.0 {
             let e = v.eye;
             pos[..4].copy_from_slice(&[
@@ -662,9 +694,13 @@ impl PointValues {
             ]);
             col[..4].copy_from_slice(&[p.brightness, p.brightness, p.brightness, 0.0]);
             num = 1.0;
+            if s.shadows {
+                shadow_lights = 1.0;
+                select[0] = 1.0;
+            }
         }
         PointValues {
-            values: vec![pos, col, vec![num, 0.0]],
+            values: vec![pos, col, vec![num, shadow_lights], select],
         }
     }
 }

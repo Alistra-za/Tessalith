@@ -9,7 +9,8 @@ use sdc_gui::model::AppModel;
 use std::time::Duration;
 use support::*;
 
-const HEAD: &str = "Where these settings come from";
+/// The group header's name starts with its title and ", " (only the header's name has the comma).
+const HEAD: &str = "Where these settings come from, ";
 const ONLY: &str = "Show only what differs from sdc-base";
 
 fn leaf(dir: &std::path::Path) -> AppModel {
@@ -18,7 +19,14 @@ fn leaf(dir: &std::path::Path) -> AppModel {
     m
 }
 
-fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
+fn harness(mut m: AppModel, w: f32) -> Harness<'static, AppModel> {
+    // Groups default to closed; the inspector's fold sits under the open ones, and the Sources group is its own.
+    open_texture_groups(&mut m);
+    sdc_gui::model::panel_groups::set_open(
+        &mut m.settings,
+        sdc_gui::model::panel_groups::PanelGroup::Sources,
+        false,
+    );
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -35,9 +43,9 @@ fn centre(h: &Harness<'static, AppModel>) -> Rect {
 
 /// Unfold the section.
 fn open_section(h: &mut Harness<'static, AppModel>) {
-    h.get_by_label(HEAD).scroll_to_me();
+    h.get_by_label_contains(HEAD).scroll_to_me();
     h.run();
-    h.get_by_label(HEAD).click();
+    h.get_by_label_contains(HEAD).click();
     h.run();
 }
 
@@ -66,9 +74,9 @@ fn the_inspector_is_folded_at_the_bottom_of_the_texture_panel() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(leaf(d.path()), 1280.0);
     let c = centre(&h);
-    let head = h.get_by_label(HEAD);
+    let head = h.get_by_label_contains(HEAD);
     assert!(c.contains(head.rect().center()));
-    assert!(head.rect().top() > h.get_by_label("Compression").rect().top());
+    assert!(head.rect().top() > h.get_by_label_contains("Compression, ").rect().top());
     assert!(h.query_by_label(ONLY).is_none(), "closed by default");
     open_section(&mut h);
     h.get_by_label(ONLY);
@@ -115,9 +123,9 @@ fn the_preview_strip_has_no_inspector() {
     let strip = support::panel(&h.ctx, "preview-settings");
     // The strip is drawn: it holds the texture's Compression group, and no section.
     assert!(h
-        .query_all_by_label("Compression")
+        .query_all_by_label_contains("Compression, ")
         .any(|n| strip.contains(n.rect().center())));
-    assert!(h.query_by_label(HEAD).is_none());
+    assert!(h.query_by_label_contains(HEAD).is_none());
 }
 
 /// D10: the first column reads in words; the key rides in the AccessKit name and on hover.

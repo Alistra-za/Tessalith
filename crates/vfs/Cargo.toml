@@ -9,8 +9,11 @@ rust-version.workspace = true
 [dependencies]
 thiserror.workspace = true
 walkdir.workspace = true
-lz4_flex.workspace = true
+lzzzz.workspace = true
 nif = { path = "../nif" }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[lints]
+workspace = true

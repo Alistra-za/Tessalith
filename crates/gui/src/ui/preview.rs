@@ -15,7 +15,8 @@ use engine::config::Format;
 use engine::cube::layout::HCROSS;
 use std::sync::Arc;
 
-pub(crate) const SETTINGS_WIDTH: f32 = 280.0;
+/// The width of the preview strip's settings panel.
+pub const SETTINGS_WIDTH: f32 = 280.0;
 /// The narrowest the viewports get (A10): below it the settings collapse to a strip.
 pub const PREVIEW_MIN: f32 = 480.0;
 /// From this window width the settings start open (Note FC8).
@@ -166,7 +167,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| settings_panel::draw(ui, model, &key, true));
+                    .show(ui, |ui| {
+                        settings_panel::draw(ui, model, &key, settings_panel::Surface::Strip)
+                    });
             });
     } else {
         // Its own id: a strip under "preview-settings" would store 24 px as that panel's width (A6).

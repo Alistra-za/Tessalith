@@ -1,8 +1,130 @@
 //! Environment cube from the HDRI (v2 Phase D, D5): CS's cube face convention (CaptureCommon.hlsli:48-76
 //! GetSamplingVector), the yaw turn, the box mips, the GGX-prefiltered specular chain, and the GPU's own cube addressing of the uploaded cube.
+mod common;
+use common::hdr_bytes;
 use render3d::composite::EnvMaps;
-use render3d::hdri::{cube_dir, cube_faces, dir_to_uv, mip_chain, specular_chain, studio, Hdr};
+use render3d::hdri::{
+    cube_dir, cube_faces, dir_to_uv, mip_chain, procedural, specular_chain, Environment, Hdr,
+};
 use std::f32::consts::PI;
+
+fn grey(w: usize, h: usize) -> Vec<u8> {
+    hdr_bytes(w, h, |x, _| [0.25 + x as f32 / (4 * w) as f32; 3])
+}
+
+#[test]
+fn a_2_to_1_file_loads() {
+    let e = Environment::from_bytes(&grey(128, 64)).unwrap();
+    assert_eq!((e.image().width, e.image().height), (128, 64));
+    assert!(e.image().rgb.iter().all(|v| (0.2..0.55).contains(v)));
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("sky.HDR"); // the extension is case-insensitive
+    std::fs::write(&p, grey(128, 64)).unwrap();
+    assert_eq!(Environment::from_path(&p).unwrap().image().width, 128);
+}
+
+#[test]
+fn refusals_name_the_reason() {
+    let header_only = |w: usize, h: usize| {
+        format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes()
+    };
+    let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+        ("not 2:1", grey(100, 64), "2:1"),
+        ("too small", grey(32, 16), "64"),
+        // Only a header: the size is refused before any pixel is decoded.
+        ("too large", header_only(8192, 4096), "4096"),
+        // Just over the cap, so only the width rule can name 4096 (the decoder's own error would not).
+        ("just too large", header_only(4098, 2049), "4096"),
+        (
+            "not RGBE",
+            b"just some text, not an image".to_vec(),
+            "Radiance",
+        ),
+    ];
+    for (what, bytes, needle) in cases {
+        let e = Environment::from_bytes(&bytes).unwrap_err();
+        assert!(e.contains(needle), "{what}: {e}");
+        assert!(!e.contains('\n'), "{what}: one line: {e}");
+    }
+    // RGBE bytes cannot hold a NaN, so the finite rule is checked on a decoded image.
+    let mut rgb = vec![0.5; 64 * 32 * 3];
+    rgb[100] = f32::NAN;
+    let e = Environment::from_image(Hdr {
+        width: 64,
+        height: 32,
+        rgb,
+    })
+    .unwrap_err();
+    assert!(e.contains("finite"), "{e}");
+    // The extension is checked before the file is read, so the path needs no file.
+    let e = Environment::from_path(std::path::Path::new("sky.png")).unwrap_err();
+    assert!(e.contains(".hdr"), "{e}");
+}
+
+/// Final review: `from_image` is public, so an image whose buffer does not hold `width × height` RGB samples is refused
+/// with a reason, never indexed past its end; and a height whose double overflows is refused, not a panic.
+#[test]
+fn an_image_with_the_wrong_sample_count_is_refused() {
+    for (what, len) in [("short", 64 * 32 * 3 - 1), ("long", 64 * 32 * 3 + 3)] {
+        let e = Environment::from_image(Hdr {
+            width: 64,
+            height: 32,
+            rgb: vec![0.5; len],
+        })
+        .unwrap_err();
+        assert!(e.contains("6144"), "{what}: {e}");
+    }
+    let e = Environment::from_image(Hdr {
+        width: 64,
+        height: usize::MAX,
+        rgb: vec![],
+    })
+    .unwrap_err();
+    assert!(e.contains("2:1"), "{e}");
+}
+
+#[test]
+fn procedural_matches_the_ambient_axes() {
+    // Opposite axes sum to 1.0 in every channel, so the six-axis blend returns each axis colour on its axis.
+    let six = [
+        [0.60, 0.50, 0.40], // +X
+        [0.40, 0.50, 0.60], // -X
+        [0.30, 0.70, 0.50], // +Y
+        [0.70, 0.30, 0.50], // -Y
+        [0.90, 0.20, 0.10], // +Z
+        [0.10, 0.80, 0.90], // -Z
+    ];
+    let img = procedural(&six);
+    assert_eq!((img.width, img.height), (128, 64));
+    let at = |x: usize, y: usize| [0, 1, 2].map(|k| img.rgb[(y * 128 + x % 128) * 3 + k]);
+    let close = |a: [f32; 3], b: [f32; 3], what: &str| {
+        for k in 0..3 {
+            assert!((a[k] - b[k]).abs() < 1e-3, "{what}: {a:?} vs {b:?}");
+        }
+    };
+    // No pixel centre lies on an axis, so each axis is read where the blend's other terms cancel. At a pole the mean
+    // of the row next to it drops the x and y terms and leaves cos(1.4 degrees) on the z term.
+    let row_mean = |y: usize| [0, 1, 2].map(|k| (0..128).map(|x| at(x, y)[k]).sum::<f32>() / 128.0);
+    close(row_mean(0), six[4], "+Z");
+    close(row_mean(63), six[5], "-Z");
+    // On the equator rows 31 and 32 straddle it (their z terms cancel); the two columns around the direction are
+    // interpolated by where the direction falls between their centres.
+    let along = |d: [f32; 3]| {
+        let fx = dir_to_uv(d).0 * 128.0 - 0.5;
+        let (x0, w) = (fx.floor(), fx - fx.floor());
+        let (a, b) = (
+            (x0 as isize).rem_euclid(128) as usize,
+            (x0 as isize + 1).rem_euclid(128) as usize,
+        );
+        [0, 1, 2].map(|k| {
+            0.5 * ((1.0 - w) * (at(a, 31)[k] + at(a, 32)[k]) + w * (at(b, 31)[k] + at(b, 32)[k]))
+        })
+    };
+    close(along([1.0, 0.0, 0.0]), six[0], "+X");
+    close(along([-1.0, 0.0, 0.0]), six[1], "-X");
+    close(along([0.0, 1.0, 0.0]), six[2], "+Y");
+    close(along([0.0, -1.0, 0.0]), six[3], "-Y");
+}
 
 /// `w × h` image whose pixel (x, y) is (x, y, 0): the source pixel of any sample can be read back exactly.
 fn index_image(w: usize, h: usize) -> Hdr {
@@ -61,7 +183,7 @@ fn cube_faces_agree_with_dir_to_uv() {
 #[test]
 fn yaw_rotates_the_cube() {
     const N: u32 = 8;
-    let img = index_image(studio().image.width, studio().image.height);
+    let img = index_image(1024, 512);
     let (a, b) = (cube_faces(&img, N, 0.0), cube_faces(&img, N, PI / 2.0));
     let w = img.width as f32;
     let mut moved = 0;
@@ -228,6 +350,7 @@ fn sample_cube(
             SysMemSlicePitch: 0,
         });
         let mut b = None;
+        // SAFETY: `d` is a valid buffer desc, `data` (when present) points at `init`, which outlives the call and holds `n` float4 values, so at least `d.ByteWidth` (n * 16) bytes, and `b` is a writable out-parameter.
         unsafe {
             gpu.device
                 .CreateBuffer(&d, data.as_ref().map(|x| x as *const _), Some(&mut b))
@@ -257,6 +380,7 @@ fn sample_cube(
         ..Default::default()
     };
     let (mut cs, mut smp, mut dsrv, mut uav) = (None, None, None, None);
+    // SAFETY: every object belongs to `gpu.device`; the buffers hold `n` float4 values, so the mapped read of `n` `[f32; 4]` stays inside the staging buffer and ends before Unmap.
     unsafe {
         gpu.device
             .CreateComputeShader(&c.bytecode, None, Some(&mut cs))

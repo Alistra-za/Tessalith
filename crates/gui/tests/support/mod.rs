@@ -1364,6 +1364,66 @@ pub fn bar_rects_in<S>(
     bar_like(&filled_rects(&h.output().shapes), c)
 }
 
+/// Every texture group open in `m.settings` (the groups start closed, so a test that reads a row inside one
+/// opens them before its harness is built).
+pub fn open_texture_groups(m: &mut AppModel) {
+    for g in sdc_gui::model::panel_groups::PanelGroup::ALL {
+        sdc_gui::model::panel_groups::set_open(&mut m.settings, g, true);
+    }
+}
+
+/// The distinct (role, label) kinds of enabled control inside `area` (texture-panel-compact plan, "Expected control
+/// kinds"): AccessKit nodes of an input role, every digit run turned into `#`, a disclosure triangle's label cut at its
+/// first ", ", and a "Use {type}" button folded into one kind.
+pub fn control_kinds<S>(
+    h: &egui_kittest::Harness<'_, S>,
+    area: eframe::egui::Rect,
+) -> BTreeSet<(String, String)> {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let roles = [
+        Role::Button,
+        Role::CheckBox,
+        Role::ComboBox,
+        Role::Slider,
+        Role::SpinButton,
+        Role::TextInput,
+        Role::Link,
+        Role::DisclosureTriangle,
+        Role::RadioButton,
+        Role::MenuItem,
+    ];
+    let mut kinds = BTreeSet::new();
+    for role in roles {
+        for n in h.query_all_by_role(role) {
+            if !area.contains_rect(n.rect()) || n.accesskit_node().is_disabled() {
+                continue;
+            }
+            let mut label = n.accesskit_node().label().unwrap_or_default();
+            if role == Role::DisclosureTriangle {
+                if let Some((head, _)) = label.split_once(", ") {
+                    label = head.to_string();
+                }
+            }
+            if role == Role::Button && label.starts_with("Use ") {
+                label = "Use {type}".to_string();
+            }
+            let mut folded = String::new();
+            for c in label.chars() {
+                if c.is_ascii_digit() {
+                    if !folded.ends_with('#') {
+                        folded.push('#');
+                    }
+                } else {
+                    folded.push(c);
+                }
+            }
+            kinds.insert((format!("{role:?}"), folded));
+        }
+    }
+    kinds
+}
+
 /// The x a control may reach beside a scroll bar whose track is `track`: short of the 10 px the bar takes when hovered
 /// (`bar_width`), or, for a set card (a frame in the Sets column whose own margin is wider than the rest), short of the
 /// track itself at rest. The caller says whether the control is a set card.

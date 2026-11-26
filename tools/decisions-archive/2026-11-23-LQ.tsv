@@ -1,0 +1,6 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+HI2	HI		back	LQ		archive-item	2026-11-23		the group list (Type, Alpha, Mipmaps, Compression) is replaced by LQ2; Input content and DDS tag stay in Compression (LQ2)
+HI4	HI		back	LQ		partial	2026-11-23		goes: the Helper row sits in a "Type group"; stays: the tick, the role combo, the helper panel (LQ1: first screen)
+HI13	HI		back	LQ		partial	2026-11-23		goes: the Undecided box's place (LQ1: on the first screen, above the groups); stays: the Alpha row's alignment
+JI3	JI		back	LQ		partial	2026-11-23		goes: the group names as `GROUPS` and the inspector's per-panel fold in egui memory (LQ2, LQ5: PanelGroup, gui.toml [texture_groups]); stays: the rows, the widths, the strip and bulk
+LM13	LM		back	LQ		partial	2026-11-23		goes: "above the Type group" (LQ1: the Type group is gone; the list sits above the first screen's type row); stays: the rest

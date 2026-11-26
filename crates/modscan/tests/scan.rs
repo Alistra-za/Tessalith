@@ -360,7 +360,7 @@ fn folder_source_scans_one_origin() {
 /// Owner-instance smoke run (plan step 5). Read-only on the instance; writes only %TEMP%\sdc-scan-smoke.db.
 #[cfg(windows)]
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_smoke() {
     let Some(root) = std::env::var_os("SDC_ACHERUS").map(std::path::PathBuf::from) else {
         println!("skipped: set SDC_ACHERUS");
@@ -508,7 +508,7 @@ fn report_has_phase_timings() {
 /// Manual check of the shell Documents lookup (prints the folder; reads nothing in it).
 #[cfg(windows)]
 #[test]
-#[ignore]
+#[ignore = "manual check: needs a Windows user session with a Documents folder, and prints it"]
 fn documents_dir_resolves() {
     let d = modscan::win::documents_dir().expect("FOLDERID_Documents");
     println!("documents: {}", d.display());
@@ -519,7 +519,7 @@ fn documents_dir_resolves() {
 /// instance; the store is a temp file, never the real scan.db.
 /// `SDC_ACHERUS='<your MO2 instance>' cargo test -p modscan --release --test scan owner_timing -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_timing() {
     let root = std::path::PathBuf::from(
         std::env::var("SDC_ACHERUS").expect("set SDC_ACHERUS to the MO2 instance root"),

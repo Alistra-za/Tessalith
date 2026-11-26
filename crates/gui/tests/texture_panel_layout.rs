@@ -49,7 +49,8 @@ fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     sized_harness(m, w, 800.0)
 }
 
-fn sized_harness(m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
+fn sized_harness(mut m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -157,7 +158,8 @@ fn the_variance_bake_provenance_explains_itself() {
 #[test]
 fn every_control_starts_at_the_same_x() {
     let d = tempfile::tempdir().unwrap();
-    let h = harness(model(d.path()), 1280.0);
+    // Tall enough that the last group is inside the centre (AccessKit rects are not clipped): the headers take room.
+    let h = sized_harness(model(d.path()), 1280.0, 1600.0);
     let all = controls(&h, centre(&h));
     let x = all[0].1.min.x;
     for (n, r) in &all {
@@ -192,7 +194,8 @@ fn the_helper_tick_sits_under_sub_type() {
 #[test]
 fn every_dropdown_has_the_same_width() {
     let d = tempfile::tempdir().unwrap();
-    let h = harness(model(d.path()), 1280.0);
+    // Tall enough that the last group is inside the centre (AccessKit rects are not clipped): the headers take room.
+    let h = sized_harness(model(d.path()), 1280.0, 1600.0);
     for (n, r) in combos(&h, centre(&h)) {
         assert!(
             (r.width() - CONTROL_W).abs() <= 1.0,
@@ -213,7 +216,16 @@ fn mipmaps_tick_is_in_the_control_column() {
         (tick.min.x - filter.min.x).abs() <= 1.0,
         "tick {tick:?}, Filter {filter:?}"
     );
-    let label = control(&h, Role::Label, "Mipmaps", c);
+    // Two "Mipmaps" labels: the group header's title and the tick's row label; the row's is the one beside the tick.
+    let labels: Vec<Rect> = h
+        .query_all(by().role(Role::Label).label("Mipmaps"))
+        .map(|n| n.rect())
+        .filter(|r| {
+            c.contains(r.center()) && tick.min.y <= r.center().y && r.center().y <= tick.max.y
+        })
+        .collect();
+    assert_eq!(labels.len(), 1, "the tick row's label: {labels:?}");
+    let label = labels[0];
     assert!(
         label.max.x <= tick.min.x,
         "label {label:?} left of the tick {tick:?}"
@@ -399,7 +411,8 @@ fn the_panel_shows_levels_a_size_group_and_the_dds_header() {
     let h = sized_harness(m, 1280.0, 1600.0);
     let c = centre(&h);
     let header = |t: &str| {
-        h.query_all_by_label(t)
+        // A group header's name is "{title}, {state}…"; no row has that comma.
+        h.query_all_by_label_contains(&format!("{t}, "))
             .find(|n| c.contains(n.rect().center()))
             .unwrap_or_else(|| panic!("{t} in the centre"))
             .rect()
@@ -882,6 +895,7 @@ fn window_harness(dir: &std::path::Path) -> H3 {
         .clone();
     m.selection = Selection::Item(item);
     m.settings.set_settings_open = true;
+    open_texture_groups(&mut m);
     let state = sdc_gui::ui::State {
         set3d: SetPreview::new(None, DEFAULT_CAP),
         ..Default::default()
@@ -1007,7 +1021,7 @@ fn compact_strip_has_no_colour_rows() {
     let d = tempfile::tempdir().unwrap();
     let (h, strip) = strip_harness(d.path());
     assert!(h
-        .query_all_by_label("Compression")
+        .query_all_by_label_contains("Compression, ")
         .any(|n| strip.contains(n.rect().center())));
     // Note JI3: nor the rows the drawer handed to the centre (Levels, the Size group, DDS header).
     for name in [

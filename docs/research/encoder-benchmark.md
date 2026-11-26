@@ -715,6 +715,8 @@ I audited the vendored ISPC TC BC6H kernel and fixed what reproduced, in patch 0
 
 **Method.** `crates/encoders-sys/examples/bc6h_quality.rs` encodes the 18 `hdr_real` images (Poly Haven, 1024x512) and the 4 synthetic `hdr_grad` images at all six levels, one 4-row strip per call, decodes with `bcdec_rs`, and scores mPSNR, RMSLE and the peak ratio against the input as the engine sends it (every channel through `clamp_half`). The base is the kernel before patch 0004, the final is the kernel after it, both on the AVX2 path, paired per image: n = 18, 95 % Student-t intervals. Machine: Windows, Ryzen 7 9800X3D. A fix that lowered a metric's mean with an interval excluding 0 would have been dropped; only #2 trips that at Veryfast, and the owner accepted it.
 
+Patches 0006 and 0007 came after these measurements, so the quality and time tables below measured the kernel before them. Patch 0006 ([speed phase](#audit-follow-up-speed-phase-patch-0006-2026-11-24-note-lt)) changes no byte and only the time; patch 0007 ([quality phase](#audit-follow-up-quality-phase-patch-0007-2026-11-25-note-lt)) changes bytes at every level.
+
 Base to final, mean delta (+ is better) with its 95 % half-width, and images better/worse:
 
 | Level | mPSNR dB | RMSLE x1000 | Peak ratio |
@@ -755,6 +757,198 @@ Base to final, mean delta (+ is better) with its 95 % half-width, and images bet
 - #5, #1 and #3 cost nothing measurable: the rounds of one build differ by up to 1.4 %.
 - #2's first form searched three candidate codes per endpoint and was 18 % slower in total. A single multiply finds the same code and writes the same bytes, so it replaced the search; #2 now costs 3 to 6 % per level. The first four columns come from one VM run and the last two from a second one.
 - Veryfast takes 0.08 to 0.10 s for all 22 images, so its ratios move in coarse steps.
+
+### Audit follow-up, speed phase (patch 0006, 2026-11-24, Note LT)
+
+A second audit of the BC6H kernel (mine, plus a Codex one whose findings Opus checked one by one) left more open after patch 0004. I split the work in two: speed items that must not move a byte, which are patch 0006 (`crates/encoders-sys/vendor/ispctc/patches/0006-bc6h-speed.patch`) and are described here, and fixes that do move bytes, which are patch 0007 ([quality phase](#audit-follow-up-quality-phase-patch-0007-2026-11-25-note-lt)). Patch 0006 is seven kept items and one dropped. BC6H output is byte for byte what patch 0004 wrote, on SSE2, AVX2 and AVX-512. Timed on the VM, the 22 images take 0.519 of the time end to end, about 1.9 times as fast (1.96 times at VeryslowPeak, the level BC6H's default effort, Slowest, uses). That is patch 0006 alone; the quality phase below takes back about an eighth of the time saved (1.116 of the speed end's time in total, 1.077 at VeryslowPeak).
+
+**Diagnostics.** `bc6h_quality diag` (new, in `crates/encoders-sys/examples/bc6h_quality.rs`) encodes the 22 images at all six levels and counts what the audit asked about, without touching a kernel byte. AVX2 on the Ryzen, 18 `hdr_real` images (589,824 blocks) and 4 `hdr_grad`. The fixes these point at are not in 0006, so each is one line here and the counts are in Note LT:
+- Decode bias (Q5): the decoded half is 0.41 to 0.51 codes below the source on average on `hdr_real` at every level (median 0, or -1 for Veryfast's blue).
+- Collapsed regions (Q2): on `hdr_real`, 0.19 to 0.44 % of regions decode to one colour though the source has several, with at most 0.007 % of the squared error; `hdr_grad` reaches 1.03 % of regions and 0.264 % of the error.
+- Two-region gate at Fast and Basic (Q4): a different gate would change the pick of 43,728 of 589,824 blocks at each level.
+- Guarded blocks (Q6): 256 of 589,824 blocks take the peak search, and the lift changes no channel in 211 of them (that is what the skip-retry item removes).
+- Three Codex findings (astra #5, #2 and #6): 5 blocks, 2 blocks and a source-side proxy. The quality phase built astra #5 and #6 and skipped astra #2.
+- Two tests that failed at the time were committed `#[ignore]` ahead of their fixes: a zero-covariance PCA block that decoded wrongly on the Ryzen's AVX-512 path only, and constant blocks that decoded one half code low (2,194 of 4,536 at every level and path, every channel that missed being exactly one low). Both fixes are in patch 0007 and both tests run now.
+
+**Kept.** Each item was checked to leave every byte as it was: the 18 pins, the random strips (48 hashes, 72 with AVX-512), the 22 measured images at all six levels on all three paths, and the engine's `hdr_sky.dds`.
+- R2: the endpoint quantiser, its inverse and the PCA helpers touched slots nobody had written (the fourth channel of an endpoint, covariance entries the setup never filled); those loops now skip them. S2's cached copy of 16 floats and the best-endpoint copy still carry the unused slots along, which changes no output value. A correctness item, kept on identical bytes; it is also faster.
+- Zero-div guard: a region with equal endpoints divided 0 by 0; it divides by at least 1. The numerator is still 0, so the index is as before, without the NaN. Kept as a correctness item; its small cost at Slow and VeryslowPeak is given with the speed results below.
+- Q6 skip-retry: VeryslowPeak ran its second search on every guarded block, and a block the lift does not change would repeat the first search exactly. It runs the second search only where the lift raised a channel.
+- S1 rank-once: each two-region mode ranked the same 32 partitions of the block again (six times at Slow and slower). It is ranked once per block.
+- S2 PCA once: each mode refitted the same line through the block for every ranked partition. The fits are cached per block (about 32.5 KiB of state per gang on AVX-512).
+- 7a qbounds-once: at Veryfast, Fast and Basic each admitted mode built endpoint bounds that the next one overwrote. They are built once, right before the encode that uses them.
+- S4 prune: at Slow and slower a mode is skipped when the distance of the block's texels to its endpoint window already exceeds the best error. The bound is below every candidate's error (it fired no assert in 15.9 million lane encodes; counts under "Mutations and proofs" below).
+
+**Dropped.** S3, a BC6H `block_quant` that loads each region's endpoints once instead of gathering: both forms I tried (a hoisted reciprocal, then a per-texel division) changed bytes in `hdr_sky.dds`, which the engine's identity test caught. The first left the pins and the random strips equal. The second, on AVX2, changed some of the 22 images at every level (every metric delta +0.000, last-bit index flips). Two tries were the limit I set, so it is dropped from patch 0006 and no time was measured; the quality phase ([below](#audit-follow-up-quality-phase-patch-0007-2026-11-25-note-lt)) kept it as a byte-changing item.
+
+**Method.** The same Linux VM as for patch 0004 (an Intel i9-13900K guest, 6 vCPUs, Wine 11.0), AVX2 path, one thread, 22 images, the median of 5 rounds in alternating order. A round with another process running was discarded and re-run. Every item is timed against the exe of the one kept before it, so the item's gain is the ratio of two runs made together. As for patch 0004, the VM's bytes differ from the Ryzen's, so only time is compared. The noise: an exe against itself gave ratios of 0.989 at Veryfast and 0.999 to 1.001 elsewhere, and each exe's slowest round over its fastest is in the spread table. A gain or loss counts only when the ratio is outside both exes' spreads; a ratio inside at least one exe's spread is called within noise. An item is kept when it is faster beyond the noise at the levels it names and no level is slower beyond it; R2 and the zero-div guard are kept on identical bytes alone unless slower, and the zero-div guard is slower at two levels and kept anyway because it removes NaN-dependent behaviour (its cost is in the notes below the speed table).
+
+Ratio after over before (below 1 is faster); Veryfast takes 0.08 to 0.09 s, so its figures move in steps of one hundredth:
+
+| item | veryfast | fast | basic | slow | veryslow | veryslow_peak | total |
+|---|---|---|---|---|---|---|---|
+| R2 | 0.988 | 0.917 | 0.926 | 0.960 | 0.959 | 0.959 | 0.957 |
+| zero-div guard | 0.988 | 1.017 | 1.004 | 1.007 | 1.007 | 1.005 | 1.007 |
+| Q6 skip-retry | 0.988 | 0.987 | 0.997 | 0.998 | 0.998 | 0.994 | 0.996 |
+| S1 rank-once | 1.024 | 1.012 | 0.773 | 0.742 | 0.872 | 0.873 | 0.848 |
+| S2 PCA once | 0.976 | 0.993 | 0.908 | 0.714 | 0.652 | 0.652 | 0.680 |
+| 7a qbounds-once | 1.000 | 0.981 | 0.987 | 0.998 | 0.999 | 0.998 | 0.995 |
+| S4 prune | 1.000 | 1.010 | 0.999 | 0.935 | 0.938 | 0.939 | 0.943 |
+| all seven, chained | 0.964 | 0.916 | 0.641 | 0.477 | 0.513 | 0.511 | 0.519 |
+
+Median seconds, before / after, for all 22 images:
+
+| item | veryfast | fast | basic | slow | veryslow | veryslow_peak | total |
+|---|---|---|---|---|---|---|---|
+| R2 | 0.09 / 0.09 | 0.64 / 0.59 | 1.61 / 1.49 | 6.83 / 6.56 | 14.71 / 14.11 | 14.83 / 14.21 | 38.71 / 37.04 |
+| zero-div guard | 0.09 / 0.08 | 0.59 / 0.60 | 1.49 / 1.50 | 6.56 / 6.60 | 14.11 / 14.21 | 14.21 / 14.29 | 37.04 / 37.29 |
+| Q6 skip-retry | 0.08 / 0.08 | 0.60 / 0.59 | 1.50 / 1.49 | 6.60 / 6.59 | 14.21 / 14.18 | 14.29 / 14.20 | 37.28 / 37.13 |
+| S1 rank-once | 0.08 / 0.09 | 0.59 / 0.60 | 1.49 / 1.15 | 6.57 / 4.87 | 14.18 / 12.36 | 14.21 / 12.41 | 37.13 / 31.47 |
+| S2 PCA once | 0.09 / 0.08 | 0.60 / 0.59 | 1.17 / 1.06 | 4.92 / 3.51 | 12.48 / 8.14 | 12.50 / 8.15 | 31.71 / 21.55 |
+| 7a qbounds-once | 0.08 / 0.08 | 0.59 / 0.58 | 1.05 / 1.04 | 3.50 / 3.49 | 8.05 / 8.04 | 8.07 / 8.05 | 21.39 / 21.29 |
+| S4 prune | 0.08 / 0.08 | 0.58 / 0.59 | 1.04 / 1.04 | 3.49 / 3.26 | 8.04 / 7.54 | 8.07 / 7.58 | 21.30 / 20.09 |
+
+R2 and the zero-div guard were timed in one run against the base; each later item ran in its own VM session against the previous kept exe, so one item's "after" and the next item's "before" come from different sessions and differ a little (37.29 and 37.28 s, 31.47 and 31.71 s, 21.55 and 21.39 s), and the 38.71 s and 20.09 s ends come from different sessions too. The chained row multiplies the seven ratios; the end-to-end measure is 38.71 s (base, R2's "before") to 20.09 s (S4's "after"), 0.519 of the time, or about 1.9 times as fast. By level: Slow 6.83 to 3.26 s, Veryslow 14.71 to 7.54 s, VeryslowPeak 14.83 to 7.58 s.
+
+Spread, each exe's slowest of 5 rounds over its fastest, before / after:
+
+| item | veryfast | fast | basic | slow | veryslow | veryslow_peak | total |
+|---|---|---|---|---|---|---|---|
+| R2 | 1.023 / 1.037 | 1.024 / 1.012 | 1.014 / 1.008 | 1.006 / 1.005 | 1.001 / 1.009 | 1.003 / 1.004 | 1.002 / 1.006 |
+| zero-div guard | 1.037 / 1.048 | 1.012 / 1.019 | 1.008 / 1.010 | 1.005 / 1.004 | 1.009 / 1.005 | 1.004 / 1.004 | 1.006 / 1.002 |
+| Q6 skip-retry | 1.036 / 1.036 | 1.010 / 1.026 | 1.003 / 1.017 | 1.001 / 1.007 | 1.001 / 1.001 | 1.005 / 1.002 | 1.002 / 1.001 |
+| S1 rank-once | 1.012 / 1.024 | 1.012 / 1.046 | 1.006 / 1.006 | 1.006 / 1.008 | 1.003 / 1.006 | 1.002 / 1.004 | 1.002 / 1.005 |
+| S2 PCA once | 1.036 / 1.084 | 1.019 / 1.024 | 1.021 / 1.017 | 1.005 / 1.012 | 1.005 / 1.029 | 1.004 / 1.028 | 1.004 / 1.022 |
+| 7a qbounds-once | 1.037 / 1.012 | 1.014 / 1.016 | 1.014 / 1.006 | 1.028 / 1.013 | 1.006 / 1.002 | 1.008 / 1.003 | 1.006 / 1.002 |
+| S4 prune | 1.049 / 1.024 | 1.019 / 1.029 | 1.007 / 1.011 | 1.004 / 1.005 | 1.006 / 1.007 | 1.004 / 1.003 | 1.002 / 1.005 |
+
+What the tables say, item by item:
+- R2 is faster beyond the noise at every level but Veryfast (0.917 to 0.960).
+- The zero-div guard costs 0.7 % at Slow and 0.5 % at VeryslowPeak. Fast's 1.017 is inside the guard exe's spread (1.019), Basic's 1.004 inside both, and Veryslow's 1.007 inside R2's (1.009), so those and every other level are within noise; only Slow (1.007) and VeryslowPeak (1.005) are outside both exes' spreads. I kept it anyway: it removes NaN-dependent behaviour, for 0.5 to 0.7 % at Slow and VeryslowPeak if the call is wrong.
+- The skip-retry is faster at VeryslowPeak beyond the noise: its five rounds were 14.180 to 14.206 s against 14.278 to 14.347 s, no overlap, and the peak pass over Veryslow fell from 0.08 s to 0.02 s. That pass cost is what I keep it for. The 0.994 ratio is not: Veryslow, where the retry never runs, moved 0.998 with non-overlapping rounds too (14.174 to 14.182 against 14.206 to 14.219 s), which is probably code layout or alignment, not this change.
+- S1 is 12.7 to 25.8 % faster at Basic and slower. Fast (1.012) and Veryfast (1.024) are each inside at least one exe's spread; Fast now ranks in every gang where it ranked only in gangs that entered a two-region mode, so a little more work there is plausible.
+- S2 is 9.2 to 34.8 % faster at Basic and slower, the biggest single gain. Veryfast and Fast are within noise.
+- 7a is faster at Fast by 1.9 %, beyond both spreads, and within noise elsewhere. A first form that always built with the widened-bounds helper added a loop per build and was replaced by two calls; two earlier runs of that form were partly loaded and are replaced by the one clean run in the tables.
+- S4 is 6.1 to 6.5 % faster at Slow, Veryslow and VeryslowPeak, beyond both spreads (the rounds do not overlap); the other levels are within noise. 3.7 million of 19.7 million unguarded lane-modes were skipped. It prunes a mode only when all 16 lanes of an AVX-512 gang prune, so its gain there may differ from the VM's AVX2.
+
+**Mutations and proofs.** Each byte-neutral item was broken on purpose after its commit, to show that a check sees it (R2 and the zero-div guard change no output value, so none is possible; the zero-div one is the old kernel).
+- Skip-retry, `if (!lifted)`: `the_peak_mode_is_byte_identical_to_the_recorded_objects` (the VeryslowPeak pins) and `peak_mode_keeps_a_blue_zero_sun` fail on SSE2, AVX2 and AVX-512, and the VeryslowPeak strip hash of `a` moves on SSE2 and AVX2.
+- S1: deleting the ranking call in `bc6h_setup` fails `shipped_levels_are_byte_identical_to_the_recorded_objects`, `the_peak_mode_is_byte_identical_to_the_recorded_objects` and `the_plain_call_encodes_on_the_process_target` on all three paths and moves 60 strip hashes. Deleting the call in `bc6h_peak_retry` moves nothing, no pin, strip hash or test: VeryslowPeak searches all 32 partitions (`fastSkipTreshold` 32), so list order matters only for exact ties. The call stays as the exact equivalent of the old per-call ranking; a change that lowers that threshold must add a check.
+- S2: (a) every rank copying rank 0's endpoints fails the same two pins on all three paths and moves 30 of the 48 SSE2 and AVX2 strip hashes; (b) deleting the refill in `bc6h_peak_retry` fails `the_peak_mode_is_byte_identical_to_the_recorded_objects` and `peak_mode_keeps_a_blue_zero_sun` on all three paths and moves the VeryslowPeak strip hash of `a` (the stale list alone moves nothing, so this is the endpoints).
+- 7a: dropping the bounds build before `bc6h_enc_1p` at Fast and Basic (run on the first form, the one that always called the widened-bounds helper) fails `shipped_levels_are_byte_identical_to_the_recorded_objects` and `refinement_never_ends_worse_than_veryfast` on all three paths and moves 4 Fast and 4 Basic of the 48 strip hashes; dropping it at Veryfast too crashes the `bc6h` binary with a stack buffer overrun. Dropping the build before `bc6h_enc_2p` at Fast and Basic (final form) leaves the bounds uninitialised and aborts the binary on a kernel assert, so no hash is compared. The replacement of the first form by two calls was forced by its cost (an extra loop per build), not by an identity failure.
+- S4: the bound is proved by a scratch build that asserted `best_err >= bound * (1 - 1e-4) - 1` on each encoded mode of unguarded slow-level lanes. It fired on none of 15,922,981 lane encodes of the 22 images on AVX2 (Slow and Veryslow together 10,616,599, VeryslowPeak 5,306,382; 3,735,259 of 19,658,240 unguarded lane-modes pruned, 3,010 guarded lane-modes not checked), nor on 314,139 in `random_blocks_encode_at_every_level_on_every_path` with AVX-512 (209,426 without). A control with an always-false assert aborted the test at its first Slow call, so the assert was live. The mutation `bound * 2 > best_err` passes the pins and strips; `encode_versions` fails (`hdr_sky.dds`) and the 22-image compare says 0/18 and 1/4 identical at Slow, Veryslow and VeryslowPeak.
+- S3 in detail: the first attempt hoisted `1.0f / div` per region (with `bc6h_peak_guard` given the same select, then again with its gathers restored); its `bc6h` binary on all three paths and its 48 and 72 strip hashes equalled the previous kept ones, but `encode_versions` failed. The second divided per texel (`proj / div_j`) and failed `encode_versions` too; against the previous kept CSV on AVX2 the hdr_real / hdr_grad images identical were 17/18 and 3/4 at Veryfast, 5/18 and 3/4 at Fast, 5/18 and 2/4 at Basic, 4/18 and 2/4 at Slow, 3/18 and 2/4 at Veryslow and VeryslowPeak. The smallest reproduction is the one-region path at Veryfast on `studio_small_08` and `dim_ramp`. My guess, not tested: under fast-math the loop-invariant division compiles to a reciprocal multiply, so both attempts compile alike.
+
+**SSE2 and AVX-512 on the PC.** The whole speed phase was also timed end to end on the Ryzen: the base exe (8f98807a, patch 0004's kernel) against the speed-end exe (8543ef55, patch 0006; its kernel differs from the last kernel commit, 9c452929, by one comment). One thread, the same 22 images, the median of 3 clean rounds with no other session running, SSE2 then AVX-512 in each round. Each round timed the base, the speed-end exe and a second copy of the base (the A/A pair), in that order in rounds 1 and 3 and reversed in round 2. Seconds are summed over the 22 images (a level's median over the 3 rounds); the ratio is the speed-end median over the base median, formed from the unrounded seconds, so it can differ from the rounded seconds shown in the last digit (below 1 is faster); "spread" is an exe's slowest round over its fastest.
+
+SSE2:
+
+| level | base s | speed-end s | ratio | spread base / speed-end |
+|---|---|---|---|---|
+| Veryfast | 0.18 | 0.16 | 0.88 | 1.00 / 1.01 |
+| Fast | 1.57 | 1.48 | 0.95 | 1.00 / 1.01 |
+| Basic | 3.95 | 2.68 | 0.68 | 1.00 / 1.01 |
+| Slow | 17.22 | 8.47 | 0.49 | 1.00 / 1.01 |
+| Veryslow | 37.30 | 19.68 | 0.53 | 1.01 / 1.01 |
+| VeryslowPeak | 37.44 | 19.77 | 0.53 | 1.01 / 1.01 |
+| TOTAL | 97.73 | 52.27 | 0.54 | 1.01 / 1.01 |
+
+AVX-512:
+
+| level | base s | speed-end s | ratio | spread base / speed-end |
+|---|---|---|---|---|
+| Veryfast | 0.09 | 0.09 | 0.99 | 1.08 / 1.02 |
+| Fast | 0.51 | 0.48 | 0.94 | 1.03 / 1.01 |
+| Basic | 1.31 | 0.96 | 0.73 | 1.02 / 1.00 |
+| Slow | 5.86 | 3.50 | 0.60 | 1.01 / 1.00 |
+| Veryslow | 12.90 | 8.54 | 0.66 | 1.02 / 1.00 |
+| VeryslowPeak | 13.04 | 8.54 | 0.66 | 1.01 / 1.01 |
+| TOTAL | 33.69 | 22.09 | 0.66 | 1.01 / 1.00 |
+
+The speed-end exe is faster than the base at every level on SSE2, and on AVX-512 at every level except Veryfast, which is within noise; it is slower at none. At the default effort's level (VeryslowPeak) it takes 0.53 of the time on SSE2 (1.9 times as fast) and 0.66 on AVX-512 (1.5 times as fast), against 0.511 on the VM's AVX2 path, so the AVX-512 gain is smaller than the VM's. I did not time the items one by one on the PC, so I do not know which one gives less there; the S4 prune, which skips a mode only when all 16 lanes of a gang agree, is a candidate.
+
+Noise: the A/A ratio (second base copy over the first) is 1.00 at every level except AVX-512 Veryfast (1.06; 1.01 on SSE2). AVX-512 Veryfast takes 0.09 s for all 22 images, and its 0.99 is inside the spreads (1.08 and 1.02), so it is within noise. SSE2 Veryfast's 0.88 is outside both exes' spreads (1.00 and 1.01) and the A/A ratio, so by the rule above it counts as a gain, on a level that takes 0.16 to 0.18 s. Spreads are 1.00 to 1.02 except AVX-512 Veryfast (1.08 for the base) and Fast (1.03 for the base), and the second base copy's on AVX-512: 1.10 at Veryfast and 1.13 to 1.15 at Fast and slower (one slow run in one round; its median still equals the base's). By the noise rule above every ratio at Fast and slower, and SSE2 Veryfast's, is outside both exes' spreads.
+
+Hash check: the output hashes of the base, the second base copy and the speed-end exe are identical in all 3 rounds on both paths (12 comparisons, all equal), so the PC runs also show the bytes unchanged.
+
+### Audit follow-up, quality phase (patch 0007, 2026-11-25, Note LT)
+
+Patch 0007 (`crates/encoders-sys/vendor/ispctc/patches/0007-bc6h-quality.patch`) is the second half of that audit: the fixes that move bytes, on top of patch 0006. It holds ten kept fixes, S3 (a speed item that moves bytes) and one guard that moves nothing; I dropped one fix and skipped one. BC6H output changes at all six levels: every one of the 22 measured images differs from what patch 0006 wrote, at every level, on SSE2, AVX2 and AVX-512. At BC6H's default effort (`slowest`, the VeryslowPeak level) the picture gets closer to the source by 0.031 dB mPSNR on average (95 % interval ±0.009 dB, better on all 18 `hdr_real` images), and the 22 images take 0.549 of the time they took before the audit (1.82 times as fast, speed and quality phases together). Fast and Basic gain most, +0.058 and +0.072 dB. Veryfast is within noise.
+
+**Kept, with the number that decided each.** AVX2 on the Ryzen, the 18 `hdr_real` images, each item against the one before it; mPSNR in dB with its 95 % half-width.
+- PCA re-seed: a covariance whose rows sum to exactly 0 gave a zero vector and a NaN on the AVX-512 object (Veryfast decoded the test block as black, 24 channels off; Fast and Basic 48 off). It restarts from the channel with the largest variance, and every path now decodes the test colours within 15 half codes. No pin or image moves: SSE2 and AVX2 never reached it.
+- Q5, aim at the centre of each half code's decode range: 2,194 of 4,536 constant blocks decoded one half code low at every level, now none do. mPSNR +0.003 to +0.005 dB (±0.007, inside the noise). It costs VeryslowPeak RMSLE +0.68 % worse (satara_night, interval includes 0) and `hdr_grad` dim_ramp -0.097 dB at Veryslow and VeryslowPeak (I did not trace it); the owner kept it with both.
+- astra #4, refit at the decoder's weights: mPSNR +0.001 dB at Fast and +0.009 dB at each of Basic to VeryslowPeak (18 of 18 better, intervals exclude 0), mean RMSLE 0.05 to 0.14 % lower.
+- Q2, a bracketing pair for a region the first quantisation collapsed: +0.0007 to +0.0022 dB, every interval includes 0, no image loses. Collapsed `hdr_real` regions at Veryslow 2,048 before, 1,189 after. Bracketing every refine pass as well left 988 and gave the same quality for 1.049 of the time against 1.018, so I kept the first-quantisation form.
+- Q1, refit each two-region pass from the previous pass: +0.0005 to +0.001 dB, no image loses (wins 17 to 18 of 18 at Basic and slower), time 1.001.
+- Q4, the doubled-window gate at Fast and Basic: +0.050 dB at Fast and +0.055 dB at Basic (±0.015 and ±0.016, 18 wins, no loss); 43,728 of 589,824 blocks pick another mode.
+- Q6, exact black no longer opens the peak gate: no bench block changes (256 of 589,824 are guarded before and after). It matters for RGBE-style content with exact black, which the bench does not hold.
+- astra #6, widen the better of two channels: +0.0012 to +0.0013 dB at Slow, Veryslow and VeryslowPeak (18 wins). Trying all three variants every time gains +0.0036 dB, and the one-extra-search form I built keeps about a third of that. It costs 1.027 of the time.
+- astra #5, lift a dim sun in the peak retry: no bench byte moves (5 blocks, all moonless_golf, hold such a texel); 22 seeded blocks that decoded the peak texel below 0.9 of its luminance on every path now reach 0.9.
+- Q3, refine the two best partitions at the slow levels: +0.0154 to +0.0157 dB (±0.003), RMSLE 0.18 to 0.23 % lower, 18 of 18 better. It costs 1.09 to 1.10 times the time at Veryslow and VeryslowPeak. Four partitions gain +0.0240 dB and cost 1.26, over my 10 % limit, so I built two; the owner kept the cost.
+- S3, a quantiser that loads each region's endpoints once and multiplies by a reciprocal (the gather-free `block_quant` that I dropped in the speed phase because it moved bytes; there the quality rule was not tested, here it is): no quality mean moves (+0.000 at every level and path), it changes the bytes of 2 to 16 of the 18 `hdr_real` images by level, and it takes 0.946 of the time at Veryslow and 0.944 at VeryslowPeak (outside both exes' spreads) and 1.054 at Slow, which no effort uses. I kept it for the default effort's gain.
+- S4 guard, no byte moves: a mode is pruned only after a candidate has scored, and the best error starts at the finite 1e30f where it started at 1e99, an infinity in float. The 22 images on all three paths and the strip hashes equal what the kernel wrote before, and the scratch assert build of S4 fired on none of 15,970,493 lane encodes.
+
+**Not kept.** R1 (centre the PCA's covariance sums) fixed a bright smooth block that encoded worse than its dim copy (8 of 8 test blocks, on AVX2), and gained +1.375 dB on `hdr_grad` sky_sun at Veryfast and +0.902 dB at Fast, but sky_sun lost 0.074 dB at Veryslow and VeryslowPeak; the owner dropped it. astra #2, giving a guarded block's peak texel a palette entry that decodes at 0.9 of its luminance or more, the owner skipped: the bench holds 2 blocks whose peak texel decodes below that, and no other index reaches 0.9 for either.
+
+**Method.** The scoring is patch 0004's (above). Every item is paired per image (n = 18, 95 % Student-t intervals) against the kernel before it, on AVX2 on the Ryzen 7 9800X3D. I would have dropped an item whose mean fell below 0 with an interval excluding 0 at Veryfast, Fast, Basic, Veryslow or VeryslowPeak, and asked the owner first when it fell by 0.01 dB or 0.2 % of the base RMSLE mean with an interval including 0, when a `hdr_grad` image lost more than 0.05 dB, when a VeryslowPeak peak ratio fell from 0.8 or more to under it, or when a level's VM time rose more than 10 %. Slow is reported only: no effort maps to it. Time is the method of the speed phase above (the VM, AVX2, one thread, the median of 5 alternating rounds, a round with another process discarded).
+
+Each cell below gives the change from the base kernel (patch 0004's, whose bytes patch 0006 keeps) to the final one, with + for better, then the 95 % half-width, then how many images got better and worse:
+
+| Level | mPSNR dB | RMSLE x1000 | Peak ratio |
+|---|---|---|---|
+| veryfast | +0.005 ±0.008, 11/6 | +0.001 ±0.002, 7/5 | -0.000 ±0.000, 0/1 |
+| fast | +0.058 ±0.017, 18/0 | +0.018 ±0.011, 15/2 | +0.001 ±0.002, 1/1 |
+| basic | +0.072 ±0.016, 18/0 | +0.028 ±0.010, 17/1 | +0.007 ±0.010, 7/4 |
+| slow | +0.032 ±0.009, 18/0 | +0.014 ±0.006, 17/0 | +0.006 ±0.009, 6/3 |
+| veryslow | +0.032 ±0.008, 18/0 | +0.018 ±0.007, 18/0 | +0.006 ±0.008, 6/2 |
+| veryslow_peak | +0.031 ±0.009, 18/0 | -0.014 ±0.069, 17/1 | -0.004 ±0.012, 4/3 |
+
+- Every level but Veryfast gains mPSNR on all 18 images, with intervals clear of 0. Veryfast's +0.005 ±0.008 is within noise.
+- VeryslowPeak's RMSLE mean is -0.014 ±0.069 x1000: one image, satara_night, loses 0.566 (0.285 % of the base mean, interval includes 0), the same image as Q5's flag above. No VeryslowPeak image falls from a peak ratio of 0.8 or more to under it.
+- Peak mode's cost, VeryslowPeak against Veryslow after the audit: -0.062 ±0.089 dB mPSNR (0 better, 7 worse, worst venice_sunset -0.702), peak ratio +0.077 ±0.108, 11 of 18 images identical; before the audit -0.060 dB and +0.088.
+
+**The synthetic gradients, `hdr_grad`**: mPSNR change in dB for each image, in the level order Veryfast, Fast, Basic, Slow, Veryslow, VeryslowPeak.
+- dim_ramp: +0.046 / +0.128 / +0.098 / -0.044 / -0.091 / -0.091. The only loss. On SSE2 Slow, Veryslow and VeryslowPeak are -0.111 / -0.088 / -0.088 and on AVX-512 -0.062 / -0.097 / -0.097.
+- log_ramp_color: +0.000 / +0.009 / +0.064 / +0.069 / +0.068 / +0.068.
+- noise_wide_range: +0.001 / +0.028 / +0.037 / +0.038 / +0.037 / +0.037.
+- sky_sun: +0.213 / +0.250 / +0.253 / +0.206 / +0.202 / +0.202.
+
+**Changed images.** No image keeps its bytes between the base and the final kernel: all six levels changed all 22, on AVX2, SSE2 and AVX-512 alike. Item by item, against the one before: the PCA re-seed, Q6 and astra #5 changed none; Q5 changed every image at every level; astra #4 every image at Fast and slower; Q2 every image at Fast and slower but one at Basic, and 11 or 12 of 18 `hdr_real` at Veryfast; Q1 all 18 `hdr_real` and 3 of 4 `hdr_grad` at Basic and slower; Q4 all 22 at Fast and Basic; astra #6 all 18 and 3 of 4 at Slow and slower; Q3 all 18 and all 4 at Slow and slower, except 1 of 4 `hdr_grad` at Veryslow and VeryslowPeak on AVX-512; S3 2, 13, 13, 15, 16 and 16 of 18 `hdr_real` at Veryfast to VeryslowPeak on AVX2 (last-bit index flips, no pin or strip hash moves).
+
+**SSE2 and AVX-512.** The same base-to-final comparison agrees with AVX2 in direction at every level and metric, with means within 0.002 of AVX2's. The win and loss counts differ here and there (Fast RMSLE: 15, 17 and 15 better, 2, 1 and 2 worse on AVX2, SSE2 and AVX-512). dim_ramp is the only `hdr_grad` loss on all three.
+
+**Time.** I timed three exes in one VM session, by the speed phase's method, over 5 rounds, named by the commit each was built at: 8f98807a (the base), 8543ef55 (the speed end) and 71ab6d43 (the final, with S3). The commit after it only added cross-references and formed the two-region reciprocal for two regions, kept every byte and was not timed. One base round read one competing process at its end; its re-run read the same, the load matched the clean rounds and the medians moved under 0.01 s, so I kept it. Seconds summed over the 22 images; a ratio below 1 is faster:
+
+| level | base s | speed-end s | final s | speed-end / base | final / speed-end | final / base | spread base / speed-end / final |
+|---|---|---|---|---|---|---|---|
+| veryfast | 0.086 | 0.082 | 0.079 | 0.953 | 0.963 | 0.919 | 1.071 / 1.024 / 1.051 |
+| fast | 0.637 | 0.581 | 0.589 | 0.912 | 1.014 | 0.925 | 1.014 / 1.024 / 1.019 |
+| basic | 1.610 | 1.037 | 1.072 | 0.644 | 1.034 | 0.666 | 1.001 / 1.008 / 1.018 |
+| slow | 6.840 | 3.265 | 4.403 | 0.477 | 1.349 | 0.644 | 1.005 / 1.005 / 1.006 |
+| veryslow | 14.705 | 7.529 | 8.108 | 0.512 | 1.077 | 0.551 | 1.003 / 1.006 / 1.002 |
+| veryslow_peak | 14.823 | 7.558 | 8.141 | 0.510 | 1.077 | 0.549 | 1.002 / 1.005 / 1.002 |
+| total | 38.72 | 20.08 | 22.40 | 0.519 | 1.116 | 0.579 | 1.001 / 1.003 / 1.002 |
+
+- Noise: the speed phase's A/A range, 0.989 to 1.001, and the spreads in the last column. Final over speed-end is outside both exes' spreads at Basic (1.034), Slow, Veryslow and VeryslowPeak, so the quality phase costs 3.4 % at Basic and 7.7 % at Veryslow and VeryslowPeak (34.9 % at Slow, which no effort uses; S3 alone adds about 5 points of that, and takes 5.5 % back at Veryslow and VeryslowPeak); Veryfast's 0.963 and Fast's 1.014 are within noise. The default effort takes 14.82 s for the 22 images before the audit, 7.56 s after the speed phase and 8.14 s now.
+- The owner accepted the cost knowing it. The 10 % limit applies per item, and no kept item went over it alone at a level an effort uses: Q3's is the largest (1.09 to 1.10 at Veryslow and VeryslowPeak).
+
+Each item's own time is the ratio of its exe over the exe before it (the commit named), by the same method. Q5 with the re-seed (against f60ec92c, which predates the re-seed) took 0.988 to 1.003 per level and 1.002 in total; astra #4 (against 015a0c92) 0.993 to 1.005 and 0.996. The other items, Veryfast to VeryslowPeak and in total:
+
+| item (exe before) | veryfast | fast | basic | slow | veryslow | veryslow_peak | total |
+|---|---|---|---|---|---|---|---|
+| Q2, first quantisation only (549c92e9) | 1.012 | 1.009 | 1.039 | 1.034 | 1.012 | 1.013 | 1.018 |
+| Q1 (e7bd83e4) | 0.988 | 0.995 | 0.999 | 1.001 | 1.001 | 1.001 | 1.001 |
+| Q4 (c340f8f8) | 1.000 | 0.992 | 1.000 | 1.005 | 1.000 | 0.999 | 1.001 |
+| Q6 (f451d576) | 0.976 | 1.008 | 1.003 | 1.001 | 1.000 | 1.003 | 1.002 |
+| astra #6 (8c99a6f4) | 0.988 | 0.998 | 0.998 | 1.031 | 1.030 | 1.028 | 1.027 |
+| astra #5 (f85e2c6d) | 0.988 | 0.997 | 0.997 | 1.000 | 0.999 | 0.999 | 0.999 |
+| Q3, two partitions (643de89e) | 1.000 | 0.997 | 1.006 | 1.202 | 1.094 | 1.093 | 1.104 |
+| S3 (2ef0a02e) | 0.988 | 1.009 | 0.997 | 1.054 | 0.946 | 0.944 | 0.969 |
+
+The ten totals (with Q5's and astra #4's) multiply to 1.119, against the 1.116 measured end to end. Q2 slows Basic to VeryslowPeak and astra #6 and Q3 the slow levels beyond both exes' spreads, and S3 speeds Veryslow and VeryslowPeak up and slows Slow down; the rest are within noise.
+
+**Proofs.** Each byte-changing item but S3 has a test that failed on the kernel before it and passes after it (on SSE2, AVX2 and AVX-512 for all of them but the PCA re-seed, whose test failed on AVX-512 only); the witness tests were found on the Ryzen's bytes and are skipped on an Intel CPU, like the pins. S3 moves only last bits, so I broke it on purpose instead: swapping the region select fails 8 `bc6h` tests and moves 45 of the 72 strip hashes. The witness counts are in Note LT. The S4 bound, which prunes by a window sum and must stay below every candidate's error, was re-checked with the scratch assert build on the objects of Q5, Q2, astra #6, the S4 guard and S3 (the other items touch no code the bound reads): it fired on none of 209,420 random-block lane encodes (314,130 with AVX-512) or of 15.9 million lane encodes of the 22 images at Q5 and Q2, nor on 212,686 (319,029) and 15,972,077 at astra #6, or 15,970,493 at the S4 guard and 15,970,490 at S3.
 
 ## Other findings
 
@@ -885,7 +1079,7 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 ## What Tessalith does because of this
 
 - **Correct format first.** The design ranks correct format and tag per map type first, then correct mips, then the best encoder at a practical speed ([Design overview](design-overview.md)).
-- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H** (with patches 0001, 0003 and 0004; [0004's kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo)), vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
+- **bc7e for BC7, rgbcx for BC1/BC3/BC4/BC5, ISPC TC for BC6H** (with patches 0001, 0003, 0004, 0006 and 0007; [0004's kernel fixes](#kernel-fixes-patch-0004-2026-11-22-note-lo), [0006's speed items](#audit-follow-up-speed-phase-patch-0006-2026-11-24-note-lt), [0007's quality fixes](#audit-follow-up-quality-phase-patch-0007-2026-11-25-note-lt)), vendored and pinned with SHA-256 hashes in [`crates/encoders-sys/vendor/`](../../crates/encoders-sys/vendor/README-VENDOR.md). The format alone picks the encoder (Note FM15). texconv and Compressonator are not used to encode; texconv is used only as a test oracle for headers.
 - **bc7e at `veryslow` (level 5) is the default BC7 level.** Level 5 matches level 6 at 1.5× the speed. Level 4 is not offered, because level 3 beats it on gradients. The levels are in [`crates/engine/src/encode.rs`](../../crates/engine/src/encode.rs) and the default in [`presets/sdc-base.toml`](../../presets/sdc-base.toml). The `fast-preview` preset uses `fast`.
 - <a id="vendored-encoders-reproduce-the-bench"></a>**The vendored encoders reproduce the bench.** Spike S3 (2026-10-08) built the workspace without ISPC on the path and matched the bench's bc7e level 5 result on `rgb_real` (mean 50.9771 dB against 50.977, largest per-image Δ 0.000000 dB over all 10 BC7 sets, 39 of 39 block payloads byte-identical) and rgbcx BC4 on `mask_real` (7 of 7 bit-exact). The Phase 0 gates (2026-10-09) added rgbcx BC1, BC3, BC4 and BC5 bit-exact (14, 25, 12 and 11 images; transparent black off on 14 of 14), ISPC BC6H `veryslow` at 51.4995 dB with 8 of 8 payloads byte-identical, and ISPC objects that regenerate byte for byte.
 - **rgbcx runs at level 18, its highest.** BC1 and the colour half of BC3 encode with rgbcx Dual, which scores NVIDIA and AMD decoder error together; there is no decoder setting (Note FM17). BC3 is never picked to save space, because it is the same size as BC7.

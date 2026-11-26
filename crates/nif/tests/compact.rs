@@ -337,7 +337,7 @@ fn hostile_input_never_panics_and_refuses() {
 /// The owner's real file (Starsight Eyes eye mesh after add/remove/add/clip/remove-clip/remove/add/clip): its source
 /// had 9 blocks.
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance)"]
 fn owner_eye_mesh() {
     let Ok(acherus) = std::env::var("SDC_ACHERUS") else {
         println!("skipped: set SDC_ACHERUS");

@@ -11,7 +11,7 @@ use crate::pgp::prefix::{
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
 use engine::codes::{Code, Warning};
-use engine::config::{Category, Subtype, Target};
+use engine::config::{Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
 use engine::overrides::path_key_matches;
 use engine::pack::RecipeKind;
@@ -1697,10 +1697,10 @@ pub(crate) fn missing_map_slot(w: &Warning) -> Option<u8> {
         .flatten()
 }
 
-/// A tangent-space normal: the twin of the engine's private `policy::takes_green` (a normal-category sub-type that is
-/// not model-space).
+/// A tangent-space normal (HH8's name for it): the engine's `policy::takes_green`, a normal-category sub-type that is
+/// not model-space.
 fn tangent_space_normal(st: Subtype) -> bool {
-    st.category() == Category::Normal && st != Subtype::Msn
+    engine::policy::takes_green(st)
 }
 
 /// Note HH8: whether a resolved borrow fills the slot of the missing map `w` names with a file whose sub-type answers

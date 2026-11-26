@@ -187,7 +187,36 @@ The default radius, from `speed.exe` on the same VM and commits (radius 5 for BC
 | bc3-fast (fast colour search, alpha radius 5, cut 128) | 0.842 | 0.829 |
 | bc1, bc1p, bc1-4, bc1a, bc1-fast (untouched) | 0.997 to 1.002 | 0.998 to 1.001 |
 
-On base, BC4 and BC5 are within noise to 1% slower: building the per-block bound costs about what it saves at radius 5 (the base path is the code a CPU without AVX2 runs; it was timed here on the VM's AVX2-capable CPU with the path forced). The bound stays at every radius because no BC3, BC4, BC5 or bc3-fast row is above 1.02 on either path. Radius 4 (the `fast` effort) was not measured.
+These rows compare two whole commits, so they do not isolate the bound: the bound's own cost at radius 5 is in the next section, where it slows BC4 and BC5 down, and the BC3 and bc3-fast gains above came from the rest of the commit. The base path is the code a CPU without AVX2 runs; it was timed here on the VM's AVX2-capable CPU with the path forced.
+
+### The bound per radius (2026-11-24)
+
+What the bound costs and saves at each radius, measured on its own. Run: the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, the Windows exes under Wine 11.0), the 16 PNGs of the `speed.exe` set (1,048,576 blocks), quiet (no other process busy).
+
+Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block time of the radius-r search with the bound as built before it was limited to radius 10, over the same search with no bound at all; median of 5 interleaved passes. Above 1 the bound costs more than it saves. 90% of the BC3 alpha blocks are solid:
+
+| radius | path | BC4 / BC5 first channel | BC5 second channel | BC3 alpha |
+|---|---|---|---|---|
+| 4 (`fast`) | base | 1.115 | 1.108 | 1.120 |
+| 4 | avx2 | 1.099 | 1.091 | 1.144 |
+| 5 (`default`) | base | 1.077 | 1.070 | 1.115 |
+| 5 | avx2 | 1.049 | 1.037 | 1.127 |
+| 10 (`slowest`) | base | 0.911 | 0.908 | 1.051 |
+| 10 | avx2 | 0.859 | 0.868 | 1.024 |
+
+At radius 5, skipping the bound below radius 6 in two shapes, over the search with the bound: two calls of `searched` (the shipped shape; 6 was the probe's threshold and behaves the same at radius 4 and 5 as the shipped 10) 0.933 on base and 0.974 on avx2 for the first channel, 0.939 and 0.982 for the second; one call with the bound picked at run time 0.965 and 0.979, 0.973 and 0.985. A second quiet probe at radius 5: building one bound costs about 236 ns (59 table entries on average, 4.0 ns each), 8 to 9% of the search; the pruning saves 1.0 to 1.4% of it on base and 4.3 to 4.5% on avx2. Radii 6 to 9 were not measured; no engine setting uses them.
+
+`speed.exe --no-ref --rows=bc3,bc4,bc5,bc1-fast,bc3-fast`, 5 runs per round, 3 interleaved rounds, all clean: the build that builds the bound only from radius 10 (`d6d179fc`) over the one before it (`8f98807a`), ratio of the minima over the rounds. The rows are those of the default-radius table above (radius 5, alpha cut 128; `bc3-fast` takes the fast colour search), and `bc1-fast` is untouched:
+
+| `speed.exe` row | base | avx2 |
+|---|---|---|
+| `bc3` | 0.998 | 1.000 |
+| `bc4` | 0.930 | 0.975 |
+| `bc5` | 0.932 | 0.979 |
+| `bc3-fast` | 0.984 | 1.013 |
+| `bc1-fast` | 1.005 | 1.004 |
+
+Every variant of the probe and every `speed.exe` row wrote the same bytes (every hash equal on both paths and both builds).
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 

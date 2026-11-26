@@ -136,7 +136,7 @@ pub fn vocab_for(f: &FileFacts) -> Option<&'static Vocab> {
 }
 
 /// Sub-types that read `channels.green_convention` (spec §3.2): every Normal sub-type except `msn`.
-fn takes_green(st: Subtype) -> bool {
+pub fn takes_green(st: Subtype) -> bool {
     st.category() == Category::Normal && st != Subtype::Msn
 }
 
