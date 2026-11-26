@@ -25,8 +25,9 @@
   Prune:     -PruneOutputs -RunRoot <folder> -Attempt <attempt name> -Reference <attempt name> [-Keep <names>]
              EP-O5: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
              equals the reference attempt's. The reference must be a base-build attempt of the same corpus that
-             finished with exit 0. Refused for any base-build attempt (a corpus reference is kept whole), the
-             reference itself, a name in -Keep, an attempt that did not finish with exit 0, one already pruned, an
+             finished with exit 0. Refused for the corpus reference (the oldest finished, exit-0 base-build
+             attempt of the attempt's corpus in RunRoot, EP-R4; kept whole), the -Reference itself, a name in
+             -Keep, an attempt that did not finish with exit 0, one already pruned, an
              empty reference, a .dds on disk that hashes.csv lacks (or the reverse), and an out tree holding a
              junction or link. Before deleting, meta.json is copied to meta.before-prune.json (created new) and
              replaced by a copy with a "prune" block (reference, files, bytes, time).
@@ -563,6 +564,7 @@ function Invoke-SelfTest {
     $ab = @('textures/a.dds', 'textures/b.dds')
     $baseMeta = $attMeta.Clone(); $baseMeta['build'] = 'base'
     [void](New-PruneAttempt $pr 'ref' $baseMeta $rowsAB $ab)
+    [void](New-PruneAttempt $pr 'ref2' $baseMeta $rowsAB $ab)
     [void](New-PruneAttempt $pr 'ref-empty' $baseMeta @() @())
     [void](New-PruneAttempt $pr 'ref-failed' ($baseMeta.Clone() | ForEach-Object { $_['exitCode'] = 1; $_ }) $rowsAB $ab)
     [void](New-PruneAttempt $pr 'ref-other' ($baseMeta.Clone() | ForEach-Object { $_['corpus'] = 'F:\corpus\two'; $_ }) $rowsAB $ab)
@@ -585,8 +587,36 @@ function Invoke-SelfTest {
         ($msg -like $like) -and ((& $ddsLeft $name) -eq $before) -and $before -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $pr "$name\meta.before-prune.json"))
     }
     Case 'prune: the reference attempt itself is refused' { & $refusedIntact 'ref' 'ref' @() '*is the reference attempt*' }
-    Case 'prune: the base-build reference is refused even against a release sibling named as -Reference' {
-        & $refusedIntact 'ref' 'att-keep' @() '*is a base-build attempt*'
+    Case 'prune: the corpus reference is refused even against a release sibling named as -Reference' {
+        & $refusedIntact 'ref' 'att-keep' @() '*is the corpus reference*'
+    }
+    Case 'prune: the corpus reference (oldest base) is refused even when another base attempt is named as -Reference' {
+        & $refusedIntact 'ref' 'ref2' @() '*is the corpus reference*'
+    }
+    Case 'the corpus reference is the oldest finished base attempt of that corpus' {
+        ((Get-CorpusReference $pr $corpus) -eq 'ref') -and ((Get-CorpusReference $pr 'F:\corpus\two\') -eq 'ref-other') -and
+        ($null -eq (Get-CorpusReference $pr 'F:\corpus\none'))
+    }
+    $stamped = { param($k, $cohort) '20260101-00000{0}-t-{1}-{0}-0000000{0}' -f $k, $cohort }
+    Case 'prune: a later base attempt (an overhead base) is pruned against the corpus reference' {
+        $lr = Join-Path $t 'prune-later-base'; New-NewDir $lr
+        $first = & $stamped 1 'overhead'; $later = & $stamped 2 'overhead'
+        [void](New-PruneAttempt $lr $first $baseMeta $rowsAB $ab)
+        [void](New-PruneAttempt $lr $later $baseMeta $rowsAB $ab)
+        $r = Invoke-PruneOutputs $lr $later $first @()
+        $r.Files -eq 2 -and @([IO.Directory]::EnumerateFiles((Join-Path $lr "$later\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 0 -and
+        @([IO.Directory]::EnumerateFiles((Join-Path $lr "$first\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 2
+    }
+    Case 'a failed oldest base attempt is never the corpus reference; the next finished one is, and is refused' {
+        $fr2 = Join-Path $t 'prune-failed-oldest'; New-NewDir $fr2
+        $failed = & $stamped 1 'parity'; $refN = & $stamped 2 'overhead'; $third = & $stamped 3 'overhead'
+        [void](New-PruneAttempt $fr2 $failed ($baseMeta.Clone() | ForEach-Object { $_['exitCode'] = 1; $_ }) $rowsAB $ab)
+        [void](New-PruneAttempt $fr2 $refN $baseMeta $rowsAB $ab)
+        [void](New-PruneAttempt $fr2 $third $baseMeta $rowsAB $ab)
+        $msg = ''
+        try { [void](Invoke-PruneOutputs $fr2 $refN $third @()) } catch { $msg = $_.Exception.Message }
+        ((Get-CorpusReference $fr2 $corpus) -eq $refN) -and $msg -like '*is the corpus reference*' -and
+        @([IO.Directory]::EnumerateFiles((Join-Path $fr2 "$refN\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 2
     }
     Case 'prune: a -Reference that is not a base-build attempt is refused' { & $refusedIntact 'att-diff' 'att-keep' @() '*is not a base-build attempt*' }
     Case 'prune: a -Reference that did not finish with exit 0 is refused' { & $refusedIntact 'att-keep' 'ref-failed' @() '*reference ref-failed did not finish*' }
@@ -668,10 +698,14 @@ function Invoke-SelfTest {
         $end = $text.IndexOf("`n# ----", $start)
         $body = $text.Substring($start, $end - $start)
         $ok = $start -ge 0
-        foreach ($word in @(('::Del' + 'ete('), ('::Mo' + 've('))) {
-            $all = [regex]::Matches($text, [regex]::Escape($word)).Count
-            $inBody = [regex]::Matches($body, [regex]::Escape($word)).Count
-            if ($all -ne 1 -or $inBody -ne 1) { throw "$word occurs $all time(s), $inBody in the prune" }
+        # static calls on [IO.File] and instance calls on a FileInfo alike (delete, and move or MoveTo)
+        foreach ($group in @(@(('::Del' + 'ete('), ('.Del' + 'ete(')), @(('::Mo' + 've('), ('.Mo' + 'veTo(')))) {
+            $all = 0; $inBody = 0
+            foreach ($word in $group) {
+                $all += [regex]::Matches($text, [regex]::Escape($word)).Count
+                $inBody += [regex]::Matches($body, [regex]::Escape($word)).Count
+            }
+            if ($all -ne 1 -or $inBody -ne 1) { throw "$($group -join ' or ') occurs $all time(s), $inBody in the prune" }
         }
         $ok -and $body.Contains('[IO.File]::Del' + 'ete($f)') -and $body.Contains('[IO.File]::Mo' + 've($tmp, $metaPath, $true)') -and
         -not [regex]::IsMatch($text, '(?i)\[IO\.Directory\]::' + 'Del')
@@ -1280,12 +1314,30 @@ function Get-HashRows([string]$dir) {
     , @([IO.File]::ReadAllLines($p) | Select-Object -Skip 1 | Where-Object { $_ })
 }
 
+# A corpus's reference (EP-R4: the first base attempt): the oldest attempt in RunRoot, by its time-stamped name,
+# whose meta.json shows a base build of that corpus that finished with exit 0. $null when there is none. An
+# unreadable meta.json is skipped with a warning.
+function Get-CorpusReference([string]$runRoot, [string]$corpus) {
+    $want = $corpus.TrimEnd('\')
+    $dirs = @(Get-ChildItem -LiteralPath $runRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object Name)
+    foreach ($name in (Sort-Ordinal $dirs)) {
+        $mp = Join-Path (Join-Path $runRoot $name) 'meta.json'
+        if (-not (Test-Path -LiteralPath $mp -PathType Leaf)) { continue }
+        try { $m = Read-Json $mp }
+        catch { Write-Warning "skipped the unreadable $name\meta.json: $($_.Exception.Message)"; continue }
+        if ((Get-Prop $m 'build') -eq 'base' -and (Get-Prop $m 'finished') -eq $true -and (Get-Prop $m 'exitCode') -eq 0 -and
+            [string]::Equals(([string](Get-Prop $m 'corpus')).TrimEnd('\'), $want, 'OrdinalIgnoreCase')) { return $name }
+    }
+    $null
+}
+
 # EP-O5 (amends EP-R3): the ONLY deletion in this script. Deletes exactly the .dds files the attempt's hashes.csv
 # lists, under <attempt>\out, once that list equals the reference attempt's. A corpus reference is protected by
-# what it is, not only by the arguments: no base-build attempt is ever pruned, and -Reference must be a finished
-# base-build attempt of the same corpus. meta.json is copied to meta.before-prune.json (created new: also the
-# "already pruned" lock) and replaced by a copy with a prune block before anything is deleted. Throws
-# "refused: ..." and deletes nothing on any problem.
+# what it is, not only by the arguments: the corpus reference (Get-CorpusReference) is never pruned, and
+# -Reference must be a finished base-build attempt of the same corpus. Other base attempts (the overhead
+# cohort's) may go. meta.json is copied to meta.before-prune.json (created new: also the "already pruned" lock)
+# and replaced by a copy with a prune block before anything is deleted. Throws "refused: ..." and deletes
+# nothing on any problem.
 function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$reference, [string[]]$keep) {
     foreach ($n in @($attempt, $reference)) {
         $why = Get-AttemptDirProblem $runRoot $n
@@ -1299,7 +1351,10 @@ function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$refere
     if (-not (Test-Path -LiteralPath $metaPath -PathType Leaf)) { throw "refused: $attempt has no meta.json" }
     if (Test-Path -LiteralPath $backup) { throw "refused: $attempt was already pruned (meta.before-prune.json exists)" }
     $meta = Read-Json $metaPath
-    if ((Get-Prop $meta 'build') -eq 'base') { throw "refused: $attempt is a base-build attempt (a corpus reference is kept whole, EP-O5)" }
+    $ownCorpus = [string](Get-Prop $meta 'corpus')
+    if ($ownCorpus -and $attempt -ieq (Get-CorpusReference $runRoot $ownCorpus)) {
+        throw "refused: $attempt is the corpus reference (the oldest finished base-build attempt of its corpus, EP-R4) and is kept whole (EP-O5)"
+    }
     if (Get-Prop $meta 'prune') { throw "refused: $attempt was already pruned" }
     if ((Get-Prop $meta 'finished') -ne $true -or (Get-Prop $meta 'exitCode') -ne 0) { throw "refused: $attempt did not finish with exit code 0" }
     $refMetaPath = Join-Path (Join-Path $runRoot $reference) 'meta.json'

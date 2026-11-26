@@ -208,13 +208,17 @@ function Invoke-SelfTest {
         }
         Case 'the script deletes nothing but its self-test file, in one place' {
             $text = [IO.File]::ReadAllText($PSCommandPath)
-            $words = @(('Remove' + '-Item'), ('Move' + '-Item'), ('Clear' + '-Content'), ('::Mo' + 've('), ('[IO.Directory]::Del' + 'ete'))
+            $words = @(('Remove' + '-Item'), ('Move' + '-Item'), ('Clear' + '-Content'), ('::Mo' + 've('), ('.Mo' + 'veTo('), ('[IO.Directory]::Del' + 'ete'))
             $hit = @($words | Where-Object { $text.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
             if ($hit.Count) { throw ('found: ' + ($hit -join ', ')) }
-            $del = '::Del' + 'ete('
+            # static calls on [IO.File] and instance calls on a FileInfo alike
+            $dels = @(('::Del' + 'ete('), ('.Del' + 'ete('))
             $start = $text.IndexOf('function Invoke-' + 'SelfTest')
-            $all = [regex]::Matches($text, [regex]::Escape($del)).Count
-            $inTest = [regex]::Matches($text.Substring($start), [regex]::Escape($del)).Count
+            $all = 0; $inTest = 0
+            foreach ($del in $dels) {
+                $all += [regex]::Matches($text, [regex]::Escape($del)).Count
+                $inTest += [regex]::Matches($text.Substring($start), [regex]::Escape($del)).Count
+            }
             $all -eq 1 -and $inTest -eq 1 -and $text.Contains('[IO.File]::Del' + 'ete($big)')
         }
         Case 'a corpus file that cannot be opened means no stamp' {
