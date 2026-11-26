@@ -989,9 +989,11 @@ def cold_text(a):
     stamp = a.get("purgeStamp")
     if a.get("coldMethod") == EVICT_METHOD:
         cv = a.get("cold") if isinstance(a.get("cold"), dict) else {}
+        # the 90 % check is against the read set (the ready inputs and their packed sources), not the corpus
         return ("; cold: each corpus file's cached pages were dropped (per-file no-buffering open); the exe, DLLs and "
-                "file system metadata stay cached (evict stamp %s; corpus disk read %s of %s corpus bytes)" % (
-                    stamp, cv.get("diskReadBytes", "n/a"), cv.get("corpusBytes", "n/a")))
+                "file system metadata stay cached (evict stamp %s; corpus disk read %s of %s read-set bytes, the ready "
+                "inputs and their packed sources; corpus %s bytes)" % (
+                    stamp, cv.get("diskReadBytes", "n/a"), cv.get("readSetBytes", "n/a"), cv.get("corpusBytes", "n/a")))
     if stamp:
         return "; cold: the standby list was purged before the run (purge stamp %s)" % stamp
     return ""
@@ -1658,7 +1660,7 @@ def selftest_cli(t):
             "end": {"corpus": {"name": "2 F:", "read": 990, "write": 0}, "output": {"name": "2 F:", "read": 0, "write": 5}}}
     cold_ev = mk_att("ce", cohort="cold-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk,
                      purgeStamp="evict-20261126-000000.json", coldMethod=EVICT_METHOD,
-                     cold={"method": EVICT_METHOD, "cold": True, "corpusBytes": 1000, "diskReadBytes": 990})
+                     cold={"method": EVICT_METHOD, "cold": True, "corpusBytes": 1100, "readSetBytes": 1000, "diskReadBytes": 990})
     cold_pu = mk_att("cp", cohort="cold-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk,
                      purgeStamp="purge-20261126-000000.json", coldMethod="standby-purge")
     out3, _ = summarise([{"label": "fx", "cohort": "cold-fresh", "attempts": ["ce", "cp"], "loaded": [cold_ev, cold_pu]}],
@@ -1668,7 +1670,7 @@ def selftest_cli(t):
     line_pu = next((x for x in md3.splitlines() if x.startswith("- cp:")), "")
     t.ok(n + ": a per-file eviction attempt's disk line says what EP-C5 did, not that the standby list was purged",
          "each corpus file's cached pages were dropped (per-file no-buffering open); the exe, DLLs and file system metadata stay cached" in line_ev
-         and "standby" not in line_ev and "read 990 of 1000 corpus bytes" in line_ev, line_ev)
+         and "standby" not in line_ev and "read 990 of 1000 read-set bytes" in line_ev and "corpus 1100 bytes" in line_ev, line_ev)
     t.ok(n + ": a standby-purge attempt's disk line says the standby list was purged", "standby list was purged" in line_pu
          and "per-file" not in line_pu, line_pu)
     t.ok(n + ": the disk header claims no purge for every cold run", "the standby list was purged before a cold run" not in md3, md3[:300])

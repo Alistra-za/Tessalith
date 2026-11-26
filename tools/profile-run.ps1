@@ -22,7 +22,8 @@
   Expected:  -Expected -Exe <base sdc.exe> -Corpus <folder> -Label <name> -RunRoot <folder> [-Set <string[]>]
              Dry run of the base build into a new empty folder under RunRoot with frozen APPDATA. Writes, each
              created new: expected-<Label>.txt, planned-not-written-<Label>.txt, skipped-inputs-<Label>.txt,
-             expected-<Label>-events.txt. Exit 1 (unresolved or blocked files) counts as finished when batch_done
+             expected-<Label>-events.txt, read-set-<Label>.txt ("<input> TAB <size>" per input a ready job reads,
+             packed sources included: the cold check's base). Exit 1 (unresolved or blocked files) counts as finished when batch_done
              shows nothing failed or cancelled (EP-C11); any other non-zero exit throws with the reason.
   Finished:  an attempt finished when the child ran to its end and exited 0, or exited 1 with only the known
              skips (EP-C11): its stderr done lines show nothing failed, cancelled or failing validation, and its
@@ -30,7 +31,8 @@
              label in RunRoot). meta.json keeps the child's exitCode and the verdict in a knownSkips block.
              -CopyFrom, the free-space figure, the corpus reference and the prune read this, not exit 0 alone.
              The runner exits with the child's codes other than 0 and 1 first, then 3 (contaminated), then 4 (not
-             cold), then the child's 0 or 1: 3 and 4 take precedence over the child's 1.
+             cold), then 1 for a child exit 1 that does not count, else 0: 3 and 4 take precedence over the
+             child's 1, and an accepted exit 1 exits 0.
   Prune:     -PruneOutputs -RunRoot <folder> -Attempt <attempt name> -Reference <attempt name> [-Keep <names>]
              EP-O5: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
              equals the reference attempt's. The reference must be a finished base-build attempt of the same
@@ -56,8 +58,10 @@
   old that no earlier attempt used: an owner-run tools\profile-purge.ps1 stamp (purge-*.json), or a
   tools\profile-evict.ps1 stamp (evict-*.json, EP-C5) of a folder corpus equal to -Corpus. meta.json records the
   stamp (purgeStamp, either kind) and coldMethod. After an evict stamp the attempt's disk read bytes on the corpus
-  disk must reach 90 % of the stamp's corpus bytes, else meta.json says cold = false and the exit code is 4. A
-  purge stamp carries no byte count (the runner never reads the corpus), so that check is not applied to it.
+  disk must reach 90 % of its read set's bytes (read-set-<Label>.txt from -Expected: the ready inputs and the packed
+  sources they read, with the sizes the dry run planned), else meta.json says cold = false and the exit code is 4.
+  meta.json's cold block records the stamp's corpusBytes and the readSetBytes. A purge stamp carries no byte count
+  (the runner never reads the corpus), so that check is not applied to it.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -212,24 +216,40 @@ function Get-ColdStamp([string]$runRoot, [datetime]$now, [string]$corpus) {
 }
 
 # The cold verdict of a finished cold attempt (EP-C5): after an evict stamp the corpus disk's read bytes during
-# the run must reach 90 % of the stamp's corpus bytes. A purge stamp has no byte count: the check is not applied.
-function Get-ColdVerdict([string]$runRoot, [string]$stamp, $readStart, $readEnd) {
+# the run must reach 90 % of the bytes the run reads, its read set: the ready inputs of the dry run and the packed
+# sources they read, read-set-<label>.txt from -Expected, with the sizes the plan saw. Not the whole corpus: an
+# unresolved or blocked file is not converted. meta.json's cold block records both corpusBytes (the stamp's) and
+# readSetBytes; ratio is against readSetBytes. A purge stamp has no byte count: the check is not applied.
+function Get-ColdVerdict([string]$runRoot, [string]$stamp, [string]$label, $readStart, $readEnd) {
     if ($stamp -notlike 'evict-*') {
         return [ordered]@{ method = 'standby-purge'; check = 'not applied: a purge stamp carries no corpus byte count (the runner never reads the corpus)' }
     }
     $s = Read-Json (Join-Path $runRoot $stamp)
     $corpusBytes = [int64](Get-Prop $s 'bytes')
-    $v = [ordered]@{ method = 'per-file-no-buffering'; corpusBytes = $corpusBytes; diskReadBytes = $null; ratio = $null; cold = $false; reason = $null }
+    $listName = "read-set-$label.txt"
+    $v = [ordered]@{ method = 'per-file-no-buffering'; corpusBytes = $corpusBytes; readSet = $listName; readSetFiles = $null; readSetBytes = $null; diskReadBytes = $null; ratio = $null; cold = $false; reason = $null }
     if ($readStart.name -like 'n/a*' -or $readEnd.name -like 'n/a*') {
         $v.reason = "the corpus drive has no physical-disk counter ($($readStart.name))"
         return $v
     }
     $read = [int64]([uint64]$readEnd.read - [uint64]$readStart.read)
     $v.diskReadBytes = $read
-    if ($corpusBytes -le 0) { $v.reason = 'the stamp records no corpus bytes'; return $v }
-    $v.ratio = [math]::Round($read / $corpusBytes, 4)
-    $v.cold = ($read -ge 0.9 * $corpusBytes)
-    if (-not $v.cold) { $v.reason = ('the run read {0:N0} bytes from the corpus disk, under 90 % of the {1:N0} corpus bytes' -f $read, $corpusBytes) }
+    $listPath = Join-Path $runRoot $listName
+    if (-not (Test-Path -LiteralPath $listPath -PathType Leaf)) { $v.reason = "no $listName in RunRoot: run -Expected with label $label first"; return $v }
+    $files = 0; $bytes = [int64]0; $unsized = 0
+    foreach ($l in [IO.File]::ReadAllLines($listPath)) {
+        if (-not $l) { continue }
+        $files++
+        $c = $l.Split("`t")
+        $n = [int64]0
+        if ($c.Count -ge 2 -and [int64]::TryParse($c[-1], [ref]$n)) { $bytes += $n } else { $unsized++ }
+    }
+    $v.readSetFiles = $files; $v.readSetBytes = $bytes
+    if ($unsized) { $v.reason = "$unsized read-set input(s) in $listName have no size"; return $v }
+    if ($bytes -le 0) { $v.reason = "$listName records no bytes"; return $v }
+    $v.ratio = [math]::Round($read / $bytes, 4)
+    $v.cold = ($read -ge 0.9 * $bytes)
+    if (-not $v.cold) { $v.reason = ('the run read {0:N0} bytes from the corpus disk, under 90 % of the {1:N0} bytes of its read set ({2}; the corpus is {3:N0} bytes)' -f $read, $bytes, $listName, $corpusBytes) }
     $v
 }
 
@@ -502,24 +522,24 @@ function Invoke-SelfTest {
         $v = & $ksv $okLog 'other'
         (-not $v.ok) -and $v.reason -like '*run -Expected with label other*'
     }
-    Case 'runner exit: 3 and 4 take precedence over the child''s 1; other child codes come first' {
-        ((Get-RunnerExit 1 $true $false) -eq 3) -and ((Get-RunnerExit 1 $false $true) -eq 4) -and ((Get-RunnerExit 1 $true $true) -eq 3) -and
-        ((Get-RunnerExit 1 $false $false) -eq 1) -and ((Get-RunnerExit 0 $false $false) -eq 0) -and ((Get-RunnerExit 0 $true $false) -eq 3) -and
-        ((Get-RunnerExit 2 $true $true) -eq 2)
+    # Get-RunnerExit <child code> <child exit counts> <contaminated> <not cold>
+    Case 'runner exit: an accepted child exit 1 exits 0; a refused one keeps 1' {
+        ((Get-RunnerExit 1 $true $false $false) -eq 0) -and ((Get-RunnerExit 1 $false $false $false) -eq 1) -and ((Get-RunnerExit 0 $true $false $false) -eq 0)
     }
-    Case 'runner exit: a warmup is clean at 0, or at 1 when the child''s 1 counts; never at 3 or 4' {
-        (Test-CleanRunnerExit 0 $false) -and (Test-CleanRunnerExit 1 $true) -and -not (Test-CleanRunnerExit 1 $false) -and
-        -not (Test-CleanRunnerExit 3 $true) -and -not (Test-CleanRunnerExit 4 $true)
+    Case 'runner exit: 3 and 4 take precedence over the child''s 1, accepted or not; other child codes come first' {
+        ((Get-RunnerExit 1 $true $true $false) -eq 3) -and ((Get-RunnerExit 1 $true $false $true) -eq 4) -and ((Get-RunnerExit 1 $true $true $true) -eq 3) -and
+        ((Get-RunnerExit 1 $false $true $false) -eq 3) -and ((Get-RunnerExit 1 $false $false $true) -eq 4) -and ((Get-RunnerExit 0 $true $true $false) -eq 3) -and
+        ((Get-RunnerExit 2 $false $true $true) -eq 2) -and ((Get-RunnerExit 5 $true $false $false) -eq 5)
     }
     Case 'samply elevation: an accepted exit 1 whose log names an "elevation" path is not read as needing elevation' {
         $log = 'skip  C:/c/textures/elevation_map.png: SUG-LOW-CONFIDENCE unknown suffix'
         -not (Test-SamplyNeedsElevation $true $true 1 $log) -and (Test-SamplyNeedsElevation $true $false 1 'Access is denied') -and
         -not (Test-SamplyNeedsElevation $false $false 1 'Access is denied') -and -not (Test-SamplyNeedsElevation $true $false 0 'Access is denied')
     }
-    Case 'the attempt path records knownSkips for a child exit 1, returns through Get-RunnerExit and checks its warmup with the same verdict' {
+    Case 'the attempt path records knownSkips for a child exit 1 and returns through Get-RunnerExit with the verdict' {
         $text = [IO.File]::ReadAllText($PSCommandPath)
-        $text.Contains("`$meta['knownSkips'] = Get-KnownSkipsVerdict") -and $text.Contains('return (Get-RunnerExit $code') -and
-        $text.Contains('Test-CleanRunnerExit $wr $script:LastChildAccepted') -and $text.Contains('$why = Get-ExpectedExitProblem $ec $plan.Done') -and
+        $text.Contains("`$meta['knownSkips'] = Get-KnownSkipsVerdict") -and $text.Contains('return (Get-RunnerExit $code $childAccepted') -and
+        $text.Contains('$why = Get-ExpectedExitProblem $ec $plan.Done') -and
         @([regex]::Matches($text, '-eq 0\) \{ return \$code \}|-ne 0\) \{ return \$code \}')).Count -eq 0
     }
 
@@ -581,27 +601,54 @@ function Invoke-SelfTest {
     Case 'an evict stamp an earlier attempt names is refused' { -not (Get-ColdStamp $e5.Dir $now $corpus) }
     Case 'the newest usable stamp wins across purge and evict stamps' { (Get-ColdStamp $e6.Dir $now $corpus) -eq $e6.Stamp }
 
-    # the cold verdict: disk read bytes on the corpus disk against the evict stamp's corpus bytes
+    # the cold verdict: disk read bytes on the corpus disk against the read set's bytes (here the whole corpus,
+    # 600 + 400 of the stamp's 1000 bytes)
+    Write-NewFile (Join-Path $e1.Dir 'read-set-fx.txt') "textures/a.png`t600`ntextures/b.png`t400`n"
     $disk = { param($name, $read) [pscustomobject]@{ name = $name; read = [uint64]$read; write = [uint64]0 } }
-    Case 'cold verdict: reading 95 % of the corpus bytes from disk is cold' {
-        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 5000) (& $disk '1 F:' 5950)
-        $v.cold -and $v.diskReadBytes -eq 950 -and $v.corpusBytes -eq 1000 -and $v.method -eq 'per-file-no-buffering'
+    Case 'cold verdict: reading 95 % of the read set from disk is cold, with both byte figures recorded' {
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (& $disk '1 F:' 5000) (& $disk '1 F:' 5950)
+        $v.cold -and $v.diskReadBytes -eq 950 -and $v.corpusBytes -eq 1000 -and $v.readSetBytes -eq 1000 -and $v.readSetFiles -eq 2 -and
+        $v.ratio -eq 0.95 -and $v.method -eq 'per-file-no-buffering'
     }
-    Case 'cold verdict: exactly 90 % is cold' { (Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 0) (& $disk '1 F:' 900)).cold }
+    Case 'cold verdict: exactly 90 % is cold' { (Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 900)).cold }
     Case 'cold verdict: reading 80 % is not cold, with a reason' {
-        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 0) (& $disk '1 F:' 800)
-        (-not $v.cold) -and $v.reason -like '*under 90 %*'
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 800)
+        (-not $v.cold) -and $v.reason -like '*under 90 % of the * bytes of its read set*' -and $v.ratio -eq 0.8
     }
     Case 'cold verdict: a corpus drive without a disk counter is not cold' {
-        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk 'n/a (Z: has no physical-disk counter)' 0) (& $disk 'n/a (Z: has no physical-disk counter)' 0)
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (& $disk 'n/a (Z: has no physical-disk counter)' 0) (& $disk 'n/a (Z: has no physical-disk counter)' 0)
         (-not $v.cold) -and $v.reason -like '*no physical-disk counter*'
     }
     Case 'cold verdict: Get-DiskFigure''s own objects, a drive with and without a counter' {
         $raw0 = @([pscustomobject]@{ name = '2 F:'; read = [uint64]1000; write = [uint64]0 })
         $raw1 = @([pscustomobject]@{ name = '2 F:'; read = [uint64]1950; write = [uint64]0 })
-        $yes = Get-ColdVerdict $e1.Dir $e1.Stamp (Get-DiskFigure $raw0 'F:\corpus\one') (Get-DiskFigure $raw1 'F:\corpus\one')
-        $no = Get-ColdVerdict $e1.Dir $e1.Stamp (Get-DiskFigure $raw0 'Q:\corpus') (Get-DiskFigure $raw1 'Q:\corpus')
+        $yes = Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (Get-DiskFigure $raw0 'F:\corpus\one') (Get-DiskFigure $raw1 'F:\corpus\one')
+        $no = Get-ColdVerdict $e1.Dir $e1.Stamp 'fx' (Get-DiskFigure $raw0 'Q:\corpus') (Get-DiskFigure $raw1 'Q:\corpus')
         $yes.cold -and $yes.diskReadBytes -eq 950 -and (-not $no.cold) -and $no.reason -like '*no physical-disk counter*'
+    }
+    Case 'cold verdict: a run that reads only its ready set passes at 88 % of the corpus' {
+        $rs = New-EvictDir 'evict-read-set' 2 $corpus 'folder'
+        Write-NewFile (Join-Path $rs.Dir 'read-set-fx.txt') "textures/a.png`t500`ntextures/a_rmaos.png`t380`n"
+        $v = Get-ColdVerdict $rs.Dir $rs.Stamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 880)
+        $under = Get-ColdVerdict $rs.Dir $rs.Stamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 790)
+        $v.cold -and $v.corpusBytes -eq 1000 -and $v.readSetBytes -eq 880 -and $v.ratio -eq 1 -and
+        (-not $under.cold) -and $under.reason -like '*read set (read-set-fx.txt; the corpus is * bytes)'
+    }
+    Case 'cold verdict: without read-set-<label>.txt, or with an input of no size, a run is not cold' {
+        $none = Get-ColdVerdict $e1.Dir $e1.Stamp 'other' (& $disk '1 F:' 0) (& $disk '1 F:' 1000)
+        $rs2 = New-EvictDir 'evict-read-set-unsized' 2 $corpus 'folder'
+        Write-NewFile (Join-Path $rs2.Dir 'read-set-fx.txt') "textures/a.png`t500`ntextures/b.png`t`n"
+        $uns = Get-ColdVerdict $rs2.Dir $rs2.Stamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 1000)
+        (-not $none.cold) -and $none.reason -like '*no read-set-other.txt*' -and (-not $uns.cold) -and $uns.reason -like '*1 read-set input(s)*no size*'
+    }
+    Case 'read set: the dry run lists each ready job''s input and packed sources once, with sizes; not-ready inputs stay out' {
+        $rsLines = @(
+            '{"kind":"file_planned","path":"C:/c/t/a.png","job_key":"t/a.dds","job":{"input":"C:\\c\\t\\a.png","source":{"size":100},"status":{"state":"ready"}}}',
+            '{"kind":"file_planned","path":"C:/c/t/x_ao.png","job_key":"t/x_rmaos.dds","job":{"input":"C:\\c\\t\\x_ao.png","source":null,"pack":{"sources":[{"path":"C:\\c\\t\\x_ao.png","stamp":{"size":30}},{"path":"C:\\c\\t\\a.png","stamp":{"size":100}}]},"status":{"state":"ready"}}}',
+            '{"kind":"file_planned","path":"C:/c/t/u.png","job_key":"t/u.dds","job":{"input":"C:\\c\\t\\u.png","source":{"size":999},"status":{"state":"unresolved"}}}'
+        )
+        $rp = ConvertFrom-PlanStream $rsLines 'C:\c'
+        ((Sort-Ordinal $rp.ReadSet) -join '|') -eq "t/a.png`t100|t/x_ao.png`t30"
     }
     Case 'a malformed evict stamp is skipped with a warning; an older good stamp is still found' {
         $bad = New-EvictDir 'evict-malformed' 2 $corpus 'folder'
@@ -612,7 +659,7 @@ function Invoke-SelfTest {
         $got.Count -eq 1 -and $got[0] -eq $bad.Stamp -and $warn.Count -eq 1 -and "$($warn[0])" -like '*unreadable cold stamp*'
     }
     Case 'cold verdict: a purge stamp records the method and no cold flag (the byte check is not applied)' {
-        $v = Get-ColdVerdict $c3 $okStamp (& $disk '1 F:' 0) (& $disk '1 F:' 0)
+        $v = Get-ColdVerdict $c3 $okStamp 'fx' (& $disk '1 F:' 0) (& $disk '1 F:' 0)
         $v.method -eq 'standby-purge' -and -not $v.Contains('cold') -and $v.check -like 'not applied*'
     }
 
@@ -1003,6 +1050,13 @@ function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
     $skipped = New-Object System.Collections.Generic.List[string]
     $events = New-Object System.Collections.Generic.List[string]
     $done = New-Object System.Collections.Generic.List[object]
+    $readSet = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+    $addRead = {
+        param($p, $size)
+        if (-not $p) { return }
+        $r = Get-EventRelPath $corpusRoot $p
+        if (-not $readSet.ContainsKey($r) -or ($null -eq $readSet[$r] -and $null -ne $size)) { $readSet[$r] = $size }
+    }
     foreach ($line in $lines) {
         if (-not $line.Trim().StartsWith('{')) { continue }
         $e = $line | ConvertFrom-Json
@@ -1019,8 +1073,16 @@ function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
                 $status = Get-Prop (Get-Prop $e 'job') 'status'
                 $state = Get-Prop $status 'state'
                 $key = [string](Get-Prop $e 'job_key')
-                if ($state -eq 'ready') { $ready.Add($key) }
-                else { $notWritten.Add(("{0}`t{1}`t{2}" -f $key, $(if ($state) { $state } else { '(none)' }), $(if ($status) { $status | ConvertTo-Json -Compress -Depth 5 } else { '' }))) }
+                if ($state -eq 'ready') {
+                    $ready.Add($key)
+                    # the cold read set: the job's input and every packed source it reads, with the size the plan saw
+                    $job = Get-Prop $e 'job'
+                    $in = Get-Prop $job 'input'
+                    if ($in) { & $addRead $in (Get-Prop (Get-Prop $job 'source') 'size') }
+                    foreach ($s in @(Get-Prop (Get-Prop $job 'pack') 'sources')) {
+                        if ($null -ne $s) { & $addRead (Get-Prop $s 'path') (Get-Prop (Get-Prop $s 'stamp') 'size') }
+                    }
+                } else { $notWritten.Add(("{0}`t{1}`t{2}" -f $key, $(if ($state) { $state } else { '(none)' }), $(if ($status) { $status | ConvertTo-Json -Compress -Depth 5 } else { '' }))) }
             }
             'file_skipped' {
                 $kind = Get-Prop $e 'skip'; $code = Get-Prop $e 'code'; $reason = Get-Prop $e 'reason'
@@ -1030,7 +1092,8 @@ function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
             'file_failed' { $events.Add(("failed`t{0}`t{1}" -f $path, (Get-Prop $e 'error'))) }
         }
     }
-    [pscustomobject]@{ Ready = $ready.ToArray(); NotWritten = $notWritten.ToArray(); Skipped = $skipped.ToArray(); Events = $events.ToArray(); Done = $done.ToArray() }
+    $readRows = @(foreach ($k in $readSet.Keys) { "{0}`t{1}" -f $k, $(if ($null -ne $readSet[$k]) { [int64]$readSet[$k] } else { '' }) })
+    [pscustomobject]@{ Ready = $ready.ToArray(); NotWritten = $notWritten.ToArray(); Skipped = $skipped.ToArray(); Events = $events.ToArray(); Done = $done.ToArray(); ReadSet = $readRows }
 }
 
 # ---------------------------------------------------------------- exit 1 with only the known skips (EP-C11)
@@ -1157,18 +1220,14 @@ function Test-AttemptFinished($m) {
 }
 
 # The runner's exit code: the child's codes other than 0 and 1 first (as before); then 3 (contaminated) and 4 (not
-# cold), which take precedence over the child's 1 (EP-C11); then the child's 0 or 1 (meta.json's knownSkips says
-# whether a 1 counts as finished).
-function Get-RunnerExit([int]$childCode, [bool]$contaminated, [bool]$notCold) {
+# cold), which take precedence over the child's 1 (EP-C11); then 1 for a child exit 1 that does not count; else 0,
+# so an accepted exit 1 (only the known skips, meta.json's knownSkips) exits 0 like a child exit 0.
+function Get-RunnerExit([int]$childCode, [bool]$childAccepted, [bool]$contaminated, [bool]$notCold) {
     if ($childCode -ne 0 -and $childCode -ne 1) { return $childCode }
     if ($contaminated) { return 3 }
     if ($notCold) { return 4 }
-    $childCode
-}
-
-# Whether a runner exit is a clean attempt (what a warmup must be): 0, or 1 when the child's 1 counts as finished.
-function Test-CleanRunnerExit([int]$runnerExit, [bool]$childAccepted) {
-    ($runnerExit -eq 0) -or ($runnerExit -eq 1 -and $childAccepted)
+    if ($childCode -eq 1 -and -not $childAccepted) { return 1 }
+    0
 }
 
 # samply's "needs elevation" reading of stderr: only for a child exit that does not count. An accepted exit 1's
@@ -1383,14 +1442,13 @@ function Write-ExpectedLists([string]$runRoot, [string]$label, $plan) {
     Write-NewFile (Join-Path $runRoot "planned-not-written-$label.txt") (Join-Lines (Sort-Ordinal $plan.NotWritten))
     Write-NewFile (Join-Path $runRoot "skipped-inputs-$label.txt") (Join-Lines (Sort-Ordinal $plan.Skipped))
     Write-NewFile (Join-Path $runRoot "expected-$label-events.txt") (Join-Lines (Sort-Ordinal $plan.Events))
+    Write-NewFile (Join-Path $runRoot "read-set-$label.txt") (Join-Lines (Sort-Ordinal $plan.ReadSet))
     $sorted.Count
 }
 
 # ---------------------------------------------------------------- one attempt (spec 7.3 to 7.7)
 
 $WarmCohorts = @('warm-fresh', 'warm-noop', 'warm-stale', 'overhead', 'parity')
-# Whether the last attempt's child exit counted as finished (EP-C11); read after a warmup Invoke-Attempt returns.
-$script:LastChildAccepted = $false
 $NoColdStamp = 'no unused cold stamp under 15 minutes old in RunRoot: run tools\profile-evict.ps1 -RunRoot <RunRoot> -Corpus <the same corpus folder>, or the owner runs tools\profile-purge.ps1 elevated'
 
 function Invoke-Attempt([hashtable]$A, [bool]$dry) {
@@ -1440,7 +1498,6 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         return 0
     }
     if ($problems) { throw ('refused: ' + ($problems -join '; ')) }
-    $script:LastChildAccepted = $false
 
     # quiet check; a warm chain whose check needed a retry gets a warmup first (spec 7.3)
     $qs = Get-Date
@@ -1449,7 +1506,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         Say 'the quiet check needed a retry: running a warmup first'
         $w = $A.Clone(); $w.Cohort = 'warmup'; $w.CopyFrom = $null; $w.Calibrate = $false; $w.Samply = $null
         $wr = Invoke-Attempt $w $false
-        if (-not (Test-CleanRunnerExit $wr $script:LastChildAccepted)) { throw "the warmup ended with code $wr; stopping" }
+        if ($wr -ne 0) { throw "the warmup ended with code $wr; stopping" }
         $qs = Get-Date
         $quiet = Wait-Quiet $A.RunRoot $needed
         if (-not $quiet.PassedFirstTry) { throw 'stopping: the quiet check after the warmup did not pass at its first try' }
@@ -1578,7 +1635,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         }
         $coldVerdict = $null
         if ($purge) {
-            $coldVerdict = Get-ColdVerdict $A.RunRoot $purge $meta['disk'].start.corpus $meta['disk'].end.corpus
+            $coldVerdict = Get-ColdVerdict $A.RunRoot $purge $A.Label $meta['disk'].start.corpus $meta['disk'].end.corpus
             $meta['cold'] = $coldVerdict
         }
         $timed = @($rows | Where-Object { $_.t_ms -ge $startMs -and $_.t_ms -le $endMs + 1200 })
@@ -1613,8 +1670,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             else { Say "exit 1 does NOT count as finished: $($ks.reason)" }
         }
         Say $DetectionLimit
-        $script:LastChildAccepted = $childAccepted
-        return (Get-RunnerExit $code ([bool]$verdict.contaminated) $notCold)
+        return (Get-RunnerExit $code $childAccepted ([bool]$verdict.contaminated) $notCold)
     } catch {
         $meta['error'] = $_.Exception.Message
         Say "attempt stopped: $($_.Exception.Message)"
