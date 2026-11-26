@@ -86,7 +86,7 @@ subsets of low spread), and the two estimators' `scale`, whose denominator is 0 
 0 too, so the guard gives the index the clamp gave; unit check `tests/bc7.rs` `flat_subsets_decode_sane`; no byte
 change. XC priority: when guarded channels cannot all be kept, a solution keeps the higher one, G before B before R,
 across every subset (penalties of 2^58, 2^56 and 2^54 per lost channel and subset, added to the solution's real error,
-so the closest solution wins within a tier: solutions that lose their channels in the same number of subsets), and a
+so the closest solution wins within a tier: solutions that lose each channel in the same number of subsets), and a
 one-colour candidate charges only the channels its subset's source holds at 0 or 255, not a mean that rounds there;
 proof tests `tests/bc7.rs` `guarded_channels_conflict_by_priority`, `a_lost_channel_keeps_the_closest_solution`,
 `a1_witnesses_pick_the_closest_loser` and `one_colour_packers_key_on_source_constants`; changes bytes only with the mask

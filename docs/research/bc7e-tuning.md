@@ -538,7 +538,7 @@ Patch 0005 fixes the defects an audit of `bc7e.ispc` found, adds the kernel side
 
 - **Q5** (rotated opaque modes 4 and 5 pay for the alpha the engine rewrites): under 0.005 dB everywhere in the spike. The owner dropped it.
 - **Q6** (opaque mode 6's average candidate is charged alpha): it reached 314 of 23.6 million blocks. The owner dropped it.
-- **PA** (perceptual one-colour packers sum each texel's error as a float): the keep rule dropped it under one reading of its rule (2). At the witness's setting, perceptual `basic` (and `fast`), it changed no decode. At `veryslow` 55 synthetic blocks decoded closer and 8 farther, so a `veryslow` reading would have kept it. The owner took the rule's verdict (BC7-O29 (g)).
+- **PA** (perceptual one-colour packers sum each texel's error as a float): the keep rule dropped it under one reading of its rule (2). At the witness's setting, perceptual `basic`, it changed no decode. At `veryslow` 55 synthetic blocks decoded closer and 8 farther, so a `veryslow` reading would have kept it. The owner took the rule's verdict (BC7-O29 (g)).
 - **Left for a later plan**, none of them in patch 0005: refinement of `slowest`'s partition candidates, the perceptual estimator's weights, anti-correlated colours in the estimators, the p-bit choice outside the search under weights, the RGBA principal axis, the checkerboard partitions, the mode 4/5 alpha grid recentring, WP under perceptual, a scale-free form of L16, perceptual mode 7's estimator truncation, and byte-neutral speed items.
 
 ### Method
@@ -699,7 +699,7 @@ No cell is worse on any class, level or ISA; AVX-512 matches AVX2 within 0.002 d
 - Q3 with the window `full` against the planned two-index window: +0.008 to +0.017 dB on the objective in 6 of 6 cells, -2.8 to +0.8 % time; mode-6 texels off their weighted-nearest entry fell from 285,562 to 55,711, all in opaque blocks, where Q3 does not run.
 - With Q3 `full` (final kernel), colour with alpha gives -0.05 / +0.21 dB RGB / alpha at ×8, -0.11 / +0.38 at ×16 and -0.30 / +0.68 at ×64.
 - Against BC3 (rgbcx level 18): at ×8 `alpha_real` still beats BC3 on alpha in 85 of 96 images and on RGB in 88 of 96. At ×16, `n_spec`'s normals beat BC3's on 24 of 30 (2.512 against 2.806 degrees), and its specular loses 0.96 dB to BC3 (12 of 30 wins).
-- ×32 and ×64 gain +0.46 and +0.75 dB of alpha over ×16 on `alpha_real`, for 0.43 and 0.78 dB of RGB.
+- ×32 and ×64 gain +0.46 and +0.75 dB of alpha over ×16 on `alpha_real`, for 0.43 and 0.78 dB of RGB (the texture panel's text rounds these to 0.05).
 - On colour, ×8 costs about 1 dB of RGB per 1.9 dB of alpha gained against ×1; on packed and normal maps 1 per 2.4 to 4.2.
 - Time of Q3 on its own path: +0.3 to +1.9 %; with equal weights, within the run-to-run spread.
 
