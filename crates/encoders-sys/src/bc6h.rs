@@ -70,6 +70,7 @@ pub fn bc6h_compress_rows_routed(
     compress_rows(rgba_f16, width, rows, out, level, shim_number(route));
 }
 
+/// The shim number is already validated: by `forced` after `supported()`, or by `shim_number`.
 fn compress_rows(
     rgba_f16: &[[u16; 4]],
     width: u32,

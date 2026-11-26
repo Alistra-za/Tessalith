@@ -140,11 +140,11 @@ pub(crate) fn shim_number(route: ShimRoute) -> i32 {
     match route {
         ShimRoute::Dispatcher => -1,
         ShimRoute::Direct(t) => {
-            assert!(t.supported(), "this CPU cannot run the {t:?} path");
             assert!(
                 t != IspcTarget::Avx512,
                 "the shim has no direct AVX-512 entry"
             );
+            assert!(t.supported(), "this CPU cannot run the {t:?} path");
             t as i32
         }
     }
@@ -153,6 +153,18 @@ pub(crate) fn shim_number(route: ShimRoute) -> i32 {
 #[cfg(all(test, feature = "test-hooks"))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "no direct AVX-512 entry")]
+    fn a_direct_avx512_route_panics() {
+        shim_number(ShimRoute::Direct(IspcTarget::Avx512));
+    }
+
+    #[test]
+    fn the_route_numbers_are_the_shims() {
+        assert_eq!(shim_number(ShimRoute::Dispatcher), -1);
+        assert_eq!(shim_number(ShimRoute::Direct(IspcTarget::Sse2)), 0);
+    }
 
     #[test]
     fn the_cap_stops_at_avx2_unless_lifted() {

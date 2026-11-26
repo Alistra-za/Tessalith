@@ -53,8 +53,8 @@ fn which(d: &[u8], s: &[u8], a: Option<&[u8]>) -> &'static str {
     }
 }
 
-/// Fixtures (xorshift32, seed `0x9E37_79B9` for each; differing 16-byte blocks measured on a Ryzen whose `best()` is
-/// AVX-512, as SSE2 vs AVX2 / dispatcher vs SSE2 / dispatcher vs AVX2): BC7 Veryslow, 128x128 (1024 blocks), alpha 255,
+/// Fixtures (xorshift32, seed `0x9E37_79B9` for each; differing 16-byte blocks measured on the 1.31 objects on a Ryzen
+/// whose `best()` is AVX-512, as SSE2 vs AVX2 / dispatcher vs SSE2 / dispatcher vs AVX2): BC7 Veryslow, 128x128 (1024 blocks), alpha 255,
 /// texel (x, y) channel c = clamp(200 * (x + y) / 256 + 20 * c + n, 0, 255), one n in [-8, 8] per texel (28 / 62 / 59).
 /// BC6H Veryslow, 64x256 (1024 blocks), b = (x + y) * 0.01, R = b + 0.3 u, G = 0.7 b + 0.3 u, B = 0.4 b + 0.3 u with
 /// u uniform in [0, 1] drawn per channel in that order, alpha 1 (19 / 26 / 15). White noise does not separate the paths
@@ -65,7 +65,7 @@ fn which(d: &[u8], s: &[u8], a: Option<&[u8]>) -> &'static str {
 /// the dispatcher (`forced`), so this test reaches both routes with `ShimRoute` and compares the bytes: SSE2 and AVX2
 /// must differ on the fixture (else it proves nothing), and the dispatcher must equal the object of `best()`, or on
 /// AVX-512 differ from both. It needs no `SDC_TEST_AVX512` (it uses `best()`, not `ispc_target()`) and no byte pin, so
-/// it runs on Intel too. No other test in this file encodes: `Direct(Avx2)` on an AVX2-only CPU re-runs AVX2's table
+/// it runs on Intel too. It is the only test in this file that encodes: `Direct(Avx2)` on an AVX2-only CPU re-runs AVX2's table
 /// init beside the dispatcher's (`sdc_shim.cpp`, `bc7e_blocks_on`), which is safe only while nothing else encodes.
 #[test]
 fn the_dispatcher_runs_the_best_target() {
@@ -155,12 +155,12 @@ fn check(what: &str, best: IspcTarget, d: &[u8], s: &[u8], a: Option<&[u8]>) {
     match best {
         IspcTarget::Sse2 => assert!(d == s, "{what}: the dispatcher is not the SSE2 object"),
         IspcTarget::Avx2 => assert!(
-            d == a.unwrap(),
+            d == a.expect("best() above SSE2 implies AVX2 runs"),
             "{what}: the dispatcher is not the AVX2 object"
         ),
         IspcTarget::Avx512 => {
             assert!(
-                d != a.unwrap(),
+                d != a.expect("best() above SSE2 implies AVX2 runs"),
                 "{what}: the dispatcher equals the AVX2 object"
             );
             assert!(d != s, "{what}: the dispatcher equals the SSE2 object");
