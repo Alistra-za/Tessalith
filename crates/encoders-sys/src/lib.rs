@@ -60,7 +60,7 @@ pub fn versions() -> Versions {
             "bc4-round-to-nearest+bc4-search+bc1-dual+bc4-guard-cut+bc1-alpha+bc1-perceptual",
         ),
         ispctc: "79ddbc9",
-        ispc: "1.31.0",
+        ispc: "1.32.0",
         bc7e_patch: Some("0001-exact-opaque-alpha"),
         bc7e_fixes: Some("0005-bc7e-fixes"),
     }

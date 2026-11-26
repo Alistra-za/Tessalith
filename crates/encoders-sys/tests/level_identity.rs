@@ -9,8 +9,8 @@
 //! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. Until Note JB dropped them, the SSE2 row was
 //! also what the SSE4 and AVX paths wrote.
 //!
-//! The hashes are those of the patch 0005 objects (bc7enc_rdo b943862 + patches 0001, 0002 and 0005; ISPC 1.31.0, the
-//! AVX-512 row ISPC 1.32.0), recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-23, the exact-opaque rows again on
+//! The hashes are those of the patch 0005 objects (bc7enc_rdo b943862 + patches 0001, 0002 and 0005), recorded on
+//! Windows on an AMD Ryzen 7 9800X3D, 2026-11-23, the exact-opaque rows again on
 //! 2026-11-25 when exact opaque became the channel guard's A (Note LR, LR17), and the veryfast and fast rows without
 //! perceptual weighting again that day when mode 4 gained the constant-scalar code pair (LR22; the smooth image's B is
 //! 128 throughout), and every row without perceptual weighting again that day, from veryfast up, with `RECORDED_S1`,
@@ -21,6 +21,9 @@
 //! L16 and now pinning the plain and `[1, 1, 1, N]` calls (`linear_calls_write_the_x16_bytes`). The first recording
 //! (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and never matched a Windows machine. Run with
 //! `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a recorded change is intended (needs a DECISIONS note).
+//!
+//! Every object is an ISPC 1.32.0 build since 2026-11-26 (Note LU3). The rebuild moved no hash here: the 1.32.0
+//! objects write every recorded row, `RECORDED_S1` and `X16_RECORDED` included (LU4).
 
 use encoders_sys::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,

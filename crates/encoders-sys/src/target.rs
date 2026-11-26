@@ -19,7 +19,7 @@ impl IspcTarget {
         *Self::ALL.iter().rev().find(|t| t.supported()).unwrap()
     }
 
-    /// Whether this CPU can run the target (ISPC 1.31: avx2 also needs FMA, F16C, BMI1/2; avx512skx needs AVX-512 F,
+    /// Whether this CPU can run the target (ISPC 1.32: avx2 also needs FMA, F16C, BMI1/2; avx512skx needs AVX-512 F,
     /// DQ, CD, BW and VL, as ISPC's dispatcher checks).
     pub fn supported(self) -> bool {
         match self {

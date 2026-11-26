@@ -131,8 +131,8 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
 ];
 
-/// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects built
-/// with ISPC 1.32.0 (Note LT). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+/// AVX-512 path, recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects
+/// (Note LT). A test build encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -192,13 +192,16 @@ fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
 
 /// The five shipped levels encode byte-identically to the recorded objects (the patch 0007 objects, Note LT), on each
 /// path the run reads (SSE2 and AVX2; AVX-512 only with the cap lifted). The paths differ, so each has its own hashes.
+/// Every object is an ISPC 1.32.0 build since 2026-11-26 (Note LU3), and those objects write the recorded bytes on
+/// every path (LU4).
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
     check_pins(|t| recorded(t).to_vec());
 }
 
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
-/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects (Note LT).
+/// Recorded on Windows on an AMD Ryzen 7 9800X3D, 2026-11-25, from the ISPC TC patch 0007 objects (Note LT); the ISPC
+/// 1.32.0 objects write the same bytes (LU4).
 const RECORDED_PEAK: [&str; 3] = [
     "73007c76401bbaeed478ea8caad5843137094662fc6f63fdfa0a19f4d4a9f5c1",
     "9da6a346bfbe59973588b58aba4c9921f0a366f7ace554252f8c3790d197edaa",
