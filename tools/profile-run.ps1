@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-  Engine profiling runner (plan 2026-11-21-engine-profile, Task 4). One attempt per call. NOTHING IN THIS SCRIPT
-  EVER DELETES, EMPTIES, MOVES OR OVERWRITES A FILE OR FOLDER (EP-R3): every folder is created new (the create
-  fails when it exists) and every file it writes is created new. Old runs are removed by hand.
+  Engine profiling runner (plan 2026-11-21-engine-profile, Task 4). One attempt per call. Nothing in this script
+  deletes, empties, moves or overwrites a file or folder (EP-R3), with ONE exception: -PruneOutputs (EP-O4)
+  deletes the .dds outputs an accepted attempt hashed, and records that in its meta.json (the original kept as
+  meta.before-prune.json). Every folder is created new (the create fails when it exists) and every other file it
+  writes is created new. Old runs are removed by hand.
 
 .DESCRIPTION
-  Three parameter sets, each with only its own parameters (PowerShell rejects a mix).
+  Four parameter sets, each with only its own parameters (PowerShell rejects a mix).
 
   Run:       -Exe <sdc.exe> -Corpus <folder> -Label <name>
              -Cohort <warmup|warm-fresh|warm-noop|warm-stale|cold-fresh|overhead|parity>
@@ -17,6 +19,12 @@
   Expected:  -Expected -Exe <base sdc.exe> -Corpus <folder> -Label <name> -RunRoot <folder> [-Set <string[]>]
              Dry run of the base build into a new empty folder under RunRoot with frozen APPDATA. Writes, each
              created new: expected-<Label>.txt, planned-not-written-<Label>.txt, expected-<Label>-events.txt.
+  Prune:     -PruneOutputs -RunRoot <folder> -Attempt <attempt name> -Reference <attempt name> [-Keep <names>]
+             EP-O4: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
+             equals the reference attempt's. Refused for the reference itself, a name in -Keep, an attempt that did
+             not finish with exit 0, one already pruned, an empty reference, a .dds on disk that hashes.csv lacks
+             (or the reverse), and an out tree holding a junction or link. Before deleting, meta.json is copied to
+             meta.before-prune.json (created new) and gains a "prune" block (reference, files, bytes, time).
   SelfTest:  -SelfTest [-RunRoot <folder>]   Works under a new folder <RunRoot or temp>\selftest-<stamp>, which
              it leaves in place.
 
@@ -29,8 +37,12 @@
   -Calibrate: the first attempt of a session, on a fixture project; writes <RunRoot>\baseline.json. Later
   attempts refuse to run without it.
   -DryRun: prints the quiet check, preconditions, the resolved command and folders; runs nothing.
-  The script never elevates, downloads or installs anything. Cold attempts need an owner-run
-  tools\profile-purge.ps1 stamp (purge-*.json under 15 minutes old, not yet used).
+  The script never elevates, downloads or installs anything. Cold attempts need a cold stamp under 15 minutes
+  old that no earlier attempt used: an owner-run tools\profile-purge.ps1 stamp (purge-*.json), or a
+  tools\profile-evict.ps1 stamp (evict-*.json, EP-C5) of a folder corpus equal to -Corpus. meta.json records the
+  stamp (purgeStamp, either kind) and coldMethod. After an evict stamp the attempt's disk read bytes on the corpus
+  disk must reach 90 % of the stamp's corpus bytes, else meta.json says cold = false and the exit code is 4. A
+  purge stamp carries no byte count (the runner never reads the corpus), so that check is not applied to it.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -52,7 +64,16 @@ param(
     [Parameter(ParameterSetName = 'Run')]
     [Parameter(ParameterSetName = 'Expected', Mandatory)]
     [Parameter(ParameterSetName = 'SelfTest')]
+    [Parameter(ParameterSetName = 'Prune', Mandatory)]
     [string]$RunRoot,
+    [Parameter(ParameterSetName = 'Prune', Mandatory)]
+    [switch]$PruneOutputs,
+    [Parameter(ParameterSetName = 'Prune', Mandatory)]
+    [string]$Attempt,
+    [Parameter(ParameterSetName = 'Prune', Mandatory)]
+    [string]$Reference,
+    [Parameter(ParameterSetName = 'Prune')]
+    [string[]]$Keep = @(),
     [Parameter(ParameterSetName = 'Run')]
     [Parameter(ParameterSetName = 'Expected')]
     [string[]]$Set = @(),
@@ -136,11 +157,14 @@ function Get-CopyFromProblem([string]$runRoot, [string]$name, [string]$corpus, [
     if ((Get-Prop (Get-Prop $m 'contention') 'contaminated') -ne $false) { return 'is contaminated or has no contention verdict' }
     if (-not [string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase')) { return 'is of another corpus' }
     if ((Get-Prop $m 'exeSha256') -ne $exeSha) { return 'was run with another exe' }
+    if (Get-Prop $m 'prune') { return 'was pruned: its DDS outputs are deleted (EP-O4)' }
     $null
 }
 
-# Newest unused purge stamp under 15 minutes old, or $null (spec 7.4).
-function Get-PurgeStamp([string]$runRoot, [datetime]$now) {
+# Newest unused cold stamp under 15 minutes old, or $null (spec 7.4, EP-C5): a purge-*.json (standby list), or an
+# evict-*.json of a folder corpus equal to $corpus (per-file eviction; a list-file stamp never matches a run).
+# meta.json names the stamp in purgeStamp, whichever kind, so a stamp is used once.
+function Get-ColdStamp([string]$runRoot, [datetime]$now, [string]$corpus) {
     $used = @{}
     foreach ($m in Get-ChildItem -LiteralPath $runRoot -Directory -ErrorAction SilentlyContinue) {
         $mp = Join-Path $m.FullName 'meta.json'
@@ -150,13 +174,43 @@ function Get-PurgeStamp([string]$runRoot, [datetime]$now) {
         }
     }
     $best = $null
-    foreach ($f in Get-ChildItem -LiteralPath $runRoot -File -Filter 'purge-*.json' -ErrorAction SilentlyContinue | Sort-Object Name) {
-        if ($f.Name -notmatch '^purge-(\d{8}-\d{6})\.json$') { continue }
-        $t = [datetime]::ParseExact($Matches[1], 'yyyyMMdd-HHmmss', $null)
+    $bestT = [datetime]::MinValue
+    foreach ($f in Get-ChildItem -LiteralPath $runRoot -File -ErrorAction SilentlyContinue | Sort-Object Name) {
+        if ($f.Name -notmatch '^(purge|evict)-(\d{8}-\d{6})\.json$') { continue }
+        $kind = $Matches[1]
+        $t = [datetime]::ParseExact($Matches[2], 'yyyyMMdd-HHmmss', $null)
         $age = ($now - $t).TotalMinutes
-        if ($age -ge 0 -and $age -lt 15 -and -not $used.ContainsKey($f.Name)) { $best = $f.Name }
+        if ($age -lt 0 -or $age -ge 15 -or $used.ContainsKey($f.Name)) { continue }
+        if ($kind -eq 'evict') {
+            $s = Read-Json $f.FullName
+            if ((Get-Prop $s 'method') -ne 'per-file-no-buffering' -or (Get-Prop $s 'corpusKind') -ne 'folder') { continue }
+            if (-not [string]::Equals(([string](Get-Prop $s 'corpus')).TrimEnd('\'), $corpus.TrimEnd('\'), 'OrdinalIgnoreCase')) { continue }
+        }
+        if ($t -ge $bestT) { $best = $f.Name; $bestT = $t }
     }
     $best
+}
+
+# The cold verdict of a finished cold attempt (EP-C5): after an evict stamp the corpus disk's read bytes during
+# the run must reach 90 % of the stamp's corpus bytes. A purge stamp has no byte count: the check is not applied.
+function Get-ColdVerdict([string]$runRoot, [string]$stamp, $readStart, $readEnd) {
+    if ($stamp -notlike 'evict-*') {
+        return [ordered]@{ method = 'standby-purge'; check = 'not applied: a purge stamp carries no corpus byte count (the runner never reads the corpus)' }
+    }
+    $s = Read-Json (Join-Path $runRoot $stamp)
+    $corpusBytes = [int64](Get-Prop $s 'bytes')
+    $v = [ordered]@{ method = 'per-file-no-buffering'; corpusBytes = $corpusBytes; diskReadBytes = $null; ratio = $null; cold = $false; reason = $null }
+    if ($readStart.name -like 'n/a*' -or $readEnd.name -like 'n/a*') {
+        $v.reason = "the corpus drive has no physical-disk counter ($($readStart.name))"
+        return $v
+    }
+    $read = [int64]([uint64]$readEnd.read - [uint64]$readStart.read)
+    $v.diskReadBytes = $read
+    if ($corpusBytes -le 0) { $v.reason = 'the stamp records no corpus bytes'; return $v }
+    $v.ratio = [math]::Round($read / $corpusBytes, 4)
+    $v.cold = ($read -ge 0.9 * $corpusBytes)
+    if (-not $v.cold) { $v.reason = ('the run read {0:N0} bytes from the corpus disk, under 90 % of the {1:N0} corpus bytes' -f $read, $corpusBytes) }
+    $v
 }
 
 # Reason a warm, overhead or parity attempt has no valid predecessor, or $null. last-run.json is the newest
@@ -368,10 +422,56 @@ function Invoke-SelfTest {
     $c3 = Join-Path $t 'cold-ok'; New-NewDir $c3
     $okStamp = & $stampName 2
     Write-NewJson (Join-Path $c3 $okStamp) @{ x = 1 }
-    Case 'a cold attempt without a stamp is refused' { -not (Get-PurgeStamp $c0 $now) }
-    Case 'a cold attempt with a stale stamp is refused' { -not (Get-PurgeStamp $c1 $now) }
-    Case 'a cold attempt with a stamp an earlier attempt names is refused' { -not (Get-PurgeStamp $c2 $now) }
-    Case 'a cold attempt with a fresh unused stamp is accepted' { (Get-PurgeStamp $c3 $now) -eq $okStamp }
+    Case 'a cold attempt without a stamp is refused' { -not (Get-ColdStamp $c0 $now $corpus) }
+    Case 'a cold attempt with a stale stamp is refused' { -not (Get-ColdStamp $c1 $now $corpus) }
+    Case 'a cold attempt with a stamp an earlier attempt names is refused' { -not (Get-ColdStamp $c2 $now $corpus) }
+    Case 'a cold attempt with a fresh unused stamp is accepted' { (Get-ColdStamp $c3 $now $corpus) -eq $okStamp }
+
+    # evict stamps (EP-C5): accepted like a purge stamp, for a folder corpus equal to -Corpus only
+    $evictName = { param($min) 'evict-' + $now.AddMinutes(-$min).ToString('yyyyMMdd-HHmmss') + '.json' }
+    $evictBody = { param($corp, $kind) [ordered]@{ stamp = 'x'; method = 'per-file-no-buffering'; corpus = $corp; corpusKind = $kind; files = 2; bytes = 1000 } }
+    function New-EvictDir([string]$name, [double]$min, [string]$corp, [string]$kind) {
+        $d = Join-Path $t $name; New-NewDir $d
+        $n = & $evictName $min
+        Write-NewJson (Join-Path $d $n) (& $evictBody $corp $kind)
+        [pscustomobject]@{ Dir = $d; Stamp = $n }
+    }
+    $e1 = New-EvictDir 'evict-ok' 2 $corpus 'folder'
+    $e2 = New-EvictDir 'evict-other' 2 'F:\corpus\two' 'folder'
+    $e3 = New-EvictDir 'evict-list' 2 $corpus 'list'
+    $e4 = New-EvictDir 'evict-stale' 20 $corpus 'folder'
+    $e5 = New-EvictDir 'evict-used' 2 $corpus 'folder'
+    New-NewDir (Join-Path $e5.Dir 'earlier-attempt'); Write-NewJson (Join-Path $e5.Dir 'earlier-attempt\meta.json') @{ purgeStamp = $e5.Stamp }
+    $e6 = New-EvictDir 'evict-newest' 1 $corpus 'folder'
+    $olderPurge = & $stampName 3
+    Write-NewJson (Join-Path $e6.Dir $olderPurge) @{ x = 1 }
+    Case 'a cold attempt with a fresh unused evict stamp of its corpus is accepted' { (Get-ColdStamp $e1.Dir $now $corpus) -eq $e1.Stamp }
+    Case 'an evict stamp matches the corpus with or without a trailing backslash, in any case' { (Get-ColdStamp $e1.Dir $now ($corpus.ToUpperInvariant() + '\')) -eq $e1.Stamp }
+    Case 'an evict stamp of another corpus is refused' { -not (Get-ColdStamp $e2.Dir $now $corpus) }
+    Case 'an evict stamp of a list-file corpus is refused' { -not (Get-ColdStamp $e3.Dir $now $corpus) }
+    Case 'a stale evict stamp is refused' { -not (Get-ColdStamp $e4.Dir $now $corpus) }
+    Case 'an evict stamp an earlier attempt names is refused' { -not (Get-ColdStamp $e5.Dir $now $corpus) }
+    Case 'the newest usable stamp wins across purge and evict stamps' { (Get-ColdStamp $e6.Dir $now $corpus) -eq $e6.Stamp }
+
+    # the cold verdict: disk read bytes on the corpus disk against the evict stamp's corpus bytes
+    $disk = { param($name, $read) [pscustomobject]@{ name = $name; read = [uint64]$read; write = [uint64]0 } }
+    Case 'cold verdict: reading 95 % of the corpus bytes from disk is cold' {
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 5000) (& $disk '1 F:' 5950)
+        $v.cold -and $v.diskReadBytes -eq 950 -and $v.corpusBytes -eq 1000 -and $v.method -eq 'per-file-no-buffering'
+    }
+    Case 'cold verdict: exactly 90 % is cold' { (Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 0) (& $disk '1 F:' 900)).cold }
+    Case 'cold verdict: reading 80 % is not cold, with a reason' {
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk '1 F:' 0) (& $disk '1 F:' 800)
+        (-not $v.cold) -and $v.reason -like '*under 90 %*'
+    }
+    Case 'cold verdict: a corpus drive without a disk counter is not cold' {
+        $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk 'n/a (Z: has no physical-disk counter)' 0) (& $disk 'n/a (Z: has no physical-disk counter)' 0)
+        (-not $v.cold) -and $v.reason -like '*no physical-disk counter*'
+    }
+    Case 'cold verdict: a purge stamp records the method and no cold flag (the byte check is not applied)' {
+        $v = Get-ColdVerdict $c3 $okStamp (& $disk '1 F:' 0) (& $disk '1 F:' 0)
+        $v.method -eq 'standby-purge' -and -not $v.Contains('cold') -and $v.check -like 'not applied*'
+    }
 
     # warm predecessors
     function New-LastRun([string]$dir, [double]$minAgo, [string]$corp, [bool]$killed) {
@@ -395,6 +495,106 @@ function Invoke-SelfTest {
         $a = Get-AttemptName 'fx' 'warm-fresh' 1
         $b = Get-AttemptName 'fx' 'warm-fresh' 1
         ($a -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($b -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($a -ne $b)
+    }
+    # prune (EP-O4): only an accepted attempt's hashed .dds files go, and every refusal deletes nothing
+    $pr = Join-Path $t 'prune'; New-NewDir $pr
+    $rowsAB = @('textures/a.dds,aaa', 'textures/b.dds,bbb')
+    $attMeta = @{ cohort = 'warm-fresh'; finished = $true; exitCode = 0; corpus = $corpus; exeSha256 = $sha; build = 'release'; contention = @{ contaminated = $false } }
+    function New-PruneAttempt([string]$root, [string]$name, $meta, $rows, [string[]]$dds) {
+        $d = Join-Path $root $name; New-NewDir $d; New-NewDir (Join-Path $d 'out'); New-NewDir (Join-Path $d 'out\_sdc')
+        Write-NewJson (Join-Path $d 'meta.json') $meta
+        if ($null -ne $rows) { Write-NewFile (Join-Path $d 'hashes.csv') ("path,sha256`n" + (Join-Lines $rows)) }
+        Write-NewFile (Join-Path $d 'out\_sdc\manifest.jsonl') "{}`n"
+        Write-NewFile (Join-Path $d 'stderr.log') "log`n"
+        foreach ($k in $dds) {
+            $p = Join-Path $d ('out\' + $k.Replace('/', '\'))
+            $pd = Split-Path -Parent $p
+            if (-not (Test-Path -LiteralPath $pd)) { New-Item -ItemType Directory -Path $pd | Out-Null }
+            Write-NewFile $p "dds $k"
+        }
+        $d
+    }
+    $ab = @('textures/a.dds', 'textures/b.dds')
+    [void](New-PruneAttempt $pr 'ref' $attMeta $rowsAB $ab)
+    [void](New-PruneAttempt $pr 'ref-empty' $attMeta @() @())
+    $att = New-PruneAttempt $pr 'att' $attMeta $rowsAB $ab
+    [void](New-PruneAttempt $pr 'att-keep' $attMeta $rowsAB $ab)
+    [void](New-PruneAttempt $pr 'att-nohash' $attMeta $null $ab)
+    [void](New-PruneAttempt $pr 'att-diff' $attMeta @('textures/a.dds,aaa', 'textures/b.dds,ccc') $ab)
+    [void](New-PruneAttempt $pr 'att-extra' $attMeta $rowsAB ($ab + 'textures/c.dds'))
+    [void](New-PruneAttempt $pr 'att-missing' $attMeta $rowsAB @('textures/a.dds'))
+    [void](New-PruneAttempt $pr 'att-failed' ($attMeta.Clone() | ForEach-Object { $_['exitCode'] = 1; $_ }) $rowsAB $ab)
+    $junc = New-PruneAttempt $pr 'att-junc' $attMeta $rowsAB $ab
+    New-Sentinel 'junc-target\x.dds'
+    New-Item -ItemType Junction -Path (Join-Path $junc 'out\link') -Target (Join-Path $t 'junc-target') | Out-Null
+    $ddsLeft = { param($name) @([IO.Directory]::EnumerateFiles((Join-Path $pr "$name\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count }
+    $refusedIntact = {
+        param($name, $ref, $keep, $like)
+        $before = & $ddsLeft $name
+        $msg = ''
+        try { [void](Invoke-PruneOutputs $pr $name $ref $keep) } catch { $msg = $_.Exception.Message }
+        ($msg -like $like) -and ((& $ddsLeft $name) -eq $before) -and $before -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $pr "$name\meta.before-prune.json"))
+    }
+    Case 'prune: the reference attempt itself is refused' { & $refusedIntact 'ref' 'ref' @() '*is the reference attempt*' }
+    Case 'prune: an attempt in -Keep is refused' { & $refusedIntact 'att-keep' 'ref' @('other', 'ATT-KEEP') '*-Keep list*' }
+    Case 'prune: an attempt without hashes.csv is refused' { & $refusedIntact 'att-nohash' 'ref' @() '*no hashes.csv*' }
+    Case 'prune: hashes that differ from the reference are refused' { & $refusedIntact 'att-diff' 'ref' @() '*differs from the reference*' }
+    Case 'prune: a reference without hashes.csv rows is refused' { & $refusedIntact 'att' 'ref-empty' @() '*has no hashes.csv rows*' }
+    Case 'prune: a .dds under out that hashes.csv lacks is refused' { & $refusedIntact 'att-extra' 'ref' @() '*not in hashes.csv*' }
+    Case 'prune: a hashed file missing from disk is refused' { & $refusedIntact 'att-missing' 'ref' @() '*not on disk*' }
+    Case 'prune: an attempt that did not finish with exit 0 is refused' { & $refusedIntact 'att-failed' 'ref' @() '*did not finish*' }
+    Case 'prune: an out tree holding a junction is refused and the junction target is untouched' { & $refusedIntact 'att-junc' 'ref' @() '*junction or link*' }
+    Case 'prune: names outside RunRoot or nested are refused' {
+        $a = ''; $b = ''
+        try { [void](Invoke-PruneOutputs $pr '..' 'ref' @()) } catch { $a = $_.Exception.Message }
+        try { [void](Invoke-PruneOutputs $pr 'att' 'ref\x' @()) } catch { $b = $_.Exception.Message }
+        ($a -like '*directly inside RunRoot*') -and ($b -like '*directly inside RunRoot*') -and ((& $ddsLeft 'att') -eq 2)
+    }
+    $metaPath = Join-Path $att 'meta.json'
+    $origMetaHash = (Get-FileHash -LiteralPath $metaPath -Algorithm SHA256).Hash
+    $origMeta = (Read-Json $metaPath) | ConvertTo-Json -Compress -Depth 8
+    $ddsBytes = (([IO.FileInfo](Join-Path $att 'out\textures\a.dds')).Length + ([IO.FileInfo](Join-Path $att 'out\textures\b.dds')).Length)
+    Case 'prune: an accepted attempt loses exactly its hashed .dds files and nothing else' {
+        $r = Invoke-PruneOutputs $pr 'att' 'ref' @('att-keep')
+        $r.Files -eq 2 -and $r.Bytes -eq $ddsBytes -and (& $ddsLeft 'att') -eq 0 -and
+        (Test-Path -LiteralPath (Join-Path $att 'out\_sdc\manifest.jsonl')) -and (Test-Path -LiteralPath (Join-Path $att 'stderr.log')) -and
+        (Test-Path -LiteralPath (Join-Path $att 'hashes.csv')) -and (Test-Path -LiteralPath (Join-Path $att 'out\textures') -PathType Container) -and
+        -not (Test-Path -LiteralPath (Join-Path $att 'meta.prune-new.json'))
+    }
+    Case 'prune: meta.json is the original plus one prune block, and meta.before-prune.json is the original' {
+        $m = Read-Json $metaPath
+        $p = $m.prune
+        $m.PSObject.Properties.Remove('prune')
+        ((Get-FileHash -LiteralPath (Join-Path $att 'meta.before-prune.json') -Algorithm SHA256).Hash -eq $origMetaHash) -and
+        (($m | ConvertTo-Json -Compress -Depth 8) -eq $origMeta) -and $p.reference -eq 'ref' -and $p.files -eq 2 -and $p.bytes -eq $ddsBytes -and (@($p.keep) -join ',') -eq 'att-keep'
+    }
+    Case 'prune: a second prune of the same attempt is refused' {
+        $msg = ''
+        try { [void](Invoke-PruneOutputs $pr 'att' 'ref' @()) } catch { $msg = $_.Exception.Message }
+        $msg -like '*already pruned*'
+    }
+    Case 'prune: the reference and the other refused attempts still hold every .dds' {
+        ((& $ddsLeft 'ref') -eq 2) -and ((& $ddsLeft 'att-keep') -eq 2) -and ((& $ddsLeft 'att-diff') -eq 2) -and ((& $ddsLeft 'att-extra') -eq 3)
+    }
+    Case 'a pruned warm-fresh is refused as a -CopyFrom source' { (Get-CopyFromProblem $pr 'att' $corpus $sha) -like '*pruned*' }
+    Case 'the free-space figure of a pruned attempt adds back the pruned bytes' {
+        $fr = Join-Path $t 'prune-figure'; New-NewDir $fr
+        [void](New-PruneAttempt $fr 'b-ref' ($attMeta.Clone() | ForEach-Object { $_['build'] = 'base'; $_ }) $rowsAB $ab)
+        $fa = New-PruneAttempt $fr 'a-att' $attMeta $rowsAB $ab
+        $before = Get-DirBytes (Join-Path $fa 'out')
+        [void](Invoke-PruneOutputs $fr 'a-att' 'b-ref' @())
+        ((Get-DirBytes (Join-Path $fa 'out')) -lt $before) -and ((Get-ExpectedBytesFigure $fr $corpus 'release' 0) -eq $before)
+    }
+    Case 'the one file deletion in this script sits in Invoke-PruneOutputs and deletes files only' {
+        $text = [IO.File]::ReadAllText($PSCommandPath)
+        $del = 'Del' + 'ete('
+        $start = $text.IndexOf('function Invoke-' + 'PruneOutputs(')
+        $end = $text.IndexOf("`n# ----", $start)
+        $body = $text.Substring($start, $end - $start)
+        $all = [regex]::Matches($text, [regex]::Escape($del)).Count
+        $inBody = [regex]::Matches($body, [regex]::Escape($del)).Count
+        $start -ge 0 -and $all -eq 1 -and $inBody -eq 1 -and $body.Contains('[IO.File]::' + $del) -and
+        -not [regex]::IsMatch($text, '(?i)\[IO\.Directory\]::' + 'Del')
     }
     Case 'the script text has no delete, move, clear, mirror, purge or forced folder creation' {
         $text = [IO.File]::ReadAllText($PSCommandPath) + "`n" + [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'profile-paths.ps1'))
@@ -482,7 +682,8 @@ function Get-ExpectedBytesFigure([string]$runRoot, [string]$corpus, [string]$bui
         if (-not (Test-Path -LiteralPath $mp) -or -not (Test-Path -LiteralPath $out)) { continue }
         $m = Read-Json $mp
         if ([string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase') -and (Get-Prop $m 'build') -eq $build -and (Get-Prop $m 'exitCode') -eq 0) {
-            return (Get-DirBytes $out)
+            # A pruned attempt's out lost its DDS files: add back the bytes the prune recorded (EP-O4).
+            return ((Get-DirBytes $out) + [int64](Get-Prop (Get-Prop $m 'prune') 'bytes'))
         }
     }
     if ($given -gt 0) { return $given }
@@ -713,6 +914,7 @@ function Invoke-Expected([hashtable]$A) {
 # ---------------------------------------------------------------- one attempt (spec 7.3 to 7.7)
 
 $WarmCohorts = @('warm-fresh', 'warm-noop', 'warm-stale', 'overhead', 'parity')
+$NoColdStamp = 'no unused cold stamp under 15 minutes old in RunRoot: run tools\profile-evict.ps1 -RunRoot <RunRoot> -Corpus <the same corpus folder>, or the owner runs tools\profile-purge.ps1 elevated'
 
 function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $exeSha = Get-ExeSha $A.Exe
@@ -728,7 +930,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     } elseif ($A.CopyFrom) { $problems += "-CopyFrom is refused for $cohort" }
     if ($A.Samply -and -not (Test-Path -LiteralPath $A.Samply -PathType Leaf)) { $problems += "samply not found: $($A.Samply)" }
     # refuse at once what no amount of waiting for a quiet machine can fix (a missing stamp or predecessor)
-    if ($cohort -eq 'cold-fresh' -and -not (Get-PurgeStamp $A.RunRoot (Get-Date))) { $problems += 'no unused purge-*.json under 15 minutes old in RunRoot (the owner runs tools\profile-purge.ps1 elevated)' }
+    if ($cohort -eq 'cold-fresh' -and -not (Get-ColdStamp $A.RunRoot (Get-Date) $A.Corpus)) { $problems += $NoColdStamp }
     if ($cohort -in $WarmCohorts) { $pp = Get-PredecessorProblem $A.RunRoot $A.Corpus (Get-Date); if ($pp) { $problems += $pp } }
     $figure = Get-ExpectedBytesFigure $A.RunRoot $A.Corpus $A.Build ([int64]$A.ExpectedBytes)
     if ($null -eq $figure) { $problems += 'no earlier attempt of this corpus and build in RunRoot to size the free-space check from: pass -ExpectedBytes (the corpus is never read outside the command)' }
@@ -778,9 +980,11 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         if ($pp) { throw "refused: $pp" }
     }
     $purge = $null
+    $coldMethod = $null
     if ($cohort -eq 'cold-fresh') {
-        $purge = Get-PurgeStamp $A.RunRoot (Get-Date)
-        if (-not $purge) { throw 'refused: no unused purge-*.json under 15 minutes old in RunRoot (the owner runs tools\profile-purge.ps1 elevated)' }
+        $purge = Get-ColdStamp $A.RunRoot (Get-Date) $A.Corpus
+        if (-not $purge) { throw "refused: $NoColdStamp" }
+        $coldMethod = if ($purge -like 'evict-*') { 'per-file-no-buffering' } else { 'standby-purge' }
     }
     $baseline = $null
     if (-not $A.Calibrate) { $baseline = Read-Json $baselinePath }
@@ -792,7 +996,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $meta = [ordered]@{
         attempt = $name; label = $A.Label; cohort = $cohort; build = $A.Build; corpus = $A.Corpus; exe = $A.Exe; exeSha256 = $exeSha
         commit = (& git -C $PSScriptRoot rev-parse HEAD 2>$null); command = ($exeToRun + ' ' + ($fullArgs -join ' ')); finished = $false
-        exitCode = $null; externalWallMs = $null; purgeStamp = $purge; calibrate = [bool]$A.Calibrate; samply = $null
+        exitCode = $null; externalWallMs = $null; purgeStamp = $purge; coldMethod = $coldMethod; calibrate = [bool]$A.Calibrate; samply = $null
         quiet = [ordered]@{ passedFirstTry = $quiet.PassedFirstTry; tries = $quiet.Tries; waitedSec = $quiet.WaitedSec; cpuAvgPct = $quiet.Result.CpuAvgPct; freeGB = [math]::Round($quiet.Result.FreeBytes / 1GB, 1); neededGB = [math]::Round($needed / 1GB, 1) }
         logicalCores = [Environment]::ProcessorCount
     }
@@ -887,6 +1091,11 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             start = [ordered]@{ corpus = (Get-DiskFigure $diskStart $A.Corpus); output = (Get-DiskFigure $diskStart $out) }
             end = [ordered]@{ corpus = (Get-DiskFigure $diskEnd $A.Corpus); output = (Get-DiskFigure $diskEnd $out) }
         }
+        $coldVerdict = $null
+        if ($purge) {
+            $coldVerdict = Get-ColdVerdict $A.RunRoot $purge $meta['disk'].start.corpus $meta['disk'].end.corpus
+            $meta['cold'] = $coldVerdict
+        }
         $timed = @($rows | Where-Object { $_.t_ms -ge $startMs -and $_.t_ms -le $endMs + 1200 })
         $verdict = Get-ContentionVerdict $timed $baseline ([bool]$A.Calibrate)
         $meta['contention'] = $verdict
@@ -919,9 +1128,11 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
                 endedUnixMs = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
             })
         Say ('exit {0}, wall {1} ms, contention: {2}' -f $code, $wall.ElapsedMilliseconds, $(if ($verdict.contaminated) { 'CONTAMINATED ' + ($verdict.reasons -join '; ') } else { 'clean' }))
+        if ($coldVerdict -and $coldVerdict.Contains('cold') -and -not $coldVerdict.cold) { Say "NOT COLD: $($coldVerdict.reason)" }
         Say $DetectionLimit
         if ($code -ne 0) { return $code }
         if ($verdict.contaminated) { return 3 }
+        if ($coldVerdict -and $coldVerdict.Contains('cold') -and -not $coldVerdict.cold) { return 4 }
         return 0
     } catch {
         $meta['error'] = $_.Exception.Message
@@ -932,9 +1143,100 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     }
 }
 
+# ---------------------------------------------------------------- prune (EP-O4)
+
+# Reason a name is not an attempt folder directly in RunRoot, or $null (the -CopyFrom name rule).
+function Get-AttemptDirProblem([string]$runRoot, [string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name) -or $name -ne [IO.Path]::GetFileName($name) -or $name -match '[\\/:]' -or $name -eq '..' -or $name -eq '.') {
+        return 'must be an attempt folder name directly inside RunRoot'
+    }
+    $dir = Join-Path $runRoot $name
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "no attempt folder $name in RunRoot" }
+    if ((Get-Item -LiteralPath $dir -Force).LinkType) { return "$name is a junction or link" }
+    $null
+}
+
+# The hashes.csv rows (header dropped), or $null when the file is missing.
+function Get-HashRows([string]$dir) {
+    $p = Join-Path $dir 'hashes.csv'
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $null }
+    , @([IO.File]::ReadAllLines($p) | Select-Object -Skip 1 | Where-Object { $_ })
+}
+
+# EP-O4 (amends EP-R3): the ONLY deletion in this script. Deletes exactly the .dds files the attempt's hashes.csv
+# lists, under <attempt>\out, once that list equals the reference attempt's. meta.json is copied to
+# meta.before-prune.json (created new: also the "already pruned" lock) and gains a prune block before anything
+# is deleted. Throws "refused: ..." and deletes nothing on any problem.
+function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$reference, [string[]]$keep) {
+    foreach ($n in @($attempt, $reference)) {
+        $why = Get-AttemptDirProblem $runRoot $n
+        if ($why) { throw "refused: $n $why" }
+    }
+    if ($attempt -ieq $reference) { throw "refused: $attempt is the reference attempt (kept whole)" }
+    if (@($keep | Where-Object { $_ -ieq $attempt }).Count) { throw "refused: $attempt is in the -Keep list" }
+    $dir = Join-Path $runRoot $attempt
+    $metaPath = Join-Path $dir 'meta.json'
+    $backup = Join-Path $dir 'meta.before-prune.json'
+    if (-not (Test-Path -LiteralPath $metaPath -PathType Leaf)) { throw "refused: $attempt has no meta.json" }
+    if (Test-Path -LiteralPath $backup) { throw "refused: $attempt was already pruned (meta.before-prune.json exists)" }
+    $meta = Read-Json $metaPath
+    if (Get-Prop $meta 'prune') { throw "refused: $attempt was already pruned" }
+    if ((Get-Prop $meta 'finished') -ne $true -or (Get-Prop $meta 'exitCode') -ne 0) { throw "refused: $attempt did not finish with exit code 0" }
+    $rows = Get-HashRows $dir
+    if ($null -eq $rows) { throw "refused: $attempt has no hashes.csv" }
+    $refRows = Get-HashRows (Join-Path $runRoot $reference)
+    if ($null -eq $refRows -or $refRows.Count -eq 0) { throw "refused: the reference $reference has no hashes.csv rows" }
+    $mine = @{}; foreach ($r in $rows) { $mine[$r] = $true }
+    $theirs = @{}; foreach ($r in $refRows) { $theirs[$r] = $true }
+    $onlyMine = @($rows | Where-Object { -not $theirs.ContainsKey($_) }).Count
+    $onlyRef = @($refRows | Where-Object { -not $mine.ContainsKey($_) }).Count
+    if ($onlyMine -or $onlyRef -or $rows.Count -ne $refRows.Count) {
+        throw "refused: $attempt's hashes.csv differs from the reference $reference ($onlyMine row(s) only here, $onlyRef only in the reference)"
+    }
+    $out = Join-Path $dir 'out'
+    if (-not (Test-Path -LiteralPath $out -PathType Container)) { throw "refused: $attempt has no out folder" }
+    $outItem = Get-Item -LiteralPath $out -Force
+    if ($outItem.LinkType -or ($outItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "refused: $attempt\out is a junction or link" }
+    $links = @(Get-ChildItem -LiteralPath $out -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop)
+    if ($links.Count) { throw "refused: $attempt\out holds a junction or link ($($links[0].FullName))" }
+    $outRoot = [IO.Path]::GetFullPath($out).TrimEnd('\') + '\'
+    $onDisk = @{}
+    foreach ($f in [IO.Directory]::EnumerateFiles($out, '*.dds', [IO.SearchOption]::AllDirectories)) {
+        $onDisk[$f.Substring($outRoot.Length).Replace('\', '/').ToLowerInvariant()] = $f
+    }
+    $keys = @($rows | ForEach-Object { $_.Substring(0, $_.LastIndexOf(',')) })
+    $missing = @($keys | Where-Object { -not $onDisk.ContainsKey($_) })
+    if ($missing.Count) { throw "refused: $($missing.Count) hashed file(s) are not on disk, e.g. $($missing[0])" }
+    if ($onDisk.Count -ne $keys.Count) { throw "refused: $($onDisk.Count - $keys.Count) .dds file(s) under out are not in hashes.csv" }
+    $files = @($keys | ForEach-Object { $onDisk[$_] })
+    $bytes = [int64]0
+    foreach ($f in $files) { $bytes += ([IO.FileInfo]$f).Length }
+
+    [IO.File]::Copy($metaPath, $backup, $false)
+    $record = [ordered]@{ at = (Get-Date).ToString('o'); reference = $reference; files = $files.Count; bytes = $bytes; keep = @($keep) }
+    $meta | Add-Member -NotePropertyName 'prune' -NotePropertyValue $record
+    $tmp = Join-Path $dir 'meta.prune-new.json'
+    Write-NewJson $tmp $meta
+    [IO.File]::Move($tmp, $metaPath, $true)
+    foreach ($f in $files) { [IO.File]::Delete($f) }
+    $left = @([IO.Directory]::EnumerateFiles($out, '*.dds', [IO.SearchOption]::AllDirectories)).Count
+    if ($left) { throw "$left .dds file(s) remain under $out after the prune" }
+    [pscustomobject]@{ Files = $files.Count; Bytes = $bytes }
+}
+
 # ---------------------------------------------------------------- entry
 
 if ($SelfTest) { Invoke-SelfTest }
+
+if ($PSCmdlet.ParameterSetName -eq 'Prune') {
+    $RunRoot = [IO.Path]::GetFullPath($RunRoot).TrimEnd('\')
+    $why = Get-RunRootProblem $RunRoot (Get-ProtectedList)
+    if ($why) { throw "refused: RunRoot $RunRoot $why" }
+    if (-not (Test-Path -LiteralPath $RunRoot -PathType Container)) { throw "refused: RunRoot not found: $RunRoot" }
+    $r = Invoke-PruneOutputs $RunRoot $Attempt $Reference $Keep
+    Say ('pruned {0}: {1} .dds file(s), {2:N0} bytes; meta.json records it' -f $Attempt, $r.Files, $r.Bytes)
+    exit 0
+}
 
 if (-not (Test-Label $Label)) { throw "refused: -Label must match ^[A-Za-z0-9][A-Za-z0-9-]{0,31}`$ (got '$Label')" }
 if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw "refused: exe not found: $Exe" }
