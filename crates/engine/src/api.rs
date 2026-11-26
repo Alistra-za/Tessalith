@@ -1174,13 +1174,11 @@ pub(crate) fn currency(
         Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
     );
     let older_encode = !encode_current(e, encode_version(job.profile.subtype))
-        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.ispc, &rec.bc7e_patch)
-            != (
-                &encoders.bc7enc_rdo,
-                &encoders.ispctc,
-                &encoders.ispc,
-                &encoders.bc7e_patch,
-            )
+        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.bc7e_patch)
+            != (&encoders.bc7enc_rdo, &encoders.ispctc, &encoders.bc7e_patch)
+        // The ISPC compiler builds only the bc7e (BC7) and ISPC TC (BC6H) objects, so other formats ignore the tag
+        // (Note LU2).
+        || (matches!(format, Format::Bc6hUf16 | Format::Bc7) && rec.ispc != encoders.ispc)
         || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
         // bc7e patch 0005 changes only BC7 bytes, so other formats ignore the tag (Note LR).
         || (format == Format::Bc7 && rec.bc7e_fixes != encoders.bc7e_fixes)
@@ -5397,13 +5395,36 @@ mod tests {
             );
         }
         row("empty encode_version", same, same, &ev(""), [Stale, Stale]);
-        row(
-            "other ispc",
-            same,
-            same,
-            &|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into(),
-            [ENC, Stale],
-        );
+        // The ISPC compiler builds only the bc7e (BC7) and ISPC TC (BC6H) objects; other formats ignore the tag (Note LU).
+        for f in [
+            Format::Bc1,
+            Format::Bc3,
+            Format::Bc4,
+            Format::Bc5,
+            Format::Bc6hUf16,
+            Format::Bc7,
+            Format::Rgba8,
+        ] {
+            let want = match f {
+                Format::Bc6hUf16 | Format::Bc7 => [ENC, Stale],
+                _ => [Current, Current],
+            };
+            row(
+                &format!("{f:?} other ispc"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into(),
+                want,
+            );
+            // A missing value cannot parse (the field has no serde default), so an empty one stands for it.
+            row(
+                &format!("{f:?} empty ispc"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().ispc = String::new(),
+                want,
+            );
+        }
         // The rgbcx patches only change BC1/BC3/BC4/BC5 output; a record from before them is current for the rest.
         for f in [
             Format::Bc1,
