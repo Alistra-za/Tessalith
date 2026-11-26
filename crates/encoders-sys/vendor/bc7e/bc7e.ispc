@@ -28,7 +28,7 @@
 //   byte changes.
 // - XC priority: when guarded channels cannot all be kept, a solution keeps the higher one, G before B before R,
 //   across every subset (graded penalties spaced by 4, per lost channel and subset, added to the real error so the
-//   closest solution wins within a tier: solutions that lose their channels in the same number of subsets); the
+//   closest solution wins within a tier: solutions that lose each channel in the same number of subsets); the
 //   one-colour packers charge only channels flat across the subset; exact opaque's alpha stays above them through
 //   its forced p-bits.
 // - XC (A): exact opaque is the channel guard's alpha bit, bit 3 of m_exact_mask. Opaque blocks keep the forced
@@ -972,8 +972,9 @@ static inline color_quad_i scale_color(const varying color_quad_i *uniform pC, c
 // XC_LOST_<channel> over the lost channels and subsets, G before B before R. The tiers are spaced by 4, so losing a
 // higher channel in one subset costs more than losing every lower channel in all three subsets (3 x 2^54 < 2^56,
 // 3 x (2^54 + 2^56) < 2^58), no sum wraps, and every penalty exceeds any real error (below 2^40). Round 6 (A1): the
-// penalty is added to the solution's real error, so the closest solution wins within a tier; three subsets of
-// errors below 2^40 cannot cross a tier (3 x 2^54 + 3 x 2^40 < 2^56, 3 x (2^54 + 2^56) + 3 x 2^40 < 2^58).
+// penalty is added to the solution's real error, so the closest solution wins within a tier (the solutions that
+// lose each channel in the same number of subsets); three subsets of errors below 2^40 cannot cross a tier
+// (3 x 2^54 + 3 x 2^40 < 2^56, 3 x (2^54 + 2^56) + 3 x 2^40 < 2^58).
 #define XC_LOST_R (((uint64_t)1) << 54)
 #define XC_LOST_B (((uint64_t)1) << 56)
 #define XC_LOST_G (((uint64_t)1) << 58)
@@ -1365,16 +1366,16 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 	varying int *uniform pSelectors, uint32_t num_pixels, const varying color_quad_i *uniform pPixels)
 {
 	uint32_t best_err = UINT_MAX;
-	// sdc patch 0005 (XC): start inside the loop's range, so a guard that rejects every p never leaves the forced
-	// p-bits of exact opaque (alpha 255 wins over an exact constant, ruling BC7-C4)
+	// sdc patch 0005 (XC): a start value only: best_pen starts at UINT64_MAX, so the loop's first p always replaces it.
+	// The loop itself starts at exact opaque's forced p-bits (alpha 255 wins over an exact constant, ruling BC7-C4).
 	uint32_t best_p = pParams->m_force_pbit1 ? 3 : 0;
 	uint64_t best_pen = UINT64_MAX; // sdc patch 0005 (XC): the penalty of best_p's lost masked constants
 	uint32_t xc_flags = 0; // sdc patch 0005 (XC): A3, the subset's flagged constants (set only when the mask is)
 	if (pParams->m_exact_mask != 0)
 		xc_flags = pResults->m_exact_const;
 
-	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and perceptual:
-	// the table sum, unchanged)
+	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and
+	// perceptual: the table sum, unchanged)
 	const uniform bool wp_weighted = !pParams->m_perceptual && !((pParams->m_weights[0] == pParams->m_weights[1]) && (pParams->m_weights[0] == pParams->m_weights[2]) && (pParams->m_weights[0] == pParams->m_weights[3]));
 	for (uniform uint32_t p = (pParams->m_force_pbit1 ? 3 : 0); p < 4; p++)
 	{
@@ -1382,7 +1383,8 @@ static uint64_t pack_mode6_to_one_color(const uniform color_cell_compressor_para
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error;
-		if (wp_weighted) // sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+		// sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+		if (wp_weighted)
 #pragma ignore warning(perf)
 			err = pParams->m_weights[0] * g_bc7_mode_6_optimal_endpoints[r][hi_p][lo_p].m_error + pParams->m_weights[1] * g_bc7_mode_6_optimal_endpoints[g][hi_p][lo_p].m_error + pParams->m_weights[2] * g_bc7_mode_6_optimal_endpoints[b][hi_p][lo_p].m_error + pParams->m_weights[3] * g_bc7_mode_6_optimal_endpoints[a][hi_p][lo_p].m_error;
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
@@ -1455,8 +1457,8 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 	if (pParams->m_exact_mask != 0)
 		xc_flags = pResults->m_exact_const;
 
-	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and perceptual:
-	// the table sum, unchanged)
+	// sdc patch 0005 (WP): with unequal linear weights the p-bits are chosen by the weighted error (equal weights and
+	// perceptual: the table sum, unchanged)
 	const uniform bool wp_weighted = !pParams->m_perceptual && !((pParams->m_weights[0] == pParams->m_weights[1]) && (pParams->m_weights[0] == pParams->m_weights[2]) && (pParams->m_weights[0] == pParams->m_weights[3]));
 	for (uniform uint32_t p = 0; p < 4; p++)
 	{
@@ -1464,7 +1466,8 @@ static uint64_t pack_mode7_to_one_color(const uniform color_cell_compressor_para
 		uniform uint32_t lo_p = p & 1;
 #pragma ignore warning(perf)
 		uint32_t err = g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error + g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error;
-		if (wp_weighted) // sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+		// sdc patch 0005 (WP): each entry's m_error is its channel's squared decode error at the packer's selector
+		if (wp_weighted)
 #pragma ignore warning(perf)
 			err = pParams->m_weights[0] * g_bc7_mode_7_optimal_endpoints[r][hi_p][lo_p].m_error + pParams->m_weights[1] * g_bc7_mode_7_optimal_endpoints[g][hi_p][lo_p].m_error + pParams->m_weights[2] * g_bc7_mode_7_optimal_endpoints[b][hi_p][lo_p].m_error + pParams->m_weights[3] * g_bc7_mode_7_optimal_endpoints[a][hi_p][lo_p].m_error;
 		// sdc patch 0005 (XC): the p with the smallest penalty for the subset's flagged constants its entries miss (A3),
@@ -2095,7 +2098,8 @@ static uint64_t evaluate_solution(const varying color_quad_i *uniform pLow, cons
 	uint64_t total_err = (int64)total_errf;
 
 	// sdc patch 0005 (XC): a solution that does not decode flagged constants exactly scores their penalty plus its real
-	// error (A1: added in uint64_t after the cast, so the closest solution wins within a tier). The mask test is uniform
+	// error (A1: added in uint64_t after the cast, so the closest solution wins within a tier, the solutions that lose
+	// each channel in the same number of subsets). The mask test is uniform
 	// (mask 0: one branch); the flags are per lane, so the check runs, masked, when any lane's subset is flagged.
 	if (pParams->m_exact_mask != 0)
 	{
@@ -3929,7 +3933,8 @@ static void handle_alpha_block_mode5(const varying color_quad_i *uniform pPixels
 	pParams->m_exact_mask = (a_slot < 0) ? (pComp_params->m_exact_mask & 7) : ((pComp_params->m_exact_mask & 7 & ~(1 << a_slot)) | (((pComp_params->m_exact_mask >> 3) & 1) << a_slot));
 	pParams->m_xc_a_slot = a_slot;
 		
-	// sdc patch 0005 (SF): the best so far (the callers pass it in); the colour compress runs after the scalar search
+	// sdc patch 0005 (SF): *pMode5_err must hold the caller's best so far on entry (never 0): the outputs are valid only
+	// when the returned error is below it. The colour compress runs after the scalar search.
 	const uint64_t sf_best = *pMode5_err;
 	uint64_t sf_alpha_err = 0;
 
