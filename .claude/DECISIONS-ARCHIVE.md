@@ -946,6 +946,21 @@ ARCHIVED (wording before the edit; superseded in part by Note LQ2, 2026-11-23)
 ARCHIVED (wording before the edit; superseded in part by Note LQ3, 2026-11-23)
 - A group header carries a value only where the state shows nowhere else (JR6): Coat, Emissive, Glint and Fuzz say no on/off (their tick shows the state when Features is open and the key is available); Subsurface says its mode (Off / Standard / Foliage) only while closed; NiAlphaProperty set/off, closed at start; Matching "{n} match(es)"; an enabled but blocked feature's group reads `{state}, blocked by {feature}` in amber whether it is open or closed. Off-state title "PGPatcher JSON settings (not written)"; titles "Coat", "Subsurface", "CS PBR records". [CC8, CC10, CC11, CC22, CC13, JR6]
 
+ARCHIVED (wording before the edit; superseded in part by Note LR4, 2026-11-25)
+- An engine change that alters a type's bytes or verdict moves that type's arm in `encode_version` (Note DM), except the AVX-512 path (HZ2) and the `max` search (LI5); the byte-identity pins in `encode_versions/identity.json` are strict, with the AVX-512 path the one exception there. [DM1, DM4, FM1, HZ2, LI5]
+
+ARCHIVED (wording before the edit; superseded in part by Note LR18, 2026-11-25)
+- A constant alpha-0 block of a `complex_material` with `alpha.parallax` off gets `encoders_sys::bc7_fixup::force_zero_alpha` after the encode (bc7e would otherwise decode alpha 1); BC3's alpha block stores 0 exactly. [BC7]
+
+ARCHIVED (wording before the edit; superseded in part by Note LR18, 2026-11-25)
+- A constant alpha-0 block of a `complex_material` with `alpha.parallax` off gets `encoders_sys::bc7_fixup::force_zero_alpha` after the encode when its alpha decodes above 0 at some texel (Note LR, LR18; bc7e would otherwise decode alpha 1); BC3's alpha block stores 0 exactly. [BC7]
+
+ARCHIVED (wording before the edit; superseded in part by Note LR, 2026-11-25)
+- bc7e has an effort level `max`, off by default; the default stays byte-identical; level hashes are pinned per ISPC target; the endpoint search is not adopted in `veryslow`. [BZ1, BZ2, CB2, CB4]
+
+ARCHIVED (wording before the edit; superseded in part by Note LR8 and Note LR15, 2026-11-25)
+- `encoder.bc7_weights` (the BC7 weighting dropdown) is optional and serialised only when set (existing profiles, presets, hashes and `sdc.toml` stay byte-identical). The weights reach bc7e only (other formats raise `ENC-WEIGHTS-IGNORED`); `encode_band` calls the tuned entry only with weights set and perceptual off, else the exact plain call; unit weights give the plain bytes. No preset, sub-type or rule sets it. [CP2, CP4, CP5, CP8]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -1185,6 +1200,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JB, 2026-11-14)
 ARCHIVED (superseded by Note JB2, 2026-11-14)
 - **HZ4 The SSE2, SSE4, AVX and AVX2 objects did not change.** `tools/regen-ispc.ps1` printed MATCH for those eight files before the update, and every pin recorded on those paths is unchanged. Only the two dispatcher objects and the two generated headers changed (ISPC 1.31.0 builds; the CPU-detection code in them is the same as before), and two objects were added.
 
+ARCHIVED (wording before the edit; superseded in part by Note LR6, 2026-11-25)
+- **HZ7 Two BC7 probe tests return early on the AVX-512 path.** `encoders-sys` `tests/bc7_fixup.rs` `bc7e_opaque_noise_rotated_blocks_fixed_losslessly` and `engine` `tests/encode.rs` `exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else` look for blocks that bc7e writes from their noise input on the AVX2 path and does not write on the AVX-512 path, so they return when `ispc_target()` is `Avx512`. No guarantee broke: the fix is path-independent Rust, and on the probe inputs the AVX-512 path emits no block that needs it (the raw bc7e output decoded alpha 255 with 0 blocks needing the rotated-slot fix). The engine-equals-raw-plus-fix check was confirmed once by hand on that path; the two neighbour tests `exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise` and `remove_guarantee_holds_on_task41_noise_with_exact_opaque_off` pass there, but their inputs may give the AVX-512 path no rotated block either.
+
 ## Note FO — trace-debug fixes 2026-11-04 (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note JI7, 2026-11-15)
@@ -1268,6 +1286,9 @@ ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
 
 ARCHIVED (wording before the edit; superseded in part by Note LI, 2026-11-22)
 - **JA5 Quality targets: `encoder.effort`, `encoder.bc45_search_radius`, `encoder.bc1_search`.** When the profile hashes differ, the record's own profile (`raw["profile"]`, which must hash to the record's `profile_sha256`) with the job's three targets copied in must hash as the job's profile, else the output is stale (format, weighting, size, alpha, mips or any field added later). Then per field, for the job's format: effort on BC7 by bc7e level (`ultrafast` to `max`) and on BC6H by ISPC level in the order `veryfast`, `fast`, `basic`, `slow`, `veryslow`, peak (no effort reaches `slow` today) (`slowest` and `max` are one level); the radius on BC3, BC4 and BC5 by its value (`fast` 4 < `default` 5 < `max` 10, not the declared order); `bc1_search` on BC1 and BC3 (`fast` < `default`). A field the format does not read never differs. Any rise is stale; else any fall keeps. `bc7_weights` unset against `linear` re-encodes: equal bytes, different settings.
+
+ARCHIVED (wording before the edit; superseded in part by Note LR4, 2026-11-25)
+- **JA2 What `--ev` compares.** `--ev` is named after `engine::manifest::encode_version`. A record's encode version is its `encode_version`, its encoder tags (`bc7enc_rdo`, `ispctc`, `ispc` and `bc7e_patch` on every format, `rgbcx_patch` on BC1, BC3, BC4 and BC5; a missing patch tag counts) and, on BC1 and BC3, `bc1_model` compared with `BC1_ENCODE_ID` (the constant, never the literal `dual`, so a later change of it marks the older outputs). An `encode_version` arm records any change to a type's bytes or verdict, an encoder change or a pipeline fix, so the outputs of a pipeline fix are kept too without `--ev`; every run that keeps some says how many and how to re-encode them (JA6). No `bcenc` build id is added: a `bcenc` change that alters bytes moves an arm or `BC1_ENCODE_ID` (HY7, Note DM), and a same-bytes change needs no mark. User text says "written by an older encode version", never "only the encoder changed".
 
 ## Note JI — Settings tab, and no Advanced drawer (owner, 2026-11-15)
 
@@ -1943,3 +1964,21 @@ ARCHIVED (wording before the edit; superseded in part by Note LR14, 2026-11-25)
 
 ARCHIVED (wording before the edit; superseded in part by Note LR, 2026-11-25)
 - **LQ2 The groups and their order.** `model::panel_groups::PanelGroup::ALL` is the order the single panel, the strip and the 3D window draw: Alpha, Mipmaps, Normal map, Size, Compression, Cubemap, Channels and "Where these settings come from" (`Sources`); `panel_groups::panel_group` maps every field to its group, and one test pins the whole table. Input content (`color.content`, key unchanged) and DDS tag are in Compression, after Format in `FIELDS` order, and the preview's strip leaves both rows out (as it leaves out Levels and DDS header, JI3). **A header is never disabled:** a group whose every shown row is locked starts closed, still opens, and shows each row with its own reason; its summary reads "not used for this texture" ("not used for these textures" in bulk), and its hover gives the shared reason when every row has the same one, else "Each row below says why it is not used.". `edit_off` (a pending plan, FK3) never touches a header, its summary or its "all locked" state: group headers are navigation. A read-only `sdc.toml` greys the bulk rows, never the bulk headers.
+
+## Note FZ — backlog batch B10: dead code (main team, 2026-11-04)
+
+ARCHIVED (wording before the edit; superseded in part by Note LR3 and Note LR12, 2026-11-25)
+- **FZ4 `Bc7Tune` is only `weights` (L41).** The research-only override fields are removed; `bc7e_compress_blocks_tuned` sends -1 (the level's value) for every other shim slot, as unset fields did. Output bytes are unchanged (golden, `level_identity`, `identity.json`).
+
+## Note JC — Byte pins skip on Intel CPUs (owner, 2026-11-14)
+
+ARCHIVED (wording before the edit; superseded in part by Note LR2, 2026-11-23)
+- **JC2 On an Intel CPU the checks of BC7 or BC6H bytes against recorded AMD bytes skip (owner, 2026-11-14: "skip byte parity tests when we encounter intel").** `encoders_sys::intel_cpu()` (feature `test-hooks`) reads the CPUID vendor; `SDC_TEST_AS_INTEL=1` makes it true on any CPU, to test that path. `skip_byte_pins()` is the same check and prints the reason. Skipped whole: `encoders-sys` `bc6h::{shipped_levels_are_byte_identical_to_the_recorded_objects, the_peak_mode_is_byte_identical_to_the_recorded_objects}` and `level_identity::every_shipped_level_is_byte_identical_to_the_recorded_objects`, so `SDC_RECORD_LEVEL_HASHES=1` records nothing on an Intel CPU. Partly: engine `encode::exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else` drops its probe (a broken rotated block in AMD bytes) and still checks that only rotated blocks change; engine `encode_versions::encode_inputs_are_pinned_or_their_type_was_bumped` drops the `payload_sha256@<isa>` fields before comparing, so `identity.json` keeps the recorded ones and every other field is compared, and a by-ISA hash with no recorded value fails ("record it on an AMD CPU"). The pins stay AMD's; per-vendor hashes or objects without `rcpps` were not chosen.
+
+ARCHIVED (wording before the edit; superseded in part by Note LR6 and Note LR15, 2026-11-25)
+- **JC2 On an Intel CPU the checks of BC7 or BC6H bytes against recorded AMD bytes skip (owner, 2026-11-14: "skip byte parity tests when we encounter intel").** `encoders_sys::intel_cpu()` (feature `test-hooks`) reads the CPUID vendor; `SDC_TEST_AS_INTEL=1` makes it true on any CPU, to test that path. `skip_byte_pins()` is the same check and prints the reason. Skipped whole: `encoders-sys` `bc6h::{shipped_levels_are_byte_identical_to_the_recorded_objects, the_peak_mode_is_byte_identical_to_the_recorded_objects}` and `level_identity::{every_shipped_level_is_byte_identical_to_the_recorded_objects, s1_fixture_is_pinned}`, so `SDC_RECORD_LEVEL_HASHES=1` records nothing on an Intel CPU. Partly: engine `encode::exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else` drops its probe (a broken rotated block in AMD bytes) and still checks that only rotated blocks change; engine `encode_versions::encode_inputs_are_pinned_or_their_type_was_bumped` drops the `payload_sha256@<isa>` fields before comparing, so `identity.json` keeps the recorded ones and every other field is compared, and a by-ISA hash with no recorded value fails ("record it on an AMD CPU"). The pins stay AMD's; per-vendor hashes or objects without `rcpps` were not chosen.
+
+## Note LN - BC7 weighting gains Alpha ×4, ×32 and ×64 (owner, 2026-11-22)
+
+ARCHIVED (wording before the edit; superseded in part by Note LR15, 2026-11-25)
+- **LN1 `Bc7Weights` has `alpha4`, `alpha32` and `alpha64` (owner: "add in bc7 weight modes alpha modes x 4, x 32 and x64").** They give bc7e `[1, 1, 1, w]`, are accepted wherever `alpha16` is (`sdc.toml`, overrides, presets, `--set`) and reach bc7e only, as the others do (CP2, CP4, CP5, CP8). Engine order (`Bc7Weights::ALL` and the "expected one of" text): linear, alpha2, alpha4, alpha8, alpha16, alpha32, alpha64.

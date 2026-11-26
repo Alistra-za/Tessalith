@@ -370,7 +370,7 @@ Runs the post-encode checks that need no source on DDS files that already exist,
 | `--target cs\|vanilla` | `cs` | Whose rules apply. |
 | `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A type the target doesn't have is an error. |
 | `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the type's default, except that a type whose default is `remove` is inferred as `data`. |
-| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
+| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee with channel guard A on: opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
 
 The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules, not on Tessalith's preferred format. A format Tessalith never writes has only its header checked and is reported as not judged.

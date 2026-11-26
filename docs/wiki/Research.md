@@ -9,7 +9,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 
 ## Why these encoders?
 
-- **BC7:** bc7e at `veryslow` (level 5) is the default. In the only independent multi-encoder benchmark (Aras Pranckevičius, 2020) bc7e "slow" beat ISPC TC "slow" by 1.1 dB at about 10 times the speed. Locally, level 5 is within ±0.03 dB of level 6 at 0.22 against 0.28 s/Mpix. Level 4 isn't offered: it lost to level 3 on gradients ([bc7e tuning](../research/bc7e-tuning.md)).
+- **BC7:** bc7e at `veryslow` (level 5) is the default. In the only independent multi-encoder benchmark (Aras Pranckevičius, 2020) bc7e "slow" beat ISPC TC "slow" by 1.1 dB at about 10 times the speed. Locally, level 5 is within ±0.03 dB of level 6 at 0.22 against 0.28 s/Mpix. Level 4 isn't offered: it lost to level 3 on gradients ([bc7e tuning](../research/bc7e-tuning.md)). Tessalith's bc7e carries fixes and a finer default ranking from patch 0005 ([kernel fixes](../research/bc7e-tuning.md#kernel-fixes-patch-0005-2026-11-25-note-lr)).
 - **BC7 `max`:** an opt-in level. On 150 Skyrim textures it gained 0.18 dB RGB on diffuse and 0.24 dB on alpha over `veryslow`, at 2.7 to 2.9 times the time.
 - **BC7 alpha weights:** a weighted BC7 can stand in for BC3 on data maps whose alpha matters ([the setting](GUI-Texture-Panel.md#bc7-weighting-against-bc3)).
 
@@ -33,7 +33,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 ## Why these alpha rules?
 
 - **Stray alpha is removed before mips.** It costs about 1 dB on real images and up to 17 dB on smooth ones.
-- **Exact opaque is on by default for `_m` and env masks only.** bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (spike S5), and 7 of 28 real `_m` files had 40% or more of their alpha off 255 (spike S6). CS, ENB and PGPatcher read that alpha. Forcing 255 costs 0.5 to 1.0 dB RGB on average.
+- **Channel guard A (exact opaque) is on by default for `_m` and env masks only.** Without it bc7e decoded 254 instead of 255 on 28% of pixels of RGB-only input (spike S5), and 7 of 28 real `_m` files had 40% or more of their alpha off 255 (spike S6). CS, ENB and PGPatcher read that alpha. Forcing 255 costs 0.5 to 1.0 dB RGB on average; keeping alpha 0 and 255 exact in alpha blocks too lowers the combined colour and alpha score of colour maps with alpha by up to 0.21 dB ([A against the old flag](../research/bc7e-tuning.md#channel-guard-a-against-the-old-exact-opaque-flag)).
 - **The complex-material gate is 251/255.** A RenderDoc read of the CS lighting shader (spike S8) showed the smallest mip's alpha must stay below 251/255. The `_m` margin check warns at 247.
 - **Cutout mips keep coverage.** Box-filtered alpha thins out foliage at distance. Castaño's coverage-preserving method keeps the share of texels that pass the alpha test the same at every level. Default threshold 127 ([method](../research/mipmaps-and-alpha.md)).
 

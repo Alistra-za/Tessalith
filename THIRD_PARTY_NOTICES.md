@@ -9,7 +9,7 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
 ## Shipped in the executables (non-crate components)
 
 - **bc7e.ispc** (bc7enc_rdo commit b943862), Copyright (C) 2018-2021 Binomial LLC, Apache License 2.0 (`LICENSES/Apache-2.0-bc7e.txt`).
-  Tessalith ships a modified copy: patch `crates/encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch` (change notice at the top of `bc7e.ispc`).
+  Tessalith ships a modified copy: patches `crates/encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch`, `0002-sdc-max-level.patch` and `0005-bc7e-fixes.patch` (change notices at the top of `bc7e.ispc`).
 - **rgbcx** (bc7enc_rdo commit b943862), Richard Geldreich, Jr., MIT or Public Domain (Unlicense); Tessalith uses MIT (`LICENSES/bc7enc_rdo-LICENSE.txt`).
   Tessalith ships a modified `rgbcx.h`: patch "rgbcx BC4 round-to-nearest" (see `crates/encoders-sys/vendor/README-VENDOR.md`).
 - **Intel ISPC Texture Compressor** (commit 79ddbc9), Copyright (c) 2016-2019 Intel Corporation, MIT (`LICENSES/ISPCTextureCompressor-license.txt`).

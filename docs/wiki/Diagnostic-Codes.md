@@ -61,7 +61,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `ALPHA-EXACT-OFF-M` | blocking | `exact_opaque` turned off on a BC7 `_m`; decoded 254s may trip PGPatcher's 50% rule or ENB checks. | Keep it on, or acknowledge. |
+| `ALPHA-EXACT-OFF-M` | blocking | Channel guard A (`alpha.exact_opaque`) turned off on a BC7 `_m`; alpha 0 and 255 may not stay exact, which can trip PGPatcher's 50% rule or ENB checks. An `_m` whose alpha is 0 throughout is exempt. | Keep it on, or acknowledge. |
 | `ALPHA-PARALLAX-NO-ALPHA` | warning | A complex `_m` has [`alpha.parallax`](Project-Config.md#alpha) on and no source alpha. It's written with alpha 0: complex material on, parallax off. | Give the source a height alpha, or set `alpha.parallax = false`. |
 | `ALPHA-BC1-ONE-BIT` | warning | BC1 1-bit alpha on a source whose soft alpha would turn hard ([BC1 alpha](Texture-Types.md#alpha)). | Use BC7 or BC3 to keep the soft edges, or accept. |
 
@@ -120,7 +120,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `VAL-M-COMPLEX-MARGIN` | warning | A complex `_m`'s smallest-mip alpha is 247/255 or more: within the margin below Community Shaders' 251/255 gate, or past it (complex off). | Adjust the height range. |
 | `VAL-M-GRAYSCALE` | warning | A complex `_m`'s smallest mip is grey, so it reads as a plain env mask. | Check the channels. |
 | `VAL-M-HEIGHT-CLIP` | warning | Large `_m` alpha areas with no parallax. | Remap the height. |
-| `VAL-PGPATCHER-50` | warning | A plain `_m` with alpha is 50% or more non-white; PGPatcher would treat it as complex. | Use BC4, or turn `exact_opaque` on. |
+| `VAL-PGPATCHER-50` | warning | A plain `_m` with alpha is 50% or more non-white; PGPatcher would treat it as complex. | Use BC4, or turn channel guard A (`alpha.exact_opaque`) on. |
 | `VAL-BC6H-PEAK` | warning | A BC6H texture's peak ratio is below 0.8. | Remove the `encoder.effort` set for that texture ([the BC6H default](Project-Config.md#encoder)). |
 | `VAL-GRASS-DETECT` | error | The encoded complex-grass corner texel still fails detection after a slowest re-encode. The file is written. | Fix the source corner. |
 

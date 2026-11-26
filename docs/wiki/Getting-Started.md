@@ -73,7 +73,7 @@ Tessalith's validation (always on for complex `_m` and complex grass; for the re
 - **PBR colour brightness.** Compare albedo, `_g` and `_f` with linear lighting on and off. Washed out means a `color.tag = "unorm"` override: `TAG-UNORM-PBR`. [sRGB or UNORM](Texture-Types.md#srgb-or-unorm) has the rule.
 - **Ordinary diffuse brightness.** Too dark under Community Shaders means an `_SRGB` override: `TAG-SRGB-NONPBR`.
 - **Complex `_m` maps.** Check parallax and complex shading at a distance. `VAL-M-COMPLEX-MARGIN` warns when the smallest mip's alpha nears the point where Community Shaders turns complex material off ([the rule](Validation-and-Output.md#what-is-checked)).
-- **Plain `_m` maps and PGPatcher.** PGPatcher treats a plain `_m` as complex when half or more of its alpha is non-white. Tessalith keeps `_m` alpha exactly opaque by default (`exact_opaque`) and warns with `VAL-PGPATCHER-50`.
+- **Plain `_m` maps and PGPatcher.** PGPatcher treats a plain `_m` as complex when half or more of its alpha is non-white. Tessalith keeps opaque `_m` alpha at exactly 255 by default (channel guard A, `alpha.exact_opaque`) and warns with `VAL-PGPATCHER-50`.
 - **Cutouts at a distance.** Foliage and fences that thin out or thicken point at `alpha.threshold`, and `VAL-COVERAGE`.
 - **TruePBR sets.** After PGPatcher, check the material lands on the intended meshes and no others. Watch for delete sections that hit your own sets.
 

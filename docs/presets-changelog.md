@@ -4,6 +4,13 @@ One entry per built-in preset version. A preset's version moves at a release, an
 resolves to differently. The version alone re-encodes nothing: `--on-existing if-changed` compares an output's resolved
 profile and its encode version.
 
+## Unreleased - sdc 3.2.0 (presets stay 3.0.0)
+
+- `sdc-base` sets `encoder.bc7_flat_tolerance = "data"` for `rmaos`, `skin_rfaos`, `complex_material`, `normal`,
+  `landscape_normal`, `pbr_normal`, `msn`, `coat_normal`, `detail_normal`, `skin_wet` and `skin_detail`, and
+  `encoder.channel_guard.g = true` for `rmaos`, `skin_rfaos` and `complex_material`. The preset's version stays 3.0.0.
+  These sub-types' resolved profiles change, so their outputs encode again on the next run under `if-changed`.
+
 ## 2026-11-23 — sdc 3.1.0 (presets stay 3.0.0)
 
 - `fast-preview` sets `encoder.bc1_search = "fast"`: BC1 and BC3 colour search at rgbcx level 12 instead of 18, about a

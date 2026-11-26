@@ -42,7 +42,7 @@ The thresholds are fixed; only `validation.mips` is a setting.
 |---|---|---|---|
 | Header | Flags, caps, mip count, format and header form are correct. | `VAL-HEADER` | error |
 | Mip quality | Each mip's PSNR against the encoder input is at least 30 dB. With `validation.mips = "smallest"`, only the smallest mip is checked. A BC1, BC3 or BC7 texture with `encoder.perceptual` on is scored by Rec.709 luma PSNR, the measure that encoder optimises. | `VAL-MIP-ERROR` | warning |
-| Opaque alpha | With `remove`, decoded alpha is at least 254 for a BC7 file without `exact_opaque`, and exactly 255 for BC7 with `exact_opaque` and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
+| Opaque alpha | With `remove`, decoded alpha is at least 254 for a BC7 file without channel guard A (`alpha.exact_opaque`), and exactly 255 for BC7 with it and for every other format. | `VAL-ALPHA-GUARANTEE` | error |
 | Cutout coverage | With `cutout`, `cutout_blend`, or `blend` as BC1 1-bit alpha, each mip's alpha coverage stays within 2 points of mip 0. Checked on levels of 256 texels or more. | `VAL-COVERAGE` | warning |
 | Complex `_m` margin | The smallest mip's alpha is at or above 247, close to or past the 251/255 point where Community Shaders turns complex material off. | `VAL-M-COMPLEX-MARGIN` | warning |
 | Complex `_m` grey | The smallest mip is grey and not black-with-height, so Community Shaders reads it as a plain env mask. | `VAL-M-GRAYSCALE` | warning |

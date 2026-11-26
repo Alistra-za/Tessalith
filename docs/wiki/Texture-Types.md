@@ -128,13 +128,13 @@ One row per type: the first column is the id `sdc.toml` and the command line use
 | `coat_normal` | PBR coat normal | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |
 | `skin_wet` | Skin wet | Normal | BC7 | UNORM | data | no | A grey source isn't written (`SKIN-WET-GREY`). CS reads only some formats here: see `FMT-CS-SKIN-LOADER`. <!-- D:HB3,HB4 --> |
 | `skin_detail` | Skin detail | Normal | BC5 when the source is opaque, else BC7 | UNORM | data | no | A tangent normal with a strength mask in alpha. BC5 is allowed on it. <!-- D:HB4 --> |
-| `envmask` | Environment mask | Grayscale | BC4 | UNORM | remove, exact opaque | yes | `_m`. |
+| `envmask` | Environment mask | Grayscale | BC4 | UNORM | remove, guard A | yes | `_m`. |
 | `height` | Height (parallax) | Grayscale | BC4 | UNORM | remove | yes | `_p`. |
 | `projected_noise` | Projected noise | Grayscale | BC4 | UNORM | remove | yes | `_noise`, for an XPMF profile. |
 | `msn_specular` | Model-space specular | Grayscale | BC4 | UNORM | remove | yes | `_s` beside an `_msn`. |
 | `skin_sk` | Skin subsurface mask | Grayscale | BC4 | UNORM | remove | no | Red channel only. |
 | `gray` | Grey map | Grayscale | BC4 | UNORM | remove | yes | A plain grey map you pick on the file. BC4 or R8 only. Reads red unless [`channels.grayscale_source`](Project-Config.md#channels) says otherwise. <!-- D:FM37 --> |
-| `complex_material` | Complex material | MixedPacked | BC7 | UNORM | data, exact opaque | yes | Complex `_m`. |
+| `complex_material` | Complex material | MixedPacked | BC7 | UNORM | data, guard A | yes | Complex `_m`. |
 | `rmaos` | PBR RMAOS | MixedPacked | BC7 | UNORM | data | no | `cs` only. |
 | `skin_rfaos` | Skin RFAOS | MixedPacked | BC7 | UNORM | data | no | |
 | `flow` | Hair flow | MixedPacked | BC5 | UNORM | remove | no | At 32 px or less CS ignores it (`DIM-FLOW-SMALL`). |
@@ -144,12 +144,19 @@ One row per type: the first column is the id `sdc.toml` and the command line use
 | `hdr_sky` | HDR sky | Hdr | BC6H | n/a | | no | `cs` only. |
 
 - **Default alpha is a start.** Analysis decides: no alpha channel resolves to `remove`; alpha is opaque when its minimum is 251 or more, or when fewer than 0.1 % of texels are below 251 and no connected group of them is larger than 16 texels (stray noise from a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes answer.
-- **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`). In the GUI it is the **A** tick of [Channel guard](GUI-Texture-Panel.md#channel-guard).
+- **Guard A** (`alpha.exact_opaque`, the **A** tick of [Channel guard](GUI-Texture-Panel.md#channel-guard)) keeps BC7 alpha at exactly 255 on fully opaque blocks and exactly 0 on blocks whose alpha is 0 throughout ([details](Project-Config.md#alpha)). PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`). A complex `_m` whose alpha is 0 throughout is encoded with A whatever the setting. <!-- D:LR18 -->
 - **HDR formats** (BC6H, RGBA16F) exist only under `cs`; an emissive becomes BC6H only from a float source above 1.0.
 
 ### sRGB or UNORM
 
 Under `cs`, PBR colour maps (`pbr_albedo`, `pbr_emissive` as BC7, `pbr_subsurface`, `pbr_fuzz`) are tagged `_SRGB` (`TAG-UNORM-PBR` if not) and everything else is UNORM, `diffuse` and `skin_albedo` included (`TAG-SRGB-NONPBR`). Vanilla tags nothing `_SRGB` (`TAG-SRGB-VANILLA`), and neither does anything under a `lod` folder, because LOD shaders reject it (`TAG-SRGB-LOD`). A wrong tag makes the texture look too dark or washed out.
+
+### BC7 per-type settings
+
+Packed data and normal maps hold flat values that BC7 should keep, so `sdc-base` sets two encoder keys for them ([what each does](Project-Config.md#encoder)): <!-- D:LR8 -->
+- `rmaos`, `skin_rfaos` and `complex_material` guard G, their metal or mask channel, and take `encoder.bc7_flat_tolerance = "data"`.
+- Every [normal type](#normal-maps) takes `data` alone.
+- Every other type sets neither, and other formats ignore both.
 
 ## Normal maps
 
