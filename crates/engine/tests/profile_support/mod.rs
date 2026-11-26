@@ -15,6 +15,8 @@ use std::sync::Arc;
 pub struct Fixture {
     pub dir: tempfile::TempDir,
     pub expected: BTreeSet<String>,
+    /// `BatchRequest::validate` for `plan`; off by default, as on main.
+    pub validate: bool,
 }
 impl Fixture {
     pub fn new() -> Self {
@@ -24,7 +26,11 @@ impl Fixture {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        Self { dir, expected }
+        Self {
+            dir,
+            expected,
+            validate: false,
+        }
     }
     pub fn plan(&self, out: &str, recorder: Option<&Recorder>, cancel: &CancelToken) -> Plan {
         let mut req = BatchRequest::new(
@@ -36,8 +42,7 @@ impl Fixture {
         req.accept = AcceptSuggestions::High;
         req.on_existing = OnExisting::Overwrite;
         req.jobs = 4;
-        // Validation is opt-in (Note LG1); `check_spans` requires a Validate span for every job.
-        req.validate = true;
+        req.validate = self.validate;
         req.profile = recorder.cloned();
         Engine::new()
             .unwrap()

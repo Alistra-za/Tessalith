@@ -145,7 +145,8 @@ fn profile_on_and_off_write_the_same_bytes() {
 
 #[test]
 fn spans_nest_per_thread_and_cover_each_job() {
-    let f = Fixture::new();
+    let mut f = Fixture::new();
+    f.validate = true; // Validation is opt-in (Note LG1); `check_spans` requires a Validate span for every job.
     let rec = Recorder::new();
     let cancel = CancelToken::default();
     let plan = f.plan("out", Some(&rec), &cancel);

@@ -12,7 +12,8 @@ use profile_support::*;
 #[test]
 fn a_plan_panic_closes_its_spans_and_the_report_writes() {
     let _hook = Hook::set("SDC_TEST_PANIC_ON_PLAN", "leaf.png@analyse");
-    let f = Fixture::new();
+    let mut f = Fixture::new();
+    f.validate = true; // Validation is opt-in (Note LG1); `check_spans` requires a Validate span for every job.
     let rec = Recorder::new();
     let cancel = CancelToken::default();
     let plan = f.plan("out", Some(&rec), &cancel);
