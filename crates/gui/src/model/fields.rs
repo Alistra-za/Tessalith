@@ -801,6 +801,7 @@ fn guard_view(target: Target, job: &ResolvedJob, label: &'static str) -> FieldVi
         lock: field_lock(target, &job.profile, CHANNEL_GUARD),
     }
 }
+
 /// Provenance as a reader sees it.
 pub fn provenance_text(p: &str) -> String {
     match p {

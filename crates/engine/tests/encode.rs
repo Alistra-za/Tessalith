@@ -1496,9 +1496,20 @@ fn complex_m_keeps_alpha_zero_and_g_with_a_on() {
 /// BC7-O29 (e2): an alpha-0 `_m` with A off is encoded as with A (the route): the bytes equal the A-on encode's, and
 /// the same two properties hold. Before the route (with the ungated fix, and no route) 30 flat-G blocks lost G 255 and
 /// no alpha stayed above 0, because the fix cleared the p-bits of blocks the A-off kernel left above 0 (G3); with the
-/// zero arm off and no route 33 blocks kept alpha above 0 and G held (Task 6r report, Fix round 1).
+/// zero arm off and no route 33 blocks kept alpha above 0 and G held (Task 6r report, Fix round 1). The two properties
+/// are checked before the byte equality, so a regression shows the G3 symptom, not only "A off is not encoded as A on"
+/// (BC7-C37).
 #[test]
 fn alpha_zero_m_with_a_off_keeps_alpha_and_g() {
+    let (bad, zero, flat) = zero_m_run(false);
+    println!("checked {zero} all-0 blocks and {flat} flat-G blocks");
+    assert!(zero > 0 && flat > 0, "the sources hold no block to check");
+    assert!(
+        bad.is_empty(),
+        "{} failures, first: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(6)]
+    );
     for effort in [
         Effort::Ultrafast,
         Effort::Basic,
@@ -1519,13 +1530,4 @@ fn alpha_zero_m_with_a_off_keeps_alpha_and_g() {
             );
         }
     }
-    let (bad, zero, flat) = zero_m_run(false);
-    println!("checked {zero} all-0 blocks and {flat} flat-G blocks");
-    assert!(zero > 0 && flat > 0, "the sources hold no block to check");
-    assert!(
-        bad.is_empty(),
-        "{} failures, first: {:?}",
-        bad.len(),
-        &bad[..bad.len().min(6)]
-    );
 }

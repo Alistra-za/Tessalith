@@ -11,6 +11,7 @@ mod app_harness;
 mod manifest;
 mod support;
 
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -63,6 +64,13 @@ fn counted<R>(f: impl FnOnce() -> R) -> (R, u64, u64) {
 // figures.
 const FRAME_CALLS: u64 = 3_100;
 
+/// The demo's BC7 colour map the panel frame selects.
+const PANEL_KEY: &str = "architecture/stone/stonewall.png";
+
+// Measured 2026-11-25 (bc7e Task 8, BC7-C42), 5 runs of the binary, 5 frames each: 6786 calls in all 25 frames with
+// the texture panel open. 6786 * 1.10 = 7465, rounded up to two significant figures.
+const PANEL_FRAME_CALLS: u64 = 7_500;
+
 #[test]
 fn the_counter_counts_each_allocation() {
     let mut keep: Vec<Box<u64>> = Vec::with_capacity(1000);
@@ -105,5 +113,35 @@ fn a_settled_frame_stays_within_its_allocation_budget() {
     assert!(
         largest <= FRAME_CALLS,
         "a settled frame made {largest} allocation calls, budget {FRAME_CALLS}"
+    );
+    // The same app with a BC7 colour map selected and every texture group open (they start closed, Note LQ5), so the
+    // frame draws the texture panel's rows, the BC7 weighting row and the Channel guard row among them (BC7-C42, the
+    // merge review's M7). Same process, after the list frame, so the environment redirect is not raced.
+    {
+        let m = &mut h.state_mut().model;
+        support::open_texture_groups(m);
+        m.select_item(PANEL_KEY);
+    }
+    app_harness::quiet(&mut h);
+    let guard = h
+        .query_all_by_role_and_label(Role::CheckBox, "Channel guard A")
+        .count();
+    assert_eq!(
+        guard, 1,
+        "the Channel guard row is not drawn, so the panel frame would not measure it"
+    );
+    let calls: Vec<u64> = (0..5)
+        .map(|_| {
+            let ((), calls, _) = counted(|| {
+                h.step();
+            });
+            calls
+        })
+        .collect();
+    let largest = *calls.iter().max().unwrap();
+    eprintln!("settled panel frame: calls {calls:?}, largest {largest} calls");
+    assert!(
+        largest <= PANEL_FRAME_CALLS,
+        "a settled frame with the texture panel open made {largest} allocation calls, budget {PANEL_FRAME_CALLS}"
     );
 }

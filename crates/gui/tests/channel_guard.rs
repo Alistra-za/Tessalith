@@ -43,6 +43,11 @@ fn ready(dir: &Path) -> AppModel {
 fn harness(mut m: AppModel, key: &str) -> Harness<'static, AppModel> {
     // The groups start closed (Note LQ5); the row sits in Compression.
     open_texture_groups(&mut m);
+    closed_harness(m, key)
+}
+
+/// `harness` with the groups as the app starts them: closed, so each header shows its summary (LQ3).
+fn closed_harness(mut m: AppModel, key: &str) -> Harness<'static, AppModel> {
     m.select_item(key);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -227,6 +232,10 @@ fn the_row_is_absent_off_bc7() {
     assert_eq!(p.format, Format::Bc4, "fixture: a BC4 map");
     assert_eq!(hidden_reason(&p, ROW), Some("BC7 only"));
     let h = harness(m, ROCK);
+    assert!(
+        h.query_by_label_contains("Compression, expanded").is_some(),
+        "premise: Compression is open, so an absent row is not a closed group"
+    );
     for name in TICKS {
         assert_eq!(ticks(&h, name), 0, "{name}");
     }
@@ -235,11 +244,25 @@ fn the_row_is_absent_off_bc7() {
 
 #[test]
 fn exact_opaque_alpha_exists_nowhere() {
-    let d = tempfile::tempdir().unwrap();
+    let (d, d2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let m = ready(d.path());
     assert!(all_fields().iter().all(|(_, l)| *l != "Exact opaque alpha"));
     assert!(FIELDS.iter().all(|(_, l)| *l != "Exact opaque alpha"));
+    let mut m2 = ready(d2.path());
+    m2.set_field(ROCK, A, json!(true));
+    idle(&mut m2);
     let h = harness(m, ROCK);
+    assert!(h.query_by_label_contains("Exact opaque").is_none());
+    assert!(h.query_by_label_contains("exact opaque").is_none());
+    // Closed, each header's name carries its summary (LQ3): no summary names the guard's A by its old row either, on a
+    // texture whose A is on (the merge review's I2).
+    let h = closed_harness(m2, ROCK);
+    assert!(
+        h.query_by_label_contains("Alpha, collapsed").is_some()
+            && h.query_by_label_contains("Compression, collapsed")
+                .is_some(),
+        "premise: the groups are closed"
+    );
     assert!(h.query_by_label_contains("Exact opaque").is_none());
     assert!(h.query_by_label_contains("exact opaque").is_none());
 }
@@ -347,7 +370,8 @@ fn the_lock_covers_envmask_and_only_a_on_bc7() {
     }
 }
 
-/// Edits off (a plan in flight): the grid is disabled, so the ticks are too. (settings_panel.rs `grouped`, Note FK3.)
+/// Edits off (a plan in flight): the grid is disabled, so the ticks are too. (settings_panel.rs `grouped`, which
+/// `group_section` draws every group through, Note FK3.)
 #[test]
 fn the_ticks_are_off_while_a_plan_runs() {
     let d = tempfile::tempdir().unwrap();
@@ -368,15 +392,7 @@ fn the_ticks_are_off_while_a_plan_runs() {
 #[test]
 fn go_to_exact_opaque_opens_compression_and_focuses_the_a_tick() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = ready(d.path());
-    m.select_item(ROCK);
-    let mut h = Harness::builder()
-        .with_context_setup(|ctx| {
-            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-        })
-        .with_size(eframe::egui::vec2(1400.0, 1000.0))
-        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    h.run();
+    let mut h = closed_harness(ready(d.path()), ROCK);
     assert_eq!(
         ticks(&h, "Channel guard A"),
         0,
