@@ -1,0 +1,4 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+Index¶- Encoders:	Index	15	back	LN		partial	2026-11-22		goes: the line without LN (LN1 governs the new BC7 weights)
+Index¶- GUI Settings panel:	Index	24	back	LN		partial	2026-11-22		goes: the line without LN (LN4 lists the dropdown's options)
+Digest¶- BC7 weighting is a dropdown with a stated precedence;	Digest	152	back	LN1		partial	2026-11-22		goes: the digest line without the option list and the LN1 cite (the dropdown offers Alpha x4, x32 and x64 since LN1); stays: the precedence, the overrides, RMAOS dropped

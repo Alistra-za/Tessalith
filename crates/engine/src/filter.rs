@@ -5,9 +5,9 @@ use crate::profile::{self, Stage as Timing};
 use rayon::prelude::*;
 
 const NOT_SRGB_COLOUR: &str =
-    "tent, Mitchell and Kaiser are for sRGB colour only; this texture uses box (spec §5.5)";
+    "tent, Mitchell and Kaiser are for sRGB colour only; this texture uses box";
 const HDR_NOT_COLOUR: &str =
-    "HDR mips use box or tent, and tent only on colour or HDR maps without alpha weighting (spec §5.5)";
+    "HDR mips use box or tent, and tent only on colour or HDR maps without alpha weighting";
 const ALPHA_WEIGHTED: &str =
     "alpha-tested and blended colour takes box or tent; Mitchell and Kaiser ring at cutout edges";
 
@@ -23,7 +23,7 @@ pub fn filter_allowed(p: &Profile) -> Result<(), &'static str> {
     let domain = domain_for(p);
     if domain == Domain::Hdr {
         if f != MipFilter::Tent {
-            return Err("HDR mips use box or tent (spec §5.5)");
+            return Err("HDR mips use box or tent");
         }
         if !matches!(p.category, Category::Color | Category::Hdr) {
             return Err(HDR_NOT_COLOUR);

@@ -2,7 +2,13 @@
 //! in the crate's own unit tests (`#[cfg(test)]`) and expands to nothing everywhere else, so the engine and the
 //! integration tests carry no counters. `coverage_tests` asserts every variant is taken, so a branch no generator
 //! reaches is found.
-#![cfg_attr(not(test), allow(dead_code))]
+#![cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "hit! expands to nothing outside the crate's unit tests, so Hit and its counters are read only there"
+    )
+)]
 
 /// Declares `Hit` and `Hit::ALL` from one list, so a new branch is named once.
 macro_rules! hits {
@@ -23,6 +29,9 @@ hits! {
     // Best::try_pair
     PairEarlyOut,
     PairImproved,
+    // bc4 Batch::push: the lower bound's verdict on a pair
+    BoundSkip,
+    BoundPass,
     // v0
     V0Solid,
     V0EqualEnds,
@@ -74,6 +83,12 @@ hits! {
     NoGuard,
     GuardPassed,
     GuardFallback,
+    // search_max
+    MaxPerfect,
+    MaxPairSearch,
+    MaxNoGuard,
+    MaxGuardPassed,
+    MaxGuardFallback,
     // bc1 encode
     Bc1Solid,
     LsPassSame,

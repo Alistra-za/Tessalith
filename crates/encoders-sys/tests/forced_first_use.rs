@@ -10,6 +10,7 @@ fn first_forced_encodes_from_many_threads_agree() {
         .into_iter()
         .rfind(|t| t.supported() && *t < IspcTarget::best())
     else {
+        eprintln!("skipped: this CPU supports no ISPC target below the best one, so there is nothing to force");
         return;
     };
     let (w, h) = (64u32, 64u32);

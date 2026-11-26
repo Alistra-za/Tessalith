@@ -13,7 +13,7 @@ const SET: &str = "landscape/rock01";
 
 /// Words the UI no longer uses for a concept that has one name (FC9): the old names of "undecided" and "not ready",
 /// the id-with-spaces sub-type label, and the two half-size names Review does not use.
-const STRAYS: [&str; 12] = [
+const STRAYS: [&str; 17] = [
     "need a decision",
     "Need a decision",
     "Needs a decision",
@@ -27,6 +27,13 @@ const STRAYS: [&str; 12] = [
     // Note FI11: the pin and the PGPatcher lock are said in words; the terms ride on hover.
     "(sdc)",
     "(PGPatcher lock)",
+    // Table B: "type" in prose, no spec cites.
+    "sub-type",
+    "Sub-type",
+    "spec §",
+    // Table B: the Effort level and the DDS tag read as words.
+    "Veryslow",
+    "UNORM (linear)",
 ];
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
@@ -166,7 +173,7 @@ fn the_alpha_acknowledge_names_its_action() {
     h.run();
     assert!(h.query_all_by_label("Drop the alpha anyway").count() >= 1);
     assert!(
-        h.query_all_by_label_contains("Undecided: sub-type. This alpha channel")
+        h.query_all_by_label_contains("Undecided: type. This alpha channel")
             .count()
             >= 1
     );
@@ -239,7 +246,7 @@ fn open_a_combo_and_check(h: &mut Harness<'static, AppModel>, view: &str) {
         .query_all_by_role(Role::ComboBox)
         .map(|n| n.rect())
         .collect();
-    assert!(!combos.is_empty(), "{view}: a sub-type combo");
+    assert!(!combos.is_empty(), "{view}: a type combo");
     let mut seen = false;
     for r in combos {
         h.input_mut()

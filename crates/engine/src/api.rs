@@ -21,7 +21,7 @@ use crate::manifest::{
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
-use crate::pipeline::{process_file, FileError, FileTracker};
+use crate::pipeline::{check_in_place, process_file, FileError, FileTracker};
 use crate::policy::*;
 use crate::presets::*;
 use crate::profile::{self, Stage as Timing};
@@ -70,6 +70,17 @@ pub enum PreviewVerdict {
     OnExistingSkip,
 }
 
+/// A shared roughness job and the normal input in each user's resolved slot (Note LE).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedRoughness {
+    pub producer: String,
+    /// The pre-packed input, or None for the producer's pack of this subtype.
+    pub source: Option<PathBuf>,
+    pub subtype: Subtype,
+    /// Set id to (normal owner id, input path). An empty or external slot has no local input.
+    pub users: BTreeMap<String, Option<(String, PathBuf)>>,
+}
+
 /// One batch, as the CLI or GUI hands it to the engine. `output_root` and `on_existing` are the spec §3.2
 /// `output {path, on_existing}` batch settings.
 #[derive(Debug, Clone)]
@@ -103,10 +114,10 @@ pub struct BatchRequest {
     pub set_edits: Vec<crate::sets::SetEdit>,
     /// GUI output paths (M3b, DECISIONS P1), relative to `output_root`. Empty for the CLI.
     pub output_paths: BTreeMap<crate::sets::OutputKey, PathBuf>,
-    /// GUI (M3b spec §3.3, DECISIONS R7): ids of the sets whose roughness slot (`_rmaos`/`_rfaos`) is one output used
-    /// by more than one set, owner and borrowers alike. The engine bakes no normal variance into it and reports no
-    /// missing companion for those sets. Empty for the CLI.
+    /// Explicit R7 exclusions for callers that flag shared sets off without resolved slots.
     pub shared_roughness: BTreeSet<String>,
+    /// GUI slot-6 outputs with multiple users, including their effective Normal slots.
+    pub shared_roughness_groups: Vec<SharedRoughness>,
     /// GUI (DECISIONS Note R M4-final-1): borrower set id → the id of the set whose `_n` its Normal slot borrows. The
     /// engine bakes the borrower's own roughness member from that `_n`, under every usual bake rule. Empty for the CLI.
     pub borrowed_normal: BTreeMap<String, String>,
@@ -143,6 +154,10 @@ pub struct BatchRequest {
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
     pub mem_budget: u64,
     pub dry_run: bool,
+    /// Decode and check every written output before it is written (spec §5.8). Off by default (Note LG1); with
+    /// `if-changed` it also checks skipped current outputs in place (LG10). `sdc convert --validate` and the GUI's
+    /// Validate exported DDS turn it on. Not a planning input: left out of `sig_without_files`.
+    pub validate: bool,
     /// GUI (DECISIONS AG91): counters the planner updates while it loads and resolves; nothing is emitted or written.
     pub plan_progress: Option<PlanProgress>,
     pub profile: Option<crate::profile::Recorder>,
@@ -204,6 +219,7 @@ impl BatchRequest {
             set_edits: vec![],
             output_paths: BTreeMap::new(),
             shared_roughness: BTreeSet::new(),
+            shared_roughness_groups: Vec::new(),
             borrowed_normal: BTreeMap::new(),
             set_shaders: BTreeMap::new(),
             pinned_files: BTreeSet::new(),
@@ -218,6 +234,7 @@ impl BatchRequest {
             jobs: 0,
             mem_budget: 0,
             dry_run: false,
+            validate: false, // Note LG: off, as the owner ruled ("Off, like sdc").
             plan_progress: None,
             profile: None,
             low_detail: LowDetailMode::Off,
@@ -282,6 +299,7 @@ impl BatchRequest {
             set_edits,
             output_paths,
             shared_roughness,
+            shared_roughness_groups,
             borrowed_normal,
             set_shaders,
             pinned_files,
@@ -296,6 +314,8 @@ impl BatchRequest {
             jobs,
             mem_budget,
             dry_run,
+            // A run setting: it changes no plan, so toggling it re-plans nothing.
+            validate: _,
             plan_progress: _,
             profile: _, // stage timing; not a planning input
             low_detail,
@@ -305,7 +325,7 @@ impl BatchRequest {
             // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
             write_only: _,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 33] = [
+        let fields: [&dyn std::fmt::Debug; 34] = [
             inputs,
             output_root,
             target,
@@ -321,6 +341,7 @@ impl BatchRequest {
             set_edits,
             output_paths,
             shared_roughness,
+            shared_roughness_groups,
             borrowed_normal,
             set_shaders,
             pinned_files,
@@ -450,8 +471,14 @@ fn admit_all<T: Sync>(
     cancel: &CancelToken,
     items: &[T],
     est: impl Fn(&T) -> u64,
-    #[cfg_attr(not(feature = "test-hooks"), allow(unused_variables))] output: impl Fn(&T) -> &Path
-        + Sync,
+    #[cfg_attr(
+        not(feature = "test-hooks"),
+        allow(
+            unused_variables,
+            reason = "only the test hook reads each item's output path"
+        )
+    )]
+    output: impl Fn(&T) -> &Path + Sync,
     work: impl Fn(&T, Admitted<'_>, &Cell<Stage>) -> Result<ResolvedJob, PlanFailure> + Sync,
 ) -> Vec<Option<Result<ResolvedJob, PlanFailure>>> {
     let slots: Vec<Mutex<Option<Result<ResolvedJob, PlanFailure>>>> =
@@ -567,12 +594,21 @@ impl Plan {
     }
 }
 
+/// The suffix after `up to date; ` in the `file_skipped` reason of a current output checked in place that passed.
+pub const CHECKED_IN_PLACE: &str = "checked in place";
+/// The same suffix when the check's validation reported an error.
+pub const CHECKED_IN_PLACE_FAILED: &str = "checked in place: failed validation";
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct BatchSummary {
     /// Written outputs, including those whose validation failed.
     pub converted: u32,
     /// Outputs kept under `if-changed`: current ones and the kept ones counted below.
     pub up_to_date: u32,
+    /// Of `up_to_date`, outputs checked in place during this run.
+    pub checked: u32,
+    /// Of `checked`, outputs whose validation reported an error.
+    pub checked_failed: u32,
     /// Of `up_to_date`, outputs written by an older encode version and kept (Note JA; `--ev` re-encodes them).
     pub kept_older_encode: u32,
     /// Of `up_to_date`, outputs encoded at a higher quality target than asked and kept (Note JA).
@@ -592,14 +628,14 @@ pub struct BatchSummary {
 
 impl BatchSummary {
     /// Spec §8 precedence for a batch that ran: 1 partial (unintentionally skipped, failed or cancelled
-    /// files) > 4 validation failed > 0. Up-to-date files, raw packing inputs and intentional skips
-    /// (DECISIONS Note I) do not make a batch partial. (2 and 3 come from
+    /// files) > 4 validation failed on a written or checked output > 0. Up-to-date files, raw packing inputs and
+    /// intentional skips (DECISIONS Note I) do not make a batch partial. (2 and 3 come from
     /// `EngineError`.)
     pub fn exit_code(&self) -> i32 {
         let unintended = self.skipped.saturating_sub(self.skipped_intentional);
         if unintended + self.failed > 0 || !self.cancelled.is_empty() {
             1
-        } else if self.validation_failed > 0 {
+        } else if self.validation_failed + self.checked_failed > 0 {
             4
         } else {
             0
@@ -1133,14 +1169,16 @@ fn ready_verdict(policy: OnExisting, exists: bool, recorded: Option<Currency>) -
 /// - `Stale`: another output stamp (Note Y1), a failed or missing validation (ruling O2), other sources or pack
 ///   roles, or another source SHA-256.
 /// - The encode version: another `encode_version` for the sub-type, another encoder tag (the rgbcx patch only for
-///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
+///   BC1/BC3/BC4/BC5, the bc7e fixes only for BC7), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
 ///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
-/// - The profile: the same hash changes nothing. Else the record's own profile (`raw["profile"]`, which must hash to
-///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
-///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
-///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).
+/// - The profile: the same hash changes nothing, except a `max` record of engine 3.0.0 or older, or of unknown
+///   version, against a job at `max` on a format that reads the radius (Note LI4). Else the record's own profile
+///   (`raw["profile"]`, which must hash to its `profile_sha256`) with the job's three quality targets
+///   (`encoder.effort`, `encoder.bc45_search_radius`, `encoder.bc1_search`) must hash as the job's profile, or `Stale`
+///   (format, weighting or any other field changed); then a target that rose for the job's format is `Stale` and one
+///   that fell keeps it (`lower_target`). In that comparison such an old `max` record counts as `slowest`.
 ///
-/// Neither flag: `Current`. The engine version is not compared, nor is the record's `isa`.
+/// Neither flag: `Current`. The engine version is read only for that `max` rule; the record's `isa` is not compared.
 pub(crate) fn currency(
     e: &ManifestEntry,
     job: &ResolvedJob,
@@ -1194,14 +1232,14 @@ pub(crate) fn currency(
         Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
     );
     let older_encode = !encode_current(e, encode_version(job.profile.subtype))
-        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.ispc, &rec.bc7e_patch)
-            != (
-                &encoders.bc7enc_rdo,
-                &encoders.ispctc,
-                &encoders.ispc,
-                &encoders.bc7e_patch,
-            )
+        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.bc7e_patch)
+            != (&encoders.bc7enc_rdo, &encoders.ispctc, &encoders.bc7e_patch)
+        // The ISPC compiler builds only the bc7e (BC7) and ISPC TC (BC6H) objects, so other formats ignore the tag
+        // (Note LU2).
+        || (matches!(format, Format::Bc6hUf16 | Format::Bc7) && rec.ispc != encoders.ispc)
         || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
+        // bc7e patch 0005 changes only BC7 bytes, so other formats ignore the tag (Note LR).
+        || (format == Format::Bc7 && rec.bc7e_fixes != encoders.bc7e_fixes)
         || (matches!(format, Format::Bc1 | Format::Bc3)
             && e.bc1_model.as_deref() != Some(BC1_ENCODE_ID));
     if older_encode && ev {
@@ -1222,10 +1260,17 @@ pub(crate) fn currency(
 
 /// [`currency`]'s profile step: `Some(false)` when the record's profile is the job's or differs only in a quality
 /// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
-/// otherwise, an unreadable or self-inconsistent record included.
+/// otherwise, an unreadable or self-inconsistent record included. Equal hashes return `Some(false)` at once, except
+/// for a job at `max` on a format that reads the radius (BC3, BC4, BC5) against a record not known to be newer than
+/// 3.0.0 (Note LI4): that record reads as `slowest`, so it is stale. When the hashes differ, the rank comparison reads
+/// such a record's radius as `slowest` too (`recorded_radius`).
 fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let now = profile_sha256(p).ok()?;
-    if now == e.profile_sha256 {
+    // Equal hashes mean equal radii, so an old or undated `max` record against a job at `max` must not return here.
+    let max_was_slowest = radius_rank(p.format, p.encoder.bc45_search_radius).is_some()
+        && p.encoder.bc45_search_radius == SearchRadius::Max
+        && old_max(e);
+    if now == e.profile_sha256 && !max_was_slowest {
         return Some(false);
     }
     let mut was: Profile = serde_json::from_value(e.raw.get("profile")?.clone()).ok()?;
@@ -1243,13 +1288,63 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
     let f = p.format;
     let moves = [
         effort_rank(f, new.effort).cmp(&effort_rank(f, old.effort)),
-        radius_rank(f, new.bc45_search_radius).cmp(&radius_rank(f, old.bc45_search_radius)),
+        radius_rank(f, new.bc45_search_radius)
+            .cmp(&radius_rank(f, recorded_radius(e, old.bc45_search_radius))),
         search_rank(f, new.bc1_search).cmp(&search_rank(f, old.bc1_search)),
     ];
     if moves.contains(&std::cmp::Ordering::Greater) {
         return None;
     }
     Some(moves.contains(&std::cmp::Ordering::Less))
+}
+
+/// Note LI: through engine 3.0.0, `bc45_search_radius = "max"` was the radius-10 search, today's `slowest`.
+///
+/// shortcut: a 3.0.1 build from before Note LI also wrote `max` for radius 10, and such dev records read as the new
+/// `max`; upgrade (record a build marker in the manifest) when one of those builds is known to have reached users.
+const MAX_WAS_SLOWEST_THROUGH: [u32; 3] = [3, 0, 0];
+
+/// Where a record's `engine_version` places it against a last version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordAge {
+    // At most the last version.
+    Old,
+    // Above it.
+    New,
+    // Missing, not a string, or not `X.Y.Z`: the manifest reader stores the first two as "".
+    Unknown,
+}
+
+/// The age of engine version `v` (`X.Y.Z`, a `-pre` or `+build` suffix ignored) against `last`.
+fn record_age(v: &str, last: [u32; 3]) -> RecordAge {
+    let core = v.split(['-', '+']).next().unwrap_or_default();
+    let parts: Vec<Option<u32>> = core.split('.').map(|s| s.parse().ok()).collect();
+    match parts[..] {
+        [Some(a), Some(b), Some(c)] => {
+            if [a, b, c] <= last {
+                RecordAge::Old
+            } else {
+                RecordAge::New
+            }
+        }
+        _ => RecordAge::Unknown,
+    }
+}
+
+/// The radius a record's bytes were searched at: a `max` not known to be newer than 3.0.0 was `slowest`. An unknown
+/// age counts as old (BC45-R9), so a `max` job re-encodes it rather than trusting bytes it cannot date.
+fn recorded_radius(e: &ManifestEntry, r: SearchRadius) -> SearchRadius {
+    if r == SearchRadius::Max && old_max(e) {
+        SearchRadius::Slowest
+    } else {
+        r
+    }
+}
+
+/// Whether the record was written by engine 3.0.0 or older, or by one that cannot be dated. It checks the age only;
+/// the callers check that the radius is `max`.
+fn old_max(e: &ManifestEntry) -> bool {
+    record_age(&e.engine_version, MAX_WAS_SLOWEST_THROUGH) != RecordAge::New
 }
 
 /// How hard format `f` searches at `effort`: BC7 by its bc7e level, BC6H by its ISPC level (`slowest` and `max`
@@ -1271,9 +1366,15 @@ fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
     }
 }
 
-/// The BC4 search radius of format `f` (BC3's alpha, BC4, BC5), not its declared order; `None` elsewhere.
-fn radius_rank(f: Format, r: SearchRadius) -> Option<u32> {
-    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then(|| crate::encode::radius(r))
+/// How hard format `f` searches its BC4 endpoints (BC3's alpha, BC4, BC5): `fast` < `default` < `slowest` < `max`
+/// (Note LI), not the declared order and not the radius (Slowest and Max both start at 10); `None` elsewhere.
+fn radius_rank(f: Format, r: SearchRadius) -> Option<u8> {
+    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then_some(match r {
+        SearchRadius::Fast => 0,
+        SearchRadius::Default => 1,
+        SearchRadius::Slowest => 2,
+        SearchRadius::Max => 3,
+    })
 }
 
 /// The BC1 search depth of format `f` (BC1, BC3's colour): `fast` below `default`; `None` elsewhere.
@@ -1336,25 +1437,27 @@ struct Setup {
 #[derive(Clone)]
 pub(crate) struct Prepared {
     pub(crate) req: BatchRequest,
-    pub(crate) registry: PresetRegistry,
-    pub(crate) user_config: Option<ConfigFile>,
+    // The fields below that are `Arc`s are shared by a skeleton patch's copy (Note LH5); a patch writes only
+    // `req`, `project_config`, `file_scopes`, `typed` (replaced whole) and, through `Arc::make_mut`, `sets`.
+    pub(crate) registry: Arc<PresetRegistry>,
+    pub(crate) user_config: Option<Arc<ConfigFile>>,
     pub(crate) project_config: Option<ConfigFile>,
     pub(crate) target: Target,
     pub(crate) target_src: Provenance,
     pub(crate) preset_id: String,
-    pub(crate) files: Vec<InputFile>,
+    pub(crate) files: Arc<Vec<InputFile>>,
     /// `group_sets_with`'s sets, before `drop_typed_roles` and the joins.
-    pub(crate) grouped: Vec<TextureSet>,
+    pub(crate) grouped: Arc<Vec<TextureSet>>,
     /// The sets after [`join_members`], before set edits.
-    pub(crate) joined: Vec<TextureSet>,
+    pub(crate) joined: Arc<Vec<TextureSet>>,
     /// Final membership, before the predicted packing suffixes.
-    pub(crate) sets: Vec<TextureSet>,
+    pub(crate) sets: Arc<Vec<TextureSet>>,
     pub(crate) file_scopes: FileScopes,
-    pub(crate) hand: Vec<Option<crate::helper::HelperRole>>,
-    pub(crate) typed: BTreeSet<usize>,
-    pub(crate) dup_idx: BTreeSet<usize>,
-    pub(crate) gen_replaced: Vec<SkippedFile>,
-    pub(crate) packed_outputs: BTreeMap<(String, String), PathBuf>,
+    pub(crate) hand: Arc<Vec<Option<crate::helper::HelperRole>>>,
+    pub(crate) typed: Arc<BTreeSet<usize>>,
+    pub(crate) dup_idx: Arc<BTreeSet<usize>>,
+    pub(crate) gen_replaced: Arc<Vec<SkippedFile>>,
+    pub(crate) packed_outputs: Arc<BTreeMap<(String, String), PathBuf>>,
 }
 
 impl Prepared {
@@ -1365,7 +1468,7 @@ impl Prepared {
             self.target,
             &self.registry,
             &self.preset_id,
-            self.user_config.as_ref(),
+            self.user_config.as_deref(),
             self.project_config.as_ref(),
             &self.file_scopes,
         )
@@ -1374,7 +1477,6 @@ impl Prepared {
 
 /// The pass-1 `ResolveCtx` (no shader picks). `prepare` and `plan_sets` both build theirs here, so the two cannot
 /// drift.
-#[allow(clippy::too_many_arguments)]
 fn base_ctx<'a>(
     req: &'a BatchRequest,
     target: Target,
@@ -1558,8 +1660,8 @@ pub(crate) fn drop_typed_roles(
             .chain(&set.shares)
             .partition(|i| typed.contains(i));
         for r in typed_m.into_iter().filter_map(role) {
-            if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
-                set.suffixes.remove(&r);
+            if !raw_m.iter().any(|&j| role(j) == Some(r)) {
+                set.suffixes.remove(r);
             }
         }
     }
@@ -2132,22 +2234,22 @@ impl Engine {
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
             req: req.clone(),
-            registry,
-            user_config,
+            registry: Arc::new(registry),
+            user_config: user_config.map(Arc::new),
             project_config,
             target,
             target_src,
             preset_id,
-            files,
-            grouped,
-            joined,
-            sets,
+            files: Arc::new(files),
+            grouped: Arc::new(grouped),
+            joined: Arc::new(joined),
+            sets: Arc::new(sets),
             file_scopes,
-            hand,
-            typed,
-            dup_idx,
-            gen_replaced,
-            packed_outputs,
+            hand: Arc::new(hand),
+            typed: Arc::new(typed),
+            dup_idx: Arc::new(dup_idx),
+            gen_replaced: Arc::new(gen_replaced),
+            packed_outputs: Arc::new(packed_outputs),
         })
     }
 
@@ -2183,7 +2285,7 @@ impl Engine {
             target,
             registry,
             preset_id,
-            p.user_config.as_ref(),
+            p.user_config.as_deref(),
             p.project_config.as_ref(),
             file_scopes,
         );
@@ -3168,6 +3270,8 @@ impl Engine {
             files,
             aliases: registry.alias_table(),
             shared: &shared,
+            groups: &req.shared_roughness_groups,
+            output_root: &req.output_root,
             borrowed: &borrowed,
         };
         let mut baking = crate::bake::plan::plan_bakes(&bake_cx, &mut jobs);
@@ -3448,7 +3552,7 @@ impl Engine {
         }
         let plan = Plan {
             request: req.clone(),
-            registry: registry.clone(),
+            registry: PresetRegistry::clone(registry),
             preset_id: preset_id.clone(),
             target,
             jobs,
@@ -3771,6 +3875,10 @@ impl Engine {
         // Note JA: the outputs kept for an older encode version, per format and per sub-type, for the run's one line.
         let mut older_by_format: BTreeMap<Format, u32> = BTreeMap::new();
         let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
+        enum Work<'a> {
+            Encode(&'a ResolvedJob, PresetRef, bool),
+            Check(&'a ResolvedJob, String, &'a ManifestEntry),
+        }
         let mut todo = vec![];
         for (job, job_key, recorded) in {
             let _span = profile::span(Timing::RunClassify);
@@ -3802,7 +3910,19 @@ impl Engine {
                     continue;
                 }
                 PreviewVerdict::WillWrite => None,
-                PreviewVerdict::Current => Some("up to date".into()),
+                PreviewVerdict::Current => {
+                    if req.validate && req.on_existing == OnExisting::IfChanged {
+                        if let Some(entry) = existing.get(&job_key).filter(|entry| {
+                            entry.raw["validation"]["skipped"] == true
+                                && entry.raw["copied_from"].is_null()
+                                && pack_identity_matches(entry, job)
+                        }) {
+                            todo.push(Work::Check(job, job_key.clone(), entry));
+                            continue;
+                        }
+                    }
+                    Some("up to date".into())
+                }
                 PreviewVerdict::Kept {
                     older_encode,
                     lower_target,
@@ -3853,7 +3973,7 @@ impl Engine {
                 Some(p) => {
                     let replace_existing =
                         recorded.is_some() || (exists && req.on_existing == OnExisting::Overwrite);
-                    todo.push((job, p, replace_existing));
+                    todo.push(Work::Encode(job, p, replace_existing));
                 }
                 None => {
                     summary.failed += 1;
@@ -3879,7 +3999,10 @@ impl Engine {
         let join = profile::span(Timing::ScopeJoin);
         pool.in_place_scope(|scope| {
             let _span = profile::span(Timing::Dispatch);
-            for &(job, ref preset, replace_existing) in &todo {
+            for work in &todo {
+                let job = match *work {
+                    Work::Check(job, ..) | Work::Encode(job, ..) => job,
+                };
                 if cancel.is_cancelled() {
                     lock(&state).cancelled.push(job.input.clone());
                     continue;
@@ -3905,17 +4028,22 @@ impl Engine {
                         lock(state).cancelled.push(job.input.clone());
                         return;
                     }
-                    run_one(
-                        run_call,
-                        job,
-                        req,
-                        preset,
-                        cancel,
-                        rep,
-                        manifest,
-                        state,
-                        replace_existing,
-                    );
+                    match *work {
+                        Work::Check(_, ref job_key, entry) => {
+                            check_one(job, job_key, entry, cancel, rep, manifest, state)
+                        }
+                        Work::Encode(_, ref preset, replace_existing) => run_one(
+                            run_call,
+                            job,
+                            req,
+                            preset,
+                            cancel,
+                            rep,
+                            manifest,
+                            state,
+                            replace_existing,
+                        ),
+                    }
                 });
             }
         });
@@ -4003,6 +4131,30 @@ fn kept_warnings(
     out
 }
 
+/// Whether a packed job's recorded `pack.*` provenance entries equal the ones it resolves now: the same keys, and
+/// each label serialised to JSON equals the recorded value. Pass two can select the same profile after pass one's
+/// source-channel choice changed, so the profile hash alone does not identify the pack. A job without `pack` has
+/// nothing to compare and returns true.
+pub(crate) fn pack_identity_matches(entry: &ManifestEntry, job: &ResolvedJob) -> bool {
+    if job.pack.is_none() {
+        return true;
+    }
+    let Some(recorded) = entry.raw["provenance"].as_object() else {
+        return false;
+    };
+    let mut expected = job
+        .provenance
+        .iter()
+        .filter(|(k, _)| k.starts_with("pack."));
+    let count = recorded.keys().filter(|k| k.starts_with("pack.")).count();
+    expected.clone().count() == count
+        && expected.all(|(key, label)| {
+            serde_json::to_value(label)
+                .ok()
+                .is_some_and(|value| recorded.get(key) == Some(&value))
+        })
+}
+
 fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
     let emit = |kind| rep.emit_job(Some(key), Some(&job.set_key), Some(&job.input), kind);
     emit(EventKind::Warning(Warning::new(
@@ -4019,10 +4171,62 @@ fn report_unknown_existing(rep: &Reporter, job: &ResolvedJob, key: &str) {
     });
 }
 
+/// Check one admitted current output. Only the manifest is updated on success. Events carry the run loop's `job_key`.
+fn check_one(
+    job: &ResolvedJob,
+    job_key: &str,
+    entry: &ManifestEntry,
+    cancel: &CancelToken,
+    rep: &Reporter,
+    manifest: &Manifest,
+    state: &Mutex<BatchSummary>,
+) {
+    let emit = |kind| rep.emit_job(Some(job_key), Some(&job.set_key), Some(&job.input), kind);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        check_in_place(job, entry, cancel, manifest)
+    }));
+    let (stage, error) = match result {
+        Ok(Ok(report)) => {
+            for w in report.warnings {
+                emit(EventKind::Warning(w));
+            }
+            let suffix = if report.summary.passed {
+                CHECKED_IN_PLACE
+            } else {
+                CHECKED_IN_PLACE_FAILED
+            };
+            emit(EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                code: None,
+                reason: format!("up to date; {suffix}"),
+            });
+            let mut s = lock(state);
+            s.up_to_date += 1;
+            s.checked += 1;
+            s.checked_failed += u32::from(!report.summary.passed);
+            return;
+        }
+        Ok(Err(FileError::Cancelled)) => {
+            lock(state).cancelled.push(job.input.clone());
+            return;
+        }
+        Ok(Err(FileError::Failed(stage, error))) => (stage, error),
+        Err(panic) => (
+            Stage::Validate,
+            format!("internal error: {}", panic_message(&*panic)),
+        ),
+    };
+    lock(state).failed += 1;
+    emit(EventKind::FileFailed { stage, error });
+}
+
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
 /// output was written (manifest append) has that output removed, best effort, so no output is
 /// left on disk without a record (review I1). A panic is reported at the last stage the file entered (review M10).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one file's call from the batch worker, whose job, request, preset, cancel token, reporter, manifest, summary state and replace flag each have a different owner; most go on unchanged to process_file"
+)]
 fn run_one(
     run_call: Option<u32>,
     job: &ResolvedJob,
@@ -4181,7 +4385,10 @@ pub(crate) fn pre_edit_shaders(
 /// `plan_packing` re-tags an unused one; duplicates and failed files are left out. A raw-named image set to
 /// `helper.role = "none"` (Note DY) is an ordinary member. A member's suffix and a kept DDS's sub-type are read
 /// against the set it was typed with (`member_set`, Fuzz-1a's `f` from `f_sets`).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the shader map check's inputs for one set, each a separate borrow from the planner's locals and registry (the resolve context, the set, the f-set ids, files, job index, skipped files, alias table, target); the function reads them, and its caller reads the result"
+)]
 fn map_members(
     ctx: &ResolveCtx,
     set: &TextureSet,
@@ -4317,7 +4524,7 @@ fn check_file_subtype(o: &SetOverride) -> Result<(), EngineError> {
                 .map(|_| ())
                 .map_err(|_| {
                     EngineError::Config(format!(
-                        "[files.\"{key}\"] subtype: unknown sub-type {}",
+                        "[files.\"{key}\"] subtype: unknown type {}",
                         o.value
                     ))
                 })
@@ -4358,7 +4565,8 @@ pub(crate) fn check_file_overrides(p: &Prepared, ovs: &[&SetOverride]) -> Result
     let chain = p.registry.chain(&p.preset_id).map_err(preset_err)?;
     let configs: Vec<&ConfigFile> = p
         .user_config
-        .iter()
+        .as_deref()
+        .into_iter()
         .chain(p.project_config.iter())
         .collect();
     for st in Subtype::ALL {
@@ -4384,7 +4592,7 @@ fn check_up_front(
     let usage = EngineError::Usage;
     for o in req.overrides.iter().filter(|o| o.field == "subtype") {
         serde_json::from_value::<Subtype>(o.value.clone())
-            .map_err(|_| usage(format!("--set subtype: unknown sub-type {}", o.value)))?;
+            .map_err(|_| usage(format!("--set subtype: unknown type {}", o.value)))?;
     }
     // DECISIONS N2: the project config's `[files]` entries are held to the same checks, as config errors.
     let mut file_overrides = vec![];
@@ -4457,6 +4665,8 @@ fn done_event(s: &BatchSummary) -> EventKind {
     EventKind::BatchDone {
         converted: s.converted,
         up_to_date: s.up_to_date,
+        checked: s.checked,
+        checked_failed: s.checked_failed,
         skipped: s.skipped,
         skipped_intentional: s.skipped_intentional,
         failed: s.failed,
@@ -5334,13 +5544,36 @@ mod tests {
             );
         }
         row("empty encode_version", same, same, &ev(""), [Stale, Stale]);
-        row(
-            "other ispc",
-            same,
-            same,
-            &|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into(),
-            [ENC, Stale],
-        );
+        // The ISPC compiler builds only the bc7e (BC7) and ISPC TC (BC6H) objects; other formats ignore the tag (Note LU).
+        for f in [
+            Format::Bc1,
+            Format::Bc3,
+            Format::Bc4,
+            Format::Bc5,
+            Format::Bc6hUf16,
+            Format::Bc7,
+            Format::Rgba8,
+        ] {
+            let want = match f {
+                Format::Bc6hUf16 | Format::Bc7 => [ENC, Stale],
+                _ => [Current, Current],
+            };
+            row(
+                &format!("{f:?} other ispc"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into(),
+                want,
+            );
+            // A missing value cannot parse (the field has no serde default), so an empty one stands for it.
+            row(
+                &format!("{f:?} empty ispc"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().ispc = String::new(),
+                want,
+            );
+        }
         // The rgbcx patches only change BC1/BC3/BC4/BC5 output; a record from before them is current for the rest.
         for f in [
             Format::Bc1,
@@ -5370,6 +5603,39 @@ mod tests {
                 &|e| {
                     e.encoders.as_mut().unwrap().rgbcx_patch =
                         Some("bc4-round-to-nearest@sha256:00".into())
+                },
+                want,
+            );
+        }
+        // bc7e patch 0005 only changes BC7 output; a record from before it is current for the rest (Note LR).
+        for f in [
+            Format::Bc1,
+            Format::Bc3,
+            Format::Bc4,
+            Format::Bc5,
+            Format::Bc6hUf16,
+            Format::Bc7,
+            Format::Rgba8,
+        ] {
+            let want = match f {
+                Format::Bc7 => [ENC, Stale],
+                _ => [Current, Current],
+            };
+            row(
+                &format!("{f:?} without bc7e_fixes"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().bc7e_fixes = None,
+                want,
+            );
+            // The fake hash only proves that any other tag string counts.
+            row(
+                &format!("{f:?} old bc7e_fixes"),
+                &fmt(f),
+                same,
+                &|e| {
+                    e.encoders.as_mut().unwrap().bc7e_fixes =
+                        Some("0005-bc7e-fixes@sha256:00".into())
                 },
                 want,
             );
@@ -5506,6 +5772,34 @@ mod tests {
             [TGT, TGT],
         );
         row(
+            "radius slowest to max on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Max), p),
+            &radius(SearchRadius::Slowest),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius max to slowest on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Max),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "radius default to slowest on BC3",
+            &|p| both(&fmt(Format::Bc3), &radius(SearchRadius::Slowest), p),
+            &radius(SearchRadius::Default),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius slowest to default on BC5",
+            &|p| both(&fmt(Format::Bc5), &radius(SearchRadius::Default), p),
+            &radius(SearchRadius::Slowest),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
             "bc1_search fast to default on BC1",
             &|p| both(&fmt(Format::Bc1), &search(Bc1Search::Default), p),
             &search(Bc1Search::Fast),
@@ -5589,6 +5883,79 @@ mod tests {
             &ev("0.9.0"),
             [BOTH, Stale],
         );
+        // Note LI: through engine 3.0.0 a `max` record was the radius-10 search, today's `slowest`.
+        let dated = |v: &'static str| move |e: &mut ManifestEntry| e.engine_version = v.into();
+        let at = |f: Format, r: SearchRadius| {
+            move |p: &mut Profile| {
+                p.format = f;
+                p.encoder.bc45_search_radius = r;
+            }
+        };
+        row(
+            "3.0.0 record at max against max on BC4",
+            &at(Format::Bc4, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Stale, Stale],
+        );
+        row(
+            "3.0.0 record at max against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Current, Current],
+        );
+        row(
+            "2.0.0 record at max against max on BC3",
+            &at(Format::Bc3, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("2.0.0"),
+            [Stale, Stale],
+        );
+        row(
+            "3.0.0 record at max against max on BC7",
+            &at(Format::Bc7, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated("3.0.0"),
+            [Current, Current],
+        );
+        // shortcut: a 3.0.1 record is the new `max`, even from a dev build that wrote radius 10.
+        row(
+            "3.0.1 record at max against max on BC5",
+            &at(Format::Bc5, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(ENGINE_VERSION),
+            [Current, Current],
+        );
+        row(
+            "record without engine_version at max against max on BC4",
+            &at(Format::Bc4, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Stale, Stale],
+        );
+        row(
+            "record without engine_version at max against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Current, Current],
+        );
+        row(
+            "record without engine_version at max against max on BC7",
+            &at(Format::Bc7, SearchRadius::Max),
+            &radius(SearchRadius::Max),
+            &dated(""),
+            [Current, Current],
+        );
+        // BC45-R14: only a recorded `max` of unknown age reads as `slowest`.
+        row(
+            "record without engine_version at fast against slowest on BC4",
+            &at(Format::Bc4, SearchRadius::Slowest),
+            &radius(SearchRadius::Fast),
+            &dated(""),
+            [Stale, Stale],
+        );
         for (what, job, e, [without, with]) in &rows {
             assert_eq!(
                 currency(e, job, &enc, false),
@@ -5596,6 +5963,83 @@ mod tests {
                 "{what}, without ev"
             );
             assert_eq!(currency(e, job, &enc, true), *with, "{what}, with ev");
+        }
+        // BC45-R9, BC45-R14: the same record as the reader hands it over, with no `engine_version` key on disk.
+        let mut bc4 = job0.clone();
+        at(Format::Bc4, SearchRadius::Max)(&mut bc4.profile);
+        let e = entry(&bc4, &radius(SearchRadius::Max));
+        let line = serde_json::json!({
+            "schema": e.schema,
+            "output": e.output,
+            "source_sha256": e.source_sha256,
+            "sources": e.sources,
+            "profile_sha256": e.profile_sha256,
+            "encode_version": e.encode_version,
+            "encoders": e.encoders,
+            "preset": e.preset,
+            "bc1_model": e.bc1_model,
+            "output_stamp": e.output_stamp,
+            "validation": e.raw["validation"],
+            "profile": e.raw["profile"],
+        });
+        let root = d.path();
+        std::fs::create_dir_all(root.join("_sdc")).unwrap();
+        std::fs::write(
+            root.join("_sdc").join("manifest.jsonl"),
+            format!("{line}\n"),
+        )
+        .unwrap();
+        let read = Manifest::at(root).read().unwrap();
+        let key = crate::manifest::output_key(root, &bc4.output);
+        let loaded = read.get(&key).expect("the record is read back");
+        assert_eq!(loaded.engine_version, "");
+        let mut slowest = bc4.clone();
+        at(Format::Bc4, SearchRadius::Slowest)(&mut slowest.profile);
+        for ev in [false, true] {
+            assert_eq!(
+                currency(loaded, &bc4, &enc, ev),
+                Stale,
+                "undated max against max, ev {ev}"
+            );
+            assert_eq!(
+                currency(loaded, &slowest, &enc, ev),
+                Current,
+                "undated max against slowest, ev {ev}"
+            );
+        }
+    }
+
+    /// The `""` rows of `currency_follows_the_owners_rule` stand for what the reader hands `currency`.
+    #[test]
+    fn a_record_without_engine_version_reads_as_empty() {
+        use crate::manifest::MANIFEST_SCHEMA;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("_sdc")).unwrap();
+        let lines = [
+            serde_json::json!({ "schema": MANIFEST_SCHEMA, "output": "a.dds" }),
+            serde_json::json!({ "schema": MANIFEST_SCHEMA, "output": "b.dds", "engine_version": 3 }),
+        ];
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(d.path().join("_sdc").join("manifest.jsonl"), text).unwrap();
+        let read = Manifest::at(d.path()).read().unwrap();
+        assert_eq!(read.len(), 2);
+        for key in ["a.dds", "b.dds"] {
+            assert_eq!(read[key].engine_version, "", "{key}");
+        }
+    }
+
+    #[test]
+    fn record_age_reads_core_versions() {
+        use RecordAge::{New, Old, Unknown};
+        let last = MAX_WAS_SLOWEST_THROUGH;
+        for v in ["3.0.0", "3.0.0-rc.1", "2.0.0", "1.2.0+x"] {
+            assert_eq!(record_age(v, last), Old, "{v}");
+        }
+        for v in ["3.0.1", "10.0.0", ENGINE_VERSION] {
+            assert_eq!(record_age(v, last), New, "{v}");
+        }
+        for v in ["", "3.0", "a.b.c", "3.0.0.1"] {
+            assert_eq!(record_age(v, last), Unknown, "{v}");
         }
     }
 

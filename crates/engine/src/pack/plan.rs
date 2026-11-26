@@ -447,7 +447,10 @@ fn prepacked_aliased(ctx: &ResolveCtx, img: &InputFile) -> bool {
 /// AO (or was not analysed), the generated AO is skipped `GEN-REPLACED` and leaves `raw`. When it is empty and the
 /// AO is the set's only `_rmaos`/`_rfaos` source, the image joins `raw` as `RawMap::Rmaos` and `recipes_for_with`
 /// builds R, G and A from it, B from the AO. With other loose sources the M9 conflict of today stands.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "plan_packing's per-set loop state: the context, set, files and flat_b it reads, and the raw, members, jobs, skipped and out collections it changes in place, each owned separately there"
+)]
 fn prepacked_b<'a>(
     ctx: &ResolveCtx,
     set: &TextureSet,
@@ -818,7 +821,7 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     // Fuzz-1: a fuzz map takes no part in the recipe test: `auto` with a fuzz map alone builds `_rmaos`.
     let roles: BTreeSet<RawMap> = RawMap::INPUTS
         .into_iter()
-        .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(&r.id()))
+        .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(r.id()))
         .collect();
     let raw: Vec<RawInput> = roles
         .iter()
@@ -933,7 +936,7 @@ pub fn skin_f_candidate(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bo
 /// The set lists a fuzz map, its own or one shared in (Note HH1): the gate of `set_is_advanced_skin`'s Fuzz-5
 /// evidence, and of the fast re-plan's `FUZZ_SUBTYPE` check (`skeleton.rs`), so the two never disagree.
 pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
-    set.suffixes.contains(&RawMap::Fuzz.id())
+    set.suffixes.contains(RawMap::Fuzz.id())
 }
 
 /// Pass 1 over every set. `jobs` holds every resolved job of the batch and is changed in place: consumed raw jobs
@@ -946,7 +949,10 @@ pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
 /// `Parallax` recipe, which the vanilla target otherwise never plans. It is empty without `derive` (C6).
 /// `flat_b` holds the pass-1 images whose B is empty (`!pack::b_has_content`, Note CO103), `flat_a` those whose alpha
 /// is flat (Note HC1). `output_root` turns set keys into the set ids a fuzz-map message names.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pass 1's inputs, owned separately by the planner (context, sets, files, the jobs edited in place, failed and cancelled paths, skipped, packed_outputs, derive_heights, flat_b, flat_a, fills, output_root)"
+)]
 pub fn plan_packing(
     ctx: &ResolveCtx,
     sets: &[TextureSet],
@@ -1200,7 +1206,7 @@ pub fn plan_packing(
             let mut vin = virtual_input(members[&sources[0]], recipe.kind);
             let key = (set.key.clone(), recipe.kind.suffix().to_string());
             if let Some(p) = packed_outputs.get(&key) {
-                vin.output = p.clone();
+                vin.output.clone_from(p);
             }
             let writes = !sources
                 .iter()
@@ -1226,7 +1232,7 @@ pub fn plan_packing(
             if let Some(p) =
                 packed_outputs.get(&(set.key.clone(), recipe.kind.suffix().to_string()))
             {
-                vin.output = p.clone();
+                vin.output.clone_from(p);
                 explicit = true;
             }
             let st = recipe.kind.subtype();

@@ -1,8 +1,16 @@
 //! Note GG: the set preview's material-object (MATO) layer, built from the set's `cs_mato` block and its record's
 //! DATA. Model level: the layer is read back from the viewport (`Viewport3d::projected`); one test runs the real
 //! render thread on WARP with the repo's stand-in shader.
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../modscan/tests/common/mod.rs"]
 mod scan_fixture;
 mod support;

@@ -1,8 +1,9 @@
 //! Note JI1: the Settings tab of the centre column (or its own window when popped out, Note FB7). "This project" (Mode,
-//! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml). Drawing
-//! only: every edit is collected and applied once the tab is drawn.
-use super::header::{self, target_help, target_name};
+//! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml: Preview,
+//! Checks, Export, Cache and Columns). Drawing only: every edit is collected and applied once the tab is drawn.
+use super::header::{self, target_help};
 use crate::look::Combo036 as _;
+use crate::model::code_text::target_label;
 use crate::model::{AppModel, CentreTab, EXPORT_WITHOUT_REVIEW_WAIT};
 use crate::settings::ChecksSettings;
 use eframe::egui;
@@ -19,6 +20,9 @@ const PATH_CHARS: usize = 48;
 /// Open's accessible name: Export to ▾ has an "Open export folder" item, and both can be on screen (rule 8.4).
 const OPEN_NAME: &str = "Settings: Open export folder";
 
+/// Note LG: the Validate exported DDS box's hover.
+const VALIDATE_HOVER: &str = "Decode each DDS again after it is encoded and check it against Skyrim's rules. Takes longer. With it on, the next export also checks the files an earlier export left unchecked, without encoding them again. Complex material _m and complex grass are always checked.";
+
 /// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
 /// opens: 5,000 MB is about 150,000 entries.
 const CACHE_MB: (f64, f64) = (50.0, 5_000.0);
@@ -31,6 +35,7 @@ enum Act {
     OpenExport,
     Live(bool),
     Checks(ChecksSettings),
+    ValidateExports(bool),
     CacheMb(u32),
     /// (Textures shown, Sets shown).
     Columns(bool, bool),
@@ -68,6 +73,7 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
             Act::ExportWithoutReview(on) => model.set_export_without_review(on),
             Act::Live(on) => model.set_live(on),
             Act::Checks(c) => model.set_checks(c),
+            Act::ValidateExports(on) => model.set_validate_exports(on),
             Act::CacheMb(mb) => model.set_analysis_cache_mb(mb),
             Act::Columns(textures, sets) => {
                 model.settings.textures_hidden = !textures;
@@ -148,10 +154,10 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
         row_label(ui, "Mode");
         ui.add_enabled_ui(off.is_none(), |ui| {
             let r = egui::ComboBox::from_id_salt("mode")
-                .selected_text(target_name(model.target))
+                .selected_text(target_label(model.target))
                 .show_ui_036(ui, |ui| {
                     for t in [Target::Cs, Target::Vanilla] {
-                        ui.selectable_value(&mut picked, t, target_name(t))
+                        ui.selectable_value(&mut picked, t, target_label(t))
                             .on_hover_text(target_help(t));
                     }
                 })
@@ -161,7 +167,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
                 egui::WidgetInfo::labeled(
                     egui::Role::ComboBox,
                     enabled,
-                    format!("Mode (this project): {}", target_name(model.target)),
+                    format!("Mode (this project): {}", target_label(model.target)),
                 )
             });
             match &off {
@@ -178,7 +184,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
     });
     ui.horizontal(|ui| {
         ui.add_space(LABEL_W + ui.spacing().item_spacing.x);
-        ui.weak("Wins over a preset's own Target.").on_hover_text(
+        ui.weak("This beats the Target set in a preset.").on_hover_text(
             "The project's target in sdc.toml is used before the preset's Target (sdc.exe does the same).",
         );
     });
@@ -302,7 +308,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
     }
 }
 
-/// "App settings": Preview, Checks, Cache and Columns, each saved to gui.toml at once.
+/// "App settings": Preview, Checks, Export, Cache and Columns, each saved to gui.toml at once.
 fn app(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
     use super::group::group;
     ui.label(egui::RichText::new(APP_HEADING).strong());
@@ -339,6 +345,17 @@ fn app(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
         }
         if c != now {
             acts.push(Act::Checks(c));
+        }
+    });
+    group(ui, "settings-export", "Export", None, true, |ui| {
+        let mut on = model.settings.validate_exports;
+        let r = ui.checkbox(&mut on, "Validate exported DDS");
+        let enabled = ui.is_enabled();
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, on, "Validate exported DDS")
+        });
+        if r.on_hover_text(VALIDATE_HOVER).changed() {
+            acts.push(Act::ValidateExports(on));
         }
     });
     group(ui, "settings-cache", "Cache", None, true, |ui| {

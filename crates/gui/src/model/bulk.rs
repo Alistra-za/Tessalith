@@ -2,10 +2,13 @@
 //! commands. No egui types.
 use super::fields::{
     all_fields, bc3_pair, effort_field, encoding_options, field_view, filter_option_lock,
-    hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
-    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
+    hidden_reason, no_effect_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES,
+    BC3_CUSTOM, BC3_SEARCH, CHANNEL_GUARD, EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD,
+    FILTER_OPTIONS, GUARD_FIELDS, LEVELS_FIELD, NOT_VALID, NO_SEARCH, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use super::items::TextureItem;
+use super::labels::{green_name, UNORM_LABEL};
+use super::panel_groups::{bulk_summary, panel_group, GroupSummary, PanelGroup};
 use super::set_groups::GroupTarget;
 use super::sets::{
     locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
@@ -16,6 +19,7 @@ use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
 use engine::sets::{fold_id, same_id};
 use serde_json::Value;
+use std::fmt::Write as _;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
 /// only while it holds two or more keys and the active entry (`AppModel::selection`) is one of them; otherwise the
@@ -39,6 +43,10 @@ pub struct BulkState {
     cache: Option<BulkCache>,
 }
 
+/// `AppModel::panel_cache_inputs`: items, inputs and sets-document revisions, the target, the project revision and
+/// whether a plan is in flight.
+pub(crate) type PanelInputs = (u64, u64, u64, engine::config::Target, u64, bool);
+
 type CacheInputs = (
     MultiSelection,
     Selection,
@@ -61,6 +69,16 @@ struct BulkCache {
     computes: usize,
 }
 
+/// The groups the bulk panel draws, in panel order: Cubemap and Channels have no bulk rows, and "Where these settings
+/// come from" and "Used by" describe one texture.
+pub const BULK_GROUPS: [PanelGroup; 5] = [
+    PanelGroup::Alpha,
+    PanelGroup::Mipmaps,
+    PanelGroup::NormalMap,
+    PanelGroup::Size,
+    PanelGroup::Compression,
+];
+
 /// The bulk panel's targets and rows.
 #[derive(Debug, PartialEq, Eq)]
 pub struct BulkView {
@@ -68,10 +86,93 @@ pub struct BulkView {
     pub rows: Vec<BulkField>,
     /// The kind chips over the selected sets (empty with fewer than two).
     pub chips: Vec<KindChip>,
-    /// The Format row's (format, tag) choices: `bulk_encodings`.
-    pub encodings: Vec<((Format, ColorTag), String)>,
     /// `reencode_split(keys)`: the DDS files the Re-encode button can take, and the names of the blocked ones.
     pub reencode: (Vec<String>, Vec<String>),
+    /// `type_card_split`: the selected textures the type card asks about, and the count of typed ones beside them.
+    pub undecided: (Vec<String>, usize),
+    /// `likely::likely_types` over the textures the type card asks about (Task 11).
+    pub likely: Vec<(Subtype, String)>,
+    /// The header summaries and marks of the groups the panel draws, in panel order (`bulk_summary`); empty when no
+    /// selected texture has a job.
+    pub groups: Vec<(PanelGroup, GroupSummary)>,
+    /// What the Green row reaches (A3), built here with the rest of the cached view.
+    pub green: GreenReach,
+}
+
+pub const SKIP_NOT_NORMAL: &str = "not a normal map";
+pub const SKIP_MSN: &str = "model-space normal (_msn): no green to flip";
+pub const SKIP_NO_PLAN: &str = "not planned yet";
+pub const SKIP_UNDECIDED: &str = "type not decided yet";
+pub const GREEN_NONE: &str = "No selected texture takes green.";
+
+/// A3-1, A3-4: what the bulk panel's Green row reaches. Built in `bulk_view()`'s cache, never per frame.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GreenReach {
+    /// Typed textures in no locked slot whose type reads `channels.green_convention` (`engine::policy::takes_green`),
+    /// in order.
+    pub takes: Vec<String>,
+    /// (reason, count) of the other textures of `keys`, in first-seen order (the `BulkField.skipped` shape).
+    pub skipped: Vec<(String, usize)>,
+    /// The convention every one of `takes` resolves to (unset reads DirectX, as the engine assumes:
+    /// IN-GREEN-UNSTATED); `None` when they differ or `takes` is empty.
+    pub value: Option<engine::config::GreenConvention>,
+    /// The row's label, "Green: OpenGL" (empty when `takes` is).
+    pub label: String,
+    /// The row's note, "applies to {k} of {n}".
+    pub note: String,
+    /// The note's hover: the note, then one "locked on {count} of {n}: {reason}" line per skip reason.
+    pub hover: String,
+}
+
+/// A3-1, A3-4: `keys` split by reach: a planned job whose sub-type takes green and that is not waiting for its
+/// type (a written DirectX stays in reach). TPC-F-3: a texture filling a locked slot is skipped first, with the lock's
+/// reason, as `skip_of` skips it for every other bulk row.
+pub fn green_reach(m: &AppModel, keys: &[String]) -> GreenReach {
+    use engine::config::GreenConvention;
+    let mut r = GreenReach::default();
+    let mut values: Vec<GreenConvention> = vec![];
+    let locked = locked_items(m);
+    for k in keys {
+        let reason = match (locked.get(k), m.item(k)) {
+            (Some(why), _) => why.as_str(),
+            (None, None) => SKIP_NO_PLAN,
+            (None, Some(i)) if i.waiting => SKIP_UNDECIDED,
+            (None, Some(i)) => match i.job.as_ref() {
+                None => SKIP_NO_PLAN,
+                Some(j) if j.profile.subtype == Subtype::Msn => SKIP_MSN,
+                Some(j) if !engine::policy::takes_green(j.profile.subtype) => SKIP_NOT_NORMAL,
+                Some(j) => {
+                    r.takes.push(k.clone());
+                    let g = j
+                        .profile
+                        .channels
+                        .green_convention
+                        .unwrap_or(GreenConvention::Directx);
+                    if !values.contains(&g) {
+                        values.push(g);
+                    }
+                    continue;
+                }
+            },
+        };
+        match r.skipped.iter_mut().find(|e| e.0 == reason) {
+            Some(e) => e.1 += 1,
+            None => r.skipped.push((reason.to_string(), 1)),
+        }
+    }
+    if let [g] = values[..] {
+        r.value = Some(g);
+    }
+    if !r.takes.is_empty() {
+        r.label = format!("Green: {}", r.value.map_or("mixed", green_name));
+        r.note = format!("applies to {} of {}", r.takes.len(), keys.len());
+        r.hover = if r.skipped.is_empty() {
+            r.note.clone()
+        } else {
+            format!("{}\n{}", r.note, skipped_lines(&r.skipped, keys.len()))
+        };
+    }
+    r
 }
 
 impl AppModel {
@@ -131,6 +232,18 @@ impl AppModel {
             .iter()
             .map(|&i| self.items[i].key.clone())
             .collect()
+    }
+
+    /// The first key after `key` in the visible order that still waits for a decision. No wrap; a key the filter
+    /// hides never counts.
+    pub fn next_undecided_after(&self, key: &str) -> Option<String> {
+        let undecided = self.undecided_keys();
+        let visible = self.visible_keys();
+        let at = visible.iter().position(|k| k == key)?;
+        visible
+            .into_iter()
+            .skip(at + 1)
+            .find(|k| undecided.contains(k))
     }
 
     /// Note DY16 review: what the column shows, tiles then helper rows, in display order (mouse ranges and the
@@ -325,11 +438,18 @@ impl AppModel {
         let mut s = format!("{} selected", keys.len());
         match (hidden, in_fold) {
             (0, 0) => {}
-            (h, 0) => s.push_str(&format!(" ({h} hidden by filter)")),
-            (0, f) => s.push_str(&format!(" ({f} in the collapsed Helpers group)")),
-            (h, f) => s.push_str(&format!(
-                " ({h} hidden by filter, {f} in the collapsed Helpers group)"
-            )),
+            (h, 0) => {
+                let _ = write!(s, " ({h} hidden by filter)");
+            }
+            (0, f) => {
+                let _ = write!(s, " ({f} in the collapsed Helpers group)");
+            }
+            (h, f) => {
+                let _ = write!(
+                    s,
+                    " ({h} hidden by filter, {f} in the collapsed Helpers group)"
+                );
+            }
         }
         Some(s)
     }
@@ -387,7 +507,14 @@ pub enum Change {
 /// The bulk panel's rows, in the single panel's order: the Mipmaps rows, then `FIELDS` (design 3.2).
 pub fn panel_fields() -> Vec<(&'static str, &'static str)> {
     let mut v = vec![LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD];
-    v.extend(FIELDS);
+    // Task 6g: the Channel guard row is four tick rows here (R, G, B and A), each over its own field.
+    for row in FIELDS {
+        if row.0 == CHANNEL_GUARD {
+            v.extend(GUARD_FIELDS);
+        } else {
+            v.push(row);
+        }
+    }
     v
 }
 
@@ -440,7 +567,7 @@ fn skip_of(
         // parsable sub-types and filters; an unparsable one is reported, not written.
         let bad = v.is_null()
             || (field == "subtype" && serde_json::from_value::<Subtype>(v.clone()).is_err())
-            || (field == "mips.filter" && serde_json::from_value::<MipFilter>(v.clone()).is_err())
+            || (field == FILTER_FIELD.0 && serde_json::from_value::<MipFilter>(v.clone()).is_err())
             || (field == WEIGHTING
                 && !super::fields::WEIGHTING_OPTIONS
                     .iter()
@@ -452,7 +579,7 @@ fn skip_of(
         }
         let barred = serde_json::from_value::<MipFilter>(v.clone())
             .ok()
-            .filter(|_| field == "mips.filter")
+            .filter(|_| field == FILTER_FIELD.0)
             .and_then(|f| filter_option_lock(&job.profile, f));
         if let Some(lock) = barred {
             return Some(lock.into());
@@ -567,11 +694,16 @@ pub struct BulkField {
     /// Note JI4 (spec 4.6): the Effort row over textures whose formats read different search fields (BC1 and BC3
     /// count as different): nothing is offered, and the row says to edit one format at a time.
     pub formats_differ: bool,
+    /// E14: the fields whose locks depend on the value (mip filter, BC7 weighting, Format, DDS tag) list every option
+    /// they offer here: its label, its exact write value and the textures that write reaches (`Change::Write` of
+    /// `plan_bulk_edit`). Empty for every other field.
+    pub option_reach: Vec<(String, Value, usize)>,
 }
 
 impl BulkField {
-    /// The note column: "— mixed", "applies to K of N", both, or nothing (also when the formats differ: the
-    /// control cell says why).
+    /// The note column: "— mixed", then "applies to K of N", or, on a value-dependent row, the options grouped by
+    /// equal reach ("Box: 4 of 4 · Tent, Mitchell: 1 of 4", two groups at most, then "others vary"); nothing when the
+    /// formats differ (the control cell says why).
     pub fn note(&self) -> String {
         if self.formats_differ {
             return String::new();
@@ -580,24 +712,52 @@ impl BulkField {
         if self.value.is_none() && self.applies > 0 {
             parts.push("— mixed".to_string());
         }
-        if self.applies < self.total {
+        if self.option_reach.is_empty() {
             parts.push(format!("applies to {} of {}", self.applies, self.total));
+        } else if self.option_reach.iter().all(|o| o.2 == 0) {
+            // No option reaches any texture: one plain count, not every option at zero.
+            parts.push(format!("applies to 0 of {}", self.total));
+        } else {
+            let mut groups: Vec<(usize, Vec<&str>)> = vec![];
+            for (label, _, k) in &self.option_reach {
+                match groups.iter_mut().find(|g| g.0 == *k) {
+                    Some(g) => g.1.push(label),
+                    None => groups.push((*k, vec![label])),
+                }
+            }
+            // The widest reaches first, so a big group is never folded into "others vary"; ties keep option order.
+            groups.sort_by_key(|g| std::cmp::Reverse(g.0));
+            parts.extend(
+                groups
+                    .iter()
+                    .take(2)
+                    .map(|(k, ls)| format!("{}: {k} of {}", ls.join(", "), self.total)),
+            );
+            if groups.len() > 2 {
+                parts.push("others vary".to_string());
+            }
         }
         parts.join(" · ")
     }
 
     /// The note's hover: one "locked on M of N: <reason>" line per reason.
     pub fn skipped_text(&self) -> String {
-        self.skipped
-            .iter()
-            .map(|(r, n)| format!("locked on {n} of {}: {r}", self.total))
-            .collect::<Vec<_>>()
-            .join("\n")
+        skipped_lines(&self.skipped, self.total)
     }
 }
 
-/// The bulk panel's rows over `keys` (F3a D2). Counts are the value-independent ones; the filter
-/// lock of a picked value shows in the report. One profile serialisation per texture; `AppModel::bulk_view` caches.
+/// One "locked on {count} of {total}: {reason}" line per skip reason (Note LM11), shared by the rows and the Green row.
+fn skipped_lines(skipped: &[(String, usize)], total: usize) -> String {
+    skipped
+        .iter()
+        .map(|(r, n)| format!("locked on {n} of {total}: {r}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The bulk panel's rows over `keys` (F3a D2). `applies` and `skipped` are the value-independent
+/// counts; a value-dependent row also lists each option's reach (`option_reach`). One profile serialisation per
+/// texture; `AppModel::bulk_view` caches.
 pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
     let fields = panel_fields();
     let mut rows: Vec<BulkField> = fields
@@ -611,10 +771,18 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
             skipped: vec![],
             total: keys.len(),
             formats_differ: false,
+            option_reach: vec![],
         })
         .collect();
     let mut values: Vec<Vec<Value>> = vec![vec![]; fields.len()];
     let locked = locked_items(m);
+    // E14: the value-dependent rows start with every option at no reach; the texture loop counts them.
+    for row in &mut rows {
+        row.option_reach = option_candidates(m, keys, row.field)
+            .into_iter()
+            .map(|(l, v)| (l, v, 0))
+            .collect();
+    }
     // Note JI4: the Effort row edits the field every selected texture's format reads (`effort_field`); a texture in a
     // locked slot, or with no search, does not count. Two or more fields: the formats differ.
     let effort = rows.iter().position(|r| r.field == "encoder.effort");
@@ -660,6 +828,14 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
                 other = job.and_then(|j| field_view(m.target, j, row.field));
                 other.as_ref()
             };
+            // E14: the textures a write of each option reaches, by the rule the plan applies.
+            for (_, v, reach) in &mut row.option_reach {
+                let write = BulkOp::Set(v.clone());
+                let lock = locked.get(k).map(String::as_str);
+                *reach += usize::from(
+                    skip_of(job, view, row.field, Some(&write), lock, m.target).is_none(),
+                );
+            }
             match skip_of(
                 job,
                 view,
@@ -711,6 +887,56 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
         }
     }
     rows
+}
+
+/// E14: whether the field's locks depend on the value picked (so its row lists each option's reach).
+pub fn is_value_dependent(field: &str) -> bool {
+    [FILTER_FIELD.0, WEIGHTING, "format", "color.tag"].contains(&field)
+}
+
+/// E14: the options of a value-dependent row (label, exact write value), in the order the picker lists them. The
+/// Format row's are `bulk_encodings`' pairs; the tag row's, the tags the engine allows with each selected texture's
+/// own format, in first-seen order (a stray current pair is not one a write can make).
+fn option_candidates(m: &AppModel, keys: &[String], field: &str) -> Vec<(String, Value)> {
+    match field {
+        f if f == FILTER_FIELD.0 => FILTER_OPTIONS
+            .iter()
+            .map(|(f, l)| (l.to_string(), serde_json::json!(f)))
+            .collect(),
+        WEIGHTING => WEIGHTING_OPTIONS
+            .iter()
+            .map(|o| (o.1.to_string(), Value::from(o.0)))
+            .collect(),
+        "format" => bulk_encodings(m, keys)
+            .into_iter()
+            .map(|(e, l)| (l, serde_json::json!(e)))
+            .collect(),
+        "color.tag" => {
+            let mut tags: Vec<ColorTag> = vec![];
+            for j in keys
+                .iter()
+                .filter_map(|k| m.item(k).and_then(|i| i.job.as_ref()))
+            {
+                for ((f, t), label) in encoding_options(m.target, &j.profile) {
+                    let own = f == j.profile.format && !label.ends_with(NOT_VALID);
+                    if own && t != ColorTag::NotApplicable && !tags.contains(&t) {
+                        tags.push(t);
+                    }
+                }
+            }
+            tags.into_iter()
+                .map(|t| {
+                    let label = if t == ColorTag::Srgb {
+                        "_SRGB"
+                    } else {
+                        UNORM_LABEL
+                    };
+                    (label.to_string(), serde_json::json!(t))
+                })
+                .collect()
+        }
+        _ => vec![],
+    }
 }
 
 /// The members of sets `set_keys` (in that order, then member order) whose slot is `kind`; `None` is every member.
@@ -790,7 +1016,7 @@ fn report(label: &str, plan: &[(String, Change)]) -> String {
     }
     let mut s = format!("{label}: written to {written} of {n}");
     for (r, k) in skipped {
-        s.push_str(&format!("; locked on {k} of {n}: {r}"));
+        let _ = write!(s, "; locked on {k} of {n}: {r}");
     }
     s
 }
@@ -798,6 +1024,105 @@ fn report(label: &str, plan: &[(String, Change)]) -> String {
 impl AppModel {
     pub(super) fn toml_writable(&self) -> bool {
         self.project.as_ref().is_some_and(|p| !p.read_only())
+    }
+
+    /// The selected textures that wait for a type (`subtype_question`: not an alpha or green question, and not the
+    /// blocked-type picker), minus those filling a locked slot, in selection order; and how many other selected
+    /// textures already have a type (a job and no type question, a locked one too). Read from the selection, not from
+    /// Review's run.
+    pub fn type_card_split(&self) -> (Vec<String>, usize) {
+        let locked = locked_items(self);
+        let mut undecided = vec![];
+        let mut typed = 0;
+        for k in self.selected_items() {
+            if self.subtype_question(&k).is_some() {
+                // A waiting texture in a locked slot takes no write, and is no typed peer either.
+                if !locked.contains_key(&k) {
+                    undecided.push(k);
+                }
+            } else if self.item(&k).is_some_and(|i| i.job.is_some()) {
+                typed += 1;
+            }
+        }
+        (undecided, typed)
+    }
+
+    /// Whether the picker offers `st` for texture `key` under the target (`complex_grass` only in a grass context).
+    pub fn type_offered_to(&self, key: &str, st: Subtype) -> bool {
+        self.item(key)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| {
+                engine::policy::offered_for(self.target, st, engine::policy::grass_context(j))
+            })
+    }
+
+    /// The selected textures the bulk type card asks about (Task 10, 3d-R3).
+    pub fn selected_undecided(&self) -> Vec<String> {
+        self.type_card_split().0
+    }
+
+    /// The bulk type card's Apply: write `st` to the textures of `keys` that are still selected, still ask for
+    /// a type, are not locked, and are offered `st` under the target, as one step through `apply_bulk_edit`. Everything
+    /// is read again here, at click time: nothing is written while the plan is out or `sdc.toml` is read-only.
+    pub fn decide_many(&mut self, keys: &[String], st: Subtype) {
+        if self.fix_off().is_some() {
+            return;
+        }
+        let current = self.selected_undecided();
+        let mut eligible: Vec<String> = vec![];
+        for k in keys {
+            if self.type_offered_to(k, st) && current.contains(k) && !eligible.contains(k) {
+                eligible.push(k.clone());
+            }
+        }
+        if eligible.is_empty() {
+            return;
+        }
+        self.apply_bulk_edit(&eligible, "subtype", BulkOp::Set(serde_json::json!(st)));
+    }
+
+    /// A3-1, A3-2, TPC-R2: write `channels.green_convention = g` (`decide`, so DirectX is written, not cleared) on
+    /// every key of `keys` that is still selected and that `green_reach` takes, as one step. Refuses with
+    /// `Err(fix_off())` while a plan is pending or `sdc.toml` is read-only; with no key still selected it writes
+    /// nothing and reports nothing. The report is "Green: {OpenGL|DirectX} written to {k} of {n}" (n = the keys still
+    /// selected), set only when something changed or was skipped; with no texture that takes green it is `GREEN_NONE`.
+    pub fn decide_many_green(
+        &mut self,
+        keys: &[String],
+        g: engine::config::GreenConvention,
+    ) -> Result<usize, String> {
+        if let Some(why) = self.fix_off() {
+            return Err(why);
+        }
+        let current = self.bulk_targets();
+        let mut kept: Vec<String> = vec![];
+        for k in keys {
+            if current.contains(k) && !kept.contains(k) {
+                kept.push(k.clone());
+            }
+        }
+        if kept.is_empty() {
+            return Ok(0);
+        }
+        let r = green_reach(self, &kept);
+        if r.takes.is_empty() {
+            self.bulk.report = Some(GREEN_NONE.into());
+            return Ok(0);
+        }
+        let changed = self.batch_edit(&format!("Green for {}", textures(r.takes.len())), |m| {
+            for k in &r.takes {
+                m.decide(k, super::Answer::Green(g));
+            }
+        });
+        if changed || !r.skipped.is_empty() {
+            self.bulk.report = Some(format!(
+                "Green: {} written to {} of {}",
+                green_name(g),
+                r.takes.len(),
+                kept.len()
+            ));
+        }
+        Ok(r.takes.len())
     }
 
     /// F3a D2/D5: write (or clear) `field` on every texture of `keys` it applies to, through the single-texture
@@ -1017,7 +1342,7 @@ impl AppModel {
         if changed || !why.is_empty() {
             let mut s = label;
             for (r, n) in why {
-                s.push_str(&format!("; locked on {n} of {total}: {r}"));
+                let _ = write!(s, "; locked on {n} of {total}: {r}");
             }
             self.bulk.report = Some(s);
         }
@@ -1086,6 +1411,12 @@ pub fn kind_chips(m: &AppModel, set_keys: &[String]) -> Vec<KindChip> {
 pub enum MenuAction {
     EditSettings,
     CopyFromActive,
+    /// The sets menus' Copy JSON settings from the active set to the other selected sets (the dialog opens).
+    CopyJsonFromActive,
+    /// The sets menus' Copy JSON settings: the active set's rows go on the session clipboard.
+    CopyJsonToClip,
+    /// The sets menus' Paste JSON settings: the clipboard's rows to the selected sets (the dialog opens).
+    PasteJson,
     ResetAll,
     SelectMembersOfKind(Option<SlotKind>),
     /// F3a Task 8: a Slot commands window command on slot `n` of set `set` (an id), through the same model call.
@@ -1222,6 +1553,33 @@ impl AppModel {
         )
     }
 
+    /// The model-wide inputs the single panel's cache reads (`settings_panel::panel_cache`), beside the drawn key: the
+    /// same as `bulk_cache_inputs` less the selection, with the target itself so the per-frame compare allocates
+    /// nothing. An edit moves `project.rev()` before its plan lands; every job replacement bumps `items_rev`.
+    pub(crate) fn panel_cache_inputs(&self) -> PanelInputs {
+        (
+            self.items_rev,
+            self.inputs_rev,
+            self.sets_doc.as_ref().map_or(0, |d| d.rev()),
+            self.target,
+            self.project.as_ref().map_or(0, |p| p.rev()),
+            self.planning.is_some(),
+        )
+    }
+
+    /// The panel's representative job, which its editors and its header summaries read option labels from: the active
+    /// texture's, else the first selected one with a job (design §3.2). The one place both pick it.
+    pub(crate) fn bulk_job(&self, keys: &[String]) -> Option<&ResolvedJob> {
+        let active = match &self.selection {
+            Selection::Item(k) => self.item(k).and_then(|i| i.job.as_ref()),
+            _ => None,
+        };
+        active.or_else(|| {
+            keys.iter()
+                .find_map(|k| self.item(k).and_then(|i| i.job.as_ref()))
+        })
+    }
+
     /// `bulk_targets` and `bulk_fields`, recomputed only when the selection, the kind, the target or the item or
     /// input revisions change.
     pub fn bulk_view(&mut self) -> std::sync::Arc<BulkView> {
@@ -1238,14 +1596,44 @@ impl AppModel {
         } else {
             vec![]
         };
-        let encodings = bulk_encodings(self, &keys);
         let reencode = self.reencode_split(&keys);
+        let undecided = self.type_card_split();
+        let likely = super::likely::likely_types(self, &undecided.0);
+        let job = self.bulk_job(&keys);
+        // TPC-T7-1: Resize has no effect only when every texture it applies to says so, whichever one is active.
+        let locked = locked_items(self);
+        let mut applying = keys
+            .iter()
+            .filter(|k| !locked.contains_key(*k))
+            .filter_map(|k| self.item(k).and_then(|i| i.job.as_ref()));
+        let size_no_effect = applying.next().and_then(|first| {
+            let why = no_effect_reason(&first.profile, "resize")?;
+            applying
+                .all(|j| no_effect_reason(&j.profile, "resize") == Some(why))
+                .then_some(why)
+        });
+        let groups = job.map_or_else(Vec::new, |j| {
+            BULK_GROUPS
+                .into_iter()
+                .filter(|&g| rows.iter().any(|r| panel_group(r.field) == Some(g)))
+                .map(|g| {
+                    (
+                        g,
+                        bulk_summary(g, &rows, self.target, &j.profile, size_no_effect),
+                    )
+                })
+                .collect()
+        });
+        let green = green_reach(self, &keys);
         let view = std::sync::Arc::new(BulkView {
+            green,
             keys,
             rows,
             chips,
-            encodings,
             reencode,
+            undecided,
+            likely,
+            groups,
         });
         // Taken after `bulk_targets`, which can reset a vanished kind.
         let computes = self.bulk.cache.as_ref().map_or(0, |c| c.computes) + 1;
@@ -1341,7 +1729,7 @@ impl AppModel {
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
-                disabled: locked.clone(),
+                disabled: locked,
             },
         ]
         .into_iter()
@@ -1413,8 +1801,9 @@ impl AppModel {
             ),
             disabled: project,
         });
+        // Note LJ3: the Sets view renames outputs only; Rename inputs is a Textures-view command.
         let mut v = if sets {
-            outputs.into_iter().chain([inputs]).collect::<Vec<_>>()
+            outputs.into_iter().collect::<Vec<_>>()
         } else {
             [inputs].into_iter().chain(outputs).collect()
         };
@@ -1445,6 +1834,9 @@ impl AppModel {
                 label: format!("Edit settings for {n} selected"),
                 disabled: None,
             },
+            self.copy_json_entry(),
+            self.copy_clip_entry(),
+            self.paste_clip_entry(),
             MenuEntry {
                 action: MenuAction::ResetAll,
                 label: format!("Reset all settings for {n} selected…"),
@@ -1588,7 +1980,7 @@ impl AppModel {
                     } else {
                         format!("From {host}")
                     },
-                    disabled: off.clone(),
+                    disabled: off,
                 },
             );
         }
@@ -1620,7 +2012,7 @@ impl AppModel {
         {
             menu.push(MenuEntry {
                 action: MenuAction::PgpLock {
-                    set: id.clone(),
+                    set: id,
                     n,
                     on: !on,
                 },
@@ -1842,6 +2234,9 @@ impl AppModel {
                 self.bulk.kind = None;
             }
             MenuAction::CopyFromActive => self.open_copy_settings(),
+            MenuAction::CopyJsonFromActive => self.open_copy_set_json(),
+            MenuAction::CopyJsonToClip => self.copy_json_to_clip(),
+            MenuAction::PasteJson => self.open_paste_json(),
             MenuAction::ResetAll => self.ask_reset_all(),
             MenuAction::SelectMembersOfKind(k) => self.select_members_of_kind(k),
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),
@@ -1909,7 +2304,7 @@ impl AppModel {
     /// 08f-8: it was dropped).
     pub fn menu_picked(&mut self, a: MenuAction) {
         if let Some(e) = self.run_menu(a) {
-            self.status_line = e.clone();
+            self.status_line.clone_from(&e);
             self.messages.notify(super::messages::Severity::Warning, e);
         }
     }

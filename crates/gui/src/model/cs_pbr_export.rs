@@ -107,7 +107,7 @@ pub fn refusals(entries: &[SetEntry]) -> BTreeMap<(String, Kind, String), String
 
 /// Whether a block value can be written as is: the type CS reads, and a glint object with a key CS reads (an empty
 /// one would be written as `{}`). `to_text` does no shape check, so nothing else may reach it.
-fn writable(kind: Kind, k: &str, v: &Json) -> bool {
+pub(crate) fn writable(kind: Kind, k: &str, v: &Json) -> bool {
     field(kind, k).is_some_and(|f| valid_value(f.kind, v))
         && v.as_object().is_none_or(|g| {
             g.keys()

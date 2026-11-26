@@ -208,7 +208,7 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .iter()
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
-    assert_eq!(engine::codes::Code::ALL.len(), 94);
+    assert_eq!(engine::codes::Code::ALL.len(), 95);
     assert_eq!(notes, 22);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),
@@ -5220,7 +5220,8 @@ fn the_model_keeps_ids_out_of_modified_clicks_and_select_all() {
 #[test]
 fn a_right_click_on_a_key_less_card_selects_that_set_and_edit_match_closes_the_menu() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = key_less_sets(d.path());
+    // Edit match… is off on a set with no JSON, so these sets carry some.
+    let mut m = key_less_json_sets(d.path());
     let texture = "landscape/rock01.png";
     m.expand(texture);
     let mut h = harness(m);

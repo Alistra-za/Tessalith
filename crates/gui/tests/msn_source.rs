@@ -5,7 +5,8 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use engine::config::{MsnSource, Subtype, Target};
 use image::{ImageBuffer, Rgb};
-use sdc_gui::model::fields::{field_hidden, field_view, group_of, MSN_SOURCE};
+use sdc_gui::model::fields::{field_hidden, field_view, MSN_SOURCE};
+use sdc_gui::model::panel_groups::{panel_group, PanelGroup};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
@@ -52,7 +53,7 @@ fn the_baker_row_is_msn_only_and_writes_the_key() {
     let mut m = fixture(d.path());
     let msn = job(&m, MSN);
     assert_eq!(msn.profile.subtype, Subtype::Msn);
-    assert_eq!(group_of(MSN_SOURCE), "Type");
+    assert_eq!(panel_group(MSN_SOURCE), Some(PanelGroup::NormalMap));
     assert!(!field_hidden(&msn.profile, MSN_SOURCE));
     assert_eq!(
         field_view(Target::Cs, &msn, MSN_SOURCE).unwrap().value,
@@ -73,6 +74,7 @@ fn the_panel_shows_baked_in_for_an_msn() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     m.select_item(MSN);
+    support::open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

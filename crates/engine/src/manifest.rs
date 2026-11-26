@@ -17,13 +17,16 @@ pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The newest released engine version. The release commit sets it to [`ENGINE_VERSION`]; the encode-version guard
 /// accepts a changed hash only for an arm bumped in the current, unreleased cycle.
-pub const RELEASED_ENGINE_VERSION: &str = "3.0.0";
+pub const RELEASED_ENGINE_VERSION: &str = "3.1.0";
 
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
-/// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
-/// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
+/// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version moves
+/// only the arms written as `ENGINE_VERSION`; every other arm is a literal and stays. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
 /// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
-/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`. No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`; `pbr_emissive` and `hdr_sky` moved to the current version
+/// with the BC6H kernel fixes (Note LO) and moved again with ISPC TC patch 0007 (Note LT); `msn` and `skin_wet` moved
+/// to the current version with the per-type BC7 settings (Note LR). No `_` arm: a new `Subtype` fails to compile
+/// until it gets one.
 /// An output whose record names an older arm is kept by `if-changed` unless the run's `--ev` covers it (Note JA).
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
@@ -33,10 +36,7 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::BacklightTint
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
-        | Subtype::Msn
         | Subtype::GenericData
-        | Subtype::PbrEmissive
-        | Subtype::HdrSky
         | Subtype::Envmask
         | Subtype::Flow
         | Subtype::Height
@@ -47,17 +47,26 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::ComplexGrass
         | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
+        // The built-in BC6H types: ISPC TC patch 0004 changed BC6H bytes (Note LO) and patch 0007 changes them again
+        // (Note LT), so they follow the current version until the release names it. A pbr_emissive written as BC7 is
+        // reported as an older encode too (ruling BC6H-Q1); `--ev --property bc6h_uf16` re-encodes only the BC6H outputs.
+        // shortcut: a format = "bc6h_uf16" set by hand on any other sub-type is not marked. If that is reported, add a
+        // BC6H-scoped `ispctc_patch` tag compared like `rgbcx_patch` (in api::currency) instead of moving more arms.
+        Subtype::PbrEmissive | Subtype::HdrSky => ENGINE_VERSION,
         // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6). These are the sub-types a
         // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
         // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
         // if-changed; move that arm if it is ever reported (Note HR6).
         Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => "3.0.0",
-        Subtype::SkinWet => "3.0.0",
+        // 3.2: `sdc-base` gives these the per-type BC7 flat tolerance (Note LR, LR8), which changes their profile hash
+        // and may change their BC7 bytes. Every other type it sets that for is on `ENGINE_VERSION` below already.
+        Subtype::Msn | Subtype::SkinWet => ENGINE_VERSION,
         // XY-only normal outputs need unit directions even with Keep (Note LA7).
         Subtype::DetailNormal => ENGINE_VERSION,
         // Advanced Skin detail needs a unit base even with Keep (Note LA6).
         Subtype::SkinDetail => ENGINE_VERSION,
-        // Keep carries authored normal length and bakes angular spread (Note LA).
+        // Keep carries authored normal length and bakes angular spread (Note LA). 3.2 also gives these, and the two
+        // above, the per-type BC7 settings (Note LR, LR8).
         Subtype::Normal
         | Subtype::LandscapeNormal
         | Subtype::PbrNormal
@@ -72,10 +81,15 @@ pub const fn encode_version(st: Subtype) -> &'static str {
 /// (see [`ManifestEntry::is_newer_schema`]) instead of interpreting them.
 pub const MANIFEST_SCHEMA: u32 = 2;
 
-/// The vendored bc7e patch as built into `encoders-sys`; hashed for the manifest (it is the only change to a
-/// vendored encoder). `vendor/**` is `-text` in `.gitattributes`, so the bytes do not depend on the checkout.
+/// The vendored bc7e patch 0001 as built into `encoders-sys`; hashed for the manifest's `bc7e_patch` tag on every
+/// format. `vendor/**` is `-text` in `.gitattributes`, so the bytes do not depend on the checkout.
 const BC7E_PATCH: &[u8] =
     include_bytes!("../../encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch");
+
+/// bc7e patch 0005, which changes BC7 bytes; hashed whole (its `index` line included) into the BC7-only tag
+/// `bc7e_fixes` (Note LR).
+const BC7E_FIXES: &[u8] =
+    include_bytes!("../../encoders-sys/vendor/bc7e/patches/0005-bc7e-fixes.patch");
 
 /// The patched vendored `rgbcx.h` and `rgbcx.cpp` (the patches are applied in place, so both files are hashed,
 /// header first; DECISIONS T13).
@@ -104,6 +118,10 @@ pub struct EncoderVersions {
     /// `<patch name>@sha256:<hash of the patched rgbcx.h and rgbcx.cpp>`; `None` before the patch, so BC3/BC4/BC5 re-encode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rgbcx_patch: Option<String>,
+    /// `<patch name>@sha256:<hash of the patch file>`; `None` before patch 0005, so BC7 outputs written before it
+    /// re-encode under `--ev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bc7e_fixes: Option<String>,
 }
 
 impl EncoderVersions {
@@ -127,6 +145,9 @@ impl EncoderVersions {
             bc7e_patch: v
                 .bc7e_patch
                 .map(|name| format!("{name}@sha256:{}", hex::encode(Sha256::digest(BC7E_PATCH)))),
+            bc7e_fixes: v
+                .bc7e_fixes
+                .map(|name| format!("{name}@sha256:{}", hex::encode(Sha256::digest(BC7E_FIXES)))),
         }
     }
 }
@@ -607,15 +628,13 @@ mod tests {
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
             // 3.0.0 changed skin maps, bake mip 0 (HD1) and resized cutout coverage (HR6).
-            // 3.0.1 changes kept normal lengths, XY bases and the angular variance bake (LA).
-            // SkinWet stays at 3.0.0 because every writable format stores XYZ.
+            // 3.1.0 changes kept normal lengths, XY bases and the angular variance bake (LA).
+            // 3.1.0 changed BC6H bytes (ISPC TC patch 0004, Note LO); the current version changes them again
+            // (patch 0007, Note LT). The per-type BC7 settings move Msn (from 2.0.0) and SkinWet (from 3.0.0) to the
+            // current version too (Note LR).
             let want = if matches!(
                 st,
-                Subtype::Diffuse
-                    | Subtype::PbrAlbedo
-                    | Subtype::UiSky
-                    | Subtype::SkinAlbedo
-                    | Subtype::SkinWet
+                Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo
             ) {
                 "3.0.0"
             } else if matches!(
@@ -629,6 +648,10 @@ mod tests {
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial
                     | Subtype::CoatNormal
+                    | Subtype::Msn
+                    | Subtype::SkinWet
+                    | Subtype::PbrEmissive
+                    | Subtype::HdrSky
             ) {
                 ENGINE_VERSION
             } else {

@@ -1,6 +1,8 @@
 # BC7: bc7e tuning, the `max` level and alpha weights
 
-Two BC7 studies of Tessalith's encoder settings: whether bc7e has quality left above `veryslow` (2026-10-18, commit 65c6db00), which became the `max` level, and [whether BC7 with a higher alpha weight can replace BC3](#bc7-alpha-weights-against-bc3-2026-10-21) for delicate alpha (2026-10-21, commit dbf54808), which became the *BC7 weighting* options. The encoder comparison they build on is [BCn encoders by format](encoder-benchmark.md#bc7).
+BC7 studies of Tessalith's encoder settings: whether bc7e has quality left above `veryslow` (2026-10-18, commit 65c6db00), which became the `max` level; [whether BC7 with a higher alpha weight can replace BC3](#bc7-alpha-weights-against-bc3-2026-10-21) for delicate alpha (2026-10-21, commit dbf54808), which became the *BC7 weighting* options; and bc7e patch 0005 (2026-11-23 to 2026-11-25): [its kernel fixes](#kernel-fixes-patch-0005-2026-11-25-note-lr), [the per-type flat tolerance and channel guard](#per-type-tuning-flat-tolerance-and-the-channel-guard-2026-11-23-note-lr), [×16 on colour and the alpha weights again](#x16-on-colour-and-the-alpha-weights-again-2026-11-24-note-lr) and [the estimators' precision](#estimator-precision-2026-11-23-note-lr). The encoder comparison they build on is [BCn encoders by format](encoder-benchmark.md#bc7).
+
+Every table from Method to the alpha weights study measured bc7e before patch 0005. The patch 0005 sections measure the encoder Tessalith ships.
 
 Tessalith encodes BC7 with bc7e (bc7enc_rdo b943862, patch 0001) at its `veryslow` level, which the
 [encoder benchmark](encoder-benchmark.md#bc7-on-opaque-colour) found ties or beats NVTT Production on real textures. This study asks
@@ -313,9 +315,11 @@ Per-image rows: `docs/research/bc7e-tuning/skyrim-max.csv` on branch `bench` (sc
 
 ## BC7 alpha weights against BC3 (2026-10-21)
 
+Measured before patch 0005, with weights 1, 1, 1, w; [x16 on colour and the alpha weights again](#x16-on-colour-and-the-alpha-weights-again-2026-11-24-note-lr) supersedes it. Its alpha SSIM and premultiplied columns were not measured again.
+
 Written 2026-10-21 (commit dbf54808).
 
-Source: local study, 2026-10-21, and DECISIONS Note CP. It asks whether BC7 with a higher alpha error weight can replace BC3 for textures with delicate alpha, and keep BC7's better RGB. BC7 is the built-in bc7e at its default level (veryslow), with linear weights 1,1,1,w for w = 1, 2, 4, 8 and 16, and in a follow-up on 2026-10-22, 32 and 64. BC3 is the bundled rgbcx (level 18, `-r`). w1 is today's Linear. The dropdown offers Alpha ×2, ×8 and ×16, and Perceptual. The chart is in the [GUI guide](../wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3).
+Source: local study, 2026-10-21, and DECISIONS Note CP. It asks whether BC7 with a higher alpha error weight can replace BC3 for textures with delicate alpha, and keep BC7's better RGB. BC7 is the built-in bc7e at its default level (veryslow), with linear weights 1,1,1,w for w = 1, 2, 4, 8 and 16, and in a follow-up on 2026-10-22, 32 and 64. BC3 is the bundled rgbcx (level 18, `-r`). w1 is today's Linear. The dropdown's options, and the chart, are in the [GUI guide](../wiki/GUI-Texture-Panel.md#bc7-weighting-against-bc3).
 
 These tables copy the study's values. They leave out the 95% confidence intervals and the per-image worst cases that the study also reports. PSNR is in dB, alpha SSIM is 0 to 1, alpha max error is in codes, and exact-0 and exact-255 are the share of source texels at 0 or 255 that decode exactly. Each *Means* table is the mean over the class. Each *Where BC7 beats BC3* table counts the images where the BC7 setting beats BC3.
 
@@ -334,7 +338,7 @@ These tables copy the study's values. They leave out the 95% confidence interval
 - On `rmaos_spec` and `m_height`, BC3 still leads on alpha SSIM on 23/24 and 27/30 textures.
 - On `alpha_real`, w32 and w64 add only +0.3 and +0.45 dB of alpha over w16.
 
-The dropdown stays at ×16. w32 and w64 are in the bench only.
+Since 2026-11-22 (owner) the dropdown also offers ×4, ×32 and ×64; the measured gains above stand as written.
 
 Follow-up on `m_height`:
 
@@ -356,8 +360,8 @@ Means:
 | BC7 w4 | 47.13 | 53.17 | 50.56 | 0.9979 | 15.96 | 92.13 | 63.69 |
 | BC7 w8 | 46.60 | 52.87 | 51.40 | 0.9984 | 13.91 | 92.69 | 67.00 |
 | BC7 w16 | 46.17 | 52.53 | 51.93 | 0.9987 | 13.02 | 93.06 | 66.01 |
-| BC7 w32 (study only) | 45.84 | 52.23 | 52.23 | 0.9989 | 12.42 | 93.06 | 66.39 |
-| BC7 w64 (study only) | 45.58 | 52.00 | 52.38 | 0.9990 | 12.24 | 93.08 | 66.37 |
+| BC7 w32 | 45.84 | 52.23 | 52.23 | 0.9989 | 12.42 | 93.06 | 66.39 |
+| BC7 w64 | 45.58 | 52.00 | 52.38 | 0.9990 | 12.24 | 93.08 | 66.37 |
 | BC7 perceptual | 46.54 | 52.81 | 51.17 | 0.9983 | 14.39 | 92.70 | 65.27 |
 
 Where BC7 beats BC3:
@@ -369,8 +373,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 77/96 | 62/96 | 62/96 | +6.13 dB | 94/96 | +3.32 | +0.17 |
 | BC7 w8 | 85/96 | 77/96 | 77/96 | +5.61 dB | 88/96 | +4.16 | +0.67 |
 | BC7 w16 | 86/96 | 80/96 | 80/96 | +5.18 dB | 84/96 | +4.69 | +0.97 |
-| BC7 w32 (study only) | 87/96 | 82/96 | 82/96 | +4.84 dB | 82/96 | +4.98 | +1.14 |
-| BC7 w64 (study only) | 87/96 | 82/96 | 82/96 | +4.59 dB | 79/96 | +5.14 | +1.24 |
+| BC7 w32 | 87/96 | 82/96 | 82/96 | +4.84 dB | 82/96 | +4.98 | +1.14 |
+| BC7 w64 | 87/96 | 82/96 | 82/96 | +4.59 dB | 79/96 | +5.14 | +1.24 |
 | BC7 perceptual | 82/96 | 71/96 | 71/96 | +5.54 dB | 91/96 | +3.93 | +0.54 |
 
 ### Normal map with specular in alpha (`n_spec`, 30 textures, mip 0)
@@ -385,8 +389,8 @@ Means:
 | BC7 w4 | 2.081 | 36.00 | 41.39 | 0.9807 | 55.90 | 81.60 | 43.31 |
 | BC7 w8 | 2.308 | 35.22 | 43.36 | 0.9883 | 41.10 | 80.19 | 47.44 |
 | BC7 w16 | 2.523 | 34.53 | 44.96 | 0.9929 | 32.17 | 76.90 | 51.26 |
-| BC7 w32 (study only) | 2.706 | 33.95 | 46.02 | 0.9953 | 24.87 | 75.62 | 54.68 |
-| BC7 w64 (study only) | 2.851 | 33.49 | 46.64 | 0.9963 | 19.47 | 74.28 | 53.82 |
+| BC7 w32 | 2.706 | 33.95 | 46.02 | 0.9953 | 24.87 | 75.62 | 54.68 |
+| BC7 w64 | 2.851 | 33.49 | 46.64 | 0.9963 | 19.47 | 74.28 | 53.82 |
 
 Where BC7 beats BC3:
 
@@ -397,8 +401,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 1/30 | 0/30 | 0/30 | +0.725 ° | 29/30 | -4.67 | -15.95 |
 | BC7 w8 | 3/30 | 1/30 | 1/30 | +0.498 ° | 27/30 | -2.70 | -8.30 |
 | BC7 w16 | 10/30 | 3/30 | 3/30 | +0.283 ° | 24/30 | -1.11 | -3.70 |
-| BC7 w32 (study only) | 17/30 | 6/30 | 6/30 | +0.100 ° | 16/30 | -0.04 | -1.37 |
-| BC7 w64 (study only) | 21/30 | 13/30 | 13/30 | -0.045 ° | 11/30 | +0.58 | -0.34 |
+| BC7 w32 | 17/30 | 6/30 | 6/30 | +0.100 ° | 16/30 | -0.04 | -1.37 |
+| BC7 w64 | 21/30 | 13/30 | 13/30 | -0.045 ° | 11/30 | +0.58 | -0.34 |
 
 ### The same normal maps at mip 2 (`n_spec_mip2`, 30 textures)
 
@@ -412,8 +416,8 @@ Means:
 | BC7 w4 | 2.788 | 33.67 | 39.58 | 0.9808 | 37.60 | 92.39 | 59.13 |
 | BC7 w8 | 3.052 | 33.00 | 41.59 | 0.9886 | 25.70 | 92.56 | 54.53 |
 | BC7 w16 | 3.270 | 32.44 | 42.95 | 0.9925 | 20.23 | 94.48 | 55.51 |
-| BC7 w32 (study only) | 3.460 | 31.94 | 43.80 | 0.9946 | 15.87 | 95.81 | 57.35 |
-| BC7 w64 (study only) | 3.640 | 31.45 | 44.38 | 0.9956 | 14.40 | 94.86 | 57.27 |
+| BC7 w32 | 3.460 | 31.94 | 43.80 | 0.9946 | 15.87 | 95.81 | 57.35 |
+| BC7 w64 | 3.640 | 31.45 | 44.38 | 0.9956 | 14.40 | 94.86 | 57.27 |
 
 Where BC7 beats BC3:
 
@@ -424,8 +428,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 1/30 | 0/30 | 0/30 | +0.772 ° | 29/30 | -4.71 | -15.38 |
 | BC7 w8 | 1/30 | 1/30 | 1/30 | +0.508 ° | 25/30 | -2.70 | -7.62 |
 | BC7 w16 | 8/30 | 5/30 | 4/30 | +0.290 ° | 22/30 | -1.35 | -3.63 |
-| BC7 w32 (study only) | 13/30 | 9/30 | 9/30 | +0.100 ° | 18/30 | -0.49 | -1.59 |
-| BC7 w64 (study only) | 19/30 | 12/30 | 12/30 | -0.080 ° | 13/30 | +0.09 | -0.59 |
+| BC7 w32 | 13/30 | 9/30 | 9/30 | +0.100 ° | 18/30 | -0.49 | -1.59 |
+| BC7 w64 | 19/30 | 12/30 | 12/30 | -0.080 ° | 13/30 | +0.09 | -0.59 |
 
 ### Packed `_rmaos` with specular in alpha (`rmaos_spec`, 24 textures)
 
@@ -439,11 +443,11 @@ Means:
 | BC7 w4 | 43.39 | 51.72 | 44.08 | 44.62 | 53.36 | 0.9959 | 23.33 | 95.69 | 70.44 |
 | BC7 w8 | 43.02 | 51.05 | 43.78 | 44.25 | 54.74 | 0.9972 | 17.67 | 95.14 | 72.16 |
 | BC7 w16 | 42.58 | 50.50 | 43.42 | 43.82 | 56.07 | 0.9981 | 15.33 | 78.66 | 73.05 |
-| BC7 w32 (study only) | 42.05 | 50.09 | 43.01 | 43.32 | 57.31 | 0.9987 | 13.79 | 78.52 | 73.43 |
-| BC7 w64 (study only) | 41.47 | 49.70 | 42.57 | 42.77 | 58.51 | 0.9991 | 13.12 | 78.14 | 74.13 |
+| BC7 w32 | 42.05 | 50.09 | 43.01 | 43.32 | 57.31 | 0.9987 | 13.79 | 78.52 | 73.43 |
+| BC7 w64 | 41.47 | 49.70 | 42.57 | 42.77 | 58.51 | 0.9991 | 13.12 | 78.14 | 74.13 |
 | BC7 w8 + exact opaque | | | | 44.25 | 55.01 | 0.9973 | 17.67 | 95.14 | 91.64 |
 | BC7 w16 + exact opaque | | | | 43.82 | 56.43 | 0.9982 | 15.33 | 78.66 | 92.53 |
-| BC7 w64 + exact opaque (study only) | | | | 42.77 | 59.10 | 0.9992 | 13.12 | 78.14 | 93.60 |
+| BC7 w64 + exact opaque | | | | 42.77 | 59.10 | 0.9992 | 13.12 | 78.14 | 93.60 |
 
 Where BC7 beats BC3:
 
@@ -454,8 +458,8 @@ Where BC7 beats BC3:
 | BC7 w4 | 2/24 | 1/24 | 1/24 | +5.98 dB | 23/24 | -5.62 | -3.61 |
 | BC7 w8 | 4/24 | 1/24 | 1/24 | +5.61 dB | 23/24 | -4.24 | -2.36 |
 | BC7 w16 | 5/24 | 1/24 | 1/24 | +5.18 dB | 22/24 | -2.91 | -1.46 |
-| BC7 w32 (study only) | 6/24 | 1/24 | 1/24 | +4.68 dB | 22/24 | -1.67 | -0.83 |
-| BC7 w64 (study only) | 11/24 | 1/24 | 1/24 | +4.13 dB | 22/24 | -0.47 | -0.42 |
+| BC7 w32 | 6/24 | 1/24 | 1/24 | +4.68 dB | 22/24 | -1.67 | -0.83 |
+| BC7 w64 | 11/24 | 1/24 | 1/24 | +4.13 dB | 22/24 | -0.47 | -0.42 |
 
 Why BC3 keeps the lead on this class, even at w64:
 
@@ -487,8 +491,8 @@ Means:
 | BC7 w4 | 42.64 | 50.32 | 42.34 | 43.41 | 48.73 | 0.9929 | 21.77 | 93.91 | 90.89 |
 | BC7 w8 | 42.03 | 49.61 | 41.62 | 42.70 | 50.27 | 0.9952 | 18.13 | 95.69 | 90.63 |
 | BC7 w16 | 41.44 | 49.13 | 40.94 | 42.02 | 51.56 | 0.9969 | 14.27 | 97.13 | 93.80 |
-| BC7 w32 (study only) | 40.94 | 48.82 | 40.33 | 41.44 | 52.46 | 0.9980 | 12.43 | 98.15 | 95.05 |
-| BC7 w64 (study only) | 40.52 | 48.41 | 39.84 | 40.95 | 52.99 | 0.9984 | 11.70 | 98.76 | 95.27 |
+| BC7 w32 | 40.94 | 48.82 | 40.33 | 41.44 | 52.46 | 0.9980 | 12.43 | 98.15 | 95.05 |
+| BC7 w64 | 40.52 | 48.41 | 39.84 | 40.95 | 52.99 | 0.9984 | 11.70 | 98.76 | 95.27 |
 | BC7 w1 + exact-opaque | 43.77 | 52.71 | 43.65 | 44.75 | 45.29 | 0.9851 | 36.13 | 74.98 | 90.99 |
 | BC7 [4,1,2,1] | 46.09 | 48.83 | 43.49 | 45.10 | 43.14 | 0.9773 | 48.03 | 67.90 | 83.16 |
 
@@ -501,9 +505,236 @@ Where BC7 beats BC3:
 | BC7 w4 | 2/30 / 1/30 | 1/30 / 1/30 | 1/14 / 0/14 | 0/15 / 0/15 | +4.75 dB | 29/30 |
 | BC7 w8 | 4/30 / 3/30 | 1/30 / 2/30 | 1/14 / 0/14 | 0/15 / 0/15 | +4.04 dB | 29/30 |
 | BC7 w16 | 9/30 / 11/30 | 2/30 / 3/30 | 1/14 / 0/14 | 1/15 / 0/15 | +3.35 dB | 27/30 |
-| BC7 w32 (study only, rgbcx only) | 13/30 | 2/30 | — | — | +2.77 dB | 26/30 |
-| BC7 w64 (study only, rgbcx only) | 16/30 | 3/30 | 11/14 | — | +2.28 dB | 24/30 |
+| BC7 w32 (rgbcx only) | 13/30 | 2/30 | — | — | +2.77 dB | 26/30 |
+| BC7 w64 (rgbcx only) | 16/30 | 3/30 | 11/14 | — | +2.28 dB | 24/30 |
 | BC7 w1 + exact-opaque | 0/30 / 0/30 | 0/30 / 0/30 | 0/14 / 0/14 | 0/15 / 0/15 | +6.08 dB | 30/30 |
 | BC7 [4,1,2,1] | 0/30 / 0/30 | 0/30 / 0/30 | 0/14 / 0/14 | 0/15 / 0/15 | +6.43 dB | 30/30 |
 
 The `m_height` rows are a proxy: a real `_rmaos` for RGB plus a real `_p` height written into alpha. Its Means table also lists NVTT BC3, BC7 w1 with exact-opaque, and a `[4,1,2,1]` weight mode that the owner dropped (Note CP12). In the `m_height` wins table, BC3 means rgbcx / NVTT.
+
+## Kernel fixes (patch 0005, 2026-11-25, Note LR)
+
+Measured 2026-11-23 to 2026-11-25 on Windows, on the vendored objects built from `bc7e.ispc` with patches 0001, 0002 and 0005 (ISPC 1.31.0; the AVX-512 object with 1.32.0), on an AMD CPU. Every section above this one measured bc7e before patch 0005.
+
+Patch 0005 fixes the defects an audit of `bc7e.ispc` found, adds the kernel side of the channel guard, and makes every linear BC7 encode rank its errors as the same encode with every weight ×16 would. It changes the bytes of every level. [README-VENDOR](../../crates/encoders-sys/vendor/README-VENDOR.md) describes each change with its proof test; DECISIONS Note LR holds the rulings.
+
+### What changed
+
+| Item | What it does | Which bytes change |
+|---|---|---|
+| S1 | Mode 4 writes the end state of an alpha slot that is 255 on every texel without running its search. | None |
+| Q2t | A refit spreads a channel's endpoints only when they differ by more than a flat tolerance, set per call ([its values](#q2ts-threshold)). Without it, float noise spread constant channels, and a rotated opaque block's alpha decoded 239. | Every level |
+| Q1, Q4 | Mode 7 scores its one-colour candidate on the values the decoder reads, and its table keeps each p-bit pair's own best entry. | Alpha blocks, `veryfast` and above |
+| XC | The channel guard: a subset whose guarded channel is 0 or 255 on every texel keeps that value wherever the search finds such a solution. Guarded channels that cannot all be kept keep the higher one: A, then G, then B, then R. A is exact opaque, bit 3 of the guard's mask. | Only with a channel guarded (A included) |
+| Q3 | With unequal linear weights (`alphaN`), mode 6 picks an alpha block's indices in the weighted metric over all 16 palette entries (the window `full`). | `alphaN` only |
+| DG | Four divisions by a flat subset's zero spread are guarded; the result is the value the clamp already gave. | None |
+| WP | With unequal linear weights, the mode 6 and 7 one-colour packers choose their p-bits by the weighted error. | `alphaN` only |
+| KS | Mode 4 tries the exact code pair for a scalar that is one value across the block. Without it, an alpha of 252 decoded 255 at `ultrafast` to `fast`. | Blocks with a constant scalar other than 0 and 255 |
+| M5 | Mode 5 gets a one-colour candidate, and the one-colour test ignores alpha where alpha is not scored. | Flat colour beside a varying scalar |
+| SF | Modes 4 and 5 search the scalar slot first and skip colour work that cannot win. | None |
+| L16 | Outcome D, the direct form: a linear call compares the uber threshold at 1/16 and casts the partition estimators' float error ×16. That writes exactly the bytes of the same call with every weight ×16. The weights stay as passed, and perceptual calls are unchanged. | Linear encodes, `veryfast` and above |
+
+### What was dropped
+
+- **Q5** (rotated opaque modes 4 and 5 pay for the alpha the engine rewrites): under 0.005 dB everywhere in the spike. The owner dropped it.
+- **Q6** (opaque mode 6's average candidate is charged alpha): it reached 314 of 23.6 million blocks. The owner dropped it.
+- **PA** (perceptual one-colour packers sum each texel's error as a float): the keep rule dropped it under one reading of its rule (2). At the witness's setting, perceptual `basic`, it changed no decode. At `veryslow` 55 synthetic blocks decoded closer and 8 farther, so a `veryslow` reading would have kept it. The owner took the rule's verdict (BC7-O29 (g)).
+- **Left for a later plan**, none of them in patch 0005: refinement of `slowest`'s partition candidates, the perceptual estimator's weights, anti-correlated colours in the estimators, the p-bit choice outside the search under weights, the RGBA principal axis, the checkerboard partitions, the mode 4/5 alpha grid recentring, WP under perceptual, a scale-free form of L16, perceptual mode 7's estimator truncation, and byte-neutral speed items.
+
+### Method
+
+- **Corpus.** Real textures from installed mods, not redistributable, so the lists stay outside the repo:
+  - `opaque` (60): the diffuse rows of the [Windows re-check's sample](#setup);
+  - the [alpha weights study's](#bc7-alpha-weights-against-bc3-2026-10-21) classes: `alpha_real` (96), `n_spec` (30, and the same maps at mip 2 as `n_spec_mip2`), `rmaos_spec` (24) and `m_height` (30, a proxy for a complex `_m`: a real `_rmaos`'s RGB with a real `_p` height in alpha);
+  - `n_opaque` (60): the Windows re-check's normal rows with alpha forced to 255;
+  - `rmaos_opaque` (24), and `msn` (24: 18 owner-supplied sources plus 6 from the mod set);
+  - `m_zero`, an alpha-0 complex `_m`: the 24 `rmaos_opaque` sources with alpha 0.
+
+  Synthetic classes (16 linear ramps, and each fix's witness blocks) come from seeded generators.
+- **Harness.** A measurement tool outside the repo builds each kernel variant from `bc7e.ispc` with a byte script and encodes every image through the engine's entry points, with the engine's rotated-block post-fix. `crates/encoders-sys/examples/bc7_quality.rs` writes the same bytes from the committed objects: each committed fix was checked against its variant byte for byte on AVX2 and AVX-512.
+- **Metrics.** PSNR per channel of the 8-bit decode against the source, mip 0 unless named. The objective is the PSNR of the weighted error the encoder minimises (RGB plus w times alpha). Normal maps add the mean angle in degrees. Per class, the per-image difference is averaged with a 95 % paired bootstrap interval (10,000 resamples, seed 20261122). A change is significant when the interval excludes 0.
+- **Time.** Kernel time on 8 threads, three to five interleaved rounds per ISA with the job order rotated, the fastest round per image summed. A machine-claim log showed no other session's work during each timing.
+
+### Q2t's threshold
+
+The sweep ran T = 0 (today), float noise only (`q2r`), 0.25, 0.5, 1 and 2 /255 on every class at `basic`, `veryslow` and `max`, ×1 and ×16, exact opaque on, on both ISAs (AVX-512 within 0.01 dB):
+
+| T | Summed ×1 gain, dB | Share of 2/255's | Keep rule | Ramp blocks flattened against today (cells with more) |
+|---|---|---|---|---|
+| float noise only | +0.074 | 6 % | keep | +17 (2 of 5) |
+| 0.25/255 | +0.427 | 34 % | keep | +49 (2) |
+| 0.5/255 | +0.641 | 51 % | keep | +51 (2); AVX-512 +30 (1) |
+| 1/255 | +0.950 | 76 % | keep | +295 (4) |
+| 2/255 | +1.252 | 100 % | keep | +353 (5) |
+
+- The gain still rises at 2/255 on the data classes (`rmaos_spec` `veryslow`: +0.17 dB at 0.5, +0.25 at 1, +0.32 at 2), so the sweep did not bracket the best T. Opaque colour levels off near 1/255.
+- No T raises the ramps' largest error (1, 1 and 2 levels in R, G and B). A flattened ramp block is a one-level step lost inside the block.
+- The owner picked 0.5/255 for every type: it costs `alpha_real`'s alpha 0.002 to 0.008 dB and `n_spec`'s Z at `max` 0.004 to 0.0065 dB, and every other channel gains (BC7-O12). The data and normal types take 2/255 ([below](#per-type-tuning-flat-tolerance-and-the-channel-guard-2026-11-23-note-lr)).
+
+### Before and after, per level
+
+The final kernel against the vendored bc7e before patch 0005, AVX2, on the spike's cells (exact opaque on, weights 1, linear unless named). Objective delta in dB with its 95 % interval; in brackets, the images whose bytes changed.
+
+| Class | `basic` | `veryslow` | `max` | `veryslow`, alpha ×16 | `veryslow`, perceptual |
+|---|---|---|---|---|---|
+| `alpha_real` | -0.032 [-0.046, -0.019] (85/96) | +0.114 [+0.088, +0.142] (96/96) | +0.127 [+0.098, +0.160] (96/96) | +0.175 [+0.138, +0.216] (96/96) | +0.013 [+0.008, +0.019] (73/96) |
+| `opaque` | +0.424 [+0.014, +1.232] (59/60) | +0.549 [+0.107, +1.385] (60/60) | +0.186 [+0.113, +0.273] (60/60) | +0.549 (60/60) | +0.006 [+0.002, +0.011] (57/60) |
+| `n_spec` | +0.025 [+0.020, +0.031] (30/30) | +0.029 [+0.022, +0.037] (30/30) | +0.012 [+0.008, +0.016] (30/30) | +0.046 [+0.033, +0.062] (30/30) | |
+| `n_spec_mip2` | +0.028 (30/30) | +0.031 (30/30) | +0.010 (30/30) | +0.044 (30/30) | |
+| `rmaos_spec` | +0.184 [+0.138, +0.237] (24/24) | +0.202 [+0.161, +0.245] (24/24) | +0.066 [+0.048, +0.089] (24/24) | +0.185 [+0.157, +0.214] (24/24) | |
+| `m_height` | +0.040 [+0.032, +0.050] (30/30) | +0.084 [+0.062, +0.108] (30/30) | +0.039 [+0.024, +0.056] (30/30) | +0.178 [+0.111, +0.258] (30/30) | |
+
+- **`opaque` rests on one image.** At `veryslow` the mean is +0.549 dB, the median +0.053, and the mean without the near-flat `023_gold01silver` (+24.1 dB on its own) +0.150. Every one of the 60 images moved by more than 0.001 dB.
+- **The one cell below 0 is A's cost.** `alpha_real` at `basic` with exact opaque on is -0.032 dB: exact alpha 0 and 255 cost that much colour there ([x16 and the alpha weights again](#x16-on-colour-and-the-alpha-weights-again-2026-11-24-note-lr)).
+- **The shipped cells** (`veryslow`, exact opaque as shipped): opaque colour with exact opaque off, the default for colour, +0.088 dB [+0.063, +0.119] (59 of 60 changed). With each type's shipped settings: `rmaos_opaque` +0.128 [+0.076, +0.199], `rmaos_spec` +0.336 [+0.256, +0.426], `m_height` +0.098, `n_spec` +0.061 [+0.047, +0.078], `n_opaque` +0.661 [+0.352, +1.032], `msn` +0.138 [+0.110, +0.168]. Nothing is worse.
+- **Three paths.** None of the 46 settings has a significant objective of the opposite sign on AVX-512 or SSE2. Their means differ from AVX2's by up to 0.043 dB (`n_opaque` on AVX-512). `opaque` and `n_opaque` differ mostly through one image each, and `msn` reads about 0.007 dB lower on AVX-512, spread over all 24 images.
+
+### What each kept fix gains, and its limits
+
+The chain on AVX2 at `veryslow`, each step against the one before it:
+- **Q2t** carries most of the gain on data and normals: `rmaos_spec` +0.171 dB, `m_height` +0.046, `n_spec` +0.026, `opaque` +0.012, `alpha_real` +0.006.
+- **L16** (×16 for every linear encode): `alpha_real` +0.119, `opaque` +0.134, `m_height` +0.040, `rmaos_spec` +0.025, `n_spec` +0.004.
+- **A as bit 3** (exact opaque on): `alpha_real` -0.010 [-0.015, -0.006], `m_height` -0.009. Exact opaque off, no image changed.
+- **Q1, Q4, XC, Q3, WP** leave the default cells within 0.001 dB; Q3 and WP act only at alpha weights above 1 ([below](#x16-on-colour-and-the-alpha-weights-again-2026-11-24-note-lr)).
+- **WP, KS and M5 alone** (third measurement, each against its base kernel): WP +0.0003 to +0.0009 dB on colour with alpha at alpha ×64 and +0.11 to +0.19 dB on its synthetic class; KS up to +0.025 dB on `m_height` (perceptual `fast`) and +0.22 dB on its class; M5 +0.35 to +0.40 dB on opaque colour.
+
+Their evidence is narrow in two places:
+- **M5's opaque gain is one image.** The near-flat `023_gold01silver` goes from an R squared error of 8,128 to 0; the other 59 opaque images move by about 0.000 dB.
+- **The A3 and M5 witnesses are synthetic.** Each generator was shaped after one corpus block seen in a scratch run; no corpus texel is in them.
+
+### Time
+
+**S1 alone** (exact off, weights 1, fastest of three rounds per image, AVX2): `basic` -3.5 %, `veryslow` -2.1 %, `max` -1.1 %, over `opaque` and `rmaos_opaque` together, with the same bytes on all 252 image-settings.
+
+**The final kernel against before patch 0005** (exact off, weights 1, linear; each class with its shipped settings unless named):
+
+| Class | `fast` AVX2 / AVX-512 | `basic` | `veryslow` |
+|---|---|---|---|
+| `opaque` | +2.3 % / +0.3 % | -4.8 % / -3.8 % | +4.9 % / +5.1 % |
+| `alpha_real` | +2.7 % / +1.5 % | -1.8 % / -1.6 % | +7.2 % / +6.1 % |
+| `rmaos_opaque`, no guard or tolerance | +2.3 % / +1.8 % | -4.2 % / -4.3 % | +5.2 % / +6.3 % |
+| `rmaos_opaque`, shipped (G guarded, `data`) | +8.4 % / +6.1 % | +7.0 % / +8.0 % | +22.0 % / +22.1 % |
+
+- BC7 encodes faster only at `basic`, and only on colour and on data maps without their settings. That is SF's gain.
+- At `veryslow` the ×16 ranking costs about 9 to 10 % on colour (+9.4 % on `opaque`, +10.0 % on `alpha_real`, measured alone), and SF takes part of it back.
+- On `rmaos_opaque` the guard and the tolerance add the rest of the shipped +22 %, which is no more than the +23 to +26 % the owner accepted for these settings ([below](#per-type-tuning-flat-tolerance-and-the-channel-guard-2026-11-23-note-lr)).
+
+## Per-type tuning: flat tolerance and the channel guard (2026-11-23, Note LR)
+
+Measured 2026-11-23 on the kernel of the time with patch 0005's S1, Q2t, Q1 and Q4, then on the committed kernel at each step, and re-checked 2026-11-24 on the final kernel (D4 and G4 pass on every shipped cell, both ISAs). Corpus, harness and metrics as in [Kernel fixes](#method-1).
+
+### The rule per class
+
+Each class is a set of sub-types with its main channel, the channels that must stay similar and its flat controls (a real image with one channel replaced by 0 or 255 on every texel):
+
+| Class | Sub-types | Main (G1) | Similar (G2) | Flat controls (G3) |
+|---|---|---|---|---|
+| `rmaos_opaque` | `rmaos` opaque; `skin_rfaos` rides | R (roughness) | B (AO) | G 0 and 255, alpha 0 and 255 |
+| `rmaos_spec` | `rmaos` with specular in alpha; `skin_rfaos` rides | R | B | G 0 and 255, alpha 0 and 255 |
+| `n_spec` | `normal` with specular; `landscape_normal`, `coat_normal`, `detail_normal`, `skin_wet` and `skin_detail` with alpha ride | RGB (the vector) | B (Z, which Skyrim reads), A | alpha 0 and 255 |
+| `n_opaque` | `pbr_normal`; the same riders without alpha | RGB | B (Z) | none |
+| `m_height` | `complex_material` (exact opaque on) | R | B, A (height) | G 0 and 255, alpha 0 and 255 |
+| `msn` | `msn` | RGB | B (Z) | none |
+
+A candidate ships for a class when, against the fixed kernel at weights ×1 (B):
+- **G1:** the main channel is not significantly worse;
+- **G2:** each similar channel loses at most 0.25 dB on average and is not significantly worse;
+- **G3:** no flat control is more than 4 levels worse than B's on any image;
+- **G4** (the G channel of `rmaos_opaque`, `rmaos_spec` and `m_height`): on every image, no more texels whose source G is 0 or 255 decode off it than the encoder before patch 0005 writes (BC7-O4). Texels rolled into 0 or 255 are flagged, not failed;
+- **Benefit:** the main channel, a similar channel or the total is significantly better, or a flat control B misses by more than 4 levels is kept.
+
+### What the classes measured
+
+`veryslow`, AVX2; AVX-512 gave the same verdict on every class.
+- **Mode 0 off with ×16 (C16), the planned setting, is a measured option not taken** (BC7-O5, O13). Mode 0 off alone costs quality on every class (main channel -0.0001 dB on `n_spec` to -0.587 on `n_opaque`, against ×16 with mode 0 on), and ×16 alone gains on every class (`rmaos_opaque` +0.096 dB R, `rmaos_spec` +0.026, `n_spec` +0.004, `n_opaque` +0.268, `m_height` +0.045, `msn` +0.094). C16 failed G4 on all three G classes and G1 and G2 on `n_opaque`, and had no Benefit on `msn`. What mode 0 off buys is the flat controls and speed.
+- **×16 per type became ×16 for every linear encode** (BC7-O27, L16 [above](#what-changed)), so the types below set no weights.
+- **T_data, the bracket** (0.5 to 4 /255 on the three G classes, BC7-O9): 2/255 is the largest T at which G1 to G4 hold per image on all three classes and both ISAs; the G gain from 1 to 2 is significant everywhere. 3/255 lost 3 more metal absolutes than before on one `rmaos_opaque` image (BC7-O11).
+- **Exact G against C16 and ×16** (on the 2/255 kernel, weights ×16): exact G keeps every flat G control exact (worst error 8 to 0) and loses 41 to 69 % fewer metal absolutes than C16 or ×16 (`rmaos_opaque` 516,809 before the patch, 361,072 with ×16, 178,752 with exact G). Against ×16 alone it costs R 0.024 to 0.031 dB, AO 0.019 to 0.037 and the total 0.010 to 0.014 (all significant), and 3 to 6 % of blocks change.
+- **Exact B on normals is a measured option not taken** (BC7-O17). It brought `n_spec`'s Z back to before the patch (from -0.003 to -0.0065 dB to within ±0.002, never significant), but by keeping the all-255 subsets the old encoder already missed: none of 0.5/255's Z loss sits in all-255 subsets. It sits in near-255 noise and mixed subsets. Exact B costs X and Y 0.001 to 0.002 dB (`n_opaque` 0.01 to 0.02 dB RGB) and 10 to 27 % kernel time (an upper bound: that measurement scanned for constants once per call).
+- **T_data on the normal types** (BC7-O21, O22): against before the patch, 2/255 improves the angle and pooled XYZ on every `n_opaque` and `msn` cell, with no image worse. Against 0.5/255 the angle still improves on every cell; 1 to 9 images per cell read worse by at most 0.00032 degrees, below the AVX2 to AVX-512 spread on the same image. On `n_opaque` it gives back 0.011 to 0.021 dB of Z against 0.5/255, while Z stays 0.54 to 0.86 dB above before the patch.
+
+### What shipped
+
+| Sub-types | `encoder.bc7_flat_tolerance` | Channel guard |
+|---|---|---|
+| `rmaos`, `skin_rfaos` | `data` (2/255) | G |
+| `complex_material` | `data` | A (exact opaque) and G |
+| the [normal types](../wiki/Texture-Types.md#bc7-per-type-settings) | `data` | none |
+| every other type | default (0.5/255) | as before (`envmask`: A) |
+
+On the final kernel (third measurement, against B and against the encoder before patch 0005): `rmaos_opaque` main +0.065 dB, total +0.075, metal absolutes lost 516,809 to 178,756 (fewer on 24 of 24 images); `rmaos_spec` total +0.019, 735,026 to 282,812 (24 of 24); `m_height` main +0.023, total +0.021, 905,887 to 219,546 (30 of 30); `n_spec` +0.004, `n_opaque` +0.268, `msn` +0.095. On the committed kernel before the last fixes, `data` against the default (both ×16) improved the angle by 0.00659 degrees on `n_opaque`, 0.00155 on `msn` and 0.01036 on `n_spec`.
+
+### Time per type
+
+Kernel time at `veryslow` against the encoder before these settings, fastest of five rounds, AVX2 / AVX-512 (BC7-O19): `rmaos_opaque` +26.4 / +23.2 %, `rmaos_spec` +17.7 / +18.0 %, `m_height` +15.1 / +16.5 %, `n_spec` +1.6 / +2.4 %, `n_opaque` +5.4 / +3.6 %, `msn` +10.0 / +8.3 %. The tolerance costs nothing; the rest is ×16 and, on the data maps, the G guard. The owner accepted exact G's +20 to +59 % spike bound (BC7-O13). Base to final on the shipped `rmaos_opaque` is +22 % ([Time](#time)).
+
+## x16 on colour and the alpha weights again (2026-11-24, Note LR)
+
+Measured 2026-11-24 (second and third measurements), on the kernel with the fixes of the time and then on the final kernel; numbers moved by at most 0.02 dB between the two. Corpus, harness and metrics as in [Kernel fixes](#method-1).
+
+### Is ×16 only positive on colour?
+
+×16 against ×1 on the same kernel (0.5/255, no guard, exact opaque off), RGB pooled:
+
+| Class | `fast` | `basic` | `veryslow` | `max` | Time, `veryslow` AVX2 / AVX-512 |
+|---|---|---|---|---|---|
+| `opaque` (60) | +0.006 [+0.002, +0.014] | +0.006 [+0.001, +0.013] | +0.124 [+0.080, +0.176], 57 of 60 better | +0.223 [+0.127, +0.336], 58 of 60 | +9.4 % / +8.9 % |
+| `alpha_real` (96), RGB / alpha | ±0.000, not significant | ±0.000, not significant | +0.113 / +0.162, 96 of 96 | +0.124 / +0.179 | +10.0 % / +8.0 % |
+
+No cell is worse on any class, level or ISA; AVX-512 matches AVX2 within 0.002 dB. At `fast` ×16 costs +3.6 to +3.7 % on AVX2. So ×16 became the ranking of every linear encode (BC7-O27; L16 [above](#what-changed)).
+
+### The alpha weights on the fixed kernel
+
+`veryslow`, each class at its shipped tolerance and guard; second measurement, with Q3's planned two-index window. "What Alpha ×N becomes" is weights 1, 1, 1, N with ×16 ranking and Q3, against the same weights ranked at ×1 without Q3. "Q3's own" is the same weights at ×16 with and without Q3. Objective = the weighted error's PSNR.
+
+| Class | N | What Alpha ×N becomes: RGB / alpha / objective | Q3's own: RGB / alpha / objective |
+|---|---|---|---|
+| `alpha_real` | 8 | +0.027 / +0.239 / +0.122 | -0.067 / +0.213 / +0.048 |
+| `alpha_real` | 16 | -0.049 / +0.390 / +0.164 | -0.129 / +0.379 / +0.112 |
+| `alpha_real` | 64 | -0.245 / +0.684 / +0.367 | -0.316 / +0.683 / +0.343 |
+| `n_spec` | 16 | -0.035 / +0.112 / +0.018 | -0.036 / +0.112 / +0.018 (angle +0.014 degrees) |
+| `rmaos_spec` | 16 | -0.044 / +0.234 / +0.048 | -0.061 / +0.248 / +0.038 |
+| `m_height` | 16 | -0.176 / +0.545 / +0.121 | -0.194 / +0.544 / +0.110 |
+
+- Q3 with the window `full` against the planned two-index window: +0.008 to +0.017 dB on the objective in 6 of 6 cells, -2.8 to +0.8 % time; mode-6 texels off their weighted-nearest entry fell from 285,562 to 55,711, all in opaque blocks, where Q3 does not run.
+- With Q3 `full` (final kernel), colour with alpha gives -0.05 / +0.21 dB RGB / alpha at ×8, -0.11 / +0.38 at ×16 and -0.30 / +0.68 at ×64.
+- Against BC3 (rgbcx level 18): at ×8 `alpha_real` still beats BC3 on alpha in 85 of 96 images and on RGB in 88 of 96. At ×16, `n_spec`'s normals beat BC3's on 24 of 30 (2.512 against 2.806 degrees), and its specular loses 0.96 dB to BC3 (12 of 30 wins).
+- ×32 and ×64 gain +0.46 and +0.75 dB of alpha over ×16 on `alpha_real`, for 0.43 and 0.78 dB of RGB (the texture panel's text rounds these to 0.05).
+- On colour, ×8 costs about 1 dB of RGB per 1.9 dB of alpha gained against ×1; on packed and normal maps 1 per 2.4 to 4.2.
+- Time of Q3 on its own path: +0.3 to +1.9 %; with equal weights, within the run-to-run spread.
+
+### Channel guard A against the old exact-opaque flag
+
+On fully opaque blocks A writes the old flag's bytes. On blocks with alpha, it keeps alpha 0 and 255 exact on more texels and costs colour. Final kernel, ×16, weights 1, AVX2 at every level (AVX-512 at `veryslow`), against the flag on:
+
+| Content | Alpha | RGB | Pooled objective |
+|---|---|---|---|
+| complex `_m` with height (`m_height`) | +0.039 to +0.061 dB (`ultrafast` +0.089); alpha-0 texels exact 84 %, against 72 to 77 % (66 % at `ultrafast`) | -0.009 to -0.018 dB (`ultrafast` +0.007, not significant) | -0.006 to -0.011 dB (`ultrafast` +0.009, not significant) |
+| colour with alpha, A ticked (`alpha_real`) | +0.060 to +0.466 dB | -0.014 (`max`) to -0.341 dB (`fast`) | -0.004 (`max`) to -0.214 dB (`fast`), every cell significantly worse; 0 to 2 image wins against 55 to 57 losses |
+
+- What A buys is exact alpha 0 and 255 on more texels; the pooled objective pays for it.
+- **Alpha-0 complex `_m` files that had A off** are encoded with A. Alpha stays exactly 0, and RGB moves -0.021 to -0.072 dB at `ultrafast` to `basic` and +0.013 and +0.020 dB at `veryslow` and `max`, against A off plus the engine's old exact-0 step.
+- A block whose alpha is 0 throughout decodes 0 at every level, linear and perceptual, by the kernel's own rules: 0 failures on 84,162 A-on image rows.
+- A's time against the flag: `m_height` within the noise; colour with alpha about +3 % (+2.7 % at `fast`, +3.5 % at `veryslow`).
+
+## Estimator precision (2026-11-23, Note LR)
+
+Measured 2026-11-23 with Task 3's harness, `veryslow`, both ISAs. Corpus and metrics as in [Kernel fixes](#method-1).
+
+**The mechanism.** Scaling every integer weight by 16 multiplies every weighted error by exactly 16. The partition estimators then cast a float error to an integer, and the truncation loses less at ×16, so ×16 ranks partitions more finely than ×1.
+
+**The question.** Does a kernel fix to those casts (E), with weights left at 1, give ×16's gain on its own?
+
+| Class | E-off's blocks equal to C16's (AVX2 / AVX-512) | E against B, main | E against ×16, main |
+|---|---|---|---|
+| `rmaos_opaque` | 84.8 % / 84.9 % | +0.0006 | -0.096 [-0.146, -0.052] |
+| `rmaos_spec` | 89.7 % / 89.8 % | +0.0000 | -0.025 [-0.042, -0.013] |
+| `n_spec` | 91.5 % / 91.9 % | -0.0000 | -0.004 [-0.008, -0.002] |
+| `n_opaque` | 94.1 % / 94.3 % | +0.006 [+0.001, +0.011] | -0.262 [-0.411, -0.134] |
+| `m_height` | 85.3 % / 85.6 % | +0.0000 | -0.045 [-0.070, -0.023] |
+| `msn` | 86.3 % / 86.9 % | +0.003 [+0.000, +0.008] | -0.091 [-0.122, -0.063] |
+
+- E writes ×16's bytes only at `basic` (all 96 `rmaos_opaque` image-controls). At `veryslow` it writes them on no image but 2 of 60 `n_opaque`, and at `veryslow` and `max` it recovers at most 0.006 dB of ×16's 0.004 to 0.27 dB.
+- E-off (E with mode 0 off) matches C16 on barely more blocks than mode 0 off at ×1 does (0.2 to 1.3 points).
+- So the casts are not the whole of ×16 at the slower levels. The third measurement later found the other site, the uber threshold, which L16 scales too ([What changed](#what-changed)).
+- **The owner chose P2** (BC7-O6): ship the per-type settings and leave the casts. The kernel fix alone is a measured option not taken; L16 superseded the per-type ×16 with the direct form for every linear encode.

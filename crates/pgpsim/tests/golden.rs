@@ -259,55 +259,55 @@ fn check(c: &Case) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_plain_reserve() {
     check(&PLAIN);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_emissive_parallax_eyeofmagnus() {
     check(&EMISSIVE_PARALLAX);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_subsurface_firespit() {
     check(&SUBSURFACE);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_coat_ice_cave() {
     check(&COAT);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_coat_emissive_slot_n_lighttrap() {
     check(&COAT_EMISSIVE_SLOTN);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_fuzz_texture_vampire_robes() {
     check(&FUZZ_TEXTURE);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_fuzz_slot7_tapestry() {
     check(&FUZZ_SLOT7);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_glint_sovngarde_stairs() {
     check(&GLINT);
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_ACHERUS (the owner's MO2 instance) and its PGPatcher output"]
 fn golden_glint_rename_windhelm_bridge() {
     check(&GLINT_RENAME);
 }

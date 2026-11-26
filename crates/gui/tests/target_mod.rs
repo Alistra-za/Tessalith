@@ -112,6 +112,8 @@ fn a_skyrim_shaped_project_keeps_its_output() {
     if std::env::var_os("SDC_BLESS_PIN").is_some() {
         std::fs::create_dir_all(pin.parent().unwrap()).unwrap();
         std::fs::write(&pin, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+        let shown = pin.display();
+        eprintln!("SDC_BLESS_PIN is set: wrote {shown}, compared nothing");
         return;
     }
     // Note HL5: the no-albedo `leaf` set now has its entry.
@@ -1044,6 +1046,7 @@ fn clear_removes_the_target_and_the_list_goes_back_to_the_scan() {
 #[test]
 fn render_map_to_target_dialog() {
     let Some(out) = std::env::var_os("SDC_SHOT_DIR") else {
+        eprintln!("skipped: set SDC_SHOT_DIR");
         return;
     };
     let long = trec(

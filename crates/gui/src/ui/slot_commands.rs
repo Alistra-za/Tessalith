@@ -90,7 +90,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     if !st.filled[i] {
                         st.filled[i] = true;
                         if let Some(Value::String(s)) = settings.get(&format!("slot{n}")) {
-                            st.text[i] = s.clone();
+                            st.text[i].clone_from(s);
                         }
                     }
                     let mut choice = st.mode[i].unwrap_or(current);

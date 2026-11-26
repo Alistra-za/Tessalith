@@ -27,6 +27,7 @@
 //! Images are encoded on `available_parallelism()` threads; `seconds` is the wall time of one image's encode on its
 //! thread, so it is rough when other jobs run.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -329,8 +330,9 @@ fn run(args: &Args) -> Result<(), String> {
             } else {
                 String::new()
             };
-            csv += &format!(
-                "{},{},{:.4},{:.4},{}\n",
+            let _ = writeln!(
+                csv,
+                "{},{},{:.4},{:.4},{}",
                 img.stem,
                 name,
                 db(img, &row[c], 0),

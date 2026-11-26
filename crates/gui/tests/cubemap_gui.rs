@@ -104,7 +104,8 @@ const FLAT: &str = "a/flat.png";
 
 /// A cube (a 6:1 strip decided as Cubemap) and a plain 2D texture, planned, with the panel drawn over `selected`.
 fn section(d: &std::path::Path, selected: &str) -> Harness<'static, AppModel> {
-    let m = cube_model(d, selected);
+    let mut m = cube_model(d, selected);
+    support::open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -141,7 +142,8 @@ fn settle(h: &mut Harness<'static, AppModel>) {
 }
 
 fn headers(h: &Harness<'static, AppModel>) -> usize {
-    h.query_all_by_label("Cubemap").count()
+    // Only a group header's name has the ", " after the title.
+    h.query_all_by_label_contains("Cubemap, ").count()
 }
 
 #[test]
@@ -176,6 +178,44 @@ fn mixed_selection_hides_the_cube_section() {
     assert!(!text.contains("cubemap."), "{text}");
 }
 
+/// `CUBE`'s cube section drawn alone, as the texture panel calls it: its `Ctx` and its cached views, built here each
+/// frame (the panel builds the views once per input change).
+fn cube_section_alone(
+    ui: &mut eframe::egui::Ui,
+    m: &AppModel,
+    open: bool,
+    instant: bool,
+) -> (sdc_gui::ui::cube_section::Edits, bool, bool) {
+    use sdc_gui::ui::settings_panel::{Ctx, Surface};
+    let job = m.item(CUBE).and_then(|i| i.job.as_ref()).expect("a job");
+    let views = sdc_gui::model::panel_groups::panel_views(m.target, job);
+    let (groups, forced, problems) = Default::default();
+    let cx = Ctx {
+        key: CUBE,
+        job,
+        target: m.target,
+        busy: m.edit_busy(),
+        compact: false,
+        alpha_asked: false,
+        edit_off: m.fix_off(),
+        warnings: &[],
+        surface: Surface::Centre,
+        groups: &groups,
+        forced: &forced,
+        problem_groups: &problems,
+        summaries: &[],
+        reveal: None,
+    };
+    let head = sdc_gui::ui::group::GroupHead {
+        title: "Cubemap",
+        summary: "",
+        summary_hover: None,
+        changed: false,
+        problem: None,
+    };
+    sdc_gui::ui::cube_section::cube_section(ui, m, &cx, &views, &head, open, instant)
+}
+
 /// The section's own guard, drawn with no bulk panel in front of it: the active item is a cube but the selection is
 /// not all cubes, so nothing shows and nothing is written. Fails when `all_cubes` is removed.
 #[test]
@@ -191,8 +231,8 @@ fn the_section_guard_hides_a_mixed_selection() {
         .with_size(eframe::egui::vec2(800.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
-                let edits = sdc_gui::ui::cube_section::cube_section(ui, m, CUBE);
-                assert!(edits.is_empty());
+                let (edits, toggled, taken) = cube_section_alone(ui, m, true, false);
+                assert!(edits.is_empty() && !toggled && !taken);
             },
             m,
         );
@@ -303,7 +343,7 @@ const NOT_A_CUBE: &str = "six faces, a cross or a strip";
 fn a_square_cube_has_no_layout_combo() {
     use sdc_gui::ui::review::undecided_row;
     let d = tempfile::tempdir().unwrap();
-    let m = unclear_model(d.path());
+    let mut m = unclear_model(d.path());
     let problems = sdc_gui::model::bottom::problems(&m);
     assert!(
         problems
@@ -311,6 +351,7 @@ fn a_square_cube_has_no_layout_combo() {
             .any(|p| p.text.contains(NOT_A_CUBE) && p.text.starts_with("Undecided")),
         "{problems:#?}"
     );
+    support::open_texture_groups(&mut m);
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -320,7 +361,7 @@ fn a_square_cube_has_no_layout_combo() {
     h.run();
     // The settings panel's box shows the engine's own reason (with the size); the Problems row's shorter text has no
     // size, so this label can only come from the box of the selected square cube.
-    let reason = "64x64 is not six faces, a cross or a strip. Change this file's sub-type.";
+    let reason = "64x64 is not six faces, a cross or a strip. Change this file's type.";
     let box_text: Vec<_> = h.query_all_by_label_contains(reason).collect();
     assert_eq!(box_text.len(), 1, "the texture panel's Undecided box");
     assert!(
@@ -1047,4 +1088,46 @@ mod marker {
             h.get_by_label("Save…");
         }
     }
+}
+
+/// A cube header drawn forced open (`instant`) opens in the frame it is told to; one not forced slides (TPC-T5-1).
+fn cube_header_top_after_one_step(instant: bool) -> (f32, f32) {
+    let d = tempfile::tempdir().unwrap();
+    let m = cube_model(d.path(), CUBE);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(800.0, 1600.0))
+        .with_step_dt(1.0 / 120.0)
+        .with_max_steps(40)
+        .build_ui_state(
+            move |ui, s: &mut (AppModel, bool)| {
+                cube_section_alone(ui, &s.0, s.1, instant);
+                ui.label("below");
+            },
+            (m, false),
+        );
+    h.ctx.all_styles_mut(|s| s.animation_time = 1.0 / 12.0);
+    sdc_gui::ui::motion::force_reduced(&h.ctx, false);
+    h.run();
+    h.state_mut().1 = true;
+    h.step();
+    let one = h.get_by_label("below").rect().top();
+    h.run();
+    (one, h.get_by_label("below").rect().top())
+}
+
+#[test]
+fn a_forced_cube_header_opens_without_sliding() {
+    let (one, settled) = cube_header_top_after_one_step(true);
+    assert_eq!(
+        one, settled,
+        "the body is at its final height at the first step"
+    );
+    let (one, settled) = cube_header_top_after_one_step(false);
+    assert!(
+        one < settled,
+        "premise: an unforced header slides ({one} vs {settled})"
+    );
 }

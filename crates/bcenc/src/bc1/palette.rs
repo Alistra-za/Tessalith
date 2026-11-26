@@ -3,8 +3,13 @@
 //! `interp_5_6_amd`, `interp_half_5_6_amd`, `bc1_get_dual_palette`, `bc1_dual_err` and
 //! `prepare_bc1_single_color_table_dual` (as `init` calls it for the four single-colour tables).
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 use std::sync::OnceLock;
 
@@ -52,7 +57,7 @@ pub struct DualPalette {
 }
 
 /// `bc1_get_dual_palette`: `l*` and `h*` are the unexpanded 5/6/5-bit endpoint codes.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[inline(always)]
 pub fn dual_palette(
     three: bool,
     lr: i32,
@@ -176,7 +181,10 @@ pub(crate) fn build_single_tables() -> SingleTables {
 
 /// `prepare_bc1_single_color_table_dual`. Error = squared NVIDIA error + squared AMD error of the interpolated
 /// value; equal endpoints still win ties. `expand.len()` is `size` (32 or 64).
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
 fn single_colour_table_dual(expand: &[u8], half: bool) -> [MatchEntry; 256] {
     let size = expand.len();
     if half {

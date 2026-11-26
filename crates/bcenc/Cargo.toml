@@ -19,5 +19,10 @@ rayon.workspace = true
 name = "quality"
 test = true
 
+# The speed tool's argument parsing is tested the same way; `cargo test --workspace` (the gate) runs both.
+[[example]]
+name = "speed"
+test = true
+
 [lints]
 workspace = true

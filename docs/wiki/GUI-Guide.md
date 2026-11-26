@@ -32,6 +32,8 @@ Click a tab to open the panel on it. Click the tab that is showing, or the **▼
 
 Every status-line note and every toast (*Saved*, *Export finished*, *Scan finished*, the *Undid / Redid* note) is also logged in the **Messages** tab, newest first. <!-- D:CD5 --> **Clear** empties it, and it is gone when you close the window. **Ctrl+M** opens the tab, or collapses the panel when it already shows Messages. At start it also says when Tessalith had to use its built-in fonts ([fonts](Installation.md#what-you-need)).
 
+After a plan, a batch of [values Tessalith recorded on its own](GUI-Problems.md#what-the-gui-writes-on-its-own) gets one row: "{n} types set automatically: {a}, {b}, {c}, and {m} more", or "{n} values set automatically: …" when the batch also set an alpha policy. Hover it for every file. When the batch set a file's type for the first time, the hover adds when Tessalith does that: a known ending such as `_n`, the folder, or the meshes and grass that use it. <!-- D:LM7 -->
+
 Anything that needs a decision is a [dialog](#dialogs), not a toast.
 
 ## Keyboard

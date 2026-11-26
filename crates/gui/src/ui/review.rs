@@ -16,6 +16,7 @@ use eframe::egui;
 use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -64,7 +65,7 @@ pub fn undecided_row(
         .iter()
         .filter_map(|d| match d {
             Decision::AlphaMeaning => {
-                alpha_asked(item).map(|shown| (alpha_confirm_text(shown).to_string(), None))
+                alpha_asked(item).map(|shown| (alpha_confirm_text(shown), None))
             }
             Decision::Acknowledge(code) => {
                 Some((code_line(*code).to_string(), Some(code.as_str())))
@@ -303,19 +304,19 @@ fn nif_row_text(
 ) -> String {
     let mut t = r.path.clone();
     if let Some(why) = r.kept_backup.as_ref().and_then(|b| b.last_error.as_ref()) {
-        t.push_str(&format!(" · Last backup failed ({why})"));
+        let _ = write!(t, " · Last backup failed ({why})");
     } else if let Some(note) = &r.export_note {
         t.push_str(" · ");
         t.push_str(note);
     }
     if !r.mod_name.is_empty() {
-        t.push_str(&format!(" · {}", r.mod_name));
+        let _ = write!(t, " · {}", r.mod_name);
     }
     if let Some(n) = r.compaction.filter(|n| *n > 0) {
-        t.push_str(&format!(" · {n} unused block{} removed", plural(n)));
+        let _ = write!(t, " · {n} unused block{} removed", plural(n));
     }
     if let Some(f) = folder {
-        t.push_str(&format!(" · written to {}", f.display()));
+        let _ = write!(t, " · written to {}", f.display());
     }
     t
 }
@@ -1072,7 +1073,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     text.push_str(" · Also export as Vanilla");
                 }
                 if (vanilla || cm) && n > 0 {
-                    text.push_str(&format!(" · skipping {n} set{}", plural(n)));
+                    let _ = write!(text, " · skipping {n} set{}", plural(n));
                 }
             }
             let response = egui::CollapsingHeader::new(text)

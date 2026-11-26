@@ -8,6 +8,7 @@ use crate::shader::Shader;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
@@ -120,6 +121,10 @@ pub fn project_rel(root: &Path, input: &InputFile) -> Option<String> {
     })
 }
 
+/// Each planned file's match forms (`None` for a path outside the root) by path, with the file name they were worked
+/// out for.
+pub(crate) type FormsByPath = BTreeMap<PathBuf, (Option<std::ffi::OsString>, Option<KeyForms>)>;
+
 /// The `[files]` layer (DECISIONS N2) and the per-file acknowledgements, resolved against one project root.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileScopes {
@@ -129,8 +134,9 @@ pub struct FileScopes {
     pub overrides: Vec<SetOverride>,
     /// Key → codes acknowledged for that file only.
     pub allow: BTreeMap<String, BTreeSet<Code>>,
-    /// The planned files' match forms by path (`index`), with the file name they were worked out for.
-    pub(crate) forms: BTreeMap<PathBuf, (Option<std::ffi::OsString>, Option<KeyForms>)>,
+    /// The planned files' match forms by path (`index`), with the file name they were worked out for. `None` until
+    /// `index` builds it (it does not when the layer is off or empty).
+    pub(crate) forms: Option<Arc<FormsByPath>>,
     /// Note DW: indices (into the planned files, as `TextureSet::members`) of the GUI's pinned files named as a
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
@@ -165,7 +171,7 @@ impl FileScopes {
         root: None,
         overrides: Vec::new(),
         allow: BTreeMap::new(),
-        forms: BTreeMap::new(),
+        forms: None,
         skin_pinned: BTreeSet::new(),
         skin_typed: BTreeSet::new(),
         hand_fuzz: BTreeSet::new(),
@@ -222,13 +228,15 @@ impl FileScopes {
             return;
         }
         self.rebuild_keys();
-        self.forms = files
-            .iter()
-            .map(|f| {
-                let forms = project_rel(&root, f).map(|r| KeyForms::of(&r));
-                (f.path.clone(), (key_name(f).map(Into::into), forms))
-            })
-            .collect();
+        self.forms = Some(Arc::new(
+            files
+                .iter()
+                .map(|f| {
+                    let forms = project_rel(&root, f).map(|r| KeyForms::of(&r));
+                    (f.path.clone(), (key_name(f).map(Into::into), forms))
+                })
+                .collect(),
+        ));
     }
 
     /// Replace every `[files]` override and the `allow` entry of `key` (this exact spelling, as the document holds
@@ -287,7 +295,7 @@ impl FileScopes {
     /// path under this name, else worked out now (a packed output's virtual name, a file planned later).
     pub fn forms_of(&self, input: &InputFile) -> Option<std::borrow::Cow<'_, KeyForms>> {
         let root = self.root.as_deref()?;
-        match self.forms.get(&input.path) {
+        match self.forms.as_deref().and_then(|m| m.get(&input.path)) {
             Some((name, forms)) if name.as_deref() == key_name(input) => {
                 forms.as_ref().map(std::borrow::Cow::Borrowed)
             }
@@ -350,6 +358,10 @@ pub const FIELD_PATHS: &[&str] = &[
     "encoder.effort",
     "encoder.perceptual",
     "encoder.bc7_weights",
+    "encoder.bc7_flat_tolerance",
+    "encoder.channel_guard.r",
+    "encoder.channel_guard.g",
+    "encoder.channel_guard.b",
     "encoder.bc1_alpha",
     "encoder.bc45_search_radius",
     "encoder.bc1_search",
@@ -392,6 +404,53 @@ pub const REENCODE_FIELD: &str = "reencode";
 /// The sub-type field.
 pub const SUBTYPE_FIELD: &str = "subtype";
 
+/// The channel guard's A as a settings key: another name for [`EXACT_OPAQUE_FIELD`], which is where A is stored (Note
+/// LR, LR8). Not in [`FIELD_PATHS`]: every layer reader rewrites it before the merge.
+pub const CHANNEL_GUARD_A: &str = "encoder.channel_guard.a";
+/// Where the channel guard's A is stored.
+pub const EXACT_OPAQUE_FIELD: &str = "alpha.exact_opaque";
+
+/// Moves a settings table's `encoder.channel_guard.a` to `alpha.exact_opaque` (Note LR, LR8): run once per table at
+/// load (preset and config `[defaults]`, `[subtypes]` and rule overrides, each `[files]` entry), so the merge,
+/// provenance and locks see one field. An emptied `channel_guard` table goes too. Both keys in one table must agree;
+/// otherwise the error is the message, which the caller prefixes with `CFG-INVALID: <where>: `.
+pub(crate) fn alias_channel_guard_a(table: &mut Value) -> Result<(), String> {
+    let Some(encoder) = table.get_mut("encoder").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    let Some(guard) = encoder
+        .get_mut("channel_guard")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let Some(a) = guard.remove("a") else {
+        return Ok(());
+    };
+    if guard.is_empty() {
+        encoder.remove("channel_guard");
+    }
+    let alpha = table
+        .as_object_mut()
+        .expect("a table holding `encoder` is an object")
+        .entry("alpha")
+        .or_insert_with(|| Value::Object(Map::new()));
+    match alpha.as_object_mut() {
+        Some(alpha) => match alpha.get("exact_opaque") {
+            Some(old) if *old != a => Err(format!(
+                "`{CHANNEL_GUARD_A}` and `{EXACT_OPAQUE_FIELD}` are one setting; set one"
+            )),
+            Some(_) => Ok(()),
+            None => {
+                alpha.insert("exact_opaque".into(), a);
+                Ok(())
+            }
+        },
+        // `alpha` is not a table: deserialising the profile reports that.
+        None => Ok(()),
+    }
+}
+
 /// A plan-time per-file selector (`reencode`, `helper.*`): never merged into a profile.
 pub fn is_selector(field: &str) -> bool {
     field == REENCODE_FIELD || crate::helper::FIELDS.contains(&field)
@@ -432,26 +491,27 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     if let Some(m) = removed {
         return Err(format!("--set '{s}': {m}"));
     }
-    let known = |f: &str| FIELD_PATHS.contains(&f);
+    // The channel guard's A is set as `alpha.exact_opaque` (`CHANNEL_GUARD_A`), in every scope.
+    let known = |f: &str| FIELD_PATHS.contains(&f) || f == CHANNEL_GUARD_A;
     let (scope, field) = if let Some(rest) = key.strip_prefix("subtype:") {
         let (id, field) = rest
             .split_once('.')
             .ok_or_else(|| format!("--set '{s}': expected subtype:<id>.<field>"))?;
         let st: Subtype = serde_json::from_value(Value::String(id.to_string()))
-            .map_err(|_| format!("--set '{s}': unknown sub-type '{id}'"))?;
+            .map_err(|_| format!("--set '{s}': unknown type '{id}'"))?;
         if field == "subtype" {
             return Err(format!(
-                "--set '{s}': a sub-type scope cannot set the sub-type"
+                "--set '{s}': a `subtype:` scope cannot set the type"
             ));
         }
         if field == REENCODE_FIELD {
             return Err(format!(
-                "--set '{s}': reencode is decided per file, before the sub-type: use reencode=true or file:<glob>.reencode=true"
+                "--set '{s}': reencode is decided per file, before the type: use reencode=true or file:<glob>.reencode=true"
             ));
         }
         if crate::helper::FIELDS.contains(&field) {
             return Err(format!(
-                "--set '{s}': {field} is decided per file, before the sub-type: use file:<glob>.{field}=<…>"
+                "--set '{s}': {field} is decided per file, before the type: use file:<glob>.{field}=<…>"
             ));
         }
         if !known(field) {
@@ -484,6 +544,7 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
         // The glob may itself contain dots, so take the longest known field the key ends with.
         let field = FIELD_PATHS
             .iter()
+            .chain([&CHANNEL_GUARD_A])
             .filter(|f| rest.len() > f.len() + 1 && rest.ends_with(&format!(".{f}")))
             .max_by_key(|f| f.len())
             .ok_or_else(|| format!("--set '{s}': expected file:<glob>.<field>"))?;
@@ -503,7 +564,7 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     };
     // A sub-type decides the whole profile, so a misspelt one must not be ignored.
     if field == "subtype" && value.as_str().and_then(Subtype::from_id).is_none() {
-        return Err(format!("--set '{s}': unknown sub-type '{raw}'"));
+        return Err(format!("--set '{s}': unknown type '{raw}'"));
     }
     if field == REENCODE_FIELD && !value.is_boolean() {
         return Err(format!("--set '{s}': reencode takes true or false"));
@@ -511,6 +572,11 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
     if let Some(e) = crate::helper::value_error(field, &value) {
         return Err(format!("--set '{s}': {e}"));
     }
+    let field = if field == CHANNEL_GUARD_A {
+        EXACT_OPAQUE_FIELD
+    } else {
+        field
+    };
     Ok(SetOverride {
         scope,
         field: field.to_string(),
@@ -533,6 +599,35 @@ pub fn to_patch(field: &str, value: &Value) -> Value {
 mod tests {
     use super::*;
     use crate::discover::InputKind;
+
+    /// Note LR: `alias_channel_guard_a` walks the same paths that `CHANNEL_GUARD_A` and `EXACT_OPAQUE_FIELD` spell for
+    /// `parse_set`, so a rename of one spelling fails here: a table written at `CHANNEL_GUARD_A` comes back with the
+    /// value at `EXACT_OPAQUE_FIELD` and nothing left at the alias.
+    #[test]
+    fn the_alias_rewrite_follows_the_two_field_paths() {
+        let pointer = |f: &str| format!("/{}", f.replace('.', "/"));
+        for v in [true, false] {
+            let mut t = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            alias_channel_guard_a(&mut t).unwrap();
+            assert_eq!(
+                t.pointer(&pointer(EXACT_OPAQUE_FIELD)),
+                Some(&Value::Bool(v)),
+                "{t}"
+            );
+            assert!(t.pointer(&pointer(CHANNEL_GUARD_A)).is_none(), "{t}");
+            // The same value at both paths is accepted; the other value is refused.
+            let mut both = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            crate::presets::merge_json(&mut both, &to_patch(EXACT_OPAQUE_FIELD, &Value::Bool(v)));
+            assert!(alias_channel_guard_a(&mut both).is_ok());
+            let mut clash = to_patch(CHANNEL_GUARD_A, &Value::Bool(v));
+            crate::presets::merge_json(&mut clash, &to_patch(EXACT_OPAQUE_FIELD, &Value::Bool(!v)));
+            let e = alias_channel_guard_a(&mut clash).unwrap_err();
+            assert!(
+                e.contains(CHANNEL_GUARD_A) && e.contains(EXACT_OPAQUE_FIELD),
+                "{e}"
+            );
+        }
+    }
 
     #[test]
     fn a_removed_sub_type_scope_names_the_fix() {

@@ -13,24 +13,33 @@ fn text(b: &[u8]) -> String {
     String::from_utf8(b.to_vec()).unwrap()
 }
 
-/// `<root>/out/rock.dds`: a 64x32 BC7 diffuse, decoded alpha 254 on about 39 % of mip 0, made by `sdc convert`.
+/// `<root>/out/rock.dds`: a 64x32 BC7 diffuse, decoded alpha 254 on part of mip 0 (50 % on the AVX2 path, 39 % on
+/// AVX-512; Note LR15), made by `sdc convert`.
 fn alpha254_dds(root: &Path) -> PathBuf {
+    alpha254_dds_on(root, false)
+}
+
+/// `alpha254_dds` with the child's ISPC cap chosen: `avx2` removes `SDC_TEST_AVX512` (a lifted test run sets it for
+/// this process, and the child would inherit it), so the bytes are the AVX2 path's on any CPU.
+fn alpha254_dds_on(root: &Path, avx2: bool) -> PathBuf {
     let src = root.join("in");
     std::fs::create_dir_all(&src).unwrap();
     ImageBuffer::from_fn(64, 32, |x, y| {
-        // A 255..252 alpha ramp every 4 columns: BC7 decodes about 39 % of mip 0 to exactly 254.
+        // A 255..252 alpha ramp every 4 columns: BC7 decodes part of mip 0 to exactly 254.
         Rgba([x as u8 * 4, y as u8 * 8, 90, 255 - (x % 4) as u8])
     })
     .save(src.join("rock.png"))
     .unwrap();
     let out = root.join("out");
-    let o = sdc()
-        .args(["convert", "--accept-suggestions", "high"])
+    let mut c = sdc();
+    c.args(["convert", "--accept-suggestions", "high"])
         .args(["--set", "alpha.policy=blend", "--set", "format=bc7", "-o"])
         .arg(&out)
-        .arg(src.join("rock.png"))
-        .output()
-        .unwrap();
+        .arg(src.join("rock.png"));
+    if avx2 {
+        c.env_remove("SDC_TEST_AVX512");
+    }
+    let o = c.output().unwrap();
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     out.join("rock.dds")
 }
@@ -93,7 +102,8 @@ fn inspect_reports_suggestions_and_dds_headers() {
 #[test]
 fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
     let d = tempfile::tempdir().unwrap();
-    let dds = alpha254_dds(d.path());
+    // Encoded on the AVX2 path: the AVX-512 path writes other bytes for this ramp (Note LR15).
+    let dds = alpha254_dds_on(d.path(), true);
     let o = sdc().arg("inspect").arg(&dds).output().unwrap();
     assert_eq!(code(&o), 0);
     let out = text(&o.stdout);
@@ -104,7 +114,7 @@ fn inspect_human_output_covers_the_dds_header_and_mip_alpha() {
         "Dx10",
         "cubemap false",
         // The exact percentages pin the human output byte for byte (backlog L69), not just the codec.
-        "mip 0 64x32  alpha min 253 =255 19.5% =254 39.1% <254 41.4%",
+        "mip 0 64x32  alpha min 253 =255 25.0% =254 50.0% <254 25.0%",
     ] {
         assert!(out.contains(want), "{want}: {out}");
     }

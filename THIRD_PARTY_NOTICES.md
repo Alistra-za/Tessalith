@@ -9,12 +9,12 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
 ## Shipped in the executables (non-crate components)
 
 - **bc7e.ispc** (bc7enc_rdo commit b943862), Copyright (C) 2018-2021 Binomial LLC, Apache License 2.0 (`LICENSES/Apache-2.0-bc7e.txt`).
-  Tessalith ships a modified copy: patch `crates/encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch` (change notice at the top of `bc7e.ispc`).
+  Tessalith ships a modified copy: patches `crates/encoders-sys/vendor/bc7e/patches/0001-exact-opaque-alpha.patch`, `0002-sdc-max-level.patch` and `0005-bc7e-fixes.patch` (change notices at the top of `bc7e.ispc`).
 - **rgbcx** (bc7enc_rdo commit b943862), Richard Geldreich, Jr., MIT or Public Domain (Unlicense); Tessalith uses MIT (`LICENSES/bc7enc_rdo-LICENSE.txt`).
   Tessalith ships a modified `rgbcx.h`: patch "rgbcx BC4 round-to-nearest" (see `crates/encoders-sys/vendor/README-VENDOR.md`).
 - **Intel ISPC Texture Compressor** (commit 79ddbc9), Copyright (c) 2016-2019 Intel Corporation, MIT (`LICENSES/ISPCTextureCompressor-license.txt`).
-- The ISPC objects of the above were compiled with Intel ISPC 1.31.0; the two AVX-512 objects with ISPC 1.32.0 (BSD-3-Clause compilers; the objects carry the source files' licences).
-- **Studio HDRI** `crates/render3d/assets/hdri/studio_small_09_1k.hdr` (Poly Haven `studio_small_09`, https://polyhaven.com/a/studio_small_09), embedded in the GUI as the 3D preview background and ambient light. The repository's own record (`crates/render3d/assets/hdri/README.md`) states CC0 1.0 Universal. That README is the only record; the repository holds no licence file from the download itself.
+- The ISPC objects of the above were compiled with Intel ISPC 1.32.0 (a BSD-3-Clause compiler; the objects carry the source files' licences).
+- **liblz4** (the copy vendored in the `lzzzz` crate 1.1.0, compiled into `vfs` to read BSA archives), Copyright (c) 2011-2020 Yann Collet, BSD-2-Clause (`LICENSES/BSD-2-Clause-lz4.txt`). Only the library is compiled; upstream's programs directory (GPLv2) is not.
 - **PGPatcher JSON schemas** `crates/gui/assets/pbr.schema.json` and `crates/gui/assets/complex_material.schema.json` (https://github.com/hakasapl/PGPatcher, (c) hakasapl and contributors, GPL-3.0), vendored unmodified and embedded in the GUI to validate exported JSON. `pbr.schema.json` was fetched from `main` on 2026-10-09; `complex_material.schema.json` is upstream commit 0176567.
 - **XPMF profile schema** `crates/gui/assets/xpmf_profile.schema.json` (https://github.com/hakasapl/xpmf, (c) hakasapl, GPL-3.0 with modding exception), vendored unmodified and embedded in the GUI to validate exported XPMF profiles; upstream 0.8.1, commit 8078e1f.
 - **PBR landscape template values** in `crates/gui/assets/cs_pbr_templates.json`: values by Faultier (see `docs/CREDITS.md`). Used with Faultier's permission; no licence attached.

@@ -1,6 +1,7 @@
 //! One type picker (owner amendment J, Note FB9) for Problems' "Set type…" and the texture panel's Sub-type: a popup
 //! anchored to its button, the suggestion pinned on top, a search box focused on open, the grouped list below.
-use super::settings_panel::{subtype_groups, subtype_label};
+use super::settings_panel::subtype_groups;
+use crate::model::labels::{type_hover, type_info};
 use eframe::egui;
 use engine::config::{Subtype, Target};
 use engine::policy::offered_for;
@@ -17,10 +18,33 @@ pub enum TypeKind {
 /// The list's height before it scrolls.
 pub const LIST_HEIGHT: f32 = 320.0;
 
+fn type_row(ui: &mut egui::Ui, st: Subtype, selected: bool, label: &str) -> egui::Response {
+    let mut text = egui::text::LayoutJob::default();
+    for span in [
+        egui::RichText::new(format!("{label}\n")),
+        egui::RichText::new(type_info(st).description)
+            .small()
+            .weak(),
+    ] {
+        span.append_to(
+            &mut text,
+            ui.style(),
+            egui::TextStyle::Button.into(),
+            egui::Align::Center,
+        );
+    }
+    ui.add(egui::Button::selectable(selected, text).wrap())
+        .accessible_name(label)
+        .on_hover_text(type_hover(st))
+}
+
 /// The picker on `anchor`: a click on it opens or closes the popup `id`. Returns the type picked this frame. Esc, a
 /// click outside or a pick closes it; Esc does nothing else (owner amendment G). `grass` also offers `complex_grass`
 /// (`engine::policy::grass_context`, Note FC10).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, popup id and anchor button, then the current and suggested type, the kind, target and grass flag that decide which types are offered; each comes from the caller's row, so a struct would be built per picker only to be taken apart here"
+)]
 pub fn show(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -51,7 +75,7 @@ pub fn show(
             );
             let name = match kind {
                 TypeKind::SetType => "Search the types to set",
-                TypeKind::SubType => "Search the sub-types",
+                TypeKind::SubType => "Search the types",
             };
             r.widget_info(|| {
                 let mut i = egui::WidgetInfo::text_edit(true, "", &q, hint);
@@ -64,13 +88,18 @@ pub fn show(
             if r.changed() {
                 ui.data_mut(|d| d.insert_temp(query_id, q.clone()));
             }
-            // Labels are the ids with spaces, so "subsurface_tint" finds "subsurface tint" too.
             let needle = q.trim().to_lowercase().replace('_', " ");
-            let hit = |s: Subtype| subtype_label(s).to_lowercase().contains(&needle);
+            let hit = |s: Subtype| {
+                let info = type_info(s);
+                needle.is_empty()
+                    || [info.label, info.description, s.id()]
+                        .iter()
+                        .any(|text| text.to_lowercase().replace('_', " ").contains(&needle))
+            };
             // A suggestion the target doesn't offer is not pinned: picking it would be refused.
             if let Some(s) = suggested.filter(|s| hit(*s) && offered(target, *s)) {
-                let text = format!("{} (suggested)", subtype_label(s));
-                if ui.selectable_label(current == Some(s), text).clicked() {
+                let text = format!("{} (suggested)", type_info(s).label);
+                if type_row(ui, s, current == Some(s), &text).clicked() {
                     picked = Some(s);
                 }
                 ui.separator();
@@ -93,11 +122,7 @@ pub fn show(
                         any = true;
                         ui.label(egui::RichText::new(heading).weak());
                         for s in shown {
-                            if ui
-                                .selectable_label(current == Some(s), subtype_label(s))
-                                .on_hover_text(s.id())
-                                .clicked()
-                            {
+                            if type_row(ui, s, current == Some(s), type_info(s).label).clicked() {
                                 picked = Some(s);
                             }
                         }

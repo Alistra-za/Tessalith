@@ -51,7 +51,7 @@ if [ "$(git config core.autocrlf)" = true ]; then
             if (a[3] != "attr/-text" && (a[1] == "i/crlf" || a[1] == "i/mixed" || a[1] == "i/-text")) print "CR\t" p }' \
         | while IFS="$(printf '\t')" read -r kind p; do
             if [ "$kind" = LF ]; then
-                echo "pre-commit: $p: the working copy has LF line endings but core.autocrlf=true expects CRLF. cargo fmt and the Write tool write LF: stage it, delete the file and run git checkout -- $p to get CRLF back."
+                echo "pre-commit: $p: the working copy has LF line endings but core.autocrlf=true expects CRLF. the Write tool writes LF: stage it, delete the file and run git checkout -- $p to get CRLF back."
             else
                 size=$(git show ":$p" | wc -c)
                 nonul=$(git show ":$p" | LC_ALL=C tr -d '\000' | wc -c)

@@ -1,5 +1,6 @@
 //! The texture panel's folded "Where these settings come from" section (Note JI3): the preset inspector the Advanced
 //! drawer used to hold. Drawing only; it reads the model and edits nothing.
+use super::group::{collapsing_group, GroupHead};
 use crate::model::fields::provenance_text;
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::AppModel;
@@ -33,12 +34,25 @@ fn only_differences_id() -> egui::Id {
     egui::Id::unique("inspector-only-differences")
 }
 
-/// Folded by default; the body draws only while open, so a closed section costs one header.
-pub(super) fn section(ui: &mut egui::Ui, model: &AppModel, key: &str) {
-    egui::CollapsingHeader::new("Where these settings come from")
-        .id_salt("where-settings-come-from")
-        .default_open(false)
-        .show(ui, |ui| body(ui, model, key));
+/// Folded by default; the body draws only while open, so a closed section costs one header. Returns whether the header
+/// was toggled (the caller writes the open state).
+pub(super) fn section(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    key: &str,
+    head: &GroupHead<'_>,
+    open: bool,
+    instant: bool,
+) -> bool {
+    collapsing_group(
+        ui,
+        crate::model::panel_groups::PanelGroup::Sources.id(),
+        head,
+        open,
+        instant,
+        |ui| body(ui, model, key),
+    )
+    .toggled
 }
 
 fn body(ui: &mut egui::Ui, model: &AppModel, key: &str) {

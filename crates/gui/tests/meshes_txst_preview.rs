@@ -1,6 +1,14 @@
 //! Note GO: the shape card's Texture set dropdown (TXSTs plugins assign to the shape's 3D index, preview only).
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../esp/tests/common/mod.rs"]
 mod b;
+#[allow(
+    clippy::allow_attributes_without_reason,
+    reason = "the NIF team's test helper; its own allows are theirs, and their crates do not opt in to the workspace lints"
+)]
 #[path = "../../modscan/tests/common/mod.rs"]
 mod scan_fixture;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -227,10 +235,9 @@ fn a_pick_outside_a_loaded_mesh_is_refused() {
 }
 
 /// Skyrim.esm: DirtTXST (TX00 dirt02, TX01 dirt02_n, TX02 → NIF slot 6 env mask) and RockStat (x.nif, alternate
-/// texture DirtTXST on 3D index 0). A real scan, then the pick goes into the 3D view's spec with its textures'
-/// sources, keeps the skin card's picks, and "From the NIF" takes it out; a reload of the shapes drops it.
-#[test]
-fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
+/// texture DirtTXST on 3D index 0), scanned, with mod A's x.nif selected. Returns the instance, the model, the copy
+/// and the block of the shape with 3D index 0.
+fn scanned_rock() -> (tempfile::TempDir, MeshesModel, i64, u32) {
     let inst = scan_fixture::instance_fixture("+A\n");
     let root = inst.path();
     let nif = std::fs::read(concat!(
@@ -306,6 +313,14 @@ fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
         .find(|s| s.index3d == Some(0))
         .expect("a shape with 3D index 0")
         .block;
+    (inst, m, copy, block)
+}
+
+/// A real scan, then the pick goes into the 3D view's spec with its textures' sources, keeps the skin card's picks,
+/// and "From the NIF" takes it out; a reload of the shapes drops it.
+#[test]
+fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
+    let (_inst, mut m, copy, block) = scanned_rock();
     let s0 = m.shapes.iter().find(|s| s.block == block).unwrap().clone();
     assert_eq!(m.txst_choices(&s0).len(), 1);
     let spec = |m: &MeshesModel| match m.v3.content() {
@@ -341,6 +356,27 @@ fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
     m.reload();
     assert!(m.txst_pick(block).is_none(), "the shapes reloaded: no pick");
     assert!(spec(&m).txst.is_empty());
+}
+
+/// Note GO: a shape read that fails drops the picks too. The In game / Source toggle reads the shapes again with the
+/// 3D view left as it was (a switch to another NIF empties the view first, which hides any pick), so it is where a
+/// pick that outlived a failed read would still show.
+#[test]
+fn a_failed_shape_read_drops_the_picks() {
+    let (inst, mut m, _copy, block) = scanned_rock();
+    m.set_txst(block, Some(DIRT)).unwrap();
+    assert_eq!(m.txst_pick(block).map(|(f, _)| f), Some(DIRT), "premise");
+    rusqlite::Connection::open(inst.path().join("scan.db"))
+        .unwrap()
+        .execute_batch("DROP TABLE shape")
+        .unwrap();
+    m.set_view_source(true);
+    assert!(m.error.is_some(), "premise: the shape read failed");
+    assert!(m.shapes.is_empty(), "premise: no shapes are shown");
+    assert!(
+        m.txst_pick(block).is_none(),
+        "the failed read dropped the pick"
+    );
 }
 
 /// Round 1: a picked TXST that lists no texture files says so, and the sentence behind it is the label's description.

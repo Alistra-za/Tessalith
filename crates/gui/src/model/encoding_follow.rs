@@ -93,6 +93,7 @@ impl AppModel {
         self.type_base = None;
         self.type_cause = false;
         self.type_cleaned = false;
+        self.forget_new_sets();
     }
 
     /// A user edit recorded a step and re-plans: a cleanup on its settled plan folds into that step.

@@ -697,7 +697,7 @@ fn sample<'a>(
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs a converted corpus: SDC_MIPQ_INPUT, SDC_MIPQ_OUT and SDC_MIPQ_REPORT"]
 fn mip_quality_on_a_corpus() {
     use std::{env, io::Write, path::PathBuf};
     let path = |name| PathBuf::from(env::var_os(name).unwrap_or_else(|| panic!("missing {name}")));

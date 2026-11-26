@@ -6,8 +6,8 @@ use crate::model::view::{Channel, ViewState};
 use crate::model::viewport3d::Look;
 use crate::model::Filter;
 use crate::settings::{
-    LayoutSettings, LookSettings, WindowSettings, DETAILS_NAMES, FILTER_NAMES, SETS_FILTER_NAMES,
-    WIDTH_IDS, WIDTH_RANGE,
+    LayoutSettings, LookSettings, WindowSettings, DETAILS_NAMES, HIDE_HELPERS, WIDTH_IDS,
+    WIDTH_RANGE,
 };
 use crate::ui::panel_ids;
 use eframe::egui::{self, pos2, vec2, Rect};
@@ -307,30 +307,18 @@ pub fn capture(
         }
     }
     l.meshes_view = crate::ui::header::meshes_view_active(ctx);
-    let on = [
-        filter.needs_decision,
-        filter.warnings,
-        filter.failed,
-        filter.not_in_set,
-        filter.hide_helpers,
-    ];
-    l.filters = FILTER_NAMES
-        .iter()
-        .zip(on)
-        .filter(|(_, on)| *on)
-        .map(|(n, _)| n.to_string())
-        .collect();
-    l.filter_subtype = filter.subtype.clone();
-    l.filter_format = filter.format.clone();
+    // Only hide-helpers is kept; the status pills start off after a restart (review E19).
+    l.filters = if filter.hide_helpers {
+        vec![HIDE_HELPERS.to_string()]
+    } else {
+        vec![]
+    };
+    l.filter_subtype.clone_from(&filter.subtype);
+    l.filter_format.clone_from(&filter.format);
     l.filter_set = filter.set.name().to_string();
     l.sort = prefs.sort.name().to_string();
     l.tile = prefs.tile;
-    l.sets_filters = SETS_FILTER_NAMES
-        .iter()
-        .zip([sets.attention, sets.ready, sets.no_json])
-        .filter(|(_, on)| *on)
-        .map(|(n, _)| n.to_string())
-        .collect();
+    l.sets_filters = vec![];
     l.sets_shader = sets.shader.map(|s| s.id().to_string());
     l.preview_channel = view.channel.shader_id() as u8;
     l.look = look_now(looks.0, &prev.look);
@@ -377,7 +365,7 @@ fn window_rect(r: Rect, prev: Option<[f32; 4]>, area: Rect) -> Option<[f32; 4]> 
 /// The saved look when it still means `look` (a default look saves as nothing).
 fn look_now(look: &Look, prev: &Option<LookSettings>) -> Option<LookSettings> {
     if Look::from_settings(prev.as_ref()) == *look {
-        return *prev;
+        return prev.clone();
     }
     Some(LookSettings::of(look))
 }
@@ -467,30 +455,24 @@ pub fn restore_model(
 ) {
     let has = |n: &str| l.filters.iter().any(|f| f == n);
     *filter = Filter {
-        needs_decision: has("needs-decision"),
-        warnings: has("warnings"),
-        failed: has("failed"),
-        not_in_set: has("not-in-set"),
         subtype: l.filter_subtype.clone(),
         format: l.filter_format.clone(),
         set: SetFilter::from_name(&l.filter_set).unwrap_or_default(),
-        hide_helpers: has("hide-helpers"),
+        hide_helpers: has(HIDE_HELPERS),
+        ..Filter::default()
     };
     *prefs = ColumnPrefs {
         sort: SortKey::from_name(&l.sort).unwrap_or_default(),
         tile: l.tile,
     };
-    let on = |n: &str| l.sets_filters.iter().any(|f| f == n);
     *sets = SetsFilter {
         search: std::mem::take(&mut sets.search),
-        attention: on("attention"),
-        ready: on("ready"),
-        no_json: on("no-json"),
         shader: l.sets_shader.as_deref().and_then(|id| {
             engine::shader::Shader::ALL
                 .into_iter()
                 .find(|s| s.id() == id)
         }),
+        ..SetsFilter::default()
     };
     view.channel = Channel::from_id(u32::from(l.preview_channel)).unwrap_or_default();
 }

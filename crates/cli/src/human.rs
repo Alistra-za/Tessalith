@@ -1,6 +1,7 @@
 //! Concise human log on stderr (spec §8: human output on stderr; `--json` keeps stdout for JSON Lines only).
 use engine::codes::{Code, Severity, Warning};
 use engine::events::{EngineEvent, EventKind, EventSink, SkipKind};
+use std::fmt::Write as _;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -9,6 +10,8 @@ pub struct HumanSink {
     /// Note JA6: the counts of the run-level `OUT-KEPT-OLDER-ENCODE` and `OUT-KEPT-LOWER-TARGET` events, which come
     /// before `batch_done` (it carries no kept counts); the done line reads and clears them, once per phase.
     kept: Mutex<(u64, u64)>,
+    /// Whether the run validates (`sdc convert --validate`); the done line names the validation count accordingly.
+    validated: bool,
 }
 
 impl HumanSink {
@@ -16,7 +19,26 @@ impl HumanSink {
         HumanSink {
             err: Mutex::new(std::io::stderr()),
             kept: Mutex::new((0, 0)),
+            validated: false,
         }
+    }
+
+    /// Sets whether the run validates its outputs (`new()` means not validating).
+    pub fn validating(mut self, on: bool) -> Self {
+        self.validated = on;
+        self
+    }
+}
+
+/// The done line's validation clause: the count when the run validates; `validation off` when it does not, or the
+/// count of the always-validated types (complex material and grass) that failed.
+fn validation_clause(validated: bool, failed: u32) -> String {
+    if validated {
+        format!("{failed} failed validation")
+    } else if failed > 0 {
+        format!("{failed} failed validation (complex types only)")
+    } else {
+        "validation off".to_string()
     }
 }
 
@@ -25,10 +47,13 @@ impl HumanSink {
 fn kept_clause((older, lower): (u64, u64)) -> String {
     let mut s = String::new();
     if older > 0 {
-        s += &format!(", {older} kept from an older encode version (--ev re-encodes)");
+        let _ = write!(
+            s,
+            ", {older} kept from an older encode version (--ev re-encodes)"
+        );
     }
     if lower > 0 {
-        s += &format!(", {lower} kept at a higher target");
+        let _ = write!(s, ", {lower} kept at a higher target");
     }
     s
 }
@@ -120,9 +145,13 @@ impl EventSink for HumanSink {
                 skipped_intentional,
                 failed,
                 validation_failed,
+                checked,
+                checked_failed,
                 cancelled,
             } => Some(format!(
-                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {validation_failed} failed validation, {} cancelled{}",
+                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {}{}, {} cancelled{}",
+                validation_clause(self.validated, *validation_failed),
+                if *checked > 0 { format!(", {checked} checked in place ({checked_failed} failed)") } else { String::new() },
                 cancelled.len(),
                 kept_clause(std::mem::take(&mut *kept()))
             )),
@@ -142,5 +171,20 @@ impl EventSink for TeeSink {
         for s in &self.0 {
             s.emit(ev);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validation_clause;
+
+    #[test]
+    fn the_done_line_validation_clause_has_three_cases() {
+        assert_eq!(validation_clause(true, 2), "2 failed validation");
+        assert_eq!(validation_clause(false, 0), "validation off");
+        assert_eq!(
+            validation_clause(false, 1),
+            "1 failed validation (complex types only)"
+        );
     }
 }

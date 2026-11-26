@@ -9,6 +9,7 @@ use sdc_gui::model::AppModel;
 use sdc_gui::settings::MeshesSettings;
 use sdc_gui::ui::header::{elide_middle, readable_path};
 use sdc_gui::ui::State;
+use std::fmt::Write as _;
 use support::*;
 
 type H = Harness<'static, (AppModel, State, MeshesModel)>;
@@ -593,7 +594,7 @@ fn a_long_export_path_keeps_tools_mo2_and_preset_at_1440_and_1600() {
     let d = tempfile::tempdir().unwrap();
     let mut path = String::from(r"C:\Users\runneradmin\AppData\Local\Temp\");
     for i in 0..4 {
-        path.push_str(&format!(r"a rather long folder name number {i}\"));
+        let _ = write!(path, r"a rather long folder name number {i}\");
     }
     path.push_str("export");
     for (w, meshes) in [
@@ -1420,7 +1421,7 @@ fn the_set_header_input_name_box_never_overlaps() {
 /// Note BH: renders the header (with rock01 selected, so the set row shows under it) to `SDC_TOOLBAR_PNG` for the
 /// owner. Needs a GPU: `cargo test -p sdc-gui --test it header_layout::render_the_toolbar -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU; SDC_TOOLBAR_PNG names the output file"]
 fn render_the_toolbar() {
     let out = std::env::var("SDC_TOOLBAR_PNG").unwrap_or_else(|_| "toolbar-after.png".into());
     let d = tempfile::tempdir().unwrap();

@@ -60,7 +60,6 @@ struct ReadOnly(PathBuf);
 impl ReadOnly {
     fn set(&self, on: bool) {
         let mut p = std::fs::metadata(&self.0).unwrap().permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
         p.set_readonly(on);
         std::fs::set_permissions(&self.0, p).unwrap();
     }
@@ -71,7 +70,10 @@ impl Drop for ReadOnly {
     fn drop(&mut self) {
         if let Ok(m) = std::fs::metadata(&self.0) {
             let mut p = m.permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
+            #[allow(
+                clippy::permissions_set_readonly_false,
+                reason = "the guard restores write access to the test's own temp-dir file when it drops, so a failed assert does not leave it read-only"
+            )]
             p.set_readonly(false);
             let _ = std::fs::set_permissions(&self.0, p);
         }
@@ -322,7 +324,7 @@ fn the_review_undecided_picker_offers_complex_grass_on_the_grass_fixture() {
     assert!(m.wait_idle(WAIT));
     assert!(
         m.subtype_question(key).is_some(),
-        "the grass file asks its sub-type: {:?} {:?}",
+        "the grass file asks its type: {:?} {:?}",
         m.item(key).map(|i| (&i.status, &i.decisions)),
         m.items.iter().map(|i| &i.key).collect::<Vec<_>>()
     );
@@ -382,6 +384,7 @@ fn straight_alpha_writes_the_key() {
     idle(h.state_mut());
     assert!(row(h.state(), |f| matches!(f, Fix::StraightAlpha(_))).is_none());
     // The texture's settings show the field in its Alpha group (only for an EXR source).
+    open_texture_groups(h.state_mut());
     h.state_mut().select_item(key);
     h.run();
     h.run();

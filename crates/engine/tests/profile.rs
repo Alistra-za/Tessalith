@@ -1,5 +1,8 @@
 mod also_support;
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared by the profile, profile_panic, profile_cancel and profile_session tests; each uses a subset"
+)]
 mod profile_support;
 
 use engine::api::CancelToken;
@@ -76,7 +79,7 @@ fn fixture_writer_requires_its_destination() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "writes the fixture project into SDC_PROFILE_FIXTURE_DIR, a new folder"]
 fn write_fixture_project() {
     let root = std::env::var_os("SDC_PROFILE_FIXTURE_DIR")
         .expect("set SDC_PROFILE_FIXTURE_DIR to a new fixture directory");

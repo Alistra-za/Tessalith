@@ -39,26 +39,36 @@ color = { content = "srgb", tag = "unorm" }
 [subtypes.ui_sky]
 color = { content = "srgb", tag = "unorm" }
 mips = { levels = "none" }
+# BC7 per type (Note LR): the normal maps take the data flat tolerance; the packed data maps also guard G (metal, fuzz)
+# so a flat 0 or 255 stays exact. The complex `_m` keeps A (exact_opaque) above G.
 [subtypes.normal]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.landscape_normal]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.pbr_normal]
 alpha = { policy = "remove" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.msn]
 alpha = { policy = "remove" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.coat_normal]
 alpha = { policy = "data" }
 mips = { normal = "renormalize_bake" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.envmask]
 alpha = { policy = "remove", exact_opaque = true }
 format = "bc4"
 [subtypes.complex_material]
 alpha = { policy = "data", exact_opaque = true }
+encoder = { bc7_flat_tolerance = "data", channel_guard = { g = true } }
 [subtypes.rmaos]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data", channel_guard = { g = true } }
 [subtypes.skin_rfaos]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data", channel_guard = { g = true } }
 [subtypes.flow]
 format = "bc5"
 [subtypes.height]
@@ -71,6 +81,7 @@ format = "bc4"
 format = "bc4"
 [subtypes.detail_normal]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data" }
 [subtypes.msn_specular]
 format = "bc4"
 [subtypes.generic_two_channel]
@@ -89,9 +100,11 @@ format = "bc4"
 # _wet is a normal with a binary mask in alpha (BC7). CS no longer reads a grey one, so that is not written.
 [subtypes.skin_wet]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data" }
 # A detail map is BC5 when its alpha is opaque, else BC7 (the fact is set in policy.rs).
 [subtypes.skin_detail]
 alpha = { policy = "data" }
+encoder = { bc7_flat_tolerance = "data" }
 # A cubemap is gamma-encoded colour written UNORM (CS decodes it from game gamma).
 [subtypes.cubemap]
 color = { content = "srgb", tag = "unorm" }

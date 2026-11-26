@@ -55,7 +55,7 @@ impl HelperRole {
     pub fn id(&self) -> String {
         match self {
             HelperRole::NotHelper => "none".into(),
-            HelperRole::Raw(r) => r.id(),
+            HelperRole::Raw(r) => r.id().to_owned(),
         }
     }
 

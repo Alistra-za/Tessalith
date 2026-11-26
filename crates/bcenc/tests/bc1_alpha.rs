@@ -1,16 +1,19 @@
 //! `bcenc`'s BC1 one-bit-alpha encode equals the vendored rgbcx (`encode_bc1_alpha(18, ..)` through `encoders_sys`,
 //! plain or perceptual weights) on every mask class over the colour classes, and on one hand-built block per early
 //! path of the C++. `Bc1Search::Fast` equals rgbcx's `encode_bc1_alpha(BC1_FAST_LEVEL, ..)` on the mask classes and,
-//! in the `#[ignore]` twin, on the same long run.
+//! in the `#[ignore]` twin, on the same long run. Every comparison with rgbcx runs on every code path the machine has
+//! (`support/paths.rs`), through the hidden `bc1_encode_block_alpha_on`.
 use bcenc::{
-    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_with, Bc1Search,
-    BC1_FAST_LEVEL,
+    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_on,
+    bc1_encode_block_alpha_with, Bc1Search, BC1_FAST_LEVEL,
 };
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
 #[path = "support/gen.rs"]
 mod gen;
+#[path = "support/paths.rs"]
+mod paths;
 
 use bc1_block::{colours, sel};
 
@@ -19,20 +22,24 @@ fn same(px: &[[u8; 4]; 16], mask: u16, perceptual: bool) -> [u8; 8] {
     same_with(px, mask, perceptual, Bc1Search::Default)
 }
 
-/// `bc1_encode_block_alpha_with(.., search)` against rgbcx at the level `search` stands for (level 18 for `Default`).
+/// `bc1_encode_block_alpha_on(path, .., search)` on every path against rgbcx at the level `search` stands for (level
+/// 18 for `Default`).
 fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search) -> [u8; 8] {
-    let got = bc1_encode_block_alpha_with(px, mask, perceptual, search);
     let want = match search {
         Bc1Search::Default => encoders_sys::bc1_encode_block_alpha(px, mask, perceptual),
         Bc1Search::Fast => {
             encoders_sys::bc1_encode_block_alpha_level(px, mask, BC1_FAST_LEVEL, perceptual)
         }
     };
-    assert_eq!(
-        got, want,
-        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
-    got
+    for path in paths::paths() {
+        let got = bc1_encode_block_alpha_on(path, px, mask, perceptual, search);
+        assert_eq!(
+            got, want,
+            "bc1 alpha {search:?} on path {}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+            path.name()
+        );
+    }
+    want
 }
 
 /// `px` with every masked texel replaced by random RGB and alpha 0, as a real cut-out texture holds them: nothing

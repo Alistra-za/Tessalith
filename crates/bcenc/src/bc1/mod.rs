@@ -4,11 +4,13 @@
 //! from the vendored text by `tools/gen-bcenc-tables.py`; `palette` ports the palette and single-colour code; `params`
 //! holds each level's search depth; `encode` drives the encode, `initial` picks the starting endpoints, `fit` holds the
 //! least-squares fits and rounding, `order_keys` fits a whole 4- or 3-colour total-ordering pass at once (Note HY13),
-//! `sels` the selector searches; `alpha` is the one-bit-alpha encode.
+//! `sels` the selector searches; `alpha` is the one-bit-alpha encode. `frames` holds the entries that run the encode and
+//! the one-bit-alpha encode on a code path: as plain code, or compiled again with AVX2 (Note HY21).
 
 pub(crate) mod alpha;
 pub(crate) mod encode;
 mod fit;
+pub(crate) mod frames;
 // For `coverage_tests`, which checks the class generators' restated rounding against the port's and builds the
 // total-ordering tables on its own thread.
 #[cfg(test)]

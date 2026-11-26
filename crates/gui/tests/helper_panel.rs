@@ -519,7 +519,7 @@ fn a_packed_target_is_named_by_its_output() {
 /// Review pictures of the helper panel at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a GPU and
 /// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helper_panel::shots -- --ignored`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and SDC_SHOTS_DIR"]
 fn shots() {
     let Ok(out) = std::env::var("SDC_SHOTS_DIR") else {
         return;
@@ -703,7 +703,7 @@ fn read_only_disables_the_helper_role_row() {
 fn ticking_helper_swaps_the_dropdown_and_writes_nothing() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(d.path(), &XSET, ""), "x.png");
-    let sub = in_centre(&h, Role::ComboBox, "Sub-type");
+    let sub = in_centre(&h, Role::ComboBox, "Texture type");
     assert_eq!(sub.len(), 1, "{sub:?}");
     let (text, dirty) = (toml_text(&h), h.state().is_dirty());
     tick(&mut h);
@@ -713,7 +713,7 @@ fn ticking_helper_swaps_the_dropdown_and_writes_nothing() {
     assert!(
         (role[0].min - sub[0].min).length() <= 1.0
             && (role[0].width() - sub[0].width()).abs() <= 1.0,
-        "Helper role {:?} where Sub-type was {:?}",
+        "Helper role {:?} where Type was {:?}",
         role[0],
         sub[0]
     );
@@ -723,7 +723,7 @@ fn ticking_helper_swaps_the_dropdown_and_writes_nothing() {
         Some("Pick a role…")
     );
     h.get_by_label("pick a role to make this a helper");
-    assert!(in_centre(&h, Role::ComboBox, "Sub-type").is_empty());
+    assert!(in_centre(&h, Role::ComboBox, "Texture type").is_empty());
     assert_eq!(toml_text(&h), text);
     assert_eq!(h.state().is_dirty(), dirty);
 }
@@ -752,7 +752,7 @@ fn unticking_before_picking_goes_back() {
     tick(&mut h);
     tick(&mut h);
     assert!(!ticked(&h));
-    assert_eq!(in_centre(&h, Role::ComboBox, "Sub-type").len(), 1);
+    assert_eq!(in_centre(&h, Role::ComboBox, "Texture type").len(), 1);
     assert!(in_centre(&h, Role::ComboBox, "Helper role").is_empty());
     assert_eq!(toml_text(&h), text);
 }
@@ -767,7 +767,7 @@ fn the_tick_stays_on_its_own_file() {
     h.run();
     h.run();
     assert!(!ticked(&h), "y reads unticked");
-    assert_eq!(in_centre(&h, Role::ComboBox, "Sub-type").len(), 1);
+    assert_eq!(in_centre(&h, Role::ComboBox, "Texture type").len(), 1);
     h.state_mut().select_item("x.png");
     h.run();
     h.run();
@@ -787,7 +787,8 @@ fn unticking_a_helper_writes_none() {
         Some(json!("none"))
     );
     assert_eq!(
-        in_centre(&h, Role::ComboBox, "Sub-type").len(),
+        // TPC-T4-1: an undecided texture asks its type in the card, so the Texture type row is not drawn too.
+        in_centre(&h, Role::ComboBox, "Type for this texture").len(),
         1,
         "the texture panel"
     );

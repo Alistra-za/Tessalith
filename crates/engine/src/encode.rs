@@ -83,12 +83,43 @@ fn bc1_search(s: Bc1Search) -> bcenc::Bc1Search {
     }
 }
 
+const _: () = assert!(
+    bcenc::MAX_SEARCH_RADIUS == BC45_RADIUS_MAX,
+    "bcenc's Max starts at the engine's radius 10"
+);
+
+/// The radius of the radius search. `Max` starts with that radius-10 search and then runs the pair search
+/// (`bcenc::*_max`), so it reads 10 too; not a rank (`api::radius_rank` orders the four values).
 pub fn radius(r: SearchRadius) -> u32 {
     match r {
         SearchRadius::Default => BC45_RADIUS_DEFAULT,
-        SearchRadius::Max => BC45_RADIUS_MAX,
+        SearchRadius::Slowest | SearchRadius::Max => BC45_RADIUS_MAX,
         SearchRadius::Fast => BC45_RADIUS_FAST,
     }
+}
+
+/// The bc7e tune a BC7 profile's encoder settings give (spec D5; Note LR, LR8), or `None` for the plain call:
+/// - weights: Note CP: perceptual uses bc7e's own weights, so it wins over `bc7_weights`; an `alphaN` passes its
+///   `[1, 1, 1, N]` (x1-form: bc7e ranks every linear call as x16 would, LR15), unset and `linear` keep the level's.
+/// - `exact_constants`: the channel guard's R, G and B (`None` when none is guarded); A is `Bc7Params::exact_opaque`.
+/// - `flat_tolerance`: `Some(Data)` for `data`; `default` keeps the level's T_d.
+///
+/// The guard and the tolerance apply under perceptual too (BC7-O16, O20): they are constraints, not weightings, and
+/// the tuned entry starts from the level's perceptual params.
+fn bc7_tune(e: &EncoderSpec) -> Option<Bc7Tune> {
+    let mask = e.channel_guard.mask();
+    let t = Bc7Tune {
+        weights: e
+            .bc7_weights
+            .filter(|w| !e.perceptual && *w != Bc7Weights::Linear)
+            .map(Bc7Weights::weights),
+        exact_constants: (mask != 0).then_some(mask),
+        flat_tolerance: match e.bc7_flat_tolerance {
+            crate::config::Bc7FlatTolerance::Default => None,
+            crate::config::Bc7FlatTolerance::Data => Some(encoders_sys::Bc7FlatTolerance::Data),
+        },
+    };
+    (t != Bc7Tune::default()).then_some(t)
 }
 
 /// Encode one band (one block row) of an LDR image. `b` holds 16 texels per block (see
@@ -96,36 +127,44 @@ pub fn radius(r: SearchRadius) -> u32 {
 ///
 /// BC7 blocks whose input alpha is 255 throughout (spec §5.6, §5.8):
 /// - Rotated mode 4/5 blocks always get the lossless rotated-slot fix, whatever `alpha.exact_opaque`
-///   and the alpha policy (fix batch 41). Without it bc7e can decode such a block's alpha well below
-///   254 (239 on white noise), which would break the `remove` guarantee.
-/// - `alpha.exact_opaque` controls only mode 6, the part that costs RGB: it is bc7e's native flag. With the flag
-///   off, mode 6 is the only source of alpha 254.
+///   and the alpha policy (fix batch 41), as the guarantee behind `remove`. Before bc7e patch 0005 bc7e could decode
+///   such a block's alpha well below 254 (239 on white noise); since 0005 (Q2t) the four probe inputs give none (0 of
+///   1210 to 2310 rotated blocks at veryslow, basic, slowest and max on SSE2, AVX2 and AVX-512; Note LR6).
+/// - `alpha.exact_opaque`, the channel guard's A (bc7e's exact-constants mask bit 3, Note LR, LR17), reaches these
+///   blocks only through mode 6, whose p-bits it forces so alpha decodes 255: the part that costs RGB. With it off,
+///   mode 6 is the only source of alpha 254.
+///
+/// In blocks with alpha, A keeps a subset whose alpha is 0 or 255 throughout exact wherever bc7e finds such a
+/// solution, above any guarded R, G or B ([`bc7_tune`]).
+///
+/// A complex `_m` written with alpha 0 (`complex_material`, parallax off, alpha kept: `ops::complex_alpha_zero`) takes A
+/// whatever `alpha.exact_opaque` says (BC7-O29 (e2), Note LR, LR18): the file has no opaque block, so A only ranks
+/// alpha in its alpha blocks, and bc7e keeps alpha 0 itself. The exact-0 fix after the encode then rewrites only a
+/// block whose alpha still decodes above 0 ([`bc7_opaque_fix`]). The route reads the profile only, so it holds for a
+/// parallax-off profile; a parallax-on `_m` whose source has no alpha channel (alpha 0 written, a policy warning) keeps
+/// the profile's A and has no fix, as before.
 fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
     let e = &p.encoder;
     match p.format {
         Format::Bc7 => {
+            // The channel guard's A (Note LR, LR17), or the alpha-0 `_m` route.
+            // shortcut: reads the profile, not the source, so a parallax-on `_m` whose source has no alpha channel
+            // (alpha 0 written, AlphaParallaxNoAlpha) keeps the profile's A and gets no fix; thread `has_alpha` through
+            // `EncodeCtx` to cover it (BC7-C36). The pipeline always resolves `alpha.parallax` for an `_m` (policy sets it
+            // from the analysis unless explicit), so `zero_fix`'s `!= Some(true)` and this `== Some(false)` agree there.
             let params = Bc7Params {
                 level: bc7_level(e.effort),
                 perceptual: e.perceptual,
-                exact_opaque: p.alpha.exact_opaque,
+                exact_opaque: p.alpha.exact_opaque || crate::ops::complex_alpha_zero(p, true),
             };
+            // Resolved once per band, before the 64-block calls.
+            let tune = bc7_tune(e);
             for (oc, bc) in o
                 .chunks_mut(BC7_BLOCKS_PER_CALL * BC7_BLOCK_BYTES)
                 .zip(b.chunks(BC7_BLOCKS_PER_CALL * BLOCK_TEXELS))
             {
-                // Note CP: perceptual mode uses bc7e's own weights, so it wins; unset and `linear` keep the plain call.
-                match e
-                    .bc7_weights
-                    .filter(|w| !e.perceptual && *w != Bc7Weights::Linear)
-                {
-                    Some(w) => bc7e_compress_blocks_tuned(
-                        bc,
-                        oc,
-                        params,
-                        Bc7Tune {
-                            weights: Some(w.weights()),
-                        },
-                    ),
+                match tune {
+                    Some(t) => bc7e_compress_blocks_tuned(bc, oc, params, t),
                     None => bc7e_compress_blocks(bc, oc, params),
                 }
             }
@@ -133,6 +172,10 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
         }
         f => {
             let bs = f.block_bytes().expect("block format");
+            let max = e.bc45_search_radius == SearchRadius::Max;
+            let bc1s = bc1_search(e.bc1_search);
+            // A closure: `alpha_cut` asserts a cut of 1 or more, which only BC3 needs.
+            let cut = || bc3_cut(alpha_cut(&p.alpha));
             for (blk, src) in o.chunks_mut(bs).zip(b.chunks(BLOCK_TEXELS)) {
                 let src: &[[u8; 4]; 16] = src.try_into().unwrap();
                 match f {
@@ -152,7 +195,7 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                             src,
                             mask,
                             e.perceptual,
-                            bc1_search(e.bc1_search),
+                            bc1s,
                         ))
                     }
                     // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
@@ -160,21 +203,29 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         src,
                         true,
                         e.perceptual,
-                        bc1_search(e.bc1_search),
+                        bc1s,
+                    )),
+                    Format::Bc3 if max => blk.copy_from_slice(&bcenc::bc3_encode_block_max_with(
+                        src,
+                        cut(),
+                        e.perceptual,
+                        bc1s,
                     )),
                     Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block_with(
                         src,
                         radius(e.bc45_search_radius),
-                        bc3_cut(alpha_cut(&p.alpha)),
+                        cut(),
                         e.perceptual,
-                        bc1_search(e.bc1_search),
+                        bc1s,
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
+                    Format::Bc4 if max => blk.copy_from_slice(&bcenc::bc4_encode_block_max(src, 0)),
                     Format::Bc4 => blk.copy_from_slice(&bcenc::bc4_encode_block(
                         src,
                         0,
                         radius(e.bc45_search_radius),
                     )),
+                    Format::Bc5 if max => blk.copy_from_slice(&bcenc::bc5_encode_block_max(src)),
                     Format::Bc5 => blk.copy_from_slice(&bcenc::bc5_encode_block(
                         src,
                         radius(e.bc45_search_radius),
@@ -200,7 +251,9 @@ fn zero_fix(p: &Profile) -> bool {
 
 /// The BC7 opaque fix-ups on blocks `o` whose source texels `b` (16 per
 /// block) have alpha 255 throughout: the lossless rotated mode 4/5 fix. With `zero`, blocks whose source alpha is 0
-/// throughout get the exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1).
+/// throughout get the exact-0 fix (DECISIONS AH1: bc7e's mode-6 p-bit can decode them as 1), which rewrites a block
+/// only if its alpha decodes above 0 at some texel (the gate in `force_zero_alpha`, Note LR, LR18). It runs once per
+/// block of every mip, and only an all-0 source block pays for the gate's decode.
 fn bc7_opaque_fix(o: &mut [u8], b: &[[u8; 4]], zero: bool) {
     for (blk, src) in o.chunks_mut(BC7_BLOCK_BYTES).zip(b.chunks(BLOCK_TEXELS)) {
         if zero && src.iter().all(|t| t[3] == 0) {

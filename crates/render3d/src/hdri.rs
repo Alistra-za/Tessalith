@@ -1,7 +1,5 @@
-//! Radiance RGBE (`.hdr`) reader and the bundled studio HDRI (Poly Haven `studio_small_09`, 1K, CC0; see
-//! `assets/hdri/README.md`). The workspace `image` crate has no `hdr` feature, so the format is read here:
-//! header lines up to the blank line, the `-Y h +X w` resolution line, then new-style RLE scanlines (or flat
-//! RGBE pixels).
+//! Radiance RGBE (`.hdr`) environments: [`Environment`] loads the user's file, [`procedural`] stands in for it. The
+//! RGBE reader itself is `texcore::cube::rgbe` (re-exported here).
 //!
 //! **Mapping (Z-up world, like the renderer):** the image is equirectangular, row 0 = +Z (straight up), the
 //! last row = −Z; the column is the azimuth `atan2(y, x)` turned by [`YAW`], growing clockwise seen from above like a
@@ -10,18 +8,14 @@
 use std::f32::consts::{PI, TAU};
 use std::sync::OnceLock;
 
-/// The bundled HDRI file (1.6 MB).
-static STUDIO_HDR: &[u8] = include_bytes!("../assets/hdri/studio_small_09_1k.hdr");
-
-/// Azimuth (radians) added to the world azimuth before the column lookup. Chosen so the image's brightest
-/// region (its key light) lies at the azimuth of the default directional light (`Scene::neutral`), upper front
-/// left of the default camera. See `studio_key_light_faces_the_default_sun`.
+/// Azimuth (radians) added to the world azimuth before the column lookup. It was chosen for the bundled studio
+/// image (removed, Note IH) so its key light lay at the azimuth of the default directional light; kept because the
+/// shader and every pin use it.
 /// Note DL: 0.774 after the clockwise flip (was −2.798), the same key-light azimuth.
 pub const YAW: f32 = 0.774;
 
-/// The HDRI is a photographic exposure (mean luminance 0.85, ambient means 0.65-1.3), several times the
-/// neutral preview's calibrated ambient (0.12-0.30), and on top of the sun it would white out every material.
-/// The ambient taken from it is scaled by this; the background is shown as is.
+/// A photographic HDRI is several times the neutral preview's calibrated ambient (0.12-0.30), and on top of the sun
+/// it would white out every material. The ambient taken from it is scaled by this; the background is shown as is.
 pub const AMBIENT_SCALE: f32 = 0.3;
 
 /// World direction (unit, Z-up) -> image coordinates `(u, v)` in 0..1 (`v` = 0 at +Z), turned by [`YAW`].
@@ -310,15 +304,118 @@ fn prefilter(src: &[texcore::cube::Cube], n: [f32; 3], r: f32, wt: f32) -> [f32;
     [sum[0] / weight, sum[1] / weight, sum[2] / weight, 1.0]
 }
 
-/// The bundled studio HDRI with its ambient, decoded on first use.
-pub struct Studio {
-    pub image: Hdr,
-    /// = `ambient6_at(0.0)`.
-    pub ambient6: [[f32; 3]; 6],
+/// Smallest and largest width of a loadable HDRI (the height is half). 4096 x 2048 is ~100 MB decoded plus ~67 MB
+/// as the RGBA16F backdrop; 8192 would be four times that.
+pub const MIN_WIDTH: usize = 64;
+pub const MAX_WIDTH: usize = 4096;
+/// Largest `.hdr` file read (a flat 4096 x 2048 RGBE image is 32 MiB).
+const MAX_FILE_BYTES: u64 = 64 << 20;
+
+/// A user-chosen HDRI with its ambient: the image, plus the cells [`Environment::ambient6_at`] integrates.
+pub struct Environment {
+    image: Hdr,
     cells: Vec<Cell>,
 }
 
-impl Studio {
+impl std::fmt::Debug for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Environment({}x{})", self.image.width, self.image.height)
+    }
+}
+
+/// `(width, height)` from the resolution line of a Radiance header, read without decoding any pixel.
+fn header_size(b: &[u8]) -> Result<(usize, usize), String> {
+    if !b.starts_with(b"#?") {
+        return Err("not a Radiance HDR file (no #? magic)".into());
+    }
+    let mut lines = b.split(|&c| c == b'\n');
+    // Header text up to the blank line, then the resolution line.
+    for l in lines.by_ref() {
+        if l.is_empty() {
+            break;
+        }
+    }
+    let res = lines.next().ok_or("HDR has no resolution line")?;
+    let res = std::str::from_utf8(res).map_err(|_| "HDR resolution line is not text")?;
+    let t: Vec<&str> = res.split_whitespace().collect();
+    match t[..] {
+        ["-Y", h, "+X", w] => Ok((
+            w.parse().map_err(|e| format!("HDR width: {e}"))?,
+            h.parse().map_err(|e| format!("HDR height: {e}"))?,
+        )),
+        _ => Err(format!("unsupported HDR orientation {res:?}")),
+    }
+}
+
+impl Environment {
+    /// Applies the HDRI rules except the extension: a Radiance RGBE image, width = 2 x height, width 64..=4096, every
+    /// value finite. The size rules are read from the header, before any pixel is decoded. `Err` is a one-line reason.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Environment, String> {
+        let (w, h) = header_size(bytes)?;
+        Self::check_size(w, h)?;
+        Self::from_image(decode_rgbe(bytes)?)
+    }
+
+    /// The rules on a decoded image (what [`Environment::from_bytes`] runs after the decode), and a buffer of exactly
+    /// `width × height` RGB samples.
+    pub fn from_image(image: Hdr) -> Result<Environment, String> {
+        Self::check_size(image.width, image.height)?;
+        // The size rules bound both sides to 4096, so the product cannot overflow.
+        let want = image.width * image.height * 3;
+        if image.rgb.len() != want {
+            return Err(format!(
+                "the image holds {} values, not {want} ({}×{} RGB)",
+                image.rgb.len(),
+                image.width,
+                image.height
+            ));
+        }
+        if !image.rgb.iter().all(|v| v.is_finite()) {
+            return Err("the image holds a value that is not finite".into());
+        }
+        let cells = cells(&image);
+        Ok(Environment { image, cells })
+    }
+
+    fn check_size(w: usize, h: usize) -> Result<(), String> {
+        if h.checked_mul(2) != Some(w) {
+            return Err(format!("not 2:1 ({w}×{h})"));
+        }
+        if w < MIN_WIDTH {
+            return Err(format!(
+                "too small ({w}×{h}): the width must be at least {MIN_WIDTH}"
+            ));
+        }
+        if w > MAX_WIDTH {
+            return Err(format!(
+                "too large ({w}×{h}): the width must be at most {MAX_WIDTH}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// [`Environment::from_bytes`] of a `.hdr` file (extension checked first, ASCII case-insensitive).
+    pub fn from_path(p: &std::path::Path) -> Result<Environment, String> {
+        let is_hdr = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("hdr"));
+        if !is_hdr {
+            return Err("not a .hdr file".into());
+        }
+        // The reasons do not name the file: the caller shows them beside its name.
+        let meta = std::fs::metadata(p).map_err(|e| format!("cannot be read: {e}"))?;
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(format!("larger than {} MiB", MAX_FILE_BYTES >> 20));
+        }
+        let bytes = std::fs::read(p).map_err(|e| format!("cannot be read: {e}"))?;
+        Self::from_bytes(&bytes)
+    }
+
+    pub fn image(&self) -> &Hdr {
+        &self.image
+    }
+
     /// The ambient of the environment turned by `yaw` (radians about +Z), [`AMBIENT_SCALE`] applied. About 12k
     /// multiply-adds per call; `Scene::ambient` calls it at most twice a frame.
     /// shortcut: no memo; add a `(yaw bits, result)` memo if a profile shows it.
@@ -327,19 +424,27 @@ impl Studio {
     }
 }
 
-/// Decodes the bundled HDRI once (about 0.1 s) and caches it for the process.
-pub fn studio() -> &'static Studio {
-    static STUDIO: OnceLock<Studio> = OnceLock::new();
-    STUDIO.get_or_init(|| {
-        let image = decode_rgbe(STUDIO_HDR).expect("the bundled HDRI decodes");
-        let cells = cells(&image);
-        let ambient6 = integrate(&cells, 0.0).map(|c| c.map(|v| v * AMBIENT_SCALE));
-        Studio {
-            image,
-            ambient6,
-            cells,
+/// The environment a solid-background frame reflects: a 128×64 equirect whose pixel is `dalc(ambient6)` evaluated at
+/// its direction ([`uv_to_dir`]), the smooth six-axis blend the shader uses for ambient, so reflections agree with the
+/// ambient light. Not scaled by [`AMBIENT_SCALE`] (`ambient6` is already the light the scene uses).
+pub fn procedural(ambient6: &[[f32; 3]; 6]) -> Hdr {
+    const W: usize = 128;
+    const H: usize = 64;
+    let m = crate::scene::dalc(ambient6);
+    let mut rgb = Vec::with_capacity(W * H * 3);
+    for y in 0..H {
+        for x in 0..W {
+            let d = uv_to_dir((x as f32 + 0.5) / W as f32, (y as f32 + 0.5) / H as f32);
+            for row in &m {
+                rgb.push((row[0] * d[0] + row[1] * d[1] + row[2] * d[2] + row[3]).max(0.0));
+            }
         }
-    })
+    }
+    Hdr {
+        width: W,
+        height: H,
+        rgb,
+    }
 }
 
 #[cfg(test)]
@@ -461,48 +566,43 @@ mod tests {
         }
     }
 
-    #[test]
-    fn bundled_asset_decodes_1k_finite_non_negative() {
-        let s = studio();
-        assert_eq!((s.image.width, s.image.height), (1024, 512));
-        assert!(s.image.rgb.iter().all(|v| v.is_finite() && *v >= 0.0));
-        assert!(s
-            .ambient6
-            .iter()
-            .flatten()
-            .all(|v| v.is_finite() && *v > 0.0));
-    }
-
-    #[test]
-    fn studio_key_light_faces_the_default_sun() {
-        let img = &studio().image;
-        let lum = |i: usize| img.rgb[i * 3] + img.rgb[i * 3 + 1] + img.rgb[i * 3 + 2];
-        let max = (0..img.width * img.height).map(lum).fold(0.0, f32::max);
-        let mut sum = [0.0f32; 3];
-        for i in 0..img.width * img.height {
-            if lum(i) > 0.3 * max {
-                let (x, y) = (i % img.width, i / img.width);
-                let d = uv_to_dir(
-                    (x as f32 + 0.5) / img.width as f32,
-                    (y as f32 + 0.5) / img.height as f32,
-                );
-                for k in 0..3 {
-                    sum[k] += d[k] * lum(i);
-                }
+    /// A 64×32 environment that differs by direction (brighter towards +X, +Y and up).
+    fn test_env() -> Environment {
+        let (w, h) = (64, 32);
+        let mut rgb = Vec::with_capacity(w * h * 3);
+        for y in 0..h {
+            for x in 0..w {
+                let d = uv_to_dir((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                rgb.extend([1.0 + d[0], 1.0 + 0.5 * d[1], 1.0 + 0.25 * d[2]]);
             }
         }
-        let sun = crate::scene::Scene::neutral().dir_light.direction;
-        let (a, b) = (sum[1].atan2(sum[0]), sun[1].atan2(sun[0]));
-        let diff = (a - b + PI).rem_euclid(TAU) - PI;
-        assert!(diff.abs() < 0.35, "key azimuth {a} vs sun {b}");
-        assert!(sum[2] > 0.0, "key light is above the horizon");
+        Environment::from_image(Hdr {
+            width: w,
+            height: h,
+            rgb,
+        })
+        .unwrap()
     }
 
     #[test]
-    fn yaw_zero_is_todays_ambient_and_a_half_turn_swaps_the_sides() {
-        let s = studio();
-        assert_eq!(s.ambient6_at(0.0), s.ambient6, "bit-equal at yaw 0");
-        assert_eq!(integrate(&cells(&s.image), 0.0), ambient6(&s.image));
+    fn a_non_finite_pixel_is_refused() {
+        let mut rgb = vec![0.5; 64 * 32 * 3];
+        rgb[7] = f32::NAN;
+        let e = Environment::from_image(Hdr {
+            width: 64,
+            height: 32,
+            rgb,
+        })
+        .unwrap_err();
+        assert!(e.contains("finite"), "{e}");
+    }
+
+    #[test]
+    fn yaw_zero_is_the_scaled_integral_and_a_half_turn_swaps_the_sides() {
+        let s = test_env();
+        let plain = integrate(&cells(s.image()), 0.0).map(|c| c.map(|v| v * AMBIENT_SCALE));
+        assert_eq!(s.ambient6_at(0.0), plain, "bit-equal at yaw 0");
+        assert_eq!(integrate(&cells(s.image()), 0.0), ambient6(s.image()));
         let (a, b) = (s.ambient6_at(0.0), s.ambient6_at(PI));
         // +X −X +Y −Y +Z −Z: the half turn swaps ±X and ±Y and keeps ±Z.
         for (got, from) in [(0, 1), (1, 0), (2, 3), (3, 2), (4, 4), (5, 5)] {
@@ -519,7 +619,7 @@ mod tests {
     /// yaw 0 lights +Y at a quarter turn (and the backdrop shader samples `azimuth - yaw`, tests/background.rs).
     #[test]
     fn a_quarter_turn_moves_the_ambient_the_way_the_sun_turns() {
-        let s = studio();
+        let s = test_env();
         let (a, b) = (s.ambient6_at(0.0), s.ambient6_at(PI / 2.0));
         for (got, from) in [(2, 0), (1, 2), (3, 1), (0, 3), (4, 4)] {
             for k in 0..3 {

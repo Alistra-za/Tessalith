@@ -55,6 +55,8 @@ pub struct SdcApp {
     layout_save: crate::layout::SaveDebounce,
     /// What the layout looked like last frame; `None` before the first.
     layout_probe: Option<crate::layout::Probe>,
+    /// The HDRI file a 3D panel took this frame (`route_3d`): the next `sync_layout_at` saves it.
+    hdri_taken: Option<std::path::PathBuf>,
     /// Test seam (the UI driver, Note HM3): `Some` records Explorer requests instead of spawning explorer.exe.
     #[cfg(feature = "test-hooks")]
     pub shell_log: Option<Vec<crate::model::shell::ShellRequest>>,
@@ -69,8 +71,8 @@ impl SdcApp {
         );
         meshes.v3 = crate::model::viewport3d::Viewport3d::new();
         let mut set3d = crate::model::set_preview::SetPreview::from_settings(model.scan_db.clone());
-        meshes.v3.cache_dir = model.shader_cache.clone();
-        set3d.v3.cache_dir = model.shader_cache.clone();
+        meshes.v3.cache_dir.clone_from(&model.shader_cache);
+        set3d.v3.cache_dir.clone_from(&model.shader_cache);
         // The saved arrangement: filters, preview channel and layout, and both 3D looks (AG17).
         let layout = model.settings.layout.clone();
         crate::layout::restore_model(
@@ -82,6 +84,12 @@ impl SdcApp {
         );
         meshes.v3.look = Look::from_settings(layout.look.as_ref());
         set3d.v3.look = Look::from_settings(layout.set_look.as_ref());
+        // Note IH2: one saved HDRI file for both panels, known by name until a panel needs it; `route_3d` decodes it
+        // once. A file that is gone or refused drops that panel to a solid background with a notice.
+        if let Some(p) = layout.hdri_file.clone() {
+            meshes.v3.set_saved_hdri(p.clone());
+            set3d.v3.set_saved_hdri(p);
+        }
         SdcApp {
             model,
             meshes,
@@ -96,6 +104,7 @@ impl SdcApp {
             paused_mesh_focus: None,
             layout_save: Default::default(),
             layout_probe: None,
+            hdri_taken: None,
             #[cfg(feature = "test-hooks")]
             shell_log: None,
         }
@@ -120,8 +129,10 @@ impl SdcApp {
             &self.model.view,
             looks,
         );
-        if self.layout_probe.as_ref() != Some(&probe) {
-            let cur = crate::layout::capture(
+        // A file a 3D panel took since the last sync is the saved one (`route_3d`); otherwise the saved path stays.
+        let hdri_file = self.hdri_taken.take();
+        if self.layout_probe.as_ref() != Some(&probe) || hdri_file.is_some() {
+            let mut cur = crate::layout::capture(
                 ctx,
                 &self.model.settings.layout,
                 &self.model.filter,
@@ -130,6 +141,9 @@ impl SdcApp {
                 &self.model.view,
                 looks,
             );
+            if hdri_file.is_some() {
+                cur.hdri_file = hdri_file;
+            }
             // The first frame is the starting point: what it reads that the file did not have is no change to write.
             if cur != self.model.settings.layout {
                 self.model.settings.layout = cur;
@@ -149,6 +163,25 @@ impl SdcApp {
     /// Both 3D panels' links to the Textures view: which missing texture paths are items of the open folder, and a
     /// "Open in Textures" click (selects the item and switches to the Textures view).
     pub fn route_3d(&mut self, ctx: &egui::Context) {
+        // Note IH2: a file one panel took (chosen there, or the saved one) is the saved path from this frame on, and the
+        // other panel's too, with the same decoded environment.
+        let (m, s) = (&mut self.meshes.v3, &mut self.state.set3d.v3);
+        if let Some((p, env)) = m.take_accepted_hdri() {
+            s.adopt_hdri(p.clone(), env);
+            self.hdri_taken = Some(p);
+        }
+        if let Some((p, env)) = s.take_accepted_hdri() {
+            m.adopt_hdri(p.clone(), env);
+            self.hdri_taken = Some(p);
+        }
+        // The saved file is decoded once, by the first panel whose background is HDRI, while neither decodes.
+        if !m.hdri_decoding() && !s.hdri_decoding() {
+            if m.wants_saved_hdri() {
+                m.decode_saved_hdri();
+            } else if s.wants_saved_hdri() {
+                s.decode_saved_hdri();
+            }
+        }
         let model = &mut self.model;
         for v in [&mut self.meshes.v3, &mut self.state.set3d.v3] {
             let missing = v
@@ -185,6 +218,24 @@ impl SdcApp {
             crate::ui::header::set_meshes_view(ctx, true);
             m.show_texture(t);
         }
+        // A Used-by shape link brings Meshes forward and opens there (now or once its rows are read). A copy id is
+        // local to its store, so a link from another database than Meshes reads, or with none open, only says so in
+        // Meshes' status line (the panel keeps its links off for another database, so that is only a race).
+        // `MeshesModel::store_path` is built from `AppModel::scan_db` (`SdcApp::new`) and neither is assigned again
+        // outside tests, so plain equality cannot differ by spelling.
+        if let Some(p) = model.show_mesh.take() {
+            use crate::model::meshes::{NO_STORE_LINK, OTHER_STORE_LINK};
+            model.centre_over_meshes = false;
+            crate::ui::header::set_meshes_view(ctx, true);
+            match &m.store_path {
+                Some(s) if *s == p.store => m.show_shape(p.copy_id, p.block, p.shape),
+                Some(_) => m.status = OTHER_STORE_LINK.into(),
+                None => m.status = NO_STORE_LINK.into(),
+            }
+        }
+        // Copied after the link above, so the panel's next frame sees Meshes as the link left it.
+        model.meshes_store = m.store_path.clone();
+        model.meshes_rows_loading = m.rows_loading();
         // Note GD1 (NIF team): a NIF worklist row's fix.
         if let Some((path, tab, field)) = model.nif_tab_request.take() {
             model.centre_over_meshes = false;

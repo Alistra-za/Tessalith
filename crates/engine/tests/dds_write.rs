@@ -410,7 +410,10 @@ fn atomic_write_to_a_read_only_target_is_an_io_error_and_leaves_no_temp() {
     perms.set_readonly(true);
     std::fs::set_permissions(&p, perms.clone()).unwrap();
     let r = write_atomic(&p, b"new");
-    #[allow(clippy::permissions_set_readonly_false)]
+    #[allow(
+        clippy::permissions_set_readonly_false,
+        reason = "the test clears the read-only flag on its own temp file so the temp dir can be deleted; the test is Windows-only, where the flag is not a Unix world-writable mode"
+    )]
     perms.set_readonly(false);
     std::fs::set_permissions(&p, perms).unwrap();
     assert!(r.is_err(), "replacing a read-only file must fail");

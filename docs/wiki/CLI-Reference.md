@@ -23,7 +23,7 @@ set textures/pbr/armor/ironplate/ironplate  shader pbr (auto:pbr)
     R source:ironplate_roughness.png:R  G source:ironplate_metallic.png:R  B source:ironplate_ao.png:R  A default:1
 C:\Work\IronPlate\textures\pbr\armor\ironplate\ironplate.png
   suggested pbr_albedo (high confidence: colour member of a PBR set)
-  sub-type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
+  type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
   status ready
 ...
 ```
@@ -63,10 +63,10 @@ Progress goes to stderr, one line per file, with forward slashes:
 ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate.dds
 ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate_n.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_n.dds
 ok    ... -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_rmaos.dds
-done: 3 converted, 0 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
+done: 3 converted, 0 up to date, 0 skipped (0 on purpose), 0 failed, validation off, 0 cancelled
 ```
 
-The three raw maps get no line: the packed output consumed them. Without `-o`, output goes to `.\sdc-out` ([layout](Validation-and-Output.md#where-the-files-go)). Exit code `0` means every file converted and validated; the others are under [Exit codes](#exit-codes).
+The three raw maps get no line: the packed output consumed them. Without `-o`, output goes to `.\sdc-out` ([layout](Validation-and-Output.md#where-the-files-go)). Exit code `0` means every file converted and no file checked in the run failed its check; the others are under [Exit codes](#exit-codes).
 
 ### Run it again
 
@@ -103,7 +103,7 @@ Point `sdc convert --recursive` at the folder. Expect unresolved files on the fi
 | `--preset-file <file>` | none | Load a preset file without selecting it, for example one that declares suffix aliases. Repeatable. Loading an id that is already loaded is an error. |
 | `--config <file>` | `sdc.toml` in the first input folder | The project config file. |
 | `--set <override>` | none | Override a profile field. Repeatable. See [--set syntax](#--set-syntax). |
-| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence sub-type suggestion. With `none`, a file whose sub-type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
+| `--accept-suggestions none\|high` | `none` | `high` accepts every High-confidence type suggestion. With `none`, a file whose type is only suggested stays unresolved. High-confidence alpha suggestions apply either way. |
 | `--allow <CODE>` | none | Acknowledge a blocking code for the whole batch. Repeatable. An unknown code is a usage error. See [Acknowledging blocking codes](#acknowledging-blocking-codes). |
 | `--json` | off | Write JSON Lines events to stdout. Human output stays on stderr. |
 
@@ -111,10 +111,10 @@ The user config and the user presets always load ([where they are](Installation.
 
 ### Why you usually want `--accept-suggestions high`
 
-A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence sub-type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise the file is reported as unresolved:
+A known suffix such as `_n` or `_rmaos`, a known exporter term such as `_albedo`, or no suffix at all (the colour map) gives a High-confidence type suggestion. The CLI applies it only with `--accept-suggestions high`; otherwise the file is reported as unresolved:
 
 ```text
-skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
+skip  C:/Work/rock/rock.png: SUG-LOW-CONFIDENCE type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
 A lone file with an unknown suffix (`rock_bump.png`) has no suggestion, so the flag doesn't help: `sdc convert` exits 1 with `unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry` ([why it waits](Texture-Types.md#how-files-form-a-set)). `--allow SUG-LOW-CONFIDENCE` doesn't convert it either. <!-- D:GY5 --> Give it a type with its path under the input folder:
@@ -130,14 +130,14 @@ The GUI accepts High suggestions and writes each into `sdc.toml` as a `[files]` 
 | Form | Applies to | Can't set |
 |---|---|---|
 | `field=value` | Every file. | `helper.*` |
-| `subtype:<id>.field=value` | Every file of that sub-type. | `subtype`, `reencode`, `helper.*` |
+| `subtype:<id>.field=value` | Every file of that type (`subtype` in `sdc.toml`). | `subtype`, `reencode`, `helper.*` |
 | `file:<glob>.field=value` | Files matching the glob ([glob rules](Project-Config.md#rules)). | |
 | `set:<set id>.shader=<shader>` | A texture set's shader ([shader ids](Set-Shaders.md)). The set id is what `inspect` prints after `set`; an id with no `/` matches every set with that base name. An id that names no set gives `SET-EDIT-STALE`. | Anything but `shader` |
 
-- Every profile field works with `--set` ([the field list](Project-Config.md#fields)), except `target`, `category` and `resize_reference`, which the planner alone writes. `subtype` takes the `file:` form only: the sub-type is decided per file.
+- Every profile field works with `--set` ([the field list](Project-Config.md#fields)), except `target`, `category` and `resize_reference`, which the planner alone writes. `subtype` takes the `file:` form only: the type is decided per file.
 - `helper.role`, `helper.fills`, `helper.read` and `helper.invert` take only the `file:` form: an unscoped `helper.role=ao` would make every image a helper.
 - Values are TOML literals (`true`, `127`, `0.5`); anything else is a string, so `format=bc1` needs no quotes.
-- A misspelt field or sub-type is an error, never ignored.
+- A misspelt field or type is an error, never ignored.
 - A `--set` ranks above everything in `sdc.toml`, presets and suggestions ([layer order](Project-Config.md#how-settings-layer)).
 - `reencode` takes the `file:` form only.
 
@@ -159,7 +159,7 @@ sdc convert src --recursive --accept-suggestions high --set "set:textures/armor/
 
 A blocking code stops its file until you acknowledge it ([which codes](Diagnostic-Codes.md)). `--allow <CODE>` acknowledges it for the whole batch.
 
-- `--allow CFG-UNAVAILABLE` converts a sub-type or format the target lacks as the fallback the message names. With no fallback, change the sub-type or the target ([which sub-types the Vanilla target lacks](Texture-Types.md#sub-types-what-each-file-becomes)).
+- `--allow CFG-UNAVAILABLE` converts a type or format the target lacks as the fallback the message names. With no fallback, change the type or the target ([which types the Vanilla target lacks](Texture-Types.md#types-what-each-file-becomes)).
 - `--allow FMT-CS-SKIN-LOADER` does nothing: that code can't be lifted.
 - `--allow SUG-LOW-CONFIDENCE` converts nothing that has no suggestion ([above](#why-you-usually-want---accept-suggestions-high)).
 
@@ -173,7 +173,7 @@ Each flag is the first thing checked; `sdc.toml`, the user config and the defaul
 - A preset named by `sdc.toml` that isn't installed makes `sdc convert` exit 2. In the GUI the same preset blocks the export.
 - Load a preset file for one run with `--preset-file <file>` (load only) or `--preset <file.toml>` (load and select); copy it into `%APPDATA%\sdc\presets\` to keep it ([how to write one](Presets-and-Targets.md#writing-a-preset-by-hand)). A file given with `--preset-file` that fails to load is an error.
 - `sdc presets list` shows each preset's suffix aliases, and keeps presets marked `hidden = true` out.
-- `sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse` shows what a preset resolves to for one sub-type, before you convert with it.
+- `sdc presets --preset-file my-armor.toml show my-armor --subtype diffuse` shows what a preset resolves to for one type, before you convert with it.
 
 ## sdc convert
 
@@ -191,6 +191,7 @@ Plans the batch, then encodes every file whose status is ready.
 | `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists: `if-changed` encodes it again only when something changed, `skip` keeps it, `overwrite` encodes it again ([below](#re-runs-and-if-changed)). |
 | `--ev` (alias `--encoder-version`) | off | With `if-changed`, also encode again the outputs written by an older encode version ([after an update](#re-encoding-after-an-update)). |
 | `--property <words>` | none | With `--ev`, only the outputs that have every word of the list. Repeatable: any list may match ([the words](#property-words)). |
+| `--validate` | off | Decode each output again after encoding and check it ([what is checked](Validation-and-Output.md#what-is-checked)). Without the flag the `done` line says `validation off` ([unless a complex output failed](#reading-the-log)). With it and `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place, without encoding them again. <!-- D:LG1,LG10 --> |
 | `--dry-run` | off | Plan and report, write nothing. |
 
 The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
@@ -212,12 +213,16 @@ Each line on stderr has one of these shapes:
 ok    <input> -> <output>
 ok    <input> -> <output>  [VALIDATION FAILED]
 skip  <input>: <CODE> <reason>
+skip  <input>: up to date; checked in place: failed validation
 FAIL  <input> at <Stage>: <error>
 warning <input>: <CODE> <message>
 blocking <input>: <CODE> <message>
 error <input>: <CODE> <message>
 info  <input>: CFG-FILTER-IGNORED <message>
 done: N converted, N up to date, N skipped (N on purpose), N failed, N failed validation, N cancelled
+done: N converted, N up to date, N skipped (N on purpose), N failed, validation off, N cancelled
+done: ..., N failed, N failed validation (complex types only), N cancelled
+done: ..., N failed, N failed validation, N checked in place (N failed), N cancelled
 done: ..., N cancelled, N kept from an older encode version (--ev re-encodes), N kept at a higher target
 done: ..., N cancelled, N kept at a higher target
 ```
@@ -228,7 +233,10 @@ done: ..., N cancelled, N kept at a higher target
 - With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
-- A file with a validation error is still written. It prints as `ok ... [VALIDATION FAILED]`, counts under "failed validation", and makes `sdc convert` exit 4 if nothing worse happened.
+- A file is checked when the run has `--validate`, and always when it is a complex material `_m` or complex grass output. <!-- D:LG1,LG9 --> A failed check reads differently by kind, and either makes `sdc convert` exit 4 if nothing worse happened:
+  - A file written this run is still written. It prints `ok ... [VALIDATION FAILED]` and counts under "failed validation". <!-- D:LG1 -->
+  - An up to date file from an earlier run is not written. It prints `skip ... up to date; checked in place: failed validation` and counts under "checked in place (M failed)"; the next `if-changed` run encodes it again. <!-- D:LG10 -->
+  - Without `--validate`, the `done` line says `validation off`, or `N failed validation (complex types only)` when a complex material `_m` or complex grass output failed. It names "checked in place" only when N is above 0, as it does for kept counts. <!-- D:LG5,LG10 -->
 - The CLI raises none of the `CHK-` artist checks; the engine measures `CHK-LOW-DETAIL` only when the GUI asks.
 
 | `done` counter | Counts |
@@ -238,7 +246,8 @@ done: ..., N cancelled, N kept at a higher target
 | skipped | Files not converted for any other reason: unresolved, blocked, duplicate output, DDS input, existing output with no record, `--on-existing skip`, a pre-packed file replaced under `packing.prefer = "raw"` (`PACK-CONFLICT`), a generated file replaced by a real map (`GEN-REPLACED`). |
 | on purpose | The part of skipped you asked for: DDS inputs not opted in (`IN-DDS-SKIPPED`), `--on-existing skip`, `PACK-CONFLICT` and `GEN-REPLACED`. |
 | failed | Files that failed to load, resolve, encode or write. |
-| failed validation | Files written whose validation reported an error. |
+| failed validation | Files written this run whose validation reported an error. |
+| checked in place | Of up to date: unchecked outputs that this run checked in place instead of encoding; M of them failed. Shown only when above 0. |
 | cancelled | Files not started because you pressed Ctrl-C. |
 | kept from an older encode version | Of up to date: the outputs kept as "older encode version" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
 | kept at a higher target | Of up to date: the outputs kept as "lower target" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
@@ -253,6 +262,7 @@ done: ..., N cancelled, N kept at a higher target
 | `skip` | kept | kept | kept | kept | kept |
 | `overwrite` | re-encoded | re-encoded | re-encoded | re-encoded | re-encoded |
 
+- `--validate` also reaches current outputs under `if-changed`: [which ones](Validation-and-Output.md#what-is-checked). Press Ctrl-C and the checks still waiting count as cancelled, so the run exits 1.
 - An existing output with no manifest record is kept under `if-changed`, reported as `OUT-UNKNOWN-EXISTING`, and the run exits 1. `--on-existing overwrite` replaces it.
 - What "older encode version" and "lower target" mean, and why those outputs are kept: [Validation and output](Validation-and-Output.md#re-runs-and-if-changed). `overwrite` encodes a lower-target output at the lower target.
 - `--ev` with `--on-existing skip` or `overwrite` exits 2: `--ev applies only with --on-existing if-changed`. <!-- D:JA7 -->
@@ -279,7 +289,7 @@ Notice: a comma list means all of its words, so `cutout,mips` is a cutout output
 | `alpha` | It stores alpha: the alpha policy isn't `remove` and the format has an alpha channel (BC1 only with 1-bit alpha). A `data` alpha, such as a parallax height, counts. |
 | `cutout` | It has `alpha` and the game alpha-tests it: a `cutout` or `cutout_blend` policy, or `blend` written as 1-bit-alpha BC1. |
 | `mips` | The written file has more than one mip level, as its manifest record says. A record that doesn't say how many levels the file has counts as having mips, so `--ev` encodes it again rather than keep it by mistake. |
-| a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#sub-types-what-each-file-becomes)). |
+| a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#types-what-each-file-becomes)). |
 
 - Case doesn't matter and spaces around a word are trimmed: `" BC1 , Mips "` works.
 - An unknown or empty word exits 2 and lists the valid words.
@@ -325,7 +335,7 @@ For image inputs it runs the whole plan as a dry run and prints, per set:
 ```text
 set <set id>  shader <shader> (<why>)
   <severity> <CODE> <message>
-  pack <output> (<sub-type>) run|conflict|failed|disabled[: reason]
+  pack <output> (<type>) run|conflict|failed|disabled[: reason]
     R <source>  G <source>  B <source>  A <source>
 ```
 
@@ -333,8 +343,8 @@ and per file:
 
 ```text
 <input path>
-  suggested <sub-type> (<confidence> confidence: <reason>)
-  sub-type <id>  format <format>  tag <srgb|unorm|n/a>  alpha <policy>  output <relative output path>
+  suggested <type> (<confidence> confidence: <reason>)
+  type <id>  format <format>  tag <srgb|unorm|n/a>  alpha <policy>  output <relative output path>
   status <ready|unresolved|blocked|error|packing_input> <reasons or codes>
   <severity> <CODE> <message>
 ```
@@ -358,9 +368,9 @@ Runs the post-encode checks that need no source on DDS files that already exist,
 | Flag | Default | Meaning |
 |---|---|---|
 | `--target cs\|vanilla` | `cs` | Whose rules apply. |
-| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A sub-type the target doesn't have is an error. |
-| `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the sub-type's default, except that a sub-type whose default is `remove` is inferred as `data`. |
-| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee that opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
+| `--subtype <id>` | inferred from the file's suffix, its game path and, for formats with alpha, its mip-0 alpha | What the files are meant to be. A type the target doesn't have is an error. |
+| `--alpha-policy remove\|cutout\|blend\|cutout_blend\|data` | inferred | The alpha meaning to check against. Inferred as `remove` when every mip-0 alpha value is at least 254. Otherwise the type's default, except that a type whose default is `remove` is inferred as `data`. |
+| `--exact-opaque` | off | Hold BC7 files under `remove` to Tessalith's own guarantee with channel guard A on: opaque alpha decodes as exactly 255. Off by default because other encoders don't promise it. |
 | `--json` | off | One JSON object per file on stdout; the human report moves to stderr. |
 
 The format and `_SRGB` tag are taken from the file, so third-party files are judged on header and alpha rules, not on Tessalith's preferred format. A format Tessalith never writes has only its header checked and is reported as not judged.
@@ -387,7 +397,7 @@ sdc presets [--preset-file <file>]... <COMMAND>
 | Command | What it does |
 |---|---|
 | `list [--json]` | Lists selectable presets: id, version, target, description, suffix aliases, and the source file for user presets. |
-| `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each sub-type (or one) as JSON, with the provenance of each field. |
+| `show <id> [--subtype <id>] [--target <t>]` | Prints the preset's resolved profile for each type (or one) as JSON, with the provenance of each field. |
 | `schema <which> [--out <dir>]` | Prints a JSON Schema: `profile`, `preset`, `config`, `event`, `manifest`, `dds-info`, `dds-validation`. `all` writes every schema into `--out`, which it requires. |
 
 ```powershell
@@ -541,10 +551,10 @@ Partly. **Copy CLI command** (Files tab, [Review and Export](GUI-Review-and-Expo
 ### Every file is "unresolved"
 
 ```text
-skip  C:/src/rock.png: SUG-LOW-CONFIDENCE sub-type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
+skip  C:/src/rock.png: SUG-LOW-CONFIDENCE type 'diffuse' is a High-confidence suggestion (colour member, non-PBR set)
 ```
 
-`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the sub-types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
+`sdc` doesn't apply suggestions unless you ask. Add `--accept-suggestions high`, or record the types in `sdc.toml`. The GUI accepts High-confidence suggestions itself ([why the flag matters](#why-you-usually-want---accept-suggestions-high)). A file that says `unknown suffix` is a different case: the flag doesn't help, and [Texture types](Texture-Types.md#how-files-form-a-set) says why.
 
 ### The run stops with `sdc: <message>`
 
@@ -554,11 +564,11 @@ That is an error that stops a run, exit 2: see [Error messages](#error-messages)
 
 | Code | Meaning |
 |---|---|
-| 0 | Success. Every file converted (or was up to date or skipped on purpose) and passed validation. |
+| 0 | Success. Every file converted (or was up to date or skipped on purpose) and no file checked this run failed validation. |
 | 1 | Partial. Some files were unresolved, blocked, failed, cancelled, or had an existing output with no manifest record. |
 | 2 | Usage or configuration error: a bad flag, `--set` value, input path, preset or config file. Nothing was converted. |
 | 3 | Fatal: an I/O failure on the output root or manifest, an internal error (`sdc: internal error`), or a second Ctrl-C. |
-| 4 | Every file was handled, but at least one failed validation. |
+| 4 | Every file was handled, but at least one file checked this run failed validation (written, or checked in place). |
 
 When several apply, the highest wins: 3, then 2, then 1, then 4, then 0. Intentional skips, up-to-date files and raw maps consumed by packing never cause exit 1.
 
@@ -580,11 +590,11 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 
 | Message | Cause and fix |
 |---|---|
-| `--set '<s>': unknown field '<f>'` and `unknown sub-type '<id>'` | A misspelt field or sub-type. [The field list](Project-Config.md#fields). |
-| `--set '<s>': a sub-type scope cannot set the sub-type` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
+| `--set '<s>': unknown field '<f>'` and `unknown type '<id>'` | A misspelt field or type. [The field list](Project-Config.md#fields). |
+| ``--set '<s>': a `subtype:` scope cannot set the type`` | A `subtype:` scope can't set `subtype`, `reencode` or `helper.*`, and an unscoped `--set` can't set `helper.*`: use `file:<glob>.…`. |
 | `--set '<s>': a set scope sets only shader` | `set:<id>.` takes `shader` and nothing else. |
 | `--allow <X>: unknown code` | A misspelt code. [All codes](Diagnostic-Codes.md). |
-| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a sub-type the target lacks. |
+| `--subtype <id> is unavailable under <Target> (CFG-UNAVAILABLE)` | `validate` with a type the target lacks. |
 
 ### Presets and config
 
@@ -616,10 +626,10 @@ An error that stops a run prints `sdc: <message>` to stderr and exits 2 (3 for a
 | `file_started` | none. |
 | `progress` | `stage`, `done`, `total`. |
 | `warning` | `code`, `severity`, `message`, `data`. |
-| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha`, `coverage`, `bc6h_peak_ratio`). |
+| `file_done` | `output`, `validation` (`passed`, `levels`, `min_mip_psnr_db`, `alpha`, `coverage`, `bc6h_peak_ratio`, `skipped`: present, as `true`, only when the output was not checked). |
 | `file_skipped` | `skip`, `code`, `reason`. |
 | `file_failed` | `stage`, `error`. |
-| `batch_done` | `converted`, `up_to_date`, `skipped`, `skipped_intentional`, `failed`, `validation_failed`, `cancelled` (list of inputs). |
+| `batch_done` | `converted`, `up_to_date`, `skipped`, `skipped_intentional`, `failed`, `validation_failed`, `checked`, `checked_failed`, `cancelled` (list of inputs). |
 
 - `skip` values: `up_to_date`, `on_existing_skip`, `unresolved`, `blocked`, `duplicate`, `dds_input`, `packing_input`, `unknown_existing`, `pack_conflict`, `packed_source`, `generated_replaced`.
 - `stage` values: `discover`, `group`, `load`, `analyse`, `resolve`, `preprocess`, `mipmaps`, `compress`, `write`, `validate`.

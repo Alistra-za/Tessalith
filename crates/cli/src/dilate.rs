@@ -174,10 +174,7 @@ fn kind_of(stem: &str, reg: &PresetRegistry) -> (Kind, String) {
         may_wait: true,
     });
     let Some(st) = sug.first().map(|s| s.subtype) else {
-        return (
-            Kind::Data,
-            "no sub-type from the name, filled as stored".into(),
-        );
+        return (Kind::Data, "no type from the name, filled as stored".into());
     };
     let kind = if st.category() == Category::Normal
         && !matches!(st, Subtype::CoatNormal | Subtype::SkinWet)
@@ -190,7 +187,7 @@ fn kind_of(stem: &str, reg: &PresetRegistry) -> (Kind, String) {
     } else {
         Kind::Data
     };
-    (kind, st.id())
+    (kind, st.id().to_owned())
 }
 
 /// Where a mask texel counts: `_uvmask` images at 255, any other mask where R, G or B is above 0.

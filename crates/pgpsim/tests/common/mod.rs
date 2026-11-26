@@ -1,5 +1,8 @@
 //! Shared fixtures for the pgpsim integration tests.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 use nif::material::MaterialState;
 use nif::props::LightingTrailer;
 use pgpsim::{simulate, Badge, SimInput, SimResult};

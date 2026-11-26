@@ -5,7 +5,7 @@ Whether bc7e (BC7) and the ISPC Texture Compressor (BC6H) should run on ISPC's A
 Short answer:
 - **About 1.5 times as fast.** The `avx512skx-x16` path takes 0.613 to 0.809 of the AVX2 time over 24 configurations, geometric mean 0.673, on one thread. With all 16 logical CPUs busy (measured with the ISPC 1.31.0 build of the path) the ratio was 0.595 to 0.719, mean 0.662.
 - **Different bytes, equal quality.** 0.3% to 8.7% of the blocks differ, PSNR moves by at most 0.002 dB, and neither path is better.
-- **Two compilers.** ISPC 1.32.0 builds the two AVX-512 objects, because it fixes an AVX-512 miscompile in 1.31.0. ISPC 1.31.0 builds every other file, so the SSE2, SSE4, AVX and AVX2 objects stay the files that were vendored before.
+- **One compiler.** ISPC 1.32.0 builds all ten files, because it fixes an AVX-512 miscompile in 1.31.0. The swap moved no output byte on any path ([measurement](#ispc-1320-for-every-object-2026-11-26)).
 - **Not measured:** an Intel CPU with AVX-512. The tables ran under load; a later run with no build running, but one unrelated single-thread job, gave the same picture ([Re-checked on the branch](#re-checked-on-the-branch)).
 
 ## Method
@@ -124,6 +124,8 @@ Limits: 16 textures; one scalar stack load sits at another place in `kernel_avx5
 
 ### Why two compilers build the objects
 
+Superseded on 2026-11-26: one compiler now builds every file ([measurement](#ispc-1320-for-every-object-2026-11-26)). What follows is the reasoning of 2026-11-13.
+
 Every file of the four old targets and both dispatcher objects come from ISPC 1.31.0; only `bc7e_avx512skx.obj` and `kernel_avx512skx.obj` come from ISPC 1.32.0. The eight SSE2, SSE4, AVX and AVX2 objects then stay the vendored files byte for byte, so "nothing changed below AVX-512" rests on the files being equal, not on 16 textures hashing equal. The dispatchers keep the CPU-detection code shipped before, instruction for instruction, which matters because a CPU without AVX-512 can't be tested here. The only new code, the AVX-512 path, comes from the compiler without the known AVX-512 bug, and it costs nothing: both compilers' AVX-512 objects write the same bytes at the same speed. `encoders_sys::versions().ispc` stays `"1.31.0"`: it names the compiler of the objects behind every output written before, and a changed value would mark every output stale on every machine.
 
 ### The vendored files that are new or changed
@@ -180,11 +182,93 @@ Note JB dropped the SSE4 and AVX objects, so a CPU without AVX2 now runs ISPC's 
 - **Not measured.** An old CPU. On a Zen 5 the forced SSE2, SSE4 and AVX paths run on cores that also have AVX2, so the ratios may differ on a CPU that has only SSE.
 - **Repeat it.** Follow [How to repeat it](#how-to-repeat-it), with `--targets avx,sse2,sse4,avx2 --rounds 3` in place of `--all --rounds 3`. SSE4 and AVX are gone, so that run needs the objects of commit bc032e22 or earlier. The SSE2 hashes above must come out exactly. On a current build, `--targets sse2` gives those SSE2 hashes (the SSE2 objects are unchanged).
 
+## ISPC 1.32.0 for every object (2026-11-26)
+
+The 2026-11-13 measurement built the two AVX-512 objects with ISPC 1.32.0 and every other file with 1.31.0. For release 3.2 the owner chose one compiler, so all ten files are now ISPC 1.32.0 builds (Note LU3). This section records what that did to the bytes, to the time and to the dispatcher. The answer: **no output byte moved on any path**, encode time shows no measurable change, and the dispatcher's conditions for `avx2` and `avx512skx` are the same as in 1.31.0. The figures of 2026-11-13 above stay as that day's record. The kernels have changed since (patches 0004 to 0007 for BC6H, 0005 for bc7e), so their hashes are not repeated here; this section shows only that the compiler swap moved no byte.
+
+### Method
+
+- Base: the committed mix (1.31.0 objects, the two AVX-512 objects 1.32.0) on the kernels of today (patches 0004 to 0007 for BC6H, 0005 for bc7e). New: the same tree with the ten files rebuilt by ISPC 1.32.0 (`tools/regen-ispc.ps1 -Update`). Same machine, same commands, one object set at a time.
+- Machine: AMD Ryzen 7 9800X3D for every byte and time figure; the Linux test VM (an Intel i9-13900K guest, AVX2, no AVX-512, under Wine) for the Intel runs.
+- Pins and witnesses, with the test AVX2 cap and with it lifted: `level_identity`, `bc6h`, `bc7`, `bc7_fixup`, `target`, `init`, the engine's `golden`, `encode_versions`, `encode` and `events_manifest`, the GUI's `target_mod::` tests and the CLI's `cli_inspect_validate` and `cli_convert`.
+- Random strips: `random_strip_hashes`, capped (48 lines) and lifted (72).
+- Corpus runs (release, all three targets): `bc6h_quality` on the bench's 22 HDR images at six levels (132 encodes per path), `bc7_quality` on 60 opaque images at fast, veryslow and max with and without perceptual weighting (360 per path), and `ispc_speed` on the 16 textures of [Method](#method) (8 configurations per path).
+- Time: the two `ispc_speed` builds run alternately, three pairs, `--all --rounds 3 --targets sse2,avx2,avx512`, High priority, pinned to one logical CPU, nothing else building; the ratio is the median of the three 1.32 runs over the median of the three 1.31 runs, the spread is the min to max of the three per-pair ratios.
+
+### The ten files
+
+| File under `vendor/ispc-objs/` | Bytes | SHA-256 | Against the 1.31.0 mix |
+|---|---:|---|---|
+| `bc7e/bc7e.obj` (dispatcher) | 7,897 | `96D965F22250A7BBA96866F88E66D1C2A164214003B4B67F3F7143C67742A160` | changed (was 7,881) |
+| `bc7e/bc7e_sse2.obj` | 438,381 | `FF5930FDBCAA668F29314EA90C7CC344F7FD0A899D5E3C7ABA1842386EDA91B3` | changed (was 438,445) |
+| `bc7e/bc7e_avx2.obj` | 363,134 | `67BECAFD3256C6F4065B3DB4243CDC97A3DB36C7A89D0BC27B76935204A9429F` | same file |
+| `bc7e/bc7e_avx512skx.obj` | 213,966 | `6F5E47D06E3F792E6036C21E938A4E39909877F2F33647DA14E647D3819A8C44` | same file |
+| `bc7e/bc7e_ispc.h` | 6,625 | `5FDC21E0CC1E479C865E5504D0D58FEB6DB1B8A788916BBE3BA58E3D56BEFD72` | same file |
+| `ispctc/kernel.obj` (dispatcher) | 2,137 | `DB3CE6816ACD0EB2413F75E5A2F38CFE7D140E01795031B0DCB2941BAA629879` | changed (was 2,121) |
+| `ispctc/kernel_sse2.obj` | 223,410 | `DB9A192D187575AF780393B1F7A6FB099FC62A9D33BE777F0C8FFF610F7097DD` | same file |
+| `ispctc/kernel_avx2.obj` | 192,274 | `04A4614FD6722042DF4D7D4B0C69271801FDEB8696F0F2FC0B0B073CF2B3AA8B` | same file |
+| `ispctc/kernel_avx512skx.obj` | 112,012 | `4FB314690A4BDE5BE5EC2C29798A3EADF495E019E317F823129AD11CCD72BDBC` | same file |
+| `ispctc/kernel_ispc.h` | 4,567 | `A3629998BE013E0EC1BB908EAF5AD204A205AE39B5204FF78BC7CE4D2208A19D` | same file |
+
+- Three files changed: both dispatcher objects and the bc7e SSE2 object. The bc7e SSE2 object differs in code (register allocation, stack frame sizes, a few instruction choices), not only in metadata: the masked disassembly differs in 2,824 lines. The other seven files (the BC6H SSE2 object, both AVX2 objects, both AVX-512 objects and both headers) are byte-identical to the files they replace, so those paths run the same machine code as before.
+- A second rebuild of all ten files gave the same bytes.
+
+### Output bytes
+
+Differences between the base and the 1.32.0 objects, per path. Every pinned row is asserted by its test, so a pass is no row moved.
+
+| Check | SSE2 | AVX2 | AVX-512 |
+|---|---:|---:|---:|
+| `level_identity` hashes (`RECORDED` 32, `RECORDED_S1` 16, `X16_RECORDED` 64 per path) moved | 0 | 0 | 0 |
+| `tests/bc6h.rs` rows moved (5 per path, and the peak pin) | 0 | 0 | 0 |
+| Random strip hashes moved (48 lines capped, 72 with AVX-512) | 0 | 0 | 0 |
+| `bc6h_quality`, 132 encodes per path, not byte-identical | 0 | 0 | 0 |
+| `bc7_quality`, 360 encodes per path, not byte-identical | 0 | 0 | 0 |
+| `ispc_speed` hashes, 8 per path, different | 0 | 0 | 0 |
+
+- No `identity.json` key, no witness in `tests/bc7.rs` or `tests/bc6h.rs`, no golden, no GUI pin and no CLI alpha-254 percentage moved. The bc6h quality deltas (mPSNR, RMSLE, peak ratio) and the bc7 RGB PSNR delta are +0.000 at every level, with a half-width of 0.000.
+- Limit: both BC7 corpus runs force alpha to 255, so BC7 with alpha on the changed SSE2 object rests on the pins and witnesses (`level_identity`, `bc7`, `bc7_fixup`, the goldens), which all pass.
+- New against 2026-11-13: every file rebuilt together, on today's kernels, with the pins, witnesses and corpus runs above on all three paths. On the Ryzen the bytes equal those the replaced objects write on every path; the Intel VM runs show pass or fail only (the dispatcher test, the witnesses, the GUI pin), because the Intel byte pins skip.
+
+### The dispatcher
+
+One detection function (`__get_system_best_isa`) sits in each of `bc7e.obj` and `kernel.obj`; the two are identical within each compiler. The exported stubs (`bc7e_compress_blocks`, `CompressBlocksBC6H_ispc` and the `*_init` stubs) are the same in 1.31.0 and 1.32.0: rank 8 or more goes to the AVX-512 object, 5 or more to the AVX2 object, 0 or more to the SSE2 object, below 0 to `__terminate_now`.
+
+| Target | `IspcTarget::supported()` | ISPC 1.31.0 dispatcher | ISPC 1.32.0 dispatcher |
+|---|---|---|---|
+| `avx2` | AVX2, FMA, F16C, BMI1, BMI2 | OSXSAVE, AVX, OS YMM state, then AVX-VNNI (rank 6) or F16C, RDRAND and AVX2 (rank 5); no FMA or BMI test | same |
+| `avx512skx` | `avx2`'s (AVX2, FMA, F16C, BMI1, BMI2) and AVX-512 F, DQ, CD, BW, VL | OSXSAVE, AVX2, AVX-512 F, OS ZMM state, DQ, CD, BW, VL (ranks 8 to 13: SKX, Ice Lake, Sapphire Rapids and AVX10 all map to this object); no AVX, FMA, F16C or BMI test | same |
+
+- 1.32.0 changed no condition for these two targets. Its changes are in ranks that land on the same AVX-512 object: the CPUID leaf 0 guard of the AVX10 query (1.31.0 guarded it on the CPU signature), the Ice Lake feature mask (0x5F40 became 0x5840) and the leaf 7 subleaf 1 bits of the AVX10.2 test.
+- `supported()` differs from the dispatcher in both compilers (Note LU7): on a CPU with AVX2 but neither RDRAND nor AVX-VNNI, `best()` reports `avx2` while the dispatcher runs the SSE2 object.
+- New test: `the_dispatcher_runs_the_best_target` encodes a BC7 and a BC6H fixture through the dispatcher, the SSE2 object and the AVX2 object and checks the dispatcher against `best()`. On the Ryzen (`best = avx512`) the differing blocks of 1024 are BC7 28 / 62 / 59 and BC6H 19 / 26 / 15 (SSE2 against AVX2, dispatcher against SSE2, dispatcher against AVX2), the same with both compilers: the dispatcher's bytes equal neither direct object's.
+
+### The Intel run
+
+On the Linux test VM, from the same objects, under Wine:
+- `target`: 4 passed; `best = avx2`, and the dispatcher wrote the AVX2 object's bytes for bc7e and for BC6H. Differing blocks of 1024: BC7 24 / 24 / 0, BC6H 20 / 20 / 0.
+- `bc6h` whole: 25 passed, 9 ignored. C22 (`a_wide_channel_block_takes_the_doubled_window`) wrote mode 18, the mode 6 family, at Fast and Basic on SSE2 and AVX2, so its mode-1 assertion held on Intel; Basic's family check skips there (Note JC).
+- `bc7` whole: 39 passed, 2 ignored; every witness passes.
+- The GUI's `target_mod::`: 36 passed and 11 failed with the same message, `No glyph for "⏵" (U+23F5)`: Wine's only font has no such glyph. The 1.31.0 build fails the same 11. The GUI pin `a_skyrim_shaped_project_keeps_its_output` passes.
+- Not measured: whether the Intel/AMD byte split of Note JC persists under 1.32.0. The Intel byte pins still skip.
+
+### Time
+
+| Path | Geometric mean of 1.32.0 over 1.31.0, 8 configurations | Spread of the three pairs |
+|---|---:|---|
+| SSE2 | 1.0030 | 1.0014 to 1.0037 |
+| AVX2 | 1.0012 | 0.9988 to 1.0063 |
+| AVX-512 | 1.0050 | 1.0010 to 1.0049 |
+
+- The AVX2 and AVX-512 encoder objects and every BC6H encoder object (the BC6H dispatcher differs, but it holds no encoder code) are byte-identical in both builds, so their ratios measure the method's own floor, and that floor is not centred on 1.00: the AVX-512 line reads +0.5 % on identical code, probably from run order (the 1.32.0 build always ran second in a pair) or the executable's layout. The SSE2 line (+0.3 %) lies inside that floor, and its five BC7 rows, the only changed code, sit in the same range as the AVX2 BC7 rows. So the change is not measurable on any path.
+- The ratio is of the medians over the three runs, not of the pair ratios, so it can lie just outside the pair range: the AVX-512 geometric mean is 1.00498 of the medians against a pair maximum of 1.0049.
+- A run took about 28 minutes; the three pairs ran from 23:09 to 01:58.
+
 ## Not measured
 
 - **An Intel CPU with AVX-512.** The AVX-512 pins were recorded on this AMD Zen 5 CPU only. Whether `vrcp14ps` gives the same bits on Intel is not known, so an Intel CPU may write other AVX-512 bytes (Note HW suspects the same of `vrcpps` on the AVX2 path).
 - **A machine with nothing else running.** The tables' rounds (one thread pinned at High priority) all ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table. The branch's last run had no build beside it but one other single-thread job, and used the example's unpinned thread.
-- **The dispatcher's choice on a CPU without AVX-512.** It can't be run here; a CI runner whose CPU lacks AVX-512 shows it, because `level_identity` encodes through the dispatcher there and compares with the AVX2 row.
+- **The dispatcher's choice on a CPU without AVX-512.** Shown since 2026-11-26 on an Intel CPU with AVX2: the test `the_dispatcher_runs_the_best_target` printed `best = avx2` and the dispatcher's bytes equalled the AVX2 object's, under Wine on the Linux test VM ([the section](#ispc-1320-for-every-object-2026-11-26)). On an AMD CI runner whose CPU lacks AVX-512, `level_identity` also encodes through the dispatcher and compares with the AVX2 row; on an Intel runner it skips whole (Note JC).
 
 ## How to repeat it
 

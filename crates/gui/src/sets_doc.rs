@@ -2237,6 +2237,37 @@ impl SetsDoc {
     }
 }
 
+impl SetsDoc {
+    /// Whether a write of a plain value at dotted `path` under set `id`'s entry can land and replaces no table: the
+    /// top-level `sets` item is absent or an array of tables (any other shape reads as no entries, and the first write
+    /// would replace it whole, `tables_mut`); every dotted parent of `path` under the set's entry is absent or a table
+    /// (the rule of `sub_table`, which refuses a plain value); the last key is absent or a plain value (`set_value`
+    /// would replace a table there whole). A set with no entry passes the last two: its entry is created empty.
+    pub fn path_open(&self, id: &str, path: &str) -> bool {
+        let sets = self.f.doc.get("sets");
+        if sets.is_some_and(|s| !s.is_array_of_tables()) {
+            return false;
+        }
+        let Some(entry) = self.table(id) else {
+            return true;
+        };
+        let parts: Vec<&str> = path.split('.').collect();
+        let (last, dirs) = parts.split_last().expect("one part at least");
+        let mut cur: &dyn TableLike = entry;
+        for d in dirs {
+            match cur.get(d) {
+                None => return true,
+                Some(item) => match item.as_table_like() {
+                    Some(next) => cur = next,
+                    None => return false,
+                },
+            }
+        }
+        cur.get(last)
+            .is_none_or(|item| item.is_value() && item.as_inline_table().is_none())
+    }
+}
+
 /// Write `v` at dotted `path` under `t` (sub-tables as dotted keys), or remove it with `None` (and any sub-table it
 /// leaves empty). True when something changed.
 fn write_path(t: &mut dyn TableLike, path: &str, v: Option<Json>) -> bool {

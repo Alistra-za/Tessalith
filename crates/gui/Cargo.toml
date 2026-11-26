@@ -72,6 +72,11 @@ path = "tests/device_lost.rs"
 name = "fonts_env"
 path = "tests/fonts_env.rs"
 
+# Installs a global allocator (counts one settled frame, Note LF2).
+[[test]]
+name = "alloc_frame"
+path = "tests/alloc_frame.rs"
+
 [[test]]
 name = "ui_drive"
 path = "tests/ui_drive/main.rs"

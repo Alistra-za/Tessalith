@@ -483,7 +483,7 @@ fn fmt_v(v: &[f32]) -> String {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_GOLDEN (the captured golden fixtures) and SDC_ACHERUS (the owner's MO2 instance)"]
 fn extraction_matches_capture() {
     let Some(env) = env() else { return };
     let fp = render3d::ShaderSource::Bundled;
@@ -813,7 +813,7 @@ const WANTED: [&str; 5] = [
 ];
 
 #[test]
-#[ignore]
+#[ignore = "needs SDC_GOLDEN (the captured golden fixtures) and SDC_ACHERUS (the owner's MO2 instance)"]
 fn trace_values_match_unit_functions() {
     let Some(env) = env() else { return };
     let fp = render3d::ShaderSource::Bundled;

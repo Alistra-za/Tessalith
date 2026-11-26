@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "every GUI test file declares this module for itself (Note HU1) and each uses a subset"
+)]
 //! A folder like a small mod: a diffuse with varying alpha (needs an alpha decision), a normal with no stated green
 //! convention, a 3 px diffuse (blocked by DIM-SMALL), a plain diffuse, and roughness + AO that pack `_rmaos`.
 use eframe::egui;
@@ -15,7 +18,13 @@ use std::time::{Duration, Instant};
 
 type RecordedSpecs = Arc<Mutex<Vec<PickerSpec>>>;
 
-#[allow(dead_code)]
+pub fn instant_tips(ctx: &eframe::egui::Context) {
+    ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+}
+
 pub fn toml_has_key(text: &str, key: &str) -> bool {
     text.lines().any(|line| {
         line.split_once('=')
@@ -1353,6 +1362,66 @@ pub fn bar_rects_in<S>(
     c: eframe::egui::Rect,
 ) -> Vec<(eframe::egui::Rect, u8)> {
     bar_like(&filled_rects(&h.output().shapes), c)
+}
+
+/// Every texture group open in `m.settings` (the groups start closed, so a test that reads a row inside one
+/// opens them before its harness is built).
+pub fn open_texture_groups(m: &mut AppModel) {
+    for g in sdc_gui::model::panel_groups::PanelGroup::ALL {
+        sdc_gui::model::panel_groups::set_open(&mut m.settings, g, true);
+    }
+}
+
+/// The distinct (role, label) kinds of enabled control inside `area` (texture-panel-compact plan, "Expected control
+/// kinds"): AccessKit nodes of an input role, every digit run turned into `#`, a disclosure triangle's label cut at its
+/// first ", ", and a "Use {type}" button folded into one kind.
+pub fn control_kinds<S>(
+    h: &egui_kittest::Harness<'_, S>,
+    area: eframe::egui::Rect,
+) -> BTreeSet<(String, String)> {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let roles = [
+        Role::Button,
+        Role::CheckBox,
+        Role::ComboBox,
+        Role::Slider,
+        Role::SpinButton,
+        Role::TextInput,
+        Role::Link,
+        Role::DisclosureTriangle,
+        Role::RadioButton,
+        Role::MenuItem,
+    ];
+    let mut kinds = BTreeSet::new();
+    for role in roles {
+        for n in h.query_all_by_role(role) {
+            if !area.contains_rect(n.rect()) || n.accesskit_node().is_disabled() {
+                continue;
+            }
+            let mut label = n.accesskit_node().label().unwrap_or_default();
+            if role == Role::DisclosureTriangle {
+                if let Some((head, _)) = label.split_once(", ") {
+                    label = head.to_string();
+                }
+            }
+            if role == Role::Button && label.starts_with("Use ") {
+                label = "Use {type}".to_string();
+            }
+            let mut folded = String::new();
+            for c in label.chars() {
+                if c.is_ascii_digit() {
+                    if !folded.ends_with('#') {
+                        folded.push('#');
+                    }
+                } else {
+                    folded.push(c);
+                }
+            }
+            kinds.insert((format!("{role:?}"), folded));
+        }
+    }
+    kinds
 }
 
 /// The x a control may reach beside a scroll bar whose track is `track`: short of the 10 px the bar takes when hovered

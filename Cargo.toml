@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp", "crates/texcore", "crates/bcenc"]
 
 [workspace.package]
-version = "3.0.1"
+version = "3.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 publish = false
@@ -32,7 +32,7 @@ encoders-sys = { path = "crates/encoders-sys" }
 bcenc = { path = "crates/bcenc" }
 engine = { path = "crates/engine" }
 encoding_rs = "0.8.42"
-lz4_flex = { version = "0.14.0", default-features = false, features = ["frame", "std"] }
+lzzzz = { version = "1.1.0", default-features = false }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 crc32fast = "1.5.2"
 flate2 = "1"
@@ -42,6 +42,10 @@ texcore = { path = "crates/texcore" }
 [workspace.lints.clippy]
 exit = "warn"
 undocumented_unsafe_blocks = "warn"
+allow_attributes_without_reason = "warn"
+ignore_without_reason = "warn"
+format_push_string = "warn"
+assigning_clones = "warn"
 
 [profile.dev]
 opt-level = 1

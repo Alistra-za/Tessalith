@@ -268,7 +268,7 @@ impl AppModel {
         // The collapsed state goes with the name.
         let was_collapsed = self.group_collapsed(&old);
         self.edit_docs(&format!("Rename group {old}"), None, false, {
-            let (old, new) = (old.clone(), new.clone());
+            let new = new.clone();
             move |_, d| d.rename_group(&old, &new)
         });
         if was_collapsed && self.stored_group(&new).is_ok() {

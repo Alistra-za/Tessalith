@@ -37,7 +37,12 @@ fn open_from_header(h: &mut H) {
 }
 
 fn mode_name(target: &str) -> String {
-    format!("Mode (this project): {target}")
+    let label = match target {
+        "cs" => "Community Shaders (cs)",
+        "vanilla" => "Base game (vanilla)",
+        other => panic!("no mode label for {other:?}"),
+    };
+    format!("Mode (this project): {label}")
 }
 
 /// The text of a combo: its value, or the label egui gives it (the selected text).
@@ -67,7 +72,7 @@ fn settings_opens_as_a_centre_tab_from_the_header() {
 }
 
 #[test]
-fn the_settings_tab_holds_exactly_four_groups() {
+fn the_settings_tab_holds_exactly_five_groups() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     m.open_settings_tab();
@@ -77,7 +82,7 @@ fn the_settings_tab_holds_exactly_four_groups() {
     let app = h.get_by_label(APP_HEADING).rect();
     assert!(project.bottom() <= app.top(), "{project:?} {app:?}");
     // The group titles: the labels at the first title's x under the App heading (a group's body is indented less
-    // than its title, which follows the collapse arrow), in y order. A fifth group would add a fifth.
+    // than its title, which follows the collapse arrow), in y order. A sixth group would add a sixth.
     let below_app = |r: egui::Rect| c.contains_rect(r) && r.top() >= app.bottom();
     let x0 = h
         .query_all_by_label("Preview")
@@ -97,16 +102,17 @@ fn the_settings_tab_holds_exactly_four_groups() {
         .collect();
     titles.sort_by(|a, b| a.0.total_cmp(&b.0));
     let names: Vec<&str> = titles.iter().map(|t| t.1.as_str()).collect();
-    assert_eq!(names, ["Preview", "Checks", "Cache", "Columns"]);
+    assert_eq!(names, ["Preview", "Checks", "Export", "Cache", "Columns"]);
     // Each group holds its controls: between its title and the next one.
     let ys: Vec<f32> = titles.iter().map(|t| t.0).chain([f32::INFINITY]).collect();
-    let groups: [&[(Role, &str)]; 4] = [
+    let groups: [&[(Role, &str)]; 5] = [
         &[(Role::CheckBox, "Live encode setting")],
         &[
             (Role::CheckBox, "Low detail check"),
             (Role::CheckBox, "Green direction check"),
             (Role::CheckBox, "Parallax check"),
         ],
+        &[(Role::CheckBox, "Validate exported DDS")],
         &[(Role::SpinButton, "Analysis cache limit")],
         &[
             (Role::CheckBox, "Textures column"),
@@ -449,6 +455,11 @@ fn app_settings_save_to_gui_toml_at_once() {
         .click();
     h.run();
     assert_eq!(saved().checks.low_detail, !low, "Low detail saved at once");
+    assert!(!saved().validate_exports);
+    h.get_by_role_and_label(Role::CheckBox, "Validate exported DDS")
+        .click();
+    h.run();
+    assert!(saved().validate_exports, "Validate saved at once");
     // The Columns tick is a check box ticked while its column shows (Note BH15's eye, now a tick).
     let toggled = |h: &H| {
         h.get_by_role_and_label(Role::CheckBox, "Textures column")
@@ -480,6 +491,7 @@ fn app_settings_save_to_gui_toml_at_once() {
     assert_eq!(saved.live_encode, !live);
     assert_eq!(saved.checks.low_detail, !low);
     assert!(saved.textures_hidden);
+    assert!(saved.validate_exports);
     assert_eq!(saved.analysis_cache_mb, Some(800));
 }
 
@@ -494,7 +506,8 @@ fn the_settings_tab_sets_the_project_mode() {
     open_from_header(&mut h);
     h.get_by_label(&mode_name("cs")).click();
     h.run();
-    h.get_by_role_and_label(Role::Button, "vanilla").click();
+    h.get_by_role_and_label(Role::Button, "Base game (vanilla)")
+        .click();
     h.run();
     // The target the plan reports lands with the re-plan.
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
@@ -564,6 +577,23 @@ fn the_mode_row_shows_in_the_popped_out_window() {
     h.get_by_label(PROJECT_HEADING);
 }
 
+#[test]
+fn the_mode_says_community_shaders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()), 1400.0);
+    open_from_header(&mut h);
+    h.get_by_label("Mode (this project): Community Shaders (cs)")
+        .click();
+    h.run();
+    assert!(h
+        .query_by_role_and_label(Role::Button, "Base game (vanilla)")
+        .is_some());
+    assert!(h
+        .query_by_label("This beats the Target set in a preset.")
+        .is_some());
+    assert!(h.query_by_label_contains("Wins over").is_none());
+}
+
 /// The plan's 1280 px capture of the Settings tab, as a test: the Mode row is there and its pieces do not overlap.
 #[test]
 fn the_mode_row_fits_at_1280() {
@@ -573,7 +603,9 @@ fn the_mode_row_fits_at_1280() {
     let heading = h.get_by_label(PROJECT_HEADING).rect();
     let label = h.get_by_label("Mode").rect();
     let combo = h.get_by_label(&mode_name("cs")).rect();
-    let note = h.get_by_label("Wins over a preset's own Target.").rect();
+    let note = h
+        .get_by_label("This beats the Target set in a preset.")
+        .rect();
     let all = [heading, label, combo, note];
     for (i, a) in all.iter().enumerate() {
         assert!(a.right() <= 1280.5, "{a:?} runs off the window");

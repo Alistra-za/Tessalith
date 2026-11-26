@@ -9,7 +9,7 @@
   "cov/textures/c/blend_bc7.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "98e67f9f535fa7ee5c251ae3422c9801f1b3362d4d7551dc2e64222e2dd73188",
+    "payload_sha256@avx2": "3e3ae27379357d2b37fa1357372bbe7ff0f752cadc5a33a305dd5ee1ed38bce3",
     "subtype": "diffuse",
     "width": 64
   },
@@ -44,14 +44,14 @@
   "cov/textures/c/cutout_bc7.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "b1e4946c09ca80fbdcd969251e8c3c89751a5a6ca35e1e586526165e3fdf2849",
+    "payload_sha256@avx2": "e569da34df063bcc0e6d1d63590bb7089b5c0a54323775407af99f2fd58a8a0c",
     "subtype": "diffuse",
     "width": 64
   },
   "cov/textures/c/gpick_rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "dcc8d143e607232ca965ed25f197b222af0c48435bd7c7b76951026ad943fd39",
+    "payload_sha256@avx2": "347cdb247af0cff5e88bb5d1203ca16c83d6b86f7ebbdbd4d77232ee09299892",
     "subtype": "rmaos",
     "width": 64
   },
@@ -135,7 +135,7 @@
   "cov/textures/c/rpick_rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "329188f2e272595c8d5e4e78e113f8442d4b487e04935b596118861e19f58a08",
+    "payload_sha256@avx2": "65eb9061310f59309f20b9ee166daa3c63ce584aa45d399b87dd376f102d391c",
     "subtype": "rmaos",
     "width": 64
   },
@@ -156,7 +156,7 @@
   "cov/textures/c/twosize_rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "63367287436e8596a2dc01b60e56df70cb70cb636f26976d9d822f1d3ad92cce",
+    "payload_sha256@avx2": "5ff9406ff070e0a19b58960ec42338f0a02c046ec87b3245a4876a34e1558cde",
     "subtype": "rmaos",
     "width": 64
   },
@@ -184,49 +184,49 @@
   "textures/h/backlight_tint.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "backlight_tint",
     "width": 64
   },
   "textures/h/coat_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "6aa4a03e203d2107211865943d8a1f816c7bd9411503e5758b9e1591f0c2be17",
+    "payload_sha256@avx2": "4ee3409af93d035b2dbde651cc002d5509462a0371c416c9591926c56962e12e",
     "subtype": "coat_normal",
     "width": 64
   },
   "textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "d6eaca3b114275cb38c0de744d2b39a8c46f19c8794d87dbaf2132e18f5bcb6e",
+    "payload_sha256@avx2": "583d6872ecb6f43b4902a7bef210123f524da389441d864ff4d98bc917d80190",
     "subtype": "complex_grass",
     "width": 64
   },
   "textures/h/complex_material.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "99d2a99e7e503ef8bc4c4be050aad22b9081f243921c0f8cfad32d4f50c074b4",
+    "payload_sha256@avx2": "bb65e92d87ae32210c1caa4dce5e47f17250fe1ad861ac91f5defe8549878718",
     "subtype": "complex_material",
     "width": 64
   },
   "textures/h/cubemap.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "02beeb88f5dcca7cabb397b1111047c7d7575140d5f6dae7e7ca99ea1d078c5c",
+    "payload_sha256@avx2": "ae02567c4c650eff017308539dc278456c22a2abc0032acd18d855a9b85bdd68",
     "subtype": "cubemap",
     "width": 64
   },
   "textures/h/detail_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "detail_normal",
     "width": 64
   },
   "textures/h/diffuse.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "98e67f9f535fa7ee5c251ae3422c9801f1b3362d4d7551dc2e64222e2dd73188",
+    "payload_sha256@avx2": "3e3ae27379357d2b37fa1357372bbe7ff0f752cadc5a33a305dd5ee1ed38bce3",
     "subtype": "diffuse",
     "width": 64
   },
@@ -247,7 +247,7 @@
   "textures/h/generic_data.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "99d2a99e7e503ef8bc4c4be050aad22b9081f243921c0f8cfad32d4f50c074b4",
+    "payload_sha256@avx2": "bb65e92d87ae32210c1caa4dce5e47f17250fe1ad861ac91f5defe8549878718",
     "subtype": "generic_data",
     "width": 64
   },
@@ -261,7 +261,7 @@
   "textures/h/glow.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "glow",
     "width": 64
   },
@@ -275,7 +275,7 @@
   "textures/h/hdr_sky.dds": {
     "format": "Bc6hUf16",
     "height": 64,
-    "payload_sha256@avx2": "15dcdc0134815f4db68fd73aacfaad76942c0eaff3c47593c35c20af9a1f48c2",
+    "payload_sha256@avx2": "a6bee4b818d4a7edb74f997c1afa6a1a1382c62454689ebf70f5efa5e2df8aff",
     "subtype": "hdr_sky",
     "width": 64
   },
@@ -289,21 +289,21 @@
   "textures/h/landscape.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "c76d1e152a0f232487d79836756977d54579828f17f76c8cf293f40419b74694",
+    "payload_sha256@avx2": "9ca421ba57b4036c4a541c5678e20b22678be0e0aab10079c232840f51719386",
     "subtype": "landscape_diffuse",
     "width": 64
   },
   "textures/h/landscape_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "landscape_normal",
     "width": 64
   },
   "textures/h/msn.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "e266febc65f1f6955923d1d79785c002055f7756e44434976bdd7bbff5b161c0",
+    "payload_sha256@avx2": "5df9243dee9e5e1aa95d29d545bda6b85de2766f87a61b0797edc63051f219c6",
     "subtype": "msn",
     "width": 64
   },
@@ -317,42 +317,42 @@
   "textures/h/normal.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "normal",
     "width": 64
   },
   "textures/h/pbr.dds": {
     "format": "Bc7 { srgb: true }",
     "height": 64,
-    "payload_sha256@avx2": "98e67f9f535fa7ee5c251ae3422c9801f1b3362d4d7551dc2e64222e2dd73188",
+    "payload_sha256@avx2": "3e3ae27379357d2b37fa1357372bbe7ff0f752cadc5a33a305dd5ee1ed38bce3",
     "subtype": "pbr_albedo",
     "width": 64
   },
   "textures/h/pbr_f.dds": {
     "format": "Bc7 { srgb: true }",
     "height": 64,
-    "payload_sha256@avx2": "c76d1e152a0f232487d79836756977d54579828f17f76c8cf293f40419b74694",
+    "payload_sha256@avx2": "9ca421ba57b4036c4a541c5678e20b22678be0e0aab10079c232840f51719386",
     "subtype": "pbr_fuzz",
     "width": 64
   },
   "textures/h/pbr_g.dds": {
     "format": "Bc7 { srgb: true }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "pbr_emissive",
     "width": 64
   },
   "textures/h/pbr_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "6a301d9e3d73a8860e91d49d36577c5f281152c04b84887fe7c0fffba318563a",
+    "payload_sha256@avx2": "895e88d2be8f204773db0eded4216e66a49d4d95cb0ad974978800571e969d17",
     "subtype": "pbr_normal",
     "width": 64
   },
   "textures/h/pbr_subsurface.dds": {
     "format": "Bc7 { srgb: true }",
     "height": 64,
-    "payload_sha256@avx2": "c76d1e152a0f232487d79836756977d54579828f17f76c8cf293f40419b74694",
+    "payload_sha256@avx2": "9ca421ba57b4036c4a541c5678e20b22678be0e0aab10079c232840f51719386",
     "subtype": "pbr_subsurface",
     "width": 64
   },
@@ -366,28 +366,28 @@
   "textures/h/rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "56abb023b313df2416bba3aa1b4f218a2a338a028d6ff13e4f0f255f5e6a6688",
+    "payload_sha256@avx2": "8b0925fb97963d4ea99f021400c570befb33dfbc759c409b0a4b0baa4715fe15",
     "subtype": "rmaos",
     "width": 64
   },
   "textures/h/skin.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "98e67f9f535fa7ee5c251ae3422c9801f1b3362d4d7551dc2e64222e2dd73188",
+    "payload_sha256@avx2": "3e3ae27379357d2b37fa1357372bbe7ff0f752cadc5a33a305dd5ee1ed38bce3",
     "subtype": "skin_albedo",
     "width": 64
   },
   "textures/h/skin_detail.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "skin_detail",
     "width": 64
   },
   "textures/h/skin_rfaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "56abb023b313df2416bba3aa1b4f218a2a338a028d6ff13e4f0f255f5e6a6688",
+    "payload_sha256@avx2": "8b0925fb97963d4ea99f021400c570befb33dfbc759c409b0a4b0baa4715fe15",
     "subtype": "skin_rfaos",
     "width": 64
   },
@@ -401,14 +401,14 @@
   "textures/h/skin_wet.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "skin_wet",
     "width": 64
   },
   "textures/h/subsurface_tint.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "subsurface_tint",
     "width": 64
   },
@@ -464,42 +464,42 @@
   "vanilla/textures/h/backlight_tint.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "backlight_tint",
     "width": 64
   },
   "vanilla/textures/h/complex_grass.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 128,
-    "payload_sha256@avx2": "d6eaca3b114275cb38c0de744d2b39a8c46f19c8794d87dbaf2132e18f5bcb6e",
+    "payload_sha256@avx2": "583d6872ecb6f43b4902a7bef210123f524da389441d864ff4d98bc917d80190",
     "subtype": "complex_grass",
     "width": 64
   },
   "vanilla/textures/h/complex_material.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "99d2a99e7e503ef8bc4c4be050aad22b9081f243921c0f8cfad32d4f50c074b4",
+    "payload_sha256@avx2": "bb65e92d87ae32210c1caa4dce5e47f17250fe1ad861ac91f5defe8549878718",
     "subtype": "complex_material",
     "width": 64
   },
   "vanilla/textures/h/cubemap.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "02beeb88f5dcca7cabb397b1111047c7d7575140d5f6dae7e7ca99ea1d078c5c",
+    "payload_sha256@avx2": "ae02567c4c650eff017308539dc278456c22a2abc0032acd18d855a9b85bdd68",
     "subtype": "cubemap",
     "width": 64
   },
   "vanilla/textures/h/detail_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "detail_normal",
     "width": 64
   },
   "vanilla/textures/h/diffuse.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "bee630a5ff87b3d49b4f101ab3a00f25e2948bbfccbf481720f21e1c3f5606b8",
+    "payload_sha256@avx2": "ca8fb8423d8c7284fdaae06e9289c06f45d40d79e0e1eea1218cd244415d9a07",
     "subtype": "diffuse",
     "width": 64
   },
@@ -513,7 +513,7 @@
   "vanilla/textures/h/generic_data.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "99d2a99e7e503ef8bc4c4be050aad22b9081f243921c0f8cfad32d4f50c074b4",
+    "payload_sha256@avx2": "bb65e92d87ae32210c1caa4dce5e47f17250fe1ad861ac91f5defe8549878718",
     "subtype": "generic_data",
     "width": 64
   },
@@ -527,7 +527,7 @@
   "vanilla/textures/h/glow.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "6b569374d580167419edf95aaa938d56b0b8c325840e3558c7ef76df3253cccf",
+    "payload_sha256@avx2": "201a06a9cc47d407e53a0d3d9a8cba98970d355e58c319489eb7856b00cf877a",
     "subtype": "glow",
     "width": 64
   },
@@ -548,21 +548,21 @@
   "vanilla/textures/h/landscape.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "c76d1e152a0f232487d79836756977d54579828f17f76c8cf293f40419b74694",
+    "payload_sha256@avx2": "9ca421ba57b4036c4a541c5678e20b22678be0e0aab10079c232840f51719386",
     "subtype": "landscape_diffuse",
     "width": 64
   },
   "vanilla/textures/h/landscape_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "landscape_normal",
     "width": 64
   },
   "vanilla/textures/h/msn.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "e266febc65f1f6955923d1d79785c002055f7756e44434976bdd7bbff5b161c0",
+    "payload_sha256@avx2": "5df9243dee9e5e1aa95d29d545bda6b85de2766f87a61b0797edc63051f219c6",
     "subtype": "msn",
     "width": 64
   },
@@ -576,7 +576,7 @@
   "vanilla/textures/h/normal.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "d85b6b44ee0a9ecbf13e424a919f7a5064b746513f2cd39574849012fb2d5190",
+    "payload_sha256@avx2": "3fa2cdb862567e7cccc4acea992826b7e4a2003fafe27e25586dbb60030a3313",
     "subtype": "normal",
     "width": 64
   },
@@ -590,7 +590,7 @@
   "vanilla/textures/h/subsurface_tint.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 64,
-    "payload_sha256@avx2": "0ab282f3d9e51c4b8f0647046f0d25a1b239749f774c1f193c409d79e7305735",
+    "payload_sha256@avx2": "56231d71fc38945f2668275e9614927f35b82f967982330eaeec90ea73288792",
     "subtype": "subsurface_tint",
     "width": 64
   },
@@ -604,7 +604,7 @@
   "vanilla/textures/pbr/rock.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 16,
-    "payload_sha256@avx2": "9fdcdb4b306aa47b1d72914538c3cadb8c77c80b1087eb82a0020921e63f5589",
+    "payload_sha256@avx2": "a9b86da0851eaddb5f8c28f92927dda3de58f52daf27c8e59a525d9b9c8c73bf",
     "subtype": "diffuse",
     "width": 16
   },

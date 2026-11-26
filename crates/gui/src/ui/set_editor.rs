@@ -259,7 +259,6 @@ pub struct View {
     pub noise_uv: Option<f32>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn draw(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -628,6 +627,23 @@ pub(super) fn show_main_tab(ctx: &egui::Context) {
     });
 }
 
+/// Show set `id`'s editor on its main tab and ask for focus on its `field` (Fix path, Edit match…): the 3D view is off
+/// so the editor is drawn, and `pgp_fields` takes the one-shot request.
+pub(super) fn focus_set_field(ctx: &egui::Context, model: &mut AppModel, id: &str, field: &str) {
+    if model.settings.set_view_3d {
+        model.settings.set_view_3d = false;
+        model.save_settings();
+    }
+    show_main_tab(ctx);
+    let at = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::unique(super::problems::FOCUS_FIELD),
+            (id.to_string(), field.to_string(), at),
+        )
+    });
+}
+
 /// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
 pub fn show_also_tab(ctx: &egui::Context) {
     ctx.data_mut(|d| {
@@ -956,7 +972,10 @@ fn flag(
     .clicked()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the model it reads, the set view and the slot's cell, the thumbnail cache and act queue it writes, and the drop position, size estimate and room of one row; they come from the grid loop's own locals, so a struct would be built per row only to be taken apart here"
+)]
 fn row(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1781,7 +1800,7 @@ fn role_label(ui: &egui::Ui, role: RawMap) -> Arc<RoleLabel> {
     let key = egui::Id::unique(("fill-role", role, &small, ui.pixels_per_point().to_bits()));
     super::paint_cached(ui.ctx(), key, || {
         let id = role.id();
-        let text = if role == RawMap::Ao { "AO" } else { &id };
+        let text = if role == RawMap::Ao { "AO" } else { id };
         let width = ui
             .painter()
             .layout_no_wrap(text.to_owned(), small, egui::Color32::PLACEHOLDER)
@@ -1793,7 +1812,7 @@ fn role_label(ui: &egui::Ui, role: RawMap) -> Arc<RoleLabel> {
             text: Arc::new(egui::RichText::new(text).small()),
             source: format!("{text} channel source"),
             fill: format!("{text} fill"),
-            id,
+            id: id.to_owned(),
         })
     })
 }
@@ -1931,7 +1950,7 @@ fn source_picker(
                             why.is_none(),
                             egui::Button::selectable(now.is_none(), "Value"),
                         )
-                        .on_disabled_hover_text(why.clone().unwrap_or_default());
+                        .on_disabled_hover_text(why.unwrap_or_default());
                     if value.clicked() && now.is_some() {
                         if let Some(c) = channel {
                             acts.push(Act::ChannelHelper(packed.into(), c as u8, None));

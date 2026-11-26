@@ -65,6 +65,7 @@ fn version_lists_the_encoders() {
         "ispc_texture_compressor ",
         "ispc ",
         "bc7e patch ",
+        "bc7e fixes ",
         "rgbcx patch ",
     ];
     let lines: Vec<&str> = out.lines().collect();

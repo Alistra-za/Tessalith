@@ -198,6 +198,15 @@ pub fn draw_with_scan(
     scan: Option<&mut crate::model::meshes::MeshesModel>,
 ) {
     state.thumbs.sweep(model.items_rev());
+    // The texture panel's forced-open latch follows the selection even in a frame no panel draws.
+    model.observe_panel_selection();
+    // A Go to no row took (its texture or field was never drawn) is dropped after a few passes. Every frame: an
+    // `Option` test and a compare, no allocation (Note LH7).
+    if model.nav.reveal_field.as_ref().is_some_and(|r| {
+        ui.ctx().cumulative_pass_nr() > r.pass + crate::model::nav::REVEAL_FIELD_PASSES
+    }) {
+        model.nav.reveal_field = None;
+    }
     // Trace-debug #52: a modal or Slot commands left open would act on the new folder's set of the same id.
     if state
         .folder_epoch
@@ -594,7 +603,9 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             if take_scroll_reset(ui.ctx()) {
                 area = area.vertical_scroll_offset(0.0);
             }
-            area.show(ui, |ui| settings_panel::draw(ui, model, key, false));
+            area.show(ui, |ui| {
+                settings_panel::draw(ui, model, key, settings_panel::Surface::Centre)
+            });
         }
         Selection::Set(_) | Selection::SetId(_) => {
             let view = set_editor::View {

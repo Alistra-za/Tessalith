@@ -1,10 +1,13 @@
 //! Task 14 (item 20, DECISIONS AG112-AG114): the toasts (fake clock), the Messages log and its action.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::messages::{Messages, Severity, FADE, FADE_WARN, LOG_CAP, MAX_SHOWN};
-use sdc_gui::model::AppModel;
+use engine::config::Subtype;
+use sdc_gui::model::messages::{
+    EntryAction, Messages, Severity, FADE, FADE_WARN, LOG_CAP, MAX_SHOWN,
+};
+use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::ui::actions;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -257,6 +260,163 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
     h.step();
     h.step();
     assert!(h.query_by_label("Saved").is_none());
+}
+
+/// The Textures view: `ui::draw` only (the toasts are not drawn).
+fn harness(model: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model)
+}
+
+/// Task 7: a log row can carry a Show button that selects its set; a set no longer listed disables it.
+#[test]
+fn a_show_button_selects_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.set_field(
+        "landscape/rock01.png",
+        "subtype",
+        serde_json::json!("diffuse"),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let rock = "landscape/rock01".to_owned();
+    let target = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == rock)
+        .map(sdc_gui::model::SetTarget::view)
+        .expect("fixture has a rock01 card");
+    let root = m.root.clone().unwrap();
+    m.messages.log_with(
+        Severity::Info,
+        "x",
+        EntryAction::ShowSet {
+            root: root.clone(),
+            id: rock.clone(),
+        },
+    );
+    m.messages.log_with(
+        Severity::Info,
+        "y",
+        EntryAction::ShowSet {
+            root,
+            id: "gone".into(),
+        },
+    );
+    m.toggle_tab(sdc_gui::model::bottom::BottomTab::Messages);
+    let mut h = harness(m);
+    support::instant_tips(&h.ctx);
+    h.run();
+    h.run();
+    assert!(h.query_by_label("x").is_some() && h.query_by_label("y").is_some());
+    assert!(
+        h.query_by_label(&format!("Show {rock}")).is_some(),
+        "the live card is reachable from its log row"
+    );
+    let gone = h.get_by_label("Show gone");
+    assert!(gone.accesskit_node().is_disabled());
+    gone.hover();
+    h.run();
+    assert!(h.query_by_label("That set is no longer listed").is_some());
+    h.get_by_label(&format!("Show {rock}")).click();
+    h.run();
+    h.run();
+    assert_eq!(h.state().selection, target.clone().selection());
+    h.get_by_label(&format!("Show {rock}")).click();
+    h.run();
+    assert_eq!(h.state().selection, target.selection());
+    assert_eq!(h.state().messages.unread(), 0);
+}
+
+fn show_set_action(m: &AppModel, id: &str) -> EntryAction {
+    EntryAction::ShowSet {
+        root: m.root.clone().unwrap(),
+        id: id.into(),
+    }
+}
+
+/// A card made in the document alone has no key; once a file joins it the same Show finds it by its ID.
+#[test]
+fn a_show_button_follows_a_document_only_card_that_later_gets_a_key() {
+    use sdc_gui::model::sets::{views, DropChoice, DropOutcome};
+    use sdc_gui::model::{Selection, SetTarget};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let normal = "landscape/rock01_normal.png";
+    m.edit_docs("t", None, true, |_, s| s.create_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let card = |m: &AppModel| {
+        views(m)
+            .iter()
+            .find(|v| v.id == "mine/empty")
+            .map(|v| (v.key.clone(), SetTarget::view(v)))
+            .expect("the card is listed")
+    };
+    let (key, target) = card(&m);
+    assert!(key.is_empty(), "no file yet: the card has no key");
+    let action = show_set_action(&m, "mine/empty");
+    m.messages.log_with(Severity::Info, "made", action.clone());
+    assert_eq!(m.logged_set_target(&action), Some(target));
+    m.remove_member("landscape/rock01", normal).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let out = m.drop_on_set(normal, "mine/empty");
+    if matches!(out, DropOutcome::AskChoice { .. }) {
+        m.drop_choice(normal, "mine/empty", DropChoice::Move);
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let (key, target) = card(&m);
+    assert!(!key.is_empty(), "a file joined: the card has a key now");
+    assert_eq!(m.logged_set_target(&action), Some(target));
+    assert!(m.show_logged_set(&action));
+    assert_eq!(m.selection, Selection::Set(key));
+}
+
+/// A Sets filter that hides the card is cleared by Show, so the card can be revealed; a filter that shows it stays.
+#[test]
+fn a_show_button_clears_a_sets_filter_that_hides_its_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let action = show_set_action(&m, "landscape/rock01");
+    m.sets_filter.search = "rock".into();
+    assert!(m.show_logged_set(&action));
+    assert_eq!(
+        m.sets_filter.search, "rock",
+        "the card passes: the filter stays"
+    );
+    m.sets_filter.search = "no such set".into();
+    assert!(m.show_logged_set(&action));
+    assert!(!m.sets_filter_active(), "the hiding filter is cleared");
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/rock01")
+        .map(|v| v.key.clone())
+        .unwrap();
+    assert_eq!(
+        m.nav.reveal_set,
+        Some(sdc_gui::model::SetTarget::Key(key.clone()))
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(key));
+}
+
+/// A set deleted after its row was logged: Show finds nothing and changes nothing.
+#[test]
+fn a_show_button_for_a_target_removed_since_logging_does_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let action = show_set_action(&m, "mine/empty");
+    assert!(m.logged_set_target(&action).is_some());
+    assert!(m.delete_set("mine/empty"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let before = m.selection.clone();
+    assert_eq!(m.logged_set_target(&action), None);
+    assert!(!m.show_logged_set(&action));
+    assert_eq!(m.selection, before);
+    assert!(m.nav.reveal_set.is_none());
 }
 
 /// Note FC8 (supersedes CA10's anchor): while the bottom panel is open, the toasts sit above it, so they never cover
@@ -536,4 +696,581 @@ fn a_hovered_toast_asks_for_no_short_timer() {
     assert_eq!(paint(&h, "Saved").expect("held").frame, rest.frame);
     let d = h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
     assert!(d >= Duration::from_secs(1), "{d:?}");
+}
+
+// Task 8 (E8): a type choice that makes a set says so, once, after the final plan.
+
+/// The `m.items` key whose relative path ends with `name`.
+fn item_key_ending(m: &AppModel, name: &str) -> String {
+    m.items
+        .iter()
+        .find(|i| i.key.ends_with(name))
+        .unwrap_or_else(|| panic!("no item ending {name}"))
+        .key
+        .clone()
+}
+
+/// Writes each `textures/<name>` as a 64x64 gradient.
+fn write_gradients(dir: &std::path::Path, names: &[&str]) {
+    for n in names {
+        let p = dir.join("textures").join(n);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+        })
+        .save(&p)
+        .unwrap();
+    }
+}
+
+/// `write_gradients`, then opens the folder as the app does and waits idle.
+fn lone(dir: &std::path::Path, names: &[&str]) -> AppModel {
+    write_gradients(dir, names);
+    let mut m = support::opened_as_the_app(dir.join("textures"), dir.join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+/// Hands the parked plan results back (stale ones are dropped by generation) and waits for the model to settle.
+fn release(m: &mut AppModel) {
+    m.hold_plan_results = false;
+    for x in m.take_held() {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+fn new_set_lines(m: &AppModel, from: usize) -> Vec<String> {
+    m.messages
+        .entries()
+        .skip(from)
+        .filter(|e| e.text.contains("New set") || e.text.contains("new sets"))
+        .map(|e| e.text.clone())
+        .collect()
+}
+
+#[test]
+fn a_type_that_makes_a_set_says_so_with_show() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let last = m.messages.entries().last().unwrap();
+    assert_eq!(
+        last.text,
+        "teeth_albedo2.png is now Diffuse. New set actors/teeth_albedo2 (1 texture)."
+    );
+    assert!(
+        matches!(&last.action, Some(EntryAction::ShowSet { root, id })
+        if Some(root) == m.root.as_ref() && id == "actors/teeth_albedo2")
+    );
+    assert_eq!(
+        m.status_note.as_deref(),
+        Some("New set actors/teeth_albedo2: see Messages.")
+    );
+}
+
+#[test]
+fn a_type_on_a_file_in_a_carded_set_logs_no_new_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let diffuse = item_key_ending(&m, "rock01.png");
+    m.set_field(&diffuse, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let start = m.messages.entries().count();
+    let key = item_key_ending(&m, "rock01_normal.png");
+    let set_of = |m: &AppModel| {
+        m.sets
+            .iter()
+            .find(|s| s.members.contains(&key))
+            .map(|s| s.key.clone())
+    };
+    let rock = set_of(&m).expect("premise: rock01_normal.png is in a set before the choice");
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.key == rock),
+        "premise: that set has a card"
+    );
+    m.set_field(&key, "subtype", serde_json::json!("height"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        set_of(&m).as_deref(),
+        Some(rock.as_str()),
+        "premise: the file is still in rock01's set"
+    );
+    assert!(new_set_lines(&m, start).is_empty());
+}
+
+#[test]
+fn an_undone_choice_logs_no_new_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    // A: a choice undone before its plan lands logs nothing.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.undo();
+    release(&mut m);
+    assert!(new_set_lines(&m, before).is_empty());
+    // B: undo, then another choice, before the plan lands: the line names the type that stands.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.undo();
+    m.decide(&key, Answer::Subtype(Subtype::Height));
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(
+        lines[0],
+        "teeth_albedo2.png is now Height (parallax). New set actors/teeth_albedo2 (1 texture)."
+    );
+}
+
+#[test]
+fn several_type_edits_announce_one_card_after_the_final_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&key, Answer::Subtype(Subtype::Height));
+    assert!(
+        new_set_lines(&m, before).is_empty(),
+        "nothing before a plan lands"
+    );
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with("teeth_albedo2.png is now Height (parallax)."));
+}
+
+#[test]
+fn a_repeated_choice_that_changes_nothing_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let after_first = m.messages.entries().count();
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, after_first).is_empty());
+}
+
+#[test]
+fn a_choice_held_across_opening_another_folder_announces_nothing_there() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mut m = lone(a.path(), &["actors/teeth_albedo2.png"]);
+    write_gradients(b.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.hold_plan_results = false;
+    m.open_folder(b.path().join("textures"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    release(&mut m);
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn two_choices_that_make_two_sets_log_one_line_with_show_for_the_first() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(
+        d.path(),
+        &["actors/teeth_albedo2.png", "actors/hair_albedo3.png"],
+    );
+    let (a, b) = (
+        item_key_ending(&m, "teeth_albedo2.png"),
+        item_key_ending(&m, "hair_albedo3.png"),
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&a, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&b, Answer::Subtype(Subtype::Diffuse));
+    release(&mut m);
+    let lines = new_set_lines(&m, before);
+    assert_eq!(
+        lines,
+        ["2 new sets: actors/hair_albedo3 and actors/teeth_albedo2."]
+    );
+    assert!(matches!(&m.messages.entries().last().unwrap().action,
+        Some(EntryAction::ShowSet { id, .. }) if id == "actors/hair_albedo3"));
+    assert_eq!(m.status_note.as_deref(), Some("2 new sets: see Messages."));
+}
+
+#[test]
+fn a_choice_the_read_only_project_refuses_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures/actors")).unwrap();
+    std::fs::write(d.path().join("textures/sdc.toml"), "target = [\n").unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    assert!(m.project.as_ref().unwrap().read_only(), "premise");
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+/// The plan results parked by `hold_plan_results`, once the current generation's full plan is among them.
+fn parked(m: &mut AppModel) -> Vec<sdc_gui::worker::WorkerMsg> {
+    use sdc_gui::worker::WorkerMsg;
+    let mut got = vec![];
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        let generation = m.generation();
+        if got
+            .iter()
+            .any(|x| matches!(x, WorkerMsg::Planned { generation: g, .. } if *g == generation))
+        {
+            return got;
+        }
+        assert!(std::time::Instant::now() < end, "no plan result parked");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_reset_after_a_choice_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.clear_field(&key, "subtype");
+    release(&mut m);
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+/// An undo drops the whole group: the other choice, which the undo left standing on a new card, is not announced
+/// either (only the forget in `reset_type_follow` keeps it silent).
+#[test]
+fn an_undo_drops_the_group_even_when_a_kept_choice_sits_on_a_new_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(
+        d.path(),
+        &["actors/teeth_albedo2.png", "actors/teeth_albedo2_bump.png"],
+    );
+    let (a, b) = (
+        item_key_ending(&m, "teeth_albedo2.png"),
+        item_key_ending(&m, "_bump.png"),
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&a, Answer::Subtype(Subtype::Diffuse));
+    m.decide(&b, Answer::Subtype(Subtype::Height));
+    assert_eq!(m.new_set_notes_pending(), 2);
+    m.undo();
+    assert_eq!(m.new_set_notes_pending(), 0);
+    release(&mut m);
+    let views = sdc_gui::model::sets::views(&m);
+    assert!(
+        views
+            .iter()
+            .any(|v| v.members.contains(&a) && v.id == "actors/teeth_albedo2"),
+        "premise: the kept choice sits on a card that was not listed before"
+    );
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn a_failed_plan_drops_the_queued_choice() {
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    let generation = m.generation();
+    parked(&mut m);
+    m.hold_plan_results = false;
+    m.sender()
+        .send(WorkerMsg::Planned {
+            generation,
+            result: Err(PlanFailure {
+                message: "boom".into(),
+                config: false,
+            }),
+        })
+        .unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.new_set_notes_pending(), 0);
+    // A later plan settles with the choice still written: it must not be announced.
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn a_cancelled_open_drops_the_queued_choice() {
+    let d = tempfile::tempdir().unwrap();
+    write_gradients(d.path(), &["actors/teeth_albedo2.png"]);
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    m.open_folder(d.path().join("textures"));
+    m.decide(
+        "actors/teeth_albedo2.png",
+        Answer::Subtype(Subtype::Diffuse),
+    );
+    assert_eq!(m.new_set_notes_pending(), 1, "premise: the choice queued");
+    assert!(m.can_cancel_open(), "premise: the open is still planning");
+    m.cancel_open();
+    assert!(m.root.is_none(), "premise: no folder stays open");
+    assert_eq!(m.new_set_notes_pending(), 0);
+}
+
+#[test]
+fn the_final_plan_announces_once_after_a_partial_and_an_intermediate_plan() {
+    let d = tempfile::tempdir().unwrap();
+    use sdc_gui::worker::WorkerMsg;
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    // An explicit pair the chosen type does not allow: the first full plan settles into a cleanup re-plan
+    // (`settle_types`, one of `finish_plan`'s early returns).
+    m.set_format(
+        &key,
+        engine::config::Format::Bc7,
+        engine::config::ColorTag::Unorm,
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(&key, "format"),
+        Some(serde_json::json!("bc7")),
+        "premise: the explicit format is written"
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::PbrAlbedo));
+    let first = parked(&mut m);
+    let first_generation = m.generation();
+    assert!(
+        first.iter().any(|x| matches!(x, WorkerMsg::Partial { .. })),
+        "premise: a partial plan was sent for this edit"
+    );
+    for x in first {
+        let planned = matches!(x, WorkerMsg::Planned { .. });
+        m.handle_held(x);
+        let lines = new_set_lines(&m, before);
+        assert!(lines.is_empty(), "{lines:?}");
+        assert_eq!(m.new_set_notes_pending(), 1);
+        if planned {
+            assert!(
+                m.generation() > first_generation,
+                "premise: the full plan landed in finish_plan and asked for a follow-up plan"
+            );
+        }
+    }
+    // The follow-up plan is the final one.
+    let last = parked(&mut m);
+    m.hold_plan_results = false;
+    let generation = m.generation();
+    for x in last {
+        let is_final = matches!(&x, WorkerMsg::Planned { generation: g, .. } if *g == generation);
+        m.handle_held(x);
+        if is_final {
+            break;
+        }
+        assert!(new_set_lines(&m, before).is_empty());
+        assert_eq!(m.new_set_notes_pending(), 1);
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let lines = new_set_lines(&m, before);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("teeth_albedo2.png is now ")
+            && lines[0].ends_with(". New set actors/teeth_albedo2 (1 texture)."),
+        "{lines:?}"
+    );
+    let action = m.messages.entries().last().unwrap().action.clone().unwrap();
+    assert!(m.logged_set_target(&action).is_some(), "Show resolves");
+}
+
+/// Review Focus 9: a partial that applies while a type choice waits announces nothing and keeps the choice queued;
+/// the full plan announces it once. The alpha edit after the choice makes the choice's own partial stale, and its own
+/// partial carries both `[files]` entries onto the waiting file's set, which the open already landed.
+#[test]
+fn a_partial_that_applies_keeps_the_choice_for_the_final_plan() {
+    use sdc_gui::worker::WorkerMsg;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let job = |m: &AppModel| {
+        let p = &m.item(&key).unwrap().job.as_ref().unwrap().profile;
+        (p.subtype, p.alpha.policy)
+    };
+    assert_ne!(
+        job(&m).1,
+        engine::config::AlphaPolicy::Data,
+        "premise: the alpha is not data yet"
+    );
+    let before = m.messages.entries().count();
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.edit_docs("Data alpha", None, true, |p, _| {
+        p.set_file_value(&key, "alpha.policy", &serde_json::json!("data"));
+    });
+    // Park the alpha edit's partial and the full plan of the current generation.
+    let seq = m.edit_seq;
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let mut got = vec![];
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        let generation = m.generation();
+        let partial = got
+            .iter()
+            .any(|x| matches!(x, WorkerMsg::Partial { seq: s, .. } if *s == seq));
+        let planned = got
+            .iter()
+            .any(|x| matches!(x, WorkerMsg::Planned { generation: g, .. } if *g == generation));
+        if partial && planned {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "no partial and plan parked"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (partials, full): (Vec<_>, Vec<_>) = got
+        .into_iter()
+        .partition(|x| matches!(x, WorkerMsg::Partial { .. }));
+    for x in partials {
+        m.handle_held(x);
+    }
+    assert_eq!(
+        m.applied_seq, seq,
+        "premise: the alpha edit's partial applied"
+    );
+    assert_eq!(
+        job(&m),
+        (Subtype::Diffuse, engine::config::AlphaPolicy::Data),
+        "premise: the partial carries the choice and the alpha"
+    );
+    assert_eq!(m.new_set_notes_pending(), 1, "the partial kept the choice");
+    assert!(new_set_lines(&m, before).is_empty());
+    m.hold_plan_results = false;
+    for x in full {
+        m.handle_held(x);
+    }
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let lines = new_set_lines(&m, before);
+    assert_eq!(
+        lines,
+        ["teeth_albedo2.png is now Diffuse. New set actors/teeth_albedo2 (1 texture)."]
+    );
+    assert_eq!(m.new_set_notes_pending(), 0);
+}
+
+#[test]
+fn a_document_card_gaining_a_key_is_not_new() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.edit_docs("t", None, true, |_, s| s.create_set("actors/ghost"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    // Planned as a keyed set of the plan (`m.sets`), or only listed by the document.
+    let in_plan = |m: &AppModel| {
+        let views = sdc_gui::model::sets::views(m);
+        let v = views.iter().find(|v| v.id == "actors/ghost")?;
+        Some(m.sets.iter().any(|s| s.key == v.key))
+    };
+    assert_eq!(
+        in_plan(&m),
+        Some(false),
+        "premise: the document lists a card that no plan set backs"
+    );
+    let before = m.messages.entries().count();
+    // The choice is queued while the card is document-only; then the document puts the file in the card.
+    m.hold_plan_results = true;
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    m.edit_docs("t", None, true, |_, s| s.add_member("actors/ghost", &key));
+    assert_eq!(m.new_set_notes_pending(), 1);
+    release(&mut m);
+    assert_eq!(
+        in_plan(&m),
+        Some(true),
+        "premise: the card gained a plan set"
+    );
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn an_output_root_rekey_does_not_announce_a_card() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened(d.path());
+    let before = m.messages.entries().count();
+    let key = item_key_ending(&m, "rock01_normal.png");
+    let card = |m: &AppModel| {
+        sdc_gui::model::sets::views(m)
+            .iter()
+            .find(|v| v.members.contains(&key))
+            .map(|v| (v.id.clone(), v.key.clone()))
+            .expect("rock01_normal.png has a card")
+    };
+    let was = card(&m);
+    m.hold_plan_results = true;
+    m.set_field(&key, "subtype", serde_json::json!("height"));
+    assert_eq!(m.new_set_notes_pending(), 1, "premise: the choice queued");
+    m.set_export_folder(d.path().join("other-export"));
+    release(&mut m);
+    let now = card(&m);
+    assert_eq!(was.0, now.0, "premise: the same card ID");
+    assert_ne!(
+        was.1, now.1,
+        "premise: the plan key moved with the output root"
+    );
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn an_invalid_type_value_queues_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lone(d.path(), &["actors/teeth_albedo2.png"]);
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    let before = m.messages.entries().count();
+    m.set_field(&key, "subtype", serde_json::json!("no_such_type"));
+    assert_eq!(m.new_set_notes_pending(), 0);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(new_set_lines(&m, before).is_empty());
+}
+
+#[test]
+fn a_settled_entry_stays_in_messages_and_its_show_is_off_in_another_folder() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mut m = lone(a.path(), &["actors/teeth_albedo2.png"]);
+    // B lists a card of the same ID from the start.
+    write_gradients(
+        b.path(),
+        &["actors/teeth_albedo2.png", "actors/teeth_albedo2_n.png"],
+    );
+    let key = item_key_ending(&m, "teeth_albedo2.png");
+    m.decide(&key, Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let entry = m.messages.entries().last().unwrap().clone();
+    let action = entry.action.clone().expect("a Show action");
+    assert!(m.logged_set_target(&action).is_some(), "premise: live in A");
+    m.open_folder(b.path().join("textures"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "actors/teeth_albedo2"),
+        "premise: B has a card of that ID"
+    );
+    assert!(m.messages.entries().any(|e| *e == entry), "still logged");
+    assert!(m.logged_set_target(&action).is_none(), "off in B");
+    assert!(!m.show_logged_set(&action));
 }

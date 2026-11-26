@@ -13,6 +13,7 @@ use sdc_gui::model::sets::{
 };
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 use support::{session, shapes};
@@ -995,7 +996,7 @@ fn no_fill_round_trips() {
 /// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test it txst_map::render_ -- --ignored`: the card and the editor of the
 /// shared set at 1100, 1280 and 1600 px wide.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and TXST_SHOTS_DIR"]
 fn render_shared_set_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("TXST_SHOTS_DIR").expect("TXST_SHOTS_DIR"));
     std::fs::create_dir_all(&out).unwrap();
@@ -1065,7 +1066,8 @@ fn an_external_record_chip_stays_named_at_rest() {
     h.hover_at(at);
     h.run();
     h.run();
-    h.get_by_label(RECORD_NORMAL);
+    // the record's path first, then what the slot is
+    h.get_by_label(&format!("{RECORD_NORMAL}\nPBR normal"));
     h.event(egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -1290,7 +1292,7 @@ const BODY_N: &str = "textures/s/body_n.dds";
 fn txst(slots: &[(u8, &str)]) -> String {
     let mut s = "[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\n".to_string();
     for (n, p) in slots {
-        s += &format!("slot{n} = \"{p}\"\n");
+        let _ = writeln!(s, "slot{n} = \"{p}\"");
     }
     s
 }
@@ -3015,7 +3017,7 @@ fn the_card_hover_marks_a_supplied_slot() {
 /// Screenshots for the Task 6 review (`TXST_SHOTS_DIR` names the folder): the card and editor with a mapped set, the
 /// picker with long EDIDs and paths, and the Problems rows. Not a gate.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU and TXST_SHOTS_DIR"]
 fn render_picker_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("TXST_SHOTS_DIR").expect("TXST_SHOTS_DIR"));
     std::fs::create_dir_all(&out).unwrap();

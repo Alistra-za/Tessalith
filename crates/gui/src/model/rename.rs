@@ -16,6 +16,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// W19: the status line when F2 is pressed over sets and none of them can rename outputs (Note LJ3).
+pub const INPUTS_IN_TEXTURES: &str =
+    "Rename inputs in the Textures view: select the textures there and press F2";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RenameMode {
     /// `[inputs]` aliases: the files are read under the new names.
@@ -705,6 +709,10 @@ impl AppModel {
 
     /// Open the rename dialog in `mode` over the selection, with the last recipe of this session.
     pub fn open_rename(&mut self, mode: RenameMode) {
+        // As `set_rename_mode`: Inputs is offered over texture selections only.
+        if mode == RenameMode::Inputs && !self.inputs_rename_offered() {
+            return;
+        }
         let keys = self.rename_keys(mode);
         if keys.is_empty() {
             return;
@@ -744,8 +752,20 @@ impl AppModel {
         self.rename_cache.take();
     }
 
-    /// Switch the open dialog's mode; the recipe stays, the keys follow the selection.
+    /// Note LJ3: Rename inputs is a Textures-view command; a set selection (either kind) is not offered it.
+    pub fn inputs_rename_offered(&self) -> bool {
+        !matches!(
+            self.selection,
+            super::Selection::Set(_) | super::Selection::SetId(_)
+        )
+    }
+
+    /// Switch the open dialog's mode; the recipe stays, the keys follow the selection. A set selection never goes
+    /// to Inputs (Note LJ3).
     pub fn set_rename_mode(&mut self, mode: RenameMode) {
+        if mode == RenameMode::Inputs && !self.inputs_rename_offered() {
+            return;
+        }
         let keys = self.rename_keys(mode);
         if let Some(Dialog::Rename(d)) = self.dialog.as_mut() {
             if d.mode != mode && !keys.is_empty() {
@@ -806,6 +826,8 @@ impl AppModel {
             for (from, to) in &retargets {
                 m.edit_docs(&label, None, true, |_, d| d.retarget_auto(from, to));
             }
+            // The Also opt-outs follow in one pass over the whole mapping, so a chain moves each once (Note FT1).
+            m.edit_docs(&label, None, true, |p, _| p.rename_skips_also(&retargets));
             for r in &rows {
                 match d.mode {
                     RenameMode::Inputs => {

@@ -1,15 +1,15 @@
-# Rebuilds the ISPC objects into a temp dir and compares SHA-256 with the vendored objects. Two compilers:
-# ISPC 1.31.0 (-Ispc) builds every vendored file except the two `_avx512skx` objects, which come from
-# ISPC 1.32.0 (-Ispc512; it fixes an AVX-512 miscompile of 1.31.0, ISPC issue 3891). Without -Ispc512 those
-# two objects are reported as SKIP and not counted. -Update (needs both compilers) copies the new objects and
-# main headers into vendor/ispc-objs (then run tools/hash-vendor.ps1).
+# Rebuilds the ISPC objects into a temp dir and compares SHA-256 with the vendored objects. One compiler:
+# ISPC 1.32.0 (-Ispc) builds every vendored file (owner decision, release 3.2). 1.32.0 also fixes ISPC issue 3891,
+# an AVX-512 miscompile in 1.31.0, so one compiler serves all three targets. -Update copies the new objects and
+# main headers into vendor/ispc-objs (then run tools/hash-vendor.ps1). -Ispc512 is gone: it stays as a parameter
+# only so that an old command line fails with a message instead of binding to nothing.
 #
 # Targets: sse2, avx2 and avx512skx-x16 (`--target=sse2,avx2,avx512skx-x16`): each source gives one dispatcher
 # object, one object per target and the main header. A vendored `.obj` the build does not produce (a dropped
 # target's) is reported as EXTRA and counted as a difference. -Update never deletes a vendored file: remove an
 # EXTRA object with `git rm`.
 #
-# kernel.ispc is built with -DSDC_BC6H_ONLY in both compiler runs (ISPC TC patch 0003): its objects hold the BC6H
+# kernel.ispc is built with -DSDC_BC6H_ONLY (ISPC TC patch 0003): its objects hold the BC6H
 # encoder only. bc7e.ispc does not get the define.
 #
 # Reproducibility: ISPC embeds the source path it was given, so it is always run with the working
@@ -18,7 +18,7 @@
 # temp dir) is normalised to the bare file name before hashing and vendoring.
 param(
   [string]$Ispc = "ispc.exe",
-  # ISPC 1.32.0, for the two `_avx512skx` objects only
+  # removed: passing it is an error
   [string]$Ispc512 = "",
   [string]$Bc7eSource = "$PSScriptRoot\..\crates\encoders-sys\vendor\bc7e\bc7e.ispc",
   [switch]$Update,
@@ -28,15 +28,10 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
 $vendor = Join-Path $repo "crates\encoders-sys\vendor"
-if (-not (Get-Command $Ispc -ErrorAction SilentlyContinue)) { throw "ISPC 1.31.0 not found as '$Ispc'; pass -Ispc <path to ispc.exe> (and -Ispc512 <path to ISPC 1.32.0>)" }
+if ($PSBoundParameters.ContainsKey('Ispc512')) { throw "ISPC 1.32.0 builds every object now: pass it as -Ispc and drop -Ispc512" }
+if (-not (Get-Command $Ispc -ErrorAction SilentlyContinue)) { throw "ISPC 1.32.0 not found as '$Ispc'; pass -Ispc <path to ispc.exe>" }
 $ver = & $Ispc --version | Out-String
-if ($ver -notmatch "1\.31\.0") { throw "ISPC 1.31.0 required as -Ispc (ISPC 1.32.0 goes in -Ispc512); got: $ver" }
-if ($Ispc512) {
-  if (-not (Get-Command $Ispc512 -ErrorAction SilentlyContinue)) { throw "ISPC 1.32.0 not found as '$Ispc512'; pass -Ispc512 <path to ispc.exe>" }
-  $ver512 = & $Ispc512 --version | Out-String
-  if ($ver512 -notmatch "1\.32\.0") { throw "ISPC 1.32.0 required as -Ispc512 (ISPC 1.31.0 goes in -Ispc); got: $ver512" }
-}
-elseif ($Update) { throw "-Update needs -Ispc512 <path to ISPC 1.32.0>: the _avx512skx objects come from ISPC 1.32.0 (-Bc7eOnly too)" }
+if ($ver -notmatch "1\.32\.0") { throw "ISPC 1.32.0 required as -Ispc; got: $ver" }
 
 # Repo-relative, forward-slash source path (absolute only if the source lives outside the repo).
 function Get-SourceArg([string]$path) {
@@ -52,7 +47,7 @@ function Normalize-Header([string]$path) {
   [IO.File]::WriteAllLines($path, $lines, (New-Object Text.UTF8Encoding($false)))
 }
 
-# Builds both sources with one compiler into $out\bc7e and $out\ispctc.
+# Builds both sources into $out\bc7e and $out\ispctc.
 function Build-Objects([string]$exe, [string]$out) {
   New-Item -ItemType Directory "$out\bc7e", "$out\ispctc" | Out-Null
   Push-Location $repo
@@ -70,24 +65,14 @@ function Build-Objects([string]$exe, [string]$out) {
 }
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("sdc-ispc-" + [guid]::NewGuid())
-Build-Objects $Ispc "$tmp\131"
-if ($Ispc512) { Build-Objects $Ispc512 "$tmp\132" }
-
-# The build each vendored file comes from: the `_avx512skx` objects from ISPC 1.32.0, everything else from 1.31.0
-# (1.31.0's `_avx512skx` objects are never vendored).
-function Get-Owner([string]$name) {
-  if ($name -like "*_avx512skx.obj") { if ($Ispc512) { return "$tmp\132" } else { return $null } }
-  return "$tmp\131"
-}
+Build-Objects $Ispc $tmp
 
 $diff = 0
 foreach ($dir in "bc7e", "ispctc") {
   # the per-target headers ISPC also emits are not vendored; compare objects and the main header
-  $outputs = Get-ChildItem "$tmp\131\$dir" | Where-Object { $_.Extension -eq ".obj" -or $_.Name -in "bc7e_ispc.h", "kernel_ispc.h" }
+  $outputs = Get-ChildItem "$tmp\$dir" | Where-Object { $_.Extension -eq ".obj" -or $_.Name -in "bc7e_ispc.h", "kernel_ispc.h" }
   foreach ($o in $outputs) {
-    $owner = Get-Owner $o.Name
-    if (-not $owner) { "{0,-5} {1}/{2}" -f "SKIP", $dir, $o.Name; continue }
-    $new = "$owner\$dir\$($o.Name)"
+    $new = "$tmp\$dir\$($o.Name)"
     $old = "$vendor\ispc-objs\$dir\$($o.Name)"
     $same = (Test-Path $old) -and ((Get-FileHash $old).Hash -eq (Get-FileHash $new).Hash)
     if (-not $same) { $diff++ }
@@ -101,8 +86,8 @@ foreach ($dir in "bc7e", "ispctc") {
 }
 if ($Update) {
   foreach ($dir in $(if ($Bc7eOnly) { @("bc7e") } else { @("bc7e", "ispctc") })) {
-    $outputs = Get-ChildItem "$tmp\131\$dir" | Where-Object { $_.Extension -eq ".obj" -or $_.Name -in "bc7e_ispc.h", "kernel_ispc.h" }
-    foreach ($o in $outputs) { Copy-Item "$(Get-Owner $o.Name)\$dir\$($o.Name)" "$vendor\ispc-objs\$dir\" -Force }
+    $outputs = Get-ChildItem "$tmp\$dir" | Where-Object { $_.Extension -eq ".obj" -or $_.Name -in "bc7e_ispc.h", "kernel_ispc.h" }
+    foreach ($o in $outputs) { Copy-Item "$tmp\$dir\$($o.Name)" "$vendor\ispc-objs\$dir\" -Force }
   }
   "Updated vendor/ispc-objs. Now run tools/hash-vendor.ps1."
 }

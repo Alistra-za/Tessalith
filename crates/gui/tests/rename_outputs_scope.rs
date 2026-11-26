@@ -5,7 +5,7 @@ use engine::sets::OutputKey;
 use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::sets::{engine_inputs, views};
-use sdc_gui::model::{Answer, AppModel, Dialog};
+use sdc_gui::model::{Answer, AppModel};
 use std::path::PathBuf;
 use std::time::Duration;
 use support::*;
@@ -150,17 +150,18 @@ fn a_mixed_texture_selection_counts_the_pbr_sets() {
 }
 
 #[test]
-fn f2_on_a_vanilla_set_opens_inputs_mode() {
+fn f2_on_a_vanilla_set_opens_no_dialog_and_says_where_inputs_are_renamed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let leaf = set_id_of(&m, LEAF);
     let lk = views(&m).iter().find(|v| v.id == leaf).unwrap().key.clone();
     m.click_set(&lk, false, false);
     sdc_gui::ui::actions::run("rename", &mut m, &eframe::egui::Context::default());
-    match &m.dialog {
-        Some(Dialog::Rename(d)) => assert_eq!(d.mode, RenameMode::Inputs),
-        other => panic!("expected the rename dialog, got {other:?}"),
-    }
+    assert_eq!(m.dialog, None);
+    assert_eq!(
+        m.status_line,
+        "Rename inputs in the Textures view: select the textures there and press F2"
+    );
 }
 
 #[test]

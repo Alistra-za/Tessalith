@@ -5,9 +5,9 @@ use engine::suggest::Confidence;
 use serde_json::Value;
 
 /// The editable fields, with the label each row shows (Note JI3: the drawer's DDS header and Size rows included). The
-/// panel draws them by group (`group_of`, in `settings_panel::GROUPS` order), in this order within a group.
+/// panel draws them by group (`panel_groups::panel_group`, in `PanelGroup::ALL` order), in this order within a group.
 pub const FIELDS: [(&str, &str); 21] = [
-    ("subtype", "Sub-type"),
+    ("subtype", "Texture type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
     (MSN_SOURCE, "Baked in"),
     ("alpha.policy", "Alpha"),
@@ -16,26 +16,27 @@ pub const FIELDS: [(&str, &str); 21] = [
     ("mips.coverage", "Coverage"),
     // Note FM: shown only for BC1 (`hidden_reason`).
     ("encoder.bc1_alpha", "1-bit alpha"),
-    ("alpha.exact_opaque", "Exact opaque alpha"),
     ("alpha.parallax", "Enable parallax"),
     ("mips.normal", "Normal handling"),
     ("mips.normal_base", "Normal base level"),
     ("format", "Format"),
-    // Note HI2: the colour rows sit in Compression, after Format.
+    // Note LQ2: the colour rows sit in Compression; this is their place in the `FIELDS` order.
     ("color.tag", "DDS tag"),
     ("color.content", "Input content"),
     ("encoder.effort", "Effort"),
     (WEIGHTING, "BC7 weighting"),
+    // Task 6g (Note LR, LR8): R, G, B and A in one row, over `GUARD_FIELDS`.
+    (CHANNEL_GUARD, "Channel guard"),
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
     ("encoder.perceptual", "Perceptual"),
     ("header", "DDS header"),
-    // Note JI3: the Size group (`group_of`).
+    // Note JI3: the Size group (`panel_groups::panel_group`).
     ("resize", "Resize"),
     ("resize_relative_to", "Relative to"),
     ("resize_floor", "Size floor"),
 ];
 
-/// The model-space normal's baker row (Note IA2), in the Type group.
+/// The model-space normal's baker row (Note IA2), in the Normal map group.
 pub const MSN_SOURCE: &str = "channels.msn_source";
 
 /// Hover text of the BC1/BC3 "Perceptual" check box (FM42).
@@ -45,8 +46,52 @@ pub const PERCEPTUAL_HOVER: &str =
 /// The BC7 weighting row (DECISIONS Note CP): one dropdown over `encoder.perceptual` and `encoder.bc7_weights`.
 pub const WEIGHTING: &str = "encoder.bc7_weights";
 
+/// The Channel guard row (Note LR, LR8): four ticks over `GUARD_FIELDS`. A row id like `WEIGHTING`: never written to
+/// `[files]` itself, and not in `all_fields`.
+pub const CHANNEL_GUARD: &str = "encoder.channel_guard";
+
+/// The Channel guard row's four fields, in the order of its ticks (R, G, B, A), with the label each has in the bulk
+/// panel and Copy settings. A is `alpha.exact_opaque`, where the engine stores it. Kept in `all_fields` so lookups,
+/// bulk labels and Copy settings keep every field, as `SEARCH_FIELDS` is (Note JI4, FM44).
+pub const GUARD_FIELDS: [(&str, &str); 4] = [
+    ("encoder.channel_guard.r", "Channel guard R"),
+    ("encoder.channel_guard.g", "Channel guard G"),
+    ("encoder.channel_guard.b", "Channel guard B"),
+    ("alpha.exact_opaque", "Channel guard A"),
+];
+
+/// A hand-written spelling of the A field that the same entry must not keep beside `alpha.exact_opaque` (the engine
+/// refuses two keys that disagree; `overrides::CHANNEL_GUARD_A`).
+pub const GUARD_A_ALIAS: &str = "encoder.channel_guard.a";
+
+/// The tick letters, in `GUARD_FIELDS` order.
+pub const GUARD_LETTERS: [&str; 4] = ["R", "G", "B", "A"];
+
+/// Hover of the A tick (owner, BC7-O29 (c)).
+pub const GUARD_A_HOVER: &str = "On: fully opaque 4x4 blocks decode as exactly 255 in BC7, and blocks whose alpha is 0 throughout as exactly 0. Where only part of a block is 0 or 255, the encoder keeps it when it can, ahead of R, G and B.";
+
+/// Hover of the R, G and B ticks.
+pub const GUARD_RGB_HOVER: &str = "On: where this channel is exactly 0 or exactly 255 across part of a block, BC7 keeps that value wherever the encoder can. With several channels on, A wins, then G, then B, then R.";
+
+/// Help of the Channel guard row, on its label and its `?` (owner, BC7-O30): one guarded channel at a time, the
+/// priority order, and what a channel guarded flat at 255 costs another.
+pub const GUARD_HELP: &str = "Keeps a channel's flat 0 or 255 exact in BC7 where the encoder can, such as G for metalness in an _rmaos. Tick the one channel you need exact: the design assumes one guarded channel at a time, and if you tick several you sort out the trade-offs yourself. When blocks clash, the priority is A, then G, then B, then R. A channel guarded flat at 255 can stop texels of another channel reaching the opposite end, an exact 0.";
+
+/// Why the A tick of a complex `_m` or an env mask written as BC7 cannot be turned off (`ALPHA-EXACT-OFF-M`).
+pub const GUARD_A_LOCK: &str = "this map keeps alpha 0 and 255 exact wherever the encoder can, and opaque alpha exactly 255: PGPatcher and ENB read it (ALPHA-EXACT-OFF-M)";
+
+/// Why a Channel guard tick cannot be changed for `p`, or `None`. `channel` is the tick's letter: only A is ever
+/// locked, and only while it is on, on a `complex_material` or `envmask` written as BC7. Off, it stays editable.
+pub fn guard_channel_lock(p: &Profile, channel: char) -> Option<&'static str> {
+    (channel == 'A'
+        && p.format == Format::Bc7
+        && matches!(p.subtype, Subtype::ComplexMaterial | Subtype::Envmask)
+        && p.alpha.exact_opaque)
+        .then_some(GUARD_A_LOCK)
+}
+
 /// The BC7 weighting row's options: the row's value, its label, its hover text.
-pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
+pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 8] = [
     ("linear", "Linear", "Linear: every channel counts the same (the default)."),
     (
         "perceptual",
@@ -59,14 +104,29 @@ pub const WEIGHTING_OPTIONS: [(&str, &str, &str); 5] = [
         "Alpha ×2: a light lean towards alpha accuracy, for little colour cost.",
     ),
     (
+        "alpha4",
+        "Alpha ×4",
+        "Alpha ×4: a moderate lean towards alpha accuracy, between ×2 and ×8.",
+    ),
+    (
         "alpha8",
         "Alpha ×8",
-        "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. Costs about 1 dB of RGB per 3 dB of alpha.",
+        "Alpha ×8: favours alpha accuracy over colour; an alternative to BC3 for delicate alpha. On colour it costs about 1 dB of RGB per 2 dB of alpha gained.",
     ),
     (
         "alpha16",
         "Alpha ×16",
-        "Alpha ×16: the strongest alpha priority; best for a _n with specular in alpha.",
+        "Alpha ×16: strong alpha priority; best for a _n with specular in alpha.",
+    ),
+    (
+        "alpha32",
+        "Alpha ×32",
+        "Alpha ×32: stronger alpha priority than ×16, for alpha that matters more than colour; a small alpha gain over ×16 for more colour cost.",
+    ),
+    (
+        "alpha64",
+        "Alpha ×64",
+        "Alpha ×64: the strongest alpha priority; alpha first, colour last.",
     ),
 ];
 
@@ -136,9 +196,10 @@ pub const SEARCH_FIELDS: [(&str, &str); 2] = [
 pub const BC3_SEARCH: &str = "encoder.bc3_search";
 
 /// Spec goal 4, BC3 row: (choice, encoder.bc1_search, encoder.bc45_search_radius).
-pub const BC3_CHOICES: [(&str, &str, &str); 3] = [
+pub const BC3_CHOICES: [(&str, &str, &str); 4] = [
     ("fast", "fast", "fast"),
     ("default", "default", "default"),
+    ("slowest", "default", "slowest"),
     ("max", "default", "max"),
 ];
 
@@ -167,7 +228,7 @@ pub fn effort_field(p: &Profile) -> Option<&'static str> {
     }
 }
 
-/// A search field's value as its serde name (`"fast"`, `"default"`, `"max"`).
+/// A search field's value as its serde name (`"fast"`, `"default"`, `"slowest"`, `"max"`).
 fn search_name<T: serde::Serialize>(v: T) -> String {
     serde_json::to_value(v)
         .ok()
@@ -251,26 +312,15 @@ pub fn cube_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
 pub const LEVELS_FIELD: (&str, &str) = ("mips.levels", "Levels");
 /// The mip filter: a live combo in the basic Mipmaps group, each option locked by `filter_option_lock`.
 pub const FILTER_FIELD: (&str, &str) = ("mips.filter", "Filter");
-pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
 
-pub fn group_of(field: &str) -> &'static str {
-    // Coverage only ever applies to the alpha-tested policies, and BC1 1-bit alpha is an alpha setting, so both sit
-    // with the alpha settings.
-    if matches!(field, "mips.coverage" | "encoder.bc1_alpha") {
-        return "Alpha";
-    }
-    if field == MSN_SOURCE {
-        return "Type";
-    }
-    match field.split('.').next().unwrap_or("") {
-        // Note JI3: the Size group; `header` stays in Compression.
-        "resize" | "resize_relative_to" | "resize_floor" => "Size",
-        "subtype" => "Type",
-        "alpha" => "Alpha",
-        "mips" => "Mipmaps",
-        _ => "Compression",
-    }
-}
+/// The mip filters a picker lists, in order, with their labels.
+pub const FILTER_OPTIONS: [(MipFilter, &str); 4] = [
+    (MipFilter::Box, "Box"),
+    (MipFilter::Tent, "Tent"),
+    (MipFilter::Mitchell, "Mitchell"),
+    (MipFilter::Kaiser, "Kaiser"),
+];
+pub const EDGE_FIELD: (&str, &str) = ("mips.edge", "Edge");
 
 /// "BC7": the one format-name table (AG130); `format_label` and the output size line read it.
 pub fn format_name(format: Format) -> &'static str {
@@ -377,6 +427,17 @@ pub fn hidden_reason(p: &Profile, field: &str) -> Option<&'static str> {
         MSN_SOURCE if p.subtype != Subtype::Msn => Some("model-space normal (msn) only"),
         // Note CP: the weights reach bc7e only; the engine warns ENC-WEIGHTS-IGNORED anywhere else.
         WEIGHTING if p.format != Format::Bc7 => Some("BC7 only"),
+        // Task 6g: the guard reaches bc7e only (the engine ignores it silently elsewhere, LR8); its four fields
+        // are hidden and skipped by a bulk write alike.
+        CHANNEL_GUARD
+        | "encoder.channel_guard.r"
+        | "encoder.channel_guard.g"
+        | "encoder.channel_guard.b"
+        | "alpha.exact_opaque"
+            if p.format != Format::Bc7 =>
+        {
+            Some("BC7 only")
+        }
         "encoder.bc1_alpha" if p.format != Format::Bc1 => Some("BC1 only"),
         "encoder.perceptual" if !matches!(p.format, Format::Bc1 | Format::Bc3) => {
             Some("BC1 and BC3 only (BC7: the BC7 weighting row)")
@@ -433,6 +494,9 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         }
         // Note CP (fix round 1, I2): shown for a non-BC7 texture, the row is locked; it does nothing there.
         WEIGHTING => hidden_reason(p, WEIGHTING),
+        CHANNEL_GUARD => hidden_reason(p, CHANNEL_GUARD),
+        // The row's ticks lock one by one (`guard_channel_lock`): only A, only while on.
+        "alpha.exact_opaque" => guard_channel_lock(p, 'A'),
         "mips.edge" if p.mips.filter == MipFilter::Box => {
             Some("only tent, Mitchell and Kaiser read the edge")
         }
@@ -530,18 +594,22 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "alpha.threshold" => "The alpha-test threshold the mesh uses. Mipmaps are built to keep the same coverage at this value.",
         "alpha.compare" => "How the mesh tests alpha against the threshold: greater than, or greater than or equal.",
         "mips.coverage" => "Keeps a cutout from thinning out in smaller mipmaps. Applies to Cutout, Cutout + Blend, and Blend with BC1 1-bit alpha; Auto and On both turn it on there.",
-        "alpha.exact_opaque" => "On: fully opaque alpha decodes as exactly 255 in BC7, not a value just under it.",
         "mips.levels" => "How many mipmaps to write: the smaller copies the game shows at a distance.",
         "mips.filter" => "How each smaller mipmap is averaged. Box is the default. Tent, Mitchell and Kaiser are for sRGB colour. With see-through alpha the only other choice is Tent.",
         "mips.edge" => "How Tent, Mitchell and Kaiser read past the texture's edge: Wrap for a tiling texture, Clamp for one that doesn't tile. Box ignores it.",
-        "mips.normal" => "How normal-map mipmaps are built. Renormalise and bake also bakes the detail each mipmap loses into the roughness stored in the same texture.",
+        "mips.normal" => "How normal-map mipmaps are built. The bake option puts the detail each mipmap loses into the roughness stored in the same texture, or into a complex material's gloss.",
         "mips.normal_base" => "Renormalise to unit length is the default. Keep as authored preserves the average authored length in lower mips of XYZ tangent-space base normals and coat normals, up to what XYZ can hold. Advanced Skin detail normals always start from unit length, as do tangent normal outputs in formats that drop Z. On other normal maps Keep preserves the full-size level only.",
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
-        "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Max a radius of 10, Fast a radius of 4.",
+        CHANNEL_GUARD => GUARD_HELP,
+        "alpha.exact_opaque" => GUARD_A_HOVER,
+        "encoder.channel_guard.r" | "encoder.channel_guard.g" | "encoder.channel_guard.b" => {
+            GUARD_RGB_HOVER
+        }
+        "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Fast a radius of 4, Default 5, Slowest 10. Max runs the Slowest search, then tries every endpoint pair near the block's values; it takes longer for a small gain.",
         "encoder.bc1_search" => "How long the encoder searches. On BC1 it sets the colour search: Fast takes a fraction of the time and is a little less exact; use it for previews.",
-        BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Max searches the alpha widest.",
+        BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Slowest searches the alpha at radius 10, and Max also tries every alpha endpoint pair near the block's values.",
         "header" => "The form of the DDS header. Auto writes a legacy header for BC1, BC3 and RGBA8 without the _SRGB tag, and the DX10 header for everything else.",
         "resize" => "Halves both sides once, twice or three times, while the longer side stays at or above the size floor.",
         "resize_relative_to" => "What Resize is measured from: this texture's own size, or the size of the set's map in a texture-set slot.",
@@ -581,9 +649,15 @@ pub fn mips_on(levels: &Value) -> bool {
 
 /// Every field the settings panel edits, each once, in display order (F3a: bulk lookups and copy-from-active).
 pub fn all_fields() -> Vec<(&'static str, &'static str)> {
-    let mut v = FIELDS.to_vec();
+    // The Channel guard row is no field: its four fields stand for it.
+    let mut v: Vec<_> = FIELDS
+        .iter()
+        .copied()
+        .filter(|(f, _)| *f != CHANNEL_GUARD)
+        .collect();
     v.extend([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD]);
     v.extend(SEARCH_FIELDS);
+    v.extend(GUARD_FIELDS);
     v
 }
 
@@ -615,6 +689,10 @@ pub(crate) fn unset_default(field: &str) -> Value {
         "resize_relative_to" => Value::from("self"),
         "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
         "encoder.bc1_alpha" => Value::from(false),
+        // Task 6g: the profile serialises a guarded channel only when it is on.
+        "encoder.channel_guard.r" | "encoder.channel_guard.g" | "encoder.channel_guard.b" => {
+            Value::from(false)
+        }
         "encoder.bc1_search" => Value::from("default"),
         MSN_SOURCE => Value::from("skyrim"),
         _ => Value::Null,
@@ -632,6 +710,9 @@ pub(crate) fn views_of(
         .map(|&(field, label)| {
             if field == WEIGHTING {
                 return weighting_view(target, job, label);
+            }
+            if field == CHANNEL_GUARD {
+                return guard_view(target, job, label);
             }
             let value = profile
                 .pointer(&format!("/{}", field.replace('.', "/")))
@@ -683,17 +764,55 @@ fn weighting_view(target: Target, job: &ResolvedJob, label: &'static str) -> Fie
     }
 }
 
+/// The four ticks of the Channel guard row (R, G, B, A), read from the resolved profile; the one place both the view
+/// and the drawn row read them.
+pub fn guard_on(p: &Profile) -> [bool; 4] {
+    let g = &p.encoder.channel_guard;
+    [g.r, g.g, g.b, p.alpha.exact_opaque]
+}
+
+/// The Channel guard row's view: its value is the bc7e mask of the ticks (bit 0 R to bit 3 A, no allocation), and its
+/// provenance comes from the texture's own entry when any of the four is set there, else from the highest-priority
+/// field that is on (A, G, B, R), else from the first the row has one for. One string per call, as `weighting_view`.
+fn guard_view(target: Target, job: &ResolvedJob, label: &'static str) -> FieldView {
+    let on = guard_on(&job.profile);
+    let prov_of = |i: usize| job.provenance.get(GUARD_FIELDS[i].0);
+    let edited = (0..4).any(|i| prov_of(i) == Some(&Provenance::ProjectFile));
+    let provenance = if edited {
+        "project_file".to_string()
+    } else {
+        (0..4)
+            .rev()
+            .find(|&i| on[i])
+            .and_then(prov_of)
+            .or_else(|| (0..4).find_map(prov_of))
+            .map_or_else(|| "builtin".into(), ToString::to_string)
+    };
+    FieldView {
+        field: CHANNEL_GUARD,
+        label,
+        value: Value::from(
+            on.iter()
+                .enumerate()
+                .fold(0u8, |m, (i, &b)| m | u8::from(b) << i),
+        ),
+        provenance,
+        edited,
+        lock: field_lock(target, &job.profile, CHANNEL_GUARD),
+    }
+}
+
 /// Provenance as a reader sees it.
 pub fn provenance_text(p: &str) -> String {
     match p {
         "project_file" => "from this texture's settings".into(),
         "user" => "from the command line".into(),
-        "builtin" => "built-in default".into(),
+        "builtin" => "Tessalith's default".into(),
         "project_config" => "from sdc.toml".into(),
         "user_config" => "from your config.toml".into(),
         "suggestion" => "suggested".into(),
         "analysis" => "from the image analysis".into(),
-        "fallback" => "fallback value (sub-type or box filter)".into(),
+        "fallback" => "fallback value (type or box filter)".into(),
         "set" => "decided by the texture set".into(),
         "mesh:alpha" => "from the meshes that use this texture".into(),
         _ => match p.split_once(':') {

@@ -165,8 +165,10 @@ fn random_rotated_blocks_decode_opaque_with_rgb_unchanged() {
     }
 }
 
-/// The review's probe: bc7e (perceptual off, exact-opaque flag as built) on opaque noise emits rotated mode
-/// 4/5 blocks whose alpha decodes below 255; the fix makes every texel 255 with RGB bit-identical.
+/// The review's probe: bc7e (perceptual off, exact-opaque flag as built) on opaque noise emitted rotated mode 4/5
+/// blocks whose alpha decoded below 255 until bc7e patch 0005 (Q2t), which leaves none on this input at veryslow,
+/// basic, slowest and max (Note LR6). The fix still makes every rotated block it touches decode 255 with RGB
+/// bit-identical.
 #[test]
 fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
     if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
@@ -190,7 +192,6 @@ fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
     for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
         bc7e_compress_blocks(b, o, params);
     }
-    let mut needed = 0;
     for blk in out.chunks(16) {
         let orig: [u8; 16] = blk.try_into().unwrap();
         let mut b = orig;
@@ -198,16 +199,11 @@ fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
             continue;
         }
         let (before, after) = (decode(&orig), decode(&b));
-        needed += before.chunks(4).any(|t| t[3] != 255) as usize;
         for (p, q) in before.chunks(4).zip(after.chunks(4)) {
             assert_eq!(q[3], 255);
             assert_eq!(p[..3], q[..3]);
         }
     }
-    assert!(
-        needed > 0,
-        "no rotated mode 4/5 block decoded alpha below 255"
-    );
 }
 
 /// DECISIONS AH1: a mode-6 block with alpha endpoints 0 but p-bit 1 decodes alpha 1; the fix makes it exactly 0.
@@ -310,5 +306,192 @@ fn zero_alpha_fix_covers_modes_4_5_and_7() {
     ] {
         assert!(encoders_sys::bc7_fixup::force_zero_alpha(&mut b));
         assert!(decode(&b).chunks(4).all(|p| p[3] == 0), "{b:?}");
+    }
+}
+
+/// The gate's per-texel alpha equals `bcdec_rs`'s for every mode `force_zero_alpha` rewrites: mode 4 at each rotation
+/// and both index selectors (rotation 0 reads the scalar slot's index set, which the selector picks), mode 5 at each
+/// rotation, modes 6 and 7. Random blocks with the header bits forced, so mode 7 meets every partition and anchor.
+/// Modes 0 to 3 store no alpha: the gate has none (`None`).
+#[test]
+fn the_gate_decodes_alpha_as_bcdec_does() {
+    let mut next = xorshift(0x51ED_270B_3C9F_A1D7);
+    let mut check = |what: String, header: u128, keep: u128, n: u32| {
+        for _ in 0..n {
+            let r = (next() as u128) << 64 | next() as u128;
+            let b = ((r & !keep) | header).to_le_bytes();
+            let want: Vec<u8> = decode(&b).chunks(4).map(|t| t[3]).collect();
+            let got = encoders_sys::bc7_fixup::gate_alpha(&b).expect("a mode that stores alpha");
+            assert_eq!(&got[..], &want[..], "{what}: {b:02x?}");
+        }
+    };
+    for rot in 0..4u128 {
+        for isel in 0..2u128 {
+            check(
+                format!("mode 4 rot {rot} isel {isel}"),
+                0x10 | rot << 5 | isel << 7,
+                0xff,
+                3000,
+            );
+        }
+        check(format!("mode 5 rot {rot}"), 0x20 | rot << 6, 0xff, 3000);
+    }
+    check("mode 6".into(), 0x40, 0x7f, 6000);
+    // 6 partition bits from bit 8 are random, so every one of the 64 partitions turns up.
+    check("mode 7".into(), 0x80, 0xff, 20_000);
+    let mut next = xorshift(0x0DDB_1A5E_5BAD_5EED);
+    for mode in 0..4u32 {
+        let r = (next() as u128) << 64 | next() as u128;
+        let v = (r & !((1u128 << (mode + 1)) - 1)) | 1 << mode;
+        assert!(encoders_sys::bc7_fixup::gate_alpha(&v.to_le_bytes()).is_none());
+    }
+}
+
+/// `force_zero_alpha` as it was before the gate: the mask of every alpha field of the block, cleared. Only the
+/// witness search below uses it, to find blocks the old rewrite changed.
+fn ungated_zero(block: &[u8; 16]) -> [u8; 16] {
+    let v = u128::from_le_bytes(*block);
+    let field = |at: u32, len: u32| ((1u128 << len) - 1) << at;
+    let mask = if block[0] & 0x1f == 0x10 {
+        match (v >> 5) & 3 {
+            0 => field(38, 12),
+            r => field(8 + 10 * (r as u32 - 1), 10),
+        }
+    } else if block[0] & 0x3f == 0x20 {
+        match (v >> 6) & 3 {
+            0 => field(50, 16),
+            r => field(8 + 14 * (r as u32 - 1), 14),
+        }
+    } else if block[0] & 0x7f == 0x40 {
+        field(49, 16)
+    } else if block[0] == 0x80 {
+        field(74, 24)
+    } else {
+        return *block;
+    };
+    (v & !mask).to_le_bytes()
+}
+
+/// Every ISPC path this CPU runs up to `ispc_target()` (Note HZ3), as `tests/bc7.rs` does.
+fn paths() -> Vec<encoders_sys::IspcTarget> {
+    encoders_sys::IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= encoders_sys::ispc_target())
+        .collect()
+}
+
+/// Seeded synthetic blocks, alpha 0: colour ramps between two random colours along a random direction with a little
+/// noise, or plain noise (no corpus block, BC7-C13).
+fn zero_alpha_blocks(seed: u64, blocks: usize) -> Vec<[u8; 4]> {
+    let mut next = xorshift(seed);
+    let mut px = Vec::with_capacity(blocks * 16);
+    for _ in 0..blocks {
+        let r = next();
+        let c0 = next();
+        // The far end of the ramp: anywhere, or within a few levels of the start (a near-flat block, which uses low
+        // indices only).
+        let kind = (r >> 16) % 3;
+        let c1 = match kind {
+            0 => next(),
+            1 => {
+                let d = next();
+                (0..3).fold(0u64, |acc, ch| {
+                    let near = ((c0 >> (8 * ch)) as u8).saturating_add((d >> (8 * ch)) as u8 & 3);
+                    acc | u64::from(near) << (8 * ch)
+                })
+            }
+            _ => c0,
+        };
+        let noise = if kind == 0 {
+            [0u64, 3, 12, 255][(r % 4) as usize]
+        } else {
+            [0u64, 0, 1, 1][(r % 4) as usize]
+        };
+        for t in 0..16u64 {
+            let along = match (r >> 8) % 3 {
+                0 => t % 4,
+                1 => t / 4,
+                _ => (t % 4 + t / 4) / 2,
+            };
+            let mut px_t = [0u8, 0, 0, 0];
+            for (ch, o) in px_t.iter_mut().take(3).enumerate() {
+                let (a, b) = ((c0 >> (8 * ch)) as u8 as i64, (c1 >> (8 * ch)) as u8 as i64);
+                let v = a + (b - a) * along as i64 / 3;
+                let n = if noise == 0 {
+                    0
+                } else {
+                    (next() % (2 * noise + 1)) as i64 - noise as i64
+                };
+                *o = (v + n).clamp(0, 255) as u8;
+            }
+            px.push(px_t);
+        }
+    }
+    px
+}
+
+/// A block the encoder already keeps at alpha 0 keeps its bytes, though the old rewrite changed them (it cleared a
+/// mode 6 or 7 p-bit, which moves RGB, or zeroed endpoints that decode 0 anyway). Blocks are encoded with A on, which
+/// is where the engine's `_m` route sends an alpha-0 file. Needs at least one such block per path.
+#[test]
+fn the_zero_fix_leaves_a_block_already_at_zero() {
+    // The settings `complex_material` ships: the data flat tolerance and the G guard (Note LR, LR8).
+    let tune = encoders_sys::Bc7Tune {
+        weights: None,
+        flat_tolerance: Some(encoders_sys::Bc7FlatTolerance::Data),
+        exact_constants: Some(0b010),
+    };
+    for target in paths() {
+        let mut kept = 0;
+        'search: for level in [
+            Bc7Level::Ultrafast,
+            Bc7Level::Basic,
+            Bc7Level::Slow,
+            Bc7Level::Veryslow,
+        ] {
+            let params = Bc7Params {
+                level,
+                perceptual: false,
+                exact_opaque: true,
+            };
+            for chunk in 0..(1usize << 16) / 256 {
+                let mut px = zero_alpha_blocks(0xA11C_E000 + chunk as u64, 256);
+                // G is flat in every block, 255 and 0 in turn: the engine's `_m` guards G (the old fix cleared
+                // p-bits, where a guarded 255 sits; the test checks bytes kept, not G).
+                for (i, t) in px.iter_mut().enumerate() {
+                    t[1] = [255, 0][i / 16 % 2];
+                }
+                let mut out = vec![0u8; px.len()];
+                encoders_sys::bc7e_compress_blocks_tuned_on(&px, &mut out, params, tune, target);
+                for blk in out.chunks(16) {
+                    let blk: &[u8; 16] = blk.try_into().unwrap();
+                    let at_zero = decode(blk).chunks(4).all(|t| t[3] == 0);
+                    if !at_zero || ungated_zero(blk) == *blk {
+                        continue;
+                    }
+                    let mut b = *blk;
+                    assert!(
+                        !encoders_sys::bc7_fixup::force_zero_alpha(&mut b),
+                        "{target:?} {level:?}: rewrote a block that decodes alpha 0: {blk:02x?}"
+                    );
+                    assert_eq!(b, *blk, "{target:?} {level:?}: bytes changed");
+                    kept += 1;
+                    if kept == 8 {
+                        break 'search;
+                    }
+                }
+            }
+        }
+        eprintln!("{target:?}: {kept} blocks the old fix changed, kept");
+        // The witnesses are a few blocks of AMD's bytes (Note JC); an Intel CPU writes other bytes and could find none.
+        // Every witness found is asserted above whichever CPU runs.
+        if encoders_sys::intel_cpu() {
+            eprintln!("skipped: the witness count is AMD's bytes (Note JC)");
+        } else {
+            assert!(
+                kept > 0,
+                "{target:?}: no block found that the old fix changed"
+            );
+        }
     }
 }

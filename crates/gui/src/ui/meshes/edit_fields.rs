@@ -112,7 +112,10 @@ fn float(
 }
 
 /// [`float`] with a row label that differs from the accessible name (rows of several controllers share labels).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui, the edit state and act slot, the anchor, then the label, accessible name, field and value of one float row; each comes from the caller's own locals, so a struct would be built per row only to be taken apart here"
+)]
 pub(super) fn float_named(
     ui: &mut egui::Ui,
     e: &NifEdit,
@@ -187,7 +190,7 @@ pub(super) fn set_name(
     r.widget_info(move || {
         let mut i = egui::WidgetInfo::labeled(typ, enabled, name.clone());
         i.value = value;
-        i.current_text_value = text.clone();
+        i.current_text_value.clone_from(&text);
         i
     });
 }

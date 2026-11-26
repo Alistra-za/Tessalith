@@ -8,8 +8,13 @@
 //! fits and the endpoint steps read no weights. Its errors are in kernel units (twice rgbcx's, Note HY9); this file
 //! only compares them with each other and with 0.
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 use super::encode::{bc1_encode3, encode, round_ls, single_colour_ends3};
@@ -17,13 +22,20 @@ use super::fit::{ls_endpoints3, to_5, to_6};
 use super::initial::maximum;
 use super::sels::{find_sels3_masked, Texels};
 use super::{Ends, DUAL};
+use crate::path::Isa;
 
 /// `encode_bc1_alpha(LEVEL, ..)` with R, G, B error weights `weights`: bit i of `transparent` marks texel i
 /// transparent. Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise
 /// a 3-colour block fitted to the opaque texels (principal axis, extreme texels, up to 8 least-squares refits, then up
-/// to 64 rounds of +-1 endpoint steps), masked texels on selector 3.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+/// to 64 rounds of +-1 endpoint steps), masked texels on selector 3. Compiled for `isa` (inlined into each frame
+/// entry of `frames.rs`).
+#[allow(
+    clippy::needless_range_loop,
+    reason = "index loops mirror the C++ they port"
+)]
+#[inline(always)]
 pub(crate) fn encode_alpha<const LEVEL: u32>(
+    isa: impl Isa,
     px: &[[u8; 4]; 16],
     transparent: u16,
     weights: [i32; 3],
@@ -32,7 +44,7 @@ pub(crate) fn encode_alpha<const LEVEL: u32>(
     let mask = transparent as u32;
     if mask == 0 {
         hit!(Hit::AlphaNoMask);
-        return encode::<LEVEL>(px, true, weights);
+        return encode::<LEVEL>(isa, px, true, weights);
     }
 
     if mask == 0xFFFF {
@@ -156,7 +168,7 @@ pub(crate) fn encode_alpha<const LEVEL: u32>(
 
     let texels = Texels::masked(px, weights, DUAL, mask);
     let mut sels = [0u8; 16];
-    let mut err = find_sels3_masked(&texels, &ends, &mut sels);
+    let mut err = find_sels3_masked(isa, &texels, &ends, &mut sels);
 
     // Least-squares refits while they improve; the solve skips selector 3, so only opaque texels count.
     // `for (pass = 0; err && (pass < 8); pass++)`.
@@ -189,7 +201,7 @@ pub(crate) fn encode_alpha<const LEVEL: u32>(
         }
 
         let mut sels2 = [0u8; 16];
-        let err2 = find_sels3_masked(&texels, &trial, &mut sels2);
+        let err2 = find_sels3_masked(isa, &texels, &trial, &mut sels2);
         if err2 >= err {
             hit!(Hit::AlphaLsWorse);
             break;
@@ -233,7 +245,7 @@ pub(crate) fn encode_alpha<const LEVEL: u32>(
                 h: [e[3], e[4], e[5]],
             };
             let mut sels2 = [0u8; 16];
-            let err2 = find_sels3_masked(&texels, &trial, &mut sels2);
+            let err2 = find_sels3_masked(isa, &texels, &trial, &mut sels2);
             if err2 < err {
                 hit!(Hit::AlphaStepBetter);
                 err = err2;

@@ -26,16 +26,17 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 /// Human output on stderr, plus JSON Lines on stdout with `--json`. `run_also` takes this and makes its own reporters.
-fn tee_sink(json: bool) -> Arc<dyn EventSink> {
-    let mut sinks: Vec<Arc<dyn EventSink>> = vec![Arc::new(human::HumanSink::new())];
+fn tee_sink(json: bool, validated: bool) -> Arc<dyn EventSink> {
+    let mut sinks: Vec<Arc<dyn EventSink>> =
+        vec![Arc::new(human::HumanSink::new().validating(validated))];
     if json {
         sinks.push(Arc::new(JsonLinesSink::new(std::io::stdout())));
     }
     Arc::new(human::TeeSink(sinks))
 }
 
-fn reporter(json: bool) -> Reporter {
-    Reporter::new(tee_sink(json), new_batch_id())
+fn reporter(json: bool, validated: bool) -> Reporter {
+    Reporter::new(tee_sink(json, validated), new_batch_id())
 }
 
 /// `SDC_PROFILE`'s folder: `None` when unset or empty; a missing folder is created. A path that is not a folder, or
@@ -78,6 +79,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         (true, false) => EvScope::matching(a.property).map_err(EngineError::Usage)?,
     };
     req.dry_run = a.dry_run;
+    req.validate = a.validate;
     let profile = profile_out
         .as_deref()
         .map(|dir| (dir, engine::profile::Recorder::new()));
@@ -108,7 +110,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
             &AnalysisCache::default(),
             req,
             &spec,
-            tee_sink(a.batch.json),
+            tee_sink(a.batch.json, a.validate),
             &cancel,
         );
         if let Some((dir, rec)) = &profile {
@@ -124,7 +126,7 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         }
         return Ok(sum.exit_code());
     }
-    let rep = reporter(a.batch.json);
+    let rep = reporter(a.batch.json, a.validate);
     let result = engine
         .plan(req, &rep, &cancel)
         .and_then(|plan| engine.run(plan, &rep, &cancel));

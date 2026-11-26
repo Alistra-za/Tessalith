@@ -48,7 +48,10 @@ mod app_harness;
 mod checks;
 mod fixtures;
 mod frame;
-#[allow(dead_code)] // fields only the doc shots read
+#[allow(
+    dead_code,
+    reason = "this driver reads the doc-shot manifest's render settings and adapter, but not its shot and exempt lists, the render fonts or `Manifest::png`; the doc_shots test does"
+)]
 #[path = "../doc_shots/manifest.rs"]
 mod manifest;
 mod oracles;

@@ -14,18 +14,39 @@ With two or more textures selected, the centre shows their settings in one panel
 
 Every bulk edit is one undo step and one plan. A read-only `sdc.toml` takes none. When the selected textures' formats read different Effort keys ([Effort](GUI-Texture-Panel.md#effort)), the Effort row reads "Formats differ: edit one format at a time"; a texture whose format has no search setting doesn't count, and the edit skips it. <!-- D:JI4 -->
 
+### Choosing a type for the undecided ones
+
+When some of the selected textures wait for a type, a card comes first: **What kind are these {n} textures?** (**What kind is this texture?** for one). It asks only about the textures you selected, whether or not they are in the current Review run. <!-- D:LM8 -->
+
+1. Click a likely-type button, or open **Type for {n} textures**, which starts on **Choose a type**. The buttons come from the same sources as a single texture's ([where they come from](GUI-Texture-Panel.md#picking-the-type)), pooled over the selection. Here a button only fills the dropdown and writes nothing; on a single texture it sets the type and moves on. The dropdown lists only types every one of those textures is offered, so no texture is skipped. <!-- D:LM8,LM9 -->
+2. Click **Apply to {n}**. Every texture on the card gets the type as one undo step and one plan.
+
+Under **Apply** a line counts the selected textures that already have a type ("{m} other selected textures already have a type."); the card leaves them alone. **Apply** is off with "Pick a type from the list first" until you pick, and while a plan runs or `sdc.toml` is read-only. It reads your selection again at the click, so a texture that decided meanwhile is not touched. <!-- D:LM8 -->
+
+### What an edit reaches
+
+A row that writes the same value to every texture says how many of the selected textures it reaches: "applies to {k} of {n}", also when k is n. Hover it for why the others are skipped. <!-- D:LM11 -->
+
+- **Rows with options that differ in reach:** the mip filter, BC7 weighting, Format and DDS tag list every option as "{option} ({k} of {n})", counting the textures a write of that value reaches. A texture that already holds the value counts. An option that reaches none is greyed ("None of the selected textures can take this"), and while an edit is running every other option is greyed too ("Wait for the plan to finish"). A read-only `sdc.toml` greys every row, and the panel says why. The row's note groups options of equal reach, widest first, two groups at most, then "others vary". <!-- D:LM11 -->
+- **A packed output** is a tile of its own, so Ctrl+A selects it, and an unlocked setting such as mip levels is written to the output's own entry. A source that feeds an output but has no job of its own is skipped. Hover either tile: the output says what it is made from, the source says "Packed into {output}: changing this file changes {output}." and, for one with no job, that bulk edits skip it. <!-- D:LM16 -->
+
+When the selection holds normal maps, a **Green** row under Format sets them all to OpenGL (**Treat as OpenGL (flip green)**) or DirectX (**Treat as DirectX**) in one undo step. Normal maps in a locked slot, model-space normals (`_msn`), textures still waiting for their type, and other textures are left as they are, and the row's hover says why. Like **Apply**, it is off while a plan runs or `sdc.toml` is read-only, and it reads your selection again at the click. <!-- D:LQ -->
+
 ## The right-click menu
 
 Right-clicking a selected tile or set keeps the selection; right-clicking another entry selects it alone.
 
 ![A texture tile's right-click menu.](../img/gui/GUI-Bulk-and-Rename/tile-menu.png)
 
-- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. A format a target's type doesn't allow is skipped for it, so a [grey map](GUI-Texture-Panel.md#how-edits-are-saved) never takes BC7. Textures only: to copy between sets, use **Select members of kind** first.
+- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. A format a target's type doesn't allow is skipped for it, so a [grey map](GUI-Texture-Panel.md#how-edits-are-saved) never takes BC7. Textures only: to copy between sets, use **Select members of kind** first. The material values of a set copy with the JSON entries below.
+- **Copy JSON settings from <set> to N selected…** copies the last-clicked set's exported material values (PGPatcher, CS PBR texture set and material object, complex material, XPMF, Advanced skin) to the other selected sets. <!-- D:LJ1 -->
+- **Copy JSON settings** and **Paste JSON settings from <set> to N selected…** do the same through a clipboard that lasts until Tessalith closes, also into another project.
+- Matches, slot commands, Rename, locks, paths, record fields, each set's export choice and its XPMF PBR switch stay its own. A value a target can't take is skipped, and the reason shows in Messages.
 - **Reset all settings for N…** removes their `sdc.toml` entries after asking. It keeps your acknowledgements and skips a texture in a pinned slot.
 
 ## Renaming
 
-Right-click a texture or a set, or press **F2**. The dialog has two modes.
+Right-click a texture, or a PGPatcher PBR set for Outputs, or press **F2**. Inputs is offered in the Textures view only. <!-- D:LJ3 --> The dialog has two modes.
 
 | Mode | What it does | Saved where |
 |---|---|---|

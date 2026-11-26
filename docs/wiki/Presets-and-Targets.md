@@ -20,7 +20,7 @@ On the command line: [CLI reference](CLI-Reference.md#target-and-preset-from-the
 
 What a target changes lives with the thing it changes:
 
-- Sub-types and colour tags: [Texture types](Texture-Types.md#sub-types-what-each-file-becomes).
+- Types and colour tags: [Texture types](Texture-Types.md#types-what-each-file-becomes).
 - Packed maps: [Texture packing](Texture-Packing.md).
 - Shaders: [Set shaders](Set-Shaders.md#which-maps-each-shader-needs).
 
@@ -51,14 +51,14 @@ Every built-in preset has one rule: any file under an `interface` or `sky` folde
 ![The Presets tab.](../img/gui/Presets-and-Targets/presets-tab.png)
 
 - **Built-in presets are read-only.** **Duplicate** makes an editable copy.
-- **One row per sub-type**, in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
+- **One row per type**, in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
 - **A format a type can't use is fixed when the preset opens.** A user preset that gives `skin_sk` BC7 opens with BC4 set and a note in the editor saying so; **Save preset** writes the fix. Grey maps are BC4 or R8 in the GUI: [texture panel](GUI-Texture-Panel.md).
 - **A preset that wouldn't load is never written.** The creator loads it through the same loader as the presets folder before saving, edits your file in place (comments kept), and re-reads the folder, so the preset appears in the **Preset** menu without a restart.
 - **A preset that `sdc.toml` names but is gone** blocks the export: Problems shows "Preset <id> is not installed" with **Choose preset…**. On the command line that is an error: [CLI reference](CLI-Reference.md#target-and-preset-from-the-command-line).
 
 ### Suffix branches
 
-Open a suffix under a sub-type to change settings only for files with that suffix:
+Open a suffix under a type to change settings only for files with that suffix:
 
 - A branch is saved as one `[[rules]]` entry, and branches apply after your other rules. An alias's branch adds to its canonical suffix's branch.
 - A `[files]` value still beats a branch.
@@ -100,12 +100,12 @@ rmaosultrahigh = "rmaos"
 | `schema_version` | yes | 1. |
 | `id` | yes | The preset's id. Must not clash with one already loaded, built-in or user. |
 | `version` | yes | Your version string. |
-| `base` | in practice | The preset this one inherits from, such as `cs-quality`. Every sub-type's profile must resolve completely, so a preset without a `base` must supply every field itself; the load names what is missing. A cycle is an error. |
+| `base` | in practice | The preset this one inherits from, such as `cs-quality`. Every type's profile must resolve completely, so a preset without a `base` must supply every field itself; the load names what is missing. A cycle is an error. |
 | `target` | no | The preset's target, used when nothing else sets one. Leave it out for a target-neutral preset like `fast-preview`. |
 | `hidden` | no | `true` keeps the preset out of the preset lists. |
 | `description` | no | A one-line description, shown with the preset in lists. |
-| `[defaults]` | no | Partial profile for every sub-type. |
-| `[subtypes.<id>]` | no | Partial profile for one sub-type. |
+| `[defaults]` | no | Partial profile for every type. |
+| `[subtypes.<id>]` | no | Partial profile for one type, keyed by its type id. |
 | `[[rules]]` | no | Same format as in `sdc.toml`: [rules](Project-Config.md#rules). |
 | `[suffix_aliases]` | no | Extra file-name suffixes, as `alias = "canonical suffix"`. |
 

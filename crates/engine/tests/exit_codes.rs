@@ -3,6 +3,29 @@
 use engine::api::*;
 
 #[test]
+fn an_also_check_failure_alone_exits_4() {
+    use engine::also::{AlsoSummary, Phase};
+    let mut s = AlsoSummary {
+        phases: vec![(
+            Phase::Pbr,
+            BatchSummary {
+                checked_failed: 1,
+                ..Default::default()
+            },
+        )],
+        copied: 0,
+        sets: vec![],
+        folders: Default::default(),
+        notes: vec![],
+        cancelled_after: None,
+        error: None,
+    };
+    assert_eq!(s.exit_code(), 4);
+    s.cancelled_after = Some(Phase::Vanilla);
+    assert_eq!(s.exit_code(), 1);
+}
+
+#[test]
 fn precedence_partial_over_validation_over_success() {
     let mut s = BatchSummary::default();
     assert_eq!(s.exit_code(), 0);

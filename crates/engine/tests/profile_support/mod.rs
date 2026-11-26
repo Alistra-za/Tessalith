@@ -36,6 +36,8 @@ impl Fixture {
         req.accept = AcceptSuggestions::High;
         req.on_existing = OnExisting::Overwrite;
         req.jobs = 4;
+        // Validation is opt-in (Note LG1); `check_spans` requires a Validate span for every job.
+        req.validate = true;
         req.profile = recorder.cloned();
         Engine::new()
             .unwrap()

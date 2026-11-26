@@ -2,7 +2,7 @@
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
 use crate::model::bulk::{MenuAction, MenuEntry};
-use crate::model::items::{ItemStatus, TextureItem};
+use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::texture_view::{ColumnPrefs, FilterOptions, SetFilter, SortKey};
 use crate::model::AppModel;
 use eframe::egui;
@@ -63,6 +63,34 @@ fn rounded_width(step: f32, gap: f32, max: f32, cap: f32) -> f32 {
 mod tests {
     use super::*;
 
+    fn s(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn join_and_reads_one_two_three_and_four_names() {
+        assert_eq!(join_and(&s(&["a"])), "a");
+        assert_eq!(join_and(&s(&["a", "b"])), "a and b");
+        assert_eq!(join_and(&s(&["a", "b", "c"])), "a, b and c");
+        assert_eq!(join_and(&s(&["a", "b", "c", "d"])), "a, b, c and d");
+    }
+
+    /// Ruling 3d-R5: case-insensitive order, the key breaks a tie, a source listed twice counts once.
+    #[test]
+    fn source_names_sort_without_case_break_ties_by_key_and_drop_repeats() {
+        let keys = s(&[
+            "m/b_Rough.png",
+            "m/a_ao.png",
+            "m/B_rough.png",
+            "z/a_ao.png",
+            "m/a_ao.png",
+        ]);
+        assert_eq!(
+            sorted_file_names(keys),
+            s(&["a_ao.png", "a_ao.png", "B_rough.png", "b_Rough.png"])
+        );
+    }
+
     /// Review fix: a cap below the next whole column leaves the width as it is (Sets keeps its room).
     #[test]
     fn rounding_does_not_take_room_for_a_column_it_cannot_reach() {
@@ -94,12 +122,15 @@ pub const SETS_MIN: f32 =
 
 /// The arrow beside a column heading that collapses the column to its strip (the strip's own arrow expands it).
 pub fn collapse_arrow(ui: &mut egui::Ui, model: &mut AppModel, column: crate::ui::Column) {
-    let name = match column {
-        crate::ui::Column::Textures => "Textures",
-        crate::ui::Column::Sets => "Sets",
+    let (name, label) = match column {
+        crate::ui::Column::Textures => ("Textures", "Collapse Textures"),
+        crate::ui::Column::Sets => ("Sets", "Collapse Sets"),
     };
-    if ui
-        .small_button("◀")
+    let arrow = ui.small_button("◀");
+    // The name differs from the hover on purpose: the audit in `accessible_names.rs` counts an input whose name equals
+    // its description as named by the hover alone.
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    if arrow
         .on_hover_text(format!("Collapse the {name} column"))
         .clicked()
     {
@@ -186,9 +217,111 @@ fn tile_border(ui: &egui::Ui, status: &ItemStatus, no_set: bool) -> egui::Color3
     border_of(ui, status)
 }
 
+/// The packed output's sources as file names: each source once, by project key, sorted case-insensitively with the
+/// key as the tie-break. Empty for anything that is not a generated pack.
+fn pack_source_names(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    let (Some(root), Some(pack)) = (
+        model.root.as_deref(),
+        item.job.as_ref().and_then(|j| j.pack.as_ref()),
+    ) else {
+        return vec![];
+    };
+    sorted_file_names(
+        pack.sources
+            .iter()
+            .map(|s| crate::model::items::key_of(root, &s.path))
+            .collect(),
+    )
+}
+
+/// The file names of `keys`: each key once, sorted by lowercase file name, then by key.
+fn sorted_file_names(mut keys: Vec<String>) -> Vec<String> {
+    keys.sort();
+    keys.dedup();
+    let name = |k: &str| crate::model::items::key_file_name(k).to_string();
+    keys.sort_by_key(|k| (name(k).to_lowercase(), k.clone()));
+    keys.iter().map(|k| name(k)).collect()
+}
+
+/// "a", "a and b", "a, b and c".
+fn join_and(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// The outputs (their keys, once each, sorted) whose actual source list holds `item`.
+fn packed_into_keys(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    let Some(root) = model.root.as_deref() else {
+        return vec![];
+    };
+    let mut outs: Vec<String> = model
+        .items
+        .iter()
+        .filter(|o| o.kind == ItemKind::Packed)
+        .filter(|o| {
+            o.job
+                .as_ref()
+                .and_then(|j| j.pack.as_ref())
+                .is_some_and(|p| {
+                    p.sources
+                        .iter()
+                        .any(|s| crate::model::items::key_of(root, &s.path) == item.key)
+                })
+        })
+        .map(|o| o.job_key.clone())
+        .collect();
+    outs.sort();
+    outs.dedup();
+    outs
+}
+
+/// What a bulk edit or a change does to a packed output or to a source packed into one; empty for other files.
+/// It scans the outputs, so only a hover builds it, and a helper row's AccessKit description (ruling 3d-T19-1);
+/// a tile's AccessKit node never does (`tile_access_text`, ruling 3d-F-9b).
+fn pack_lines(model: &AppModel, item: &TextureItem) -> Vec<String> {
+    if item.kind == ItemKind::Packed {
+        let names = pack_source_names(model, item);
+        if names.is_empty() {
+            return vec![];
+        }
+        return vec![format!(
+            "Packed output, made from {}. Bulk edits change unlocked settings on this output.",
+            join_and(&names)
+        )];
+    }
+    let mut lines: Vec<String> = packed_into_keys(model, item)
+        .iter()
+        .map(|j| format!("Packed into {j}: changing this file changes {j}."))
+        .collect();
+    if !lines.is_empty() && item.job.is_none() {
+        lines
+            .push("Bulk edits skip this source because it has no settings of its own.".to_string());
+    }
+    lines
+}
+
 /// The hover text of a tile: what the status means, then the warnings, the marked ones last under `MARKED_LINE`. A
-/// no-set texture says `No set` in place of its question and its warnings (Note HF1).
+/// no-set texture says `No set` in place of its question and its warnings (Note HF1), and returns before the pack
+/// lines. A packed output says what it is made from; a packed source says what changing it changes (ruling 3d-R5).
 pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
+    tile_text(model, item, no_set, || pack_lines(model, item))
+}
+
+/// The tile's AccessKit text: [`tile_tooltip`] without the pack lines (the key, the status with its plain "Packed
+/// into {j}" line, the warnings), as the hover read before ruling 3d-R5 (rulings 3d-F-9, 3d-F-9b).
+fn tile_access_text(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
+    tile_text(model, item, no_set, Vec::new)
+}
+
+fn tile_text(
+    model: &AppModel,
+    item: &TextureItem,
+    no_set: bool,
+    pack_lines: impl FnOnce() -> Vec<String>,
+) -> String {
     let mut lines = vec![item.key.clone()];
     if no_set {
         lines.push("No set".to_string());
@@ -196,7 +329,11 @@ pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> Strin
             return lines.join("\n");
         }
     }
+    let packs = pack_lines();
+    let explained = !packs.is_empty();
+    lines.extend(packs);
     match &item.status {
+        ItemStatus::PackedInto(_) if explained => {}
         ItemStatus::Failed(e) => lines.push(format!("Failed: {e}")),
         ItemStatus::Error(codes) => lines.push(format!(
             "Error: {}",
@@ -303,7 +440,28 @@ fn tile(
         })
         .response
         .interact(egui::Sense::click_and_drag())
-        .on_hover_text(tile_tooltip(model, item, no_set));
+        .on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(tile_tooltip(model, item, no_set));
+        });
+    // Rulings 3d-F-9, 3d-F-9b: egui copies an `on_hover_text` string into the node (`describe_for_accessibility`);
+    // `on_hover_ui` copies nothing. Make that copy here with egui's guards, from `tile_access_text` (key, status,
+    // warnings; never the pack lines). While AccessKit is on, this runs for every visible tile each pass, as the old
+    // `on_hover_text` string did; it builds no pack lines, so it scans no outputs.
+    if ui.ctx().has_accesskit_node(resp.id) {
+        ui.ctx().accesskit_node_builder(resp.id, |b| {
+            let text = tile_access_text(model, item, no_set);
+            if b.description().is_none() {
+                b.set_description(text.clone());
+            }
+            if b.role() != egui::accesskit::Role::Label
+                && b.labelled_by().is_empty()
+                && b.label().is_none_or(str::is_empty)
+            {
+                b.set_label(text);
+            }
+        });
+    }
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).
@@ -665,6 +823,17 @@ fn helper_row(
         format!("Helper {}: {role}{by_you}, {target}", item.name)
     };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+    // Ruling 3d-T19-1: what changing this file changes is the row's AccessKit description (the name stays as
+    // above); the drawn hover is the target label's. A no-set helper has neither. AccessKit runs the closure only
+    // while a screen reader or a test reads the tree.
+    if !no_set {
+        ui.ctx().accesskit_node_builder(resp.id, |b| {
+            let lines = pack_lines(model, item);
+            if !lines.is_empty() {
+                b.set_description(lines.join("\n"));
+            }
+        });
+    }
     if chosen.contains(&key) {
         ui.painter().rect_filled(
             rect,
@@ -717,10 +886,15 @@ fn helper_row(
                         format!("→ {}", target.trim_start_matches("fills "))
                     };
                     ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate())
-                        .on_hover_text(crate::model::items::helper_target_files(
-                            &h,
-                            model.helper_tails(&h),
-                        ));
+                        .on_hover_ui(|ui| {
+                            ui.set_max_width(ui.spacing().tooltip_width);
+                            let mut lines = vec![crate::model::items::helper_target_files(
+                                &h,
+                                model.helper_tails(&h),
+                            )];
+                            lines.extend(pack_lines(model, item));
+                            ui.label(lines.join("\n"));
+                        });
                 },
             );
     });
@@ -783,12 +957,14 @@ fn value_combo(
     present: &[String],
     show: impl Fn(&str) -> String,
 ) {
-    let mut values: Vec<&String> = present.iter().collect();
-    if let Some(c) = current.as_ref().filter(|c| !present.contains(c)) {
-        values.push(c);
-    }
+    let extra = current.as_ref().filter(|c| !present.contains(c));
     let mut options = vec![(None, "Any".to_string())];
-    options.extend(values.into_iter().map(|v| (Some(v.as_str()), show(v))));
+    options.extend(
+        present
+            .iter()
+            .chain(extra)
+            .map(|v| (Some(v.as_str()), show(v))),
+    );
     let mut now = current.as_deref();
     pick(ui, name, hover, &mut now, &options);
     if now != current.as_deref() {
@@ -803,8 +979,8 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
     match n {
         0 => value_combo(
             ui,
-            ("Sub-type", "Sub-type filter"),
-            "Only textures of this sub-type (the sub-types in this folder)",
+            ("Filter by type", "Filter by type"),
+            "Only textures of this type (the types in this folder)",
             &mut model.filter.subtype,
             &o.subtypes,
             str::to_string,

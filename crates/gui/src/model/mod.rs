@@ -26,13 +26,16 @@ pub mod items;
 mod json_finish;
 pub mod known_paths;
 pub mod labels;
+pub mod likely;
 pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod new_set_note;
 mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
+pub mod panel_groups;
 pub mod pbr_export;
 mod pbr_follow;
 pub mod picker;
@@ -44,6 +47,7 @@ pub mod rename;
 pub mod review;
 pub mod sections;
 pub mod set_groups;
+pub mod set_json_copy;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
@@ -117,11 +121,52 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
+/// Why a plan runs. An open starts with "Planning…" and then counts "Analysing n / m files…"; a re-plan after the
+/// user's edit says "Re-checking after your change"; every other re-plan, Undo and Redo included, says "Re-checking".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlanCause {
+    #[default]
+    Open,
+    Edit,
+    Other,
+}
+
+impl PlanCause {
+    /// The status line before the first progress event.
+    fn waiting_line(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Planning…",
+            PlanCause::Edit => "Re-checking after your change…",
+            PlanCause::Other => "Re-checking…",
+        }
+    }
+
+    /// The words ahead of "n / m files…".
+    fn lead(self) -> &'static str {
+        match self {
+            PlanCause::Open => "Analysing",
+            PlanCause::Edit => "Re-checking after your change:",
+            PlanCause::Other => "Re-checking",
+        }
+    }
+}
+
+/// Note JI4: an undo step's label for a field write: every field the Effort row writes reads "Effort", as the bulk
+/// panel's step does (`bulk.rs`), not the raw config key.
+fn field_step_label(verb: &str, field: &str) -> String {
+    if fields::EFFORT_FIELDS.contains(&field) {
+        format!("{verb} Effort")
+    } else {
+        format!("{verb} {field}")
+    }
+}
+
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
-/// A7; not `counted`, which has no thousands separator).
-pub fn plan_bar_text(done: usize, total: usize) -> String {
+/// A7; not `counted`, which has no thousands separator). A re-plan reads "Re-checking …" (`PlanCause`).
+pub fn plan_bar_text(cause: PlanCause, done: usize, total: usize) -> String {
+    let lead = cause.lead();
     format!(
-        "Analysing {} / {} {}…",
+        "{lead} {} / {} {}…",
         thousands(done),
         thousands(total),
         if total == 1 { "file" } else { "files" }
@@ -155,12 +200,27 @@ pub enum CentreTab {
     Settings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Selection {
+    #[default]
     None,
     Item(String),
     Set(String),
     SetId(String),
+}
+
+/// The groups of the texture panel held open for `item`: by a problem it has (filled once per selection) or by a Go to.
+/// `settings_panel::draw` resets and fills it; `Action::SetGroupOpen(g, false)` takes a group out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForcedOpen {
+    /// The selection this latch was started for: any change of `AppModel::selection` (a set, nothing, another item,
+    /// the same item again) starts a new latch, whether or not a panel was drawn in between
+    /// (`AppModel::observe_panel_selection`). A writer that sets the latch after a `select_item` (Go to) sets this too.
+    pub seen: Selection,
+    pub item: String,
+    /// The problems' groups were added: the fill runs once per selection.
+    pub filled: bool,
+    pub groups: BTreeSet<panel_groups::PanelGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -365,6 +425,13 @@ pub enum Dialog {
         to: Vec<String>,
         fields: Vec<(String, bool)>,
     },
+    /// Copy (or paste) the ticked JSON settings of set `source` (its card name) to the sets `to` (document ids).
+    CopySetJson {
+        source: String,
+        paste: bool,
+        to: Vec<String>,
+        rows: Vec<(set_json_copy::JsonRow, bool)>,
+    },
     /// F3a D4: remove the `[files]` settings of these textures, once confirmed.
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
@@ -400,13 +467,12 @@ pub enum Answer {
     Acknowledge(Code),
 }
 
-/// What a plan takes from the sets: `set_edits`, `output_paths`, and the shared roughness slots and borrowed
-/// normals that gate the bake (DECISIONS R7, Note R M4-final-1). All four settle the two-pass planning.
+/// Inputs compared between planning passes, including roughness slot groups and their resolved normals (Note LE).
 #[derive(Debug, Clone, PartialEq)]
 struct EngineInputs {
     set_edits: Vec<engine::sets::SetEdit>,
     output_paths: std::collections::BTreeMap<engine::sets::OutputKey, PathBuf>,
-    shared_roughness: std::collections::BTreeSet<String>,
+    shared_roughness: Vec<engine::api::SharedRoughness>,
     borrowed_normal: std::collections::BTreeMap<String, String>,
     set_shaders: std::collections::BTreeMap<String, engine::shader::Shader>,
     pinned_files: std::collections::BTreeSet<String>,
@@ -530,15 +596,16 @@ pub(crate) fn cached<T: Clone>(
     put: impl FnOnce(&mut ViewCache, T),
     build: impl FnOnce() -> T,
 ) -> T {
-    let key = m.view_key();
     {
+        // A hit compares the stored key with the model in place (`view_key_matches`): no clone, so no allocation.
         let c = m.view_cache().borrow();
-        if c.key.as_ref() == Some(&key) {
+        if c.key.as_ref().is_some_and(|k| m.view_key_matches(k)) {
             if let Some(v) = get(&c) {
                 return v;
             }
         }
     }
+    let key = m.view_key();
     let v = build();
     let mut c = m.view_cache().borrow_mut();
     if c.key.as_ref() != Some(&key) {
@@ -569,6 +636,53 @@ pub(crate) struct ViewKey {
     target_mod_rev: u64,
     /// Note HF9: the export scope (`AppModel::scope_rev`): what `in_run` answers, so every cache here.
     scope: u64,
+}
+
+/// `AppModel::output_root()` kept with what it is worked out from, so `view_key_matches` can read it without building
+/// the path again. The inputs are the ones `review::writes_key` names for it: the Also ticks (`sdc.toml`, `project`),
+/// the Also location and the export folder (`sdc-project.toml`, `doc`), the folder names (`root`), `gui.toml`'s folder
+/// when there is no document (`settings_export`), the target, and whether either document is read-only.
+pub(crate) struct OutputMemo {
+    project: u64,
+    project_ro: bool,
+    doc: u64,
+    doc_ro: bool,
+    target: Target,
+    root: Option<PathBuf>,
+    settings_export: Option<PathBuf>,
+    path: PathBuf,
+}
+
+impl OutputMemo {
+    fn new(m: &AppModel) -> Self {
+        OutputMemo {
+            project: m
+                .project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev),
+            project_ro: m.project.as_ref().is_some_and(|p| p.read_only()),
+            doc: m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev),
+            doc_ro: m.sets_doc.as_ref().is_some_and(|d| d.read_only()),
+            target: m.target,
+            root: m.root.clone(),
+            settings_export: m.settings.export_folder.clone(),
+            path: m.output_root(),
+        }
+    }
+
+    /// Whether `path` was worked out from what the model holds now. No allocation.
+    fn current(&self, m: &AppModel) -> bool {
+        self.project
+            == m.project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev)
+            && self.project_ro == m.project.as_ref().is_some_and(|p| p.read_only())
+            && self.doc == m.sets_doc.as_ref().map_or(0, crate::sets_doc::SetsDoc::rev)
+            && self.doc_ro == m.sets_doc.as_ref().is_some_and(|d| d.read_only())
+            && self.target == m.target
+            && self.root == m.root
+            && self.settings_export == m.settings.export_folder
+    }
 }
 
 /// Ruling 3b-F24: everything the From another set rows' settled check (`AppModel::settled_wait`) reads, so a cached
@@ -935,6 +1049,8 @@ pub struct AppModel {
     pub marker_note: Option<(messages::Severity, String)>,
     /// F3b D4: the rename dialog's last applied recipe, offered again on the next open (this session only).
     pub last_recipe: rename::Recipe,
+    /// The Copy JSON settings clipboard (SM-R1): kept across opening another project, never saved.
+    pub json_clip: Option<set_json_copy::JsonClip>,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
     /// Note JA11: **Re-encode every output** in the Tools menu. Off at start and never saved: the next export
@@ -950,6 +1066,10 @@ pub struct AppModel {
     pub cs_pbr: cs_pbr::CsPbrScan,
     /// Keyboard navigation, the shortcut sheet and the command palette (items 5 and 19).
     pub nav: nav::Nav,
+    /// The texture panel's groups a problem (or a Go to) holds open for the selected item; never saved.
+    pub panel_forced: ForcedOpen,
+    /// `output_root()` with its inputs (`view_key_matches`).
+    output_root_memo: std::cell::RefCell<Option<OutputMemo>>,
     /// Explorer requests the app has not started yet (Task 5, `model::shell`).
     pub shell: Vec<shell::ShellRequest>,
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
@@ -965,8 +1085,14 @@ pub struct AppModel {
     reencode_follow: Option<String>,
     /// A Save report write is on a worker (AG130); the app keeps frames coming until it lands.
     pub report_saving: bool,
-    /// "Show in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
+    /// "Show all in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
     pub show_in_meshes: Option<String>,
+    /// A shape link in "Used by N meshes" was clicked; `SdcApp::route_3d` takes it and brings Meshes forward.
+    pub show_mesh: Option<used_by::MeshPick>,
+    /// The scan database the Meshes view reads and whether it is reading its rows, copied by `SdcApp::route_3d` each
+    /// frame; the Used-by links stay off while either disagrees with the answer they would act on.
+    pub meshes_store: Option<std::path::PathBuf>,
+    pub meshes_rows_loading: bool,
     /// A NIF worklist row's fix: (NIF path, tab, field); app.rs switches to the Meshes view (NIF team, Note GD1).
     pub nif_tab_request: Option<(String, meshes::NifTab, Option<nif::fields::Field>)>,
     /// Note FC1 (AM14): `Choose preset…` was clicked on this pass (`ctx.cumulative_pass_nr`); the header opens its
@@ -1072,6 +1198,10 @@ pub struct AppModel {
     type_pending: Option<encoding_follow::Pending>,
     /// The sub-types before the plan chain in flight (`settle_types` compares them with the final pass).
     type_base: Option<std::collections::HashMap<String, Subtype>>,
+    /// Type choices waiting for the plan that settles them: the settled plan says which made a new set (E8).
+    pending_new_sets: Vec<new_set_note::NewSetNote>,
+    /// The folder the pending choices were made in and every card ID listed before the first of them.
+    carded_before: Option<(PathBuf, Vec<String>)>,
     /// A user step started the chain in flight: its cleanup folds into that step.
     type_cause: bool,
     /// One-shot guard: the chain in flight is a cleanup's own replan.
@@ -1122,6 +1252,8 @@ pub struct AppModel {
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
     pub plan_progress: Option<(usize, usize)>,
+    /// The cause of the latest plan started (it stays after the plan lands); words its status line and progress text.
+    pub plan_cause: PlanCause,
     /// While a folder's first plan is in flight: the folder open before it (`None`: none), Recent as it was, and that
     /// folder's undo history and selection (Note FC12). Cancel goes back to all of them.
     opening: Option<(Option<PathBuf>, Vec<PathBuf>, history::History, Selection)>,
@@ -1314,6 +1446,7 @@ impl AppModel {
             marker: Default::default(),
             marker_note: None,
             last_recipe: Default::default(),
+            json_clip: None,
             expanded: None,
             export: export::ExportModel::default(),
             reencode_all: false,
@@ -1358,6 +1491,8 @@ impl AppModel {
             close_ready: false,
             cs_pbr: Default::default(),
             nav: Default::default(),
+            panel_forced: ForcedOpen::default(),
+            output_root_memo: Default::default(),
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
@@ -1365,6 +1500,9 @@ impl AppModel {
             reencode_follow: None,
             report_saving: false,
             show_in_meshes: None,
+            show_mesh: None,
+            meshes_store: None,
+            meshes_rows_loading: false,
             nif_tab_request: None,
             choose_preset: None,
             auto_note: None,
@@ -1378,6 +1516,8 @@ impl AppModel {
             auto_replans: 0,
             type_pending: None,
             type_base: None,
+            pending_new_sets: vec![],
+            carded_before: None,
             type_cause: false,
             type_cleaned: false,
             votes_gen: 0,
@@ -1406,6 +1546,7 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
+            plan_cause: PlanCause::Open,
             opening: None,
             open_cancelled: false,
             tx,
@@ -1527,6 +1668,12 @@ impl AppModel {
         self.replan();
         // E3: a new folder has no settled answer; the label reads Review until its plan settles.
         (self.settled_writes_now, self.settled_export_files) = (false, 0);
+    }
+
+    /// Note LG: the Validate exported DDS setting. Saved at once; the plan does not read it, so nothing re-plans.
+    pub fn set_validate_exports(&mut self, on: bool) {
+        self.settings.validate_exports = on;
+        self.save_settings();
     }
 
     pub fn save_settings(&mut self) {
@@ -1685,19 +1832,19 @@ impl AppModel {
             }
             c
         });
-        req.user_config = self.user_config.clone();
-        req.user_presets = self.user_presets.clone();
+        req.user_config.clone_from(&self.user_config);
+        req.user_presets.clone_from(&self.user_presets);
         let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
-        req.shared_roughness = sets::shared_roughness(self);
+        req.shared_roughness_groups = sets::shared_roughness(self);
         req.borrowed_normal = sets::borrowed_normal(self);
         req.set_shaders = sets::set_shaders(self);
         req.pinned_files = sets::pinned_files(self);
         req.mesh_shaders = self.mesh_votes.clone();
         req.mesh_alpha = self.mesh_alpha.clone();
-        req.gras_diffuses = self.gras_diffuses.clone();
-        req.gras_all_diffuses = self.gras_all_diffuses.clone();
+        req.gras_diffuses.clone_from(&self.gras_diffuses);
+        req.gras_all_diffuses.clone_from(&self.gras_all_diffuses);
         req.cs_txst_sets = sets::cs_txst_sets(self);
         Some(req)
     }
@@ -1887,12 +2034,12 @@ impl AppModel {
 
     /// Plan again on a worker; a newer plan supersedes (cancels) an older one. Sends no partial plan.
     pub fn replan(&mut self) {
-        self.replan_with(false);
+        self.replan_with(false, PlanCause::Other);
     }
 
     /// `replan`; `files_edit`: the edit being planned left the sets document as it was, so it may also send a
-    /// partial plan first (`send_partial`).
-    fn replan_with(&mut self, files_edit: bool) {
+    /// partial plan first (`send_partial`). `cause` words the status line; an open in progress always wins.
+    fn replan_with(&mut self, files_edit: bool, cause: PlanCause) {
         self.take_shown_next_step();
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
@@ -1922,11 +2069,16 @@ impl AppModel {
         let cancel = CancelToken::default();
         self.planning = Some(cancel.clone());
         self.plan_progress = None;
-        self.status_line = "Planning…".into();
+        self.plan_cause = if self.opening.is_some() {
+            PlanCause::Open
+        } else {
+            cause
+        };
+        self.status_line = self.plan_cause.waiting_line().into();
         let inputs = Some(EngineInputs {
             set_edits: req.set_edits.clone(),
             output_paths: req.output_paths.clone(),
-            shared_roughness: req.shared_roughness.clone(),
+            shared_roughness: req.shared_roughness_groups.clone(),
             borrowed_normal: req.borrowed_normal.clone(),
             set_shaders: req.set_shaders.clone(),
             pinned_files: req.pinned_files.clone(),
@@ -2095,6 +2247,7 @@ impl AppModel {
                 self.root = None;
                 self.project = None;
                 self.sets_doc = None;
+                self.forget_new_sets();
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
@@ -2298,7 +2451,7 @@ impl AppModel {
                 self.plan_progress = Some((done, total));
                 // Note FL: a partial's "<counts> · planning…" stays until the full plan lands.
                 if !self.partial_shown() {
-                    self.status_line = plan_bar_text(done, total);
+                    self.status_line = plan_bar_text(self.plan_cause, done, total);
                 }
             }
             WorkerMsg::PlanProgress { .. } => {}
@@ -2416,6 +2569,7 @@ impl AppModel {
             }
         }
         self.plan_failed = true;
+        self.forget_new_sets();
         self.status_line = format!("Planning failed: {}", f.message);
         self.raise_error(f.message);
     }
@@ -3064,16 +3218,16 @@ impl AppModel {
     /// A user edit recorded a step: re-plan as a change (`replan_changed`).
     fn replan_after_edit(&mut self, files_edit: bool) {
         self.type_edit_recorded();
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Edit);
     }
 
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
-    fn replan_changed(&mut self, files_edit: bool) {
+    fn replan_changed(&mut self, files_edit: bool, cause: PlanCause) {
         let cancel = (self.export_after_plan || self.armed.is_some())
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
-        self.replan_with(files_edit);
+        self.replan_with(files_edit, cause);
         if cancel {
             self.export_after_plan = false;
             self.disarm_write();
@@ -3295,6 +3449,7 @@ impl AppModel {
             engine::api::LowDetailMode::Off
         };
         req.write_only = self.write_only();
+        req.validate = self.settings.validate_exports;
         Some(req)
     }
 
@@ -3343,6 +3498,7 @@ impl AppModel {
                 .map(|i| (i.job_key.clone(), None))
                 .collect(),
             pace: Some(export::Pace::new(Instant::now())),
+            validated: req.validate,
             outside_run,
             ..Default::default()
         };
@@ -3921,6 +4077,8 @@ impl AppModel {
             return;
         }
         self.finish_fuzz_switch();
+        // E8: the settled plan says which type choices made a set; the post-open next step below still wins the note.
+        self.note_new_sets();
         if std::mem::take(&mut self.next_step_pending) {
             self.status_note = self.next_step_text();
             self.shown_next_step.clone_from(&self.status_note);
@@ -4192,6 +4350,46 @@ impl AppModel {
         )
     }
 
+    /// `view_key() == *k`, compared field by field in place: no clone and, once `output_root` is remembered, no path
+    /// built. A frame's cached views and problems ask this on every hit. `ViewKey` is destructured with no `..`, so a
+    /// field added to it does not compile until it is compared here.
+    pub(crate) fn view_key_matches(&self, k: &ViewKey) -> bool {
+        let ViewKey {
+            items,
+            inputs,
+            doc,
+            root,
+            export_root,
+            target,
+            scan_db,
+            scan,
+            known_rev,
+            target_mod_rev,
+            scope,
+        } = k;
+        *items == self.items_rev
+            && *inputs == self.inputs_rev
+            && *doc
+                == self
+                    .sets_doc
+                    .as_ref()
+                    .map_or(0, crate::sets_doc::SetsDoc::rev)
+            && *root == self.root
+            && *target == self.target
+            && *scan_db == self.scan_db
+            && *scan == self.scan_stamp
+            && *known_rev == self.known_rev
+            && *target_mod_rev == self.target_mod_rev
+            && *scope == self.view_scope_rev()
+            && {
+                let mut memo = self.output_root_memo.borrow_mut();
+                if !memo.as_ref().is_some_and(|o| o.current(self)) {
+                    *memo = Some(OutputMemo::new(self));
+                }
+                memo.as_ref().is_some_and(|o| o.path == *export_root)
+            }
+    }
+
     /// Everything `sets::views` and `pbr_export::export_blocks` read (DECISIONS Note Y7).
     pub(crate) fn view_key(&self) -> ViewKey {
         ViewKey {
@@ -4236,15 +4434,64 @@ impl AppModel {
         };
     }
 
+    /// `panel_forced` rule 1: a selection that differs from the one the latch was started for (through a set, through
+    /// nothing, another item, or the same item again) starts a new, empty latch for the selected item. Runs every frame
+    /// from `ui::draw_with_scan` and at the start of `settings_panel::draw`; a compare of two enums, and a clone only
+    /// when the selection moved.
+    pub fn observe_panel_selection(&mut self) {
+        if self.panel_forced.seen != self.selection {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: match &self.selection {
+                    Selection::Item(k) => k.clone(),
+                    _ => String::new(),
+                },
+                ..ForcedOpen::default()
+            };
+        }
+    }
+
     /// Select one texture; any multi-selection ends (F3a D1).
     pub fn select_item(&mut self, key: &str) {
-        self.selection = Selection::Item(key.to_string());
+        let next = Selection::Item(key.to_string());
+        // `panel_forced` rule 1: coming from anything else (a set, nothing, another item) is a new selection, even when
+        // no frame was drawn in between and the latch still holds this key. A click on the selected item is not.
+        if self.selection != next {
+            self.panel_forced = ForcedOpen::default();
+        }
+        self.selection = next;
         self.reset_multi();
         self.bulk = Default::default();
         // Note FB7: also a click on the texture already selected brings it to the front of the centre.
         self.centre_tab = CentreTab::Selection;
         // Review E10: a Go to set the set editor has not drawn yet ends here, so it never fires later.
         self.nav.reveal_slot = None;
+        self.nav.reveal_field = None;
+    }
+
+    /// Go to on a Problems row (after `select_item(key)`): ask the centre to focus `field`, and force its group open
+    /// (`panel_forced` rule 3). The latch's `seen` is set whenever it is rewritten, or `observe_panel_selection` would
+    /// take the write for a new selection and reset it.
+    pub fn go_to_field(&mut self, key: &str, field: &'static str, pass: u64) {
+        self.nav.reveal_field = Some(nav::RevealField {
+            item: key.to_string(),
+            field,
+            pass,
+        });
+        // A first-screen field opens nothing.
+        let Some(g) = panel_groups::panel_group(field) else {
+            return;
+        };
+        if self.panel_forced.item == key {
+            self.panel_forced.groups.insert(g);
+        } else {
+            self.panel_forced = ForcedOpen {
+                seen: self.selection.clone(),
+                item: key.to_string(),
+                filled: false,
+                groups: BTreeSet::from([g]),
+            };
+        }
     }
 
     /// Select one set; any multi-selection ends (F3a D1).
@@ -4264,6 +4511,7 @@ impl AppModel {
         if self.expanded.is_some() {
             self.collapse();
         }
+        self.nav.reveal_field = None;
         self.nav.reveal_slot = slot.map(|slot| nav::RevealSlot {
             set: target.clone(),
             target: slot,
@@ -4593,7 +4841,7 @@ impl AppModel {
             d.restore_keeping_json_sha(&s.project);
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
-        self.replan_changed(files_edit);
+        self.replan_changed(files_edit, PlanCause::Other);
     }
 
     pub fn can_undo(&self) -> bool {
@@ -4722,6 +4970,9 @@ impl AppModel {
             }
         }
         self.apply_snapshot(&c, false);
+        // The result line of a JSON copy ("Copy JSON settings from X: 3 written, ...") describes the step just undone.
+        self.status_note
+            .take_if(|n| n.starts_with(&format!("{}:", c.label)));
         self.undo_noted(
             if self.centre_over_meshes {
                 "Undone"
@@ -4912,7 +5163,7 @@ impl AppModel {
     pub fn set_field(&mut self, item_key: &str, field: &str, value: serde_json::Value) {
         if field == "subtype" {
             if let Ok(st) = serde_json::from_value::<Subtype>(value.clone()) {
-                return self.edit_subtype("Change subtype", item_key, Some(st));
+                return self.edit_subtype("Change type", item_key, Some(st));
             }
         }
         if !self.format_write_ok(item_key, field, &value) {
@@ -4976,14 +5227,19 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Change {f}"), move |p| {
-            p.set_file_value(&k, &f, &value)
+        self.edit(&field_step_label("Change", field), move |p| {
+            p.set_file_value(&k, &f, &value);
+            // Task 6g: the guard's A is one setting under two names; the entry keeps the one the row writes, so a
+            // hand-written `encoder.channel_guard.a` there can never disagree with it (the engine refuses that).
+            if f == "alpha.exact_opaque" {
+                p.clear_file_value(&k, fields::GUARD_A_ALIAS);
+            }
         });
     }
 
     pub fn clear_field(&mut self, item_key: &str, field: &str) {
         if field == "subtype" {
-            return self.edit_subtype("Reset subtype", item_key, None);
+            return self.edit_subtype("Reset type", item_key, None);
         }
         // Note JI4: the BC3 Effort row's ↺ clears both search fields, as one step.
         if field == fields::BC3_SEARCH {
@@ -4995,7 +5251,7 @@ impl AppModel {
         }
         let k = item_key.to_string();
         let f = field.to_string();
-        self.edit(&format!("Reset {f}"), move |p| {
+        self.edit(&field_step_label("Reset", field), move |p| {
             p.clear_file_value(&k, &f);
             // The Format row writes the tag with the format (`set_format`), so its reset clears both.
             if f == "format" {
@@ -5004,6 +5260,15 @@ impl AppModel {
             // The BC7 weighting row stands for both of its fields (Note CP).
             if f == fields::WEIGHTING {
                 p.clear_file_value(&k, "encoder.perceptual");
+            }
+            // Task 6g: the Channel guard row stands for its four fields, and the guard's A for its alias too.
+            if f == fields::CHANNEL_GUARD {
+                for (g, _) in fields::GUARD_FIELDS {
+                    p.clear_file_value(&k, g);
+                }
+            }
+            if f == fields::CHANNEL_GUARD || f == "alpha.exact_opaque" {
+                p.clear_file_value(&k, fields::GUARD_A_ALIAS);
             }
         });
     }
@@ -5024,6 +5289,16 @@ impl AppModel {
                 p.set_allow(&k, &codes);
             }
         });
+    }
+
+    /// `decide`, then the selection moves to the next undecided texture in view (the single card's Confirm). The next
+    /// key is read before the plan starts, from the current list; with none, the selection stays.
+    pub fn decide_and_advance(&mut self, key: &str, a: Answer) {
+        let next = self.next_undecided_after(key);
+        self.decide(key, a);
+        if let Some(next) = next {
+            self.select_item(&next);
+        }
     }
 
     /// The PGPatcher JSON file name (header field); empty restores the default (the folder's name). No re-plan (P7).
@@ -5320,7 +5595,10 @@ impl AppModel {
         }
         let fail = |e: std::io::Error| format!("{}: {e}", path.display());
         let mut perm = std::fs::metadata(path).map_err(fail)?.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
+        #[allow(
+            clippy::permissions_set_readonly_false,
+            reason = "the Clear read-only flag command (Note FC10) clears the flag on this project's sdc.toml or sdc-project.toml so Save can write it again; the path was checked above to be one of the open project's documents"
+        )]
         perm.set_readonly(false);
         std::fs::set_permissions(path, perm).map_err(fail)?;
         if self.unsaved() {
@@ -5694,6 +5972,7 @@ pub fn export_finished_text(result: &export::ExportResult) -> String {
 mod tests {
     use super::*;
     use engine::sets::OutputKey;
+    use std::fmt::Write as _;
     use std::path::Path;
 
     pub(super) fn bare_model() -> AppModel {
@@ -5857,8 +6136,8 @@ mod tests {
         let mut sets = String::from("[project.auto_normal]\n");
         for i in 0..2_048 {
             let key = format!("rock{i}_n.png");
-            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
-            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            let _ = write!(files, "[files.'{key}']\nsubtype = 'pbr_normal'\n");
+            let _ = writeln!(sets, "'{key}' = 'pbr_normal'");
             if i < 16 {
                 normal.save(root.join(key)).unwrap();
             }

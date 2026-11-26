@@ -194,6 +194,20 @@ pub fn partial_profile_schema(gen: &mut schemars::SchemaGenerator) -> schemars::
             props.remove("resize_reference");
         }
     }
+    // Note LR: a settings table may write the channel guard's A as `encoder.channel_guard.a`; the loader moves it to
+    // `alpha.exact_opaque` (`overrides::alias_channel_guard_a`), so a profile has no `a`.
+    if let Some(Value::Object(props)) = defs
+        .get_mut("PartialChannelGuard")
+        .and_then(|d| d.get_mut("properties"))
+    {
+        props.insert(
+            "a".into(),
+            serde_json::json!({
+                "description": "The channel guard's A: the same setting as `alpha.exact_opaque` (set one of the two).",
+                "type": "boolean"
+            }),
+        );
+    }
     *gen.definitions_mut() = defs;
     schemars::json_schema!({ "$ref": format!("{prefix}{name}") })
 }

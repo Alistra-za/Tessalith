@@ -164,7 +164,9 @@ pub(crate) fn stores_xyz(format: Format) -> bool {
 // uber 4, two least-squares passes and a quantised endpoint search); the vendored objects always carry it
 // (docs/research/bc7e-tuning.md).
 cfg_enum!(Effort, "lowercase" { Ultrafast, Veryfast, Fast, Basic, Veryslow, Slowest, Max });
-cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast });
+// BC4 search (Note LI): `fast` radius 4, `default` 5, `slowest` 10, `max` the radius-10 search then every endpoint
+// pair near the block. `//`, not `///`: a variant doc turns the schema into `oneOf`.
+cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast, Slowest });
 // BC1 search depth (Note HY17): `default` is rgbcx level 18; `fast` is bcenc's fast level. No `///` on a variant: it
 // would turn the schema into `oneOf`.
 cfg_enum!(#[derive(Default)] Bc1Search, "lowercase" { #[default] Default, Fast });
@@ -175,14 +177,17 @@ impl Bc1Search {
 }
 // BC7 linear error weights for bc7e (DECISIONS Note CP): alpha priority. `linear` is bc7e's own 1,1,1,1 (the plain
 // call): it overrides an inherited weighting.
-cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha8, Alpha16 });
+cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha4, Alpha8, Alpha16, Alpha32, Alpha64 });
 impl Bc7Weights {
     /// Every value, in order; `all_lists_every_variant` ties it to the enum.
-    pub const ALL: [Bc7Weights; 4] = [
+    pub const ALL: [Bc7Weights; 7] = [
         Bc7Weights::Linear,
         Bc7Weights::Alpha2,
+        Bc7Weights::Alpha4,
         Bc7Weights::Alpha8,
         Bc7Weights::Alpha16,
+        Bc7Weights::Alpha32,
+        Bc7Weights::Alpha64,
     ];
 
     /// The R, G, B, A weights bc7e is given.
@@ -190,9 +195,47 @@ impl Bc7Weights {
         match self {
             Bc7Weights::Linear => [1, 1, 1, 1],
             Bc7Weights::Alpha2 => [1, 1, 1, 2],
+            Bc7Weights::Alpha4 => [1, 1, 1, 4],
             Bc7Weights::Alpha8 => [1, 1, 1, 8],
             Bc7Weights::Alpha16 => [1, 1, 1, 16],
+            Bc7Weights::Alpha32 => [1, 1, 1, 32],
+            Bc7Weights::Alpha64 => [1, 1, 1, 64],
         }
+    }
+}
+// The flat tolerance bc7e patch 0005 gets (Note LR, LR3): `default` is the level's own T_d (0.5/255), `data` is T_data
+// (2/255) for data maps. `//`, not `///`: a variant doc turns the schema into `oneOf`.
+cfg_enum!(#[derive(Default)] Bc7FlatTolerance, "snake_case" { #[default] Default, Data });
+impl Bc7FlatTolerance {
+    pub fn is_default(&self) -> bool {
+        *self == Bc7FlatTolerance::Default
+    }
+}
+
+/// The channel guard's R, G and B (Note LR): a guarded channel that is 0 on every texel of a subset, or 255 on every
+/// texel, decodes exactly wherever bc7e finds such a solution (best effort per subset). Where guarded channels cannot
+/// all be kept, the higher one wins: A > G > B > R. A is stored as `alpha.exact_opaque`; a settings table may also
+/// write it as `encoder.channel_guard.a`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChannelGuard {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub r: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub g: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub b: bool,
+}
+
+impl ChannelGuard {
+    /// No channel guarded.
+    pub fn is_empty(&self) -> bool {
+        !(self.r || self.g || self.b)
+    }
+
+    /// bc7e's exact-constants mask: bit 0 R, bit 1 G, bit 2 B (`encoders_sys::Bc7Tune::exact_constants`).
+    pub fn mask(self) -> u8 {
+        u8::from(self.r) | u8::from(self.g) << 1 | u8::from(self.b) << 2
     }
 }
 cfg_enum!(GreenConvention, "lowercase" { Directx, Opengl });
@@ -238,8 +281,23 @@ impl RawMap {
     };
 
     /// The role id a raw map counts as after Discover (spec §4.4): `roughness`, `ao`, …
-    pub fn id(self) -> String {
-        serde_id(self)
+    pub fn id(self) -> &'static str {
+        match self {
+            RawMap::Roughness => "roughness",
+            RawMap::Metallic => "metallic",
+            RawMap::Ao => "ao",
+            RawMap::Specular => "specular",
+            RawMap::Glossiness => "glossiness",
+            RawMap::Height => "height",
+            RawMap::Opacity => "opacity",
+            RawMap::Fuzz => "fuzz",
+            RawMap::Orm => "orm",
+            RawMap::Curves => "curves",
+            RawMap::Cavity => "cavity",
+            RawMap::Rmaos => "rmaos",
+            RawMap::FuzzWeight => "fuzzweight",
+            RawMap::SubsurfaceWeight => "subsurfaceweight",
+        }
     }
 
     /// Spec §4.3 item 1, §6.4: an input that starts the cs `_rmaos`/`_rfaos` recipe, so its set is PBR.
@@ -275,15 +333,6 @@ pub enum PackRecipe {
     Auto,
     Rmaos,
     Rfaos,
-}
-
-/// The serde string a unit enum variant serialises as (its id).
-pub(crate) fn serde_id<T: serde::Serialize>(v: T) -> String {
-    serde_json::to_value(v)
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_owned()
 }
 
 impl PackRecipe {
@@ -494,8 +543,44 @@ impl Subtype {
         matches!(self, Subtype::Rmaos | Subtype::SkinRfaos)
     }
 
-    pub fn id(self) -> String {
-        serde_id(self)
+    /// The name serde writes for this variant (Note LH4).
+    pub fn id(self) -> &'static str {
+        match self {
+            Subtype::Diffuse => "diffuse",
+            Subtype::LandscapeDiffuse => "landscape_diffuse",
+            Subtype::PbrAlbedo => "pbr_albedo",
+            Subtype::PbrEmissive => "pbr_emissive",
+            Subtype::Glow => "glow",
+            Subtype::PbrSubsurface => "pbr_subsurface",
+            Subtype::PbrFuzz => "pbr_fuzz",
+            Subtype::SubsurfaceTint => "subsurface_tint",
+            Subtype::BacklightTint => "backlight_tint",
+            Subtype::UiSky => "ui_sky",
+            Subtype::Normal => "normal",
+            Subtype::LandscapeNormal => "landscape_normal",
+            Subtype::PbrNormal => "pbr_normal",
+            Subtype::Msn => "msn",
+            Subtype::CoatNormal => "coat_normal",
+            Subtype::Envmask => "envmask",
+            Subtype::ComplexMaterial => "complex_material",
+            Subtype::Rmaos => "rmaos",
+            Subtype::SkinRfaos => "skin_rfaos",
+            Subtype::Flow => "flow",
+            Subtype::Height => "height",
+            Subtype::MsnSpecular => "msn_specular",
+            Subtype::GenericTwoChannel => "generic_two_channel",
+            Subtype::GenericData => "generic_data",
+            Subtype::HdrSky => "hdr_sky",
+            Subtype::SkinAlbedo => "skin_albedo",
+            Subtype::SkinSk => "skin_sk",
+            Subtype::SkinWet => "skin_wet",
+            Subtype::SkinDetail => "skin_detail",
+            Subtype::ComplexGrass => "complex_grass",
+            Subtype::Cubemap => "cubemap",
+            Subtype::ProjectedNoise => "projected_noise",
+            Subtype::DetailNormal => "detail_normal",
+            Subtype::Gray => "gray",
+        }
     }
 
     /// The sub-type whose [`id`](Self::id) is `s`, as `--set subtype=` and `--property` take it.
@@ -598,6 +683,17 @@ pub struct EncoderSpec {
     /// profile hashes hold (DECISIONS Note CP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bc7_weights: Option<Bc7Weights>,
+    /// BC7 only: the flat tolerance bc7e spreads a channel past (Note LR): `data` keeps near-constant channels of data
+    /// maps flat. It applies under `perceptual` too (a defect threshold, not a weighting). Not serialised at `default`,
+    /// so profiles that do not set it keep their hash.
+    #[serde(default, skip_serializing_if = "Bc7FlatTolerance::is_default")]
+    pub bc7_flat_tolerance: Bc7FlatTolerance,
+    /// BC7 only: the channel guard's R, G and B (Note LR): bc7e keeps a guarded channel that is 0 or 255 across a
+    /// subset exact, best effort, the higher channel first (A > G > B > R). It applies under `perceptual` too (a
+    /// constraint, not a weighting); other formats ignore it. A is `alpha.exact_opaque`. Not serialised when no channel
+    /// is guarded.
+    #[serde(default, skip_serializing_if = "ChannelGuard::is_empty")]
+    pub channel_guard: ChannelGuard,
     /// BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by
     /// default and never set automatically; not serialised when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -789,6 +885,28 @@ impl Profile {
 mod tests {
     use super::*;
 
+    /// Note LH4: each variant's `id()` is the name serde writes for it. The schema lists every serde name; each is read
+    /// back and its `id()` compared, so a variant the match spells differently fails.
+    #[test]
+    fn ids_are_the_serde_names_of_every_variant() {
+        fn check<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
+            id: impl Fn(T) -> &'static str,
+        ) {
+            let schema = serde_json::to_value(schemars::schema_for!(T)).unwrap();
+            let names = schema["enum"]
+                .as_array()
+                .expect("a unit enum's schema lists its names");
+            assert!(!names.is_empty());
+            for n in names {
+                let v: T = serde_json::from_value(n.clone()).unwrap();
+                assert_eq!(id(v), n.as_str().unwrap());
+            }
+        }
+        check::<RawMap>(RawMap::id);
+        check::<Subtype>(Subtype::id);
+        check::<Format>(Format::id);
+    }
+
     /// Note CP: `Bc7Weights::ALL` lists every variant once, in schema order (a new variant fails here until added).
     #[test]
     fn all_lists_every_variant() {
@@ -800,11 +918,51 @@ mod tests {
         assert_eq!(schema["enum"], serde_json::Value::Array(names));
     }
 
+    /// Note LR: the per-type BC7 settings' serde names, the guard's mask bits (R 0, G 1, B 2), and neither field
+    /// serialised at its default.
+    #[test]
+    fn bc7_settings_serde_names_and_guard_mask() {
+        let schema = serde_json::to_value(schemars::schema_for!(Bc7FlatTolerance)).unwrap();
+        assert_eq!(schema["enum"], serde_json::json!(["default", "data"]));
+        assert_eq!(
+            serde_json::to_value(Bc7FlatTolerance::Data).unwrap(),
+            "data"
+        );
+        assert!(Bc7FlatTolerance::default().is_default());
+        let g = |r, g, b| ChannelGuard { r, g, b };
+        for (guard, mask) in [
+            (g(false, false, false), 0),
+            (g(true, false, false), 1),
+            (g(false, true, false), 2),
+            (g(false, false, true), 4),
+            (g(true, true, true), 7),
+        ] {
+            assert_eq!(guard.mask(), mask, "{guard:?}");
+            assert_eq!(guard.is_empty(), mask == 0, "{guard:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(g(false, true, false)).unwrap(),
+            serde_json::json!({ "g": true })
+        );
+        let back: ChannelGuard = serde_json::from_value(serde_json::json!({ "b": true })).unwrap();
+        assert_eq!(back, g(false, false, true));
+        assert!(serde_json::from_value::<ChannelGuard>(serde_json::json!({ "a": true })).is_err());
+        let spec: EncoderSpec = serde_json::from_value(serde_json::json!({
+            "effort": "veryslow", "perceptual": false, "bc45_search_radius": "default"
+        }))
+        .unwrap();
+        let v = serde_json::to_value(&spec).unwrap();
+        assert!(
+            v.get("bc7_flat_tolerance").is_none() && v.get("channel_guard").is_none(),
+            "{v}"
+        );
+    }
+
     /// `from_id` reads back every `id`, and a removed id (`rfaos`, now `skin_rfaos`) is none.
     #[test]
     fn subtype_from_id_round_trips_id() {
         for st in Subtype::ALL {
-            assert_eq!(Subtype::from_id(&st.id()), Some(st), "{st:?}");
+            assert_eq!(Subtype::from_id(st.id()), Some(st), "{st:?}");
         }
         assert_eq!(Subtype::from_id("rfaos"), None);
     }
@@ -951,7 +1109,7 @@ mod tests {
 
     #[test]
     fn subtype_ids_are_unique_and_round_trip() {
-        let mut ids: Vec<String> = Subtype::ALL.iter().map(|s| s.id()).collect();
+        let mut ids: Vec<&str> = Subtype::ALL.iter().map(|s| s.id()).collect();
         for s in Subtype::ALL {
             let back: Subtype = serde_json::from_str(&format!("\"{}\"", s.id())).unwrap();
             assert_eq!(back, s);

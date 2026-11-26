@@ -2,6 +2,7 @@ mod support;
 use engine::config::*;
 use engine::presets::PresetRegistry;
 use sdc_gui::model::fields::*;
+use sdc_gui::model::panel_groups::{panel_group, PanelGroup};
 use support::*;
 
 #[test]
@@ -72,15 +73,20 @@ fn field_views_mark_edited_fields() {
     assert!(t.edited);
     assert_eq!(t.value, serde_json::json!(90));
     assert!(!views.iter().find(|v| v.field == "format").unwrap().edited);
-    let mut groups: Vec<&str> = views.iter().map(|v| group_of(v.field)).collect();
+    let mut groups: Vec<&str> = views
+        .iter()
+        .filter_map(|v| panel_group(v.field))
+        .map(PanelGroup::title)
+        .collect();
     groups.dedup();
-    // Note JI3: the Size rows follow DDS header in `FIELDS`; the panel draws its groups in `GROUPS` order.
+    // A pin of `FIELDS` order, not of the order the panel draws (that is `PanelGroup::ALL`, pinned in
+    // `texture_groups.rs`): the Size rows follow DDS header (Note JI3), and the first-screen rows are in no group.
     assert_eq!(
         groups,
-        vec!["Type", "Alpha", "Mipmaps", "Compression", "Size"]
+        vec!["Normal map", "Alpha", "Normal map", "Compression", "Size"]
     );
-    assert_eq!(group_of("color.content"), "Compression");
-    assert_eq!(group_of("color.tag"), "Compression");
+    assert_eq!(panel_group("color.content").unwrap().title(), "Compression");
+    assert_eq!(panel_group("color.tag").unwrap().title(), "Compression");
 }
 
 #[test]
@@ -112,7 +118,7 @@ fn mixed_tags() -> (Subtype, Vec<(Format, ColorTag)>) {
             a.iter().filter(|(_, t)| *t == ColorTag::Srgb).count() >= 2
                 && a.iter().any(|(f, _)| !a.contains(&(*f, ColorTag::Srgb)))
         })
-        .expect("a sub-type with and without sRGB forms")
+        .expect("a type with and without sRGB forms")
 }
 
 #[test]
@@ -163,7 +169,12 @@ fn format_choices_keep_a_stray_pair_marked() {
 
 #[test]
 fn every_field_is_a_real_engine_path() {
-    for (f, _) in FIELDS {
+    // The Channel guard row is no field of its own: its four fields are the paths (Task 6g).
+    for (f, _) in FIELDS
+        .into_iter()
+        .filter(|(f, _)| *f != CHANNEL_GUARD)
+        .chain(GUARD_FIELDS)
+    {
         assert!(engine::overrides::FIELD_PATHS.contains(&f), "{f}");
     }
     let d = tempfile::tempdir().unwrap();
@@ -205,12 +216,12 @@ fn provenance_reads_as_prose() {
 #[test]
 fn size_is_a_group_and_header_stays_in_compression() {
     for f in ["resize", "resize_relative_to", "resize_floor"] {
-        assert_eq!(group_of(f), "Size", "{f}");
+        assert_eq!(panel_group(f), Some(PanelGroup::Size), "{f}");
     }
-    assert_eq!(group_of("header"), "Compression");
-    assert_eq!(group_of("mips.levels"), "Mipmaps");
-    assert_eq!(group_of("mips.coverage"), "Alpha");
-    assert_eq!(group_of("mips.normal"), "Mipmaps");
+    assert_eq!(panel_group("header"), Some(PanelGroup::Compression));
+    assert_eq!(panel_group("mips.levels"), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.coverage"), Some(PanelGroup::Alpha));
+    assert_eq!(panel_group("mips.normal"), Some(PanelGroup::NormalMap));
     let all = all_fields();
     for f in [
         "header",
@@ -373,10 +384,10 @@ fn uncompressed_locks_explain_themselves() {
 
 #[test]
 fn filter_and_edge_stay_in_the_basic_mipmaps_group() {
-    assert_eq!(group_of(FILTER_FIELD.0), "Mipmaps");
-    assert_eq!(group_of(EDGE_FIELD.0), "Mipmaps");
-    assert_eq!(group_of("mips.filter"), "Mipmaps");
-    assert_eq!(group_of("mips.edge"), "Mipmaps");
+    assert_eq!(panel_group(FILTER_FIELD.0), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group(EDGE_FIELD.0), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.filter"), Some(PanelGroup::Mipmaps));
+    assert_eq!(panel_group("mips.edge"), Some(PanelGroup::Mipmaps));
     assert!(!FIELDS.iter().any(|f| f.0 == "mips.filter"));
     assert!(FIELDS.iter().any(|f| f.0 == "resize"));
     for f in ["mips.filter", "mips.edge", "resize"] {
@@ -616,7 +627,7 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     use egui_kittest::kittest::Queryable;
     const F: &str = "encoder.bc1_alpha";
     assert!(FIELDS.contains(&(F, "1-bit alpha")));
-    assert_eq!(group_of(F), "Alpha");
+    assert_eq!(panel_group(F), Some(PanelGroup::Alpha));
     let reg = PresetRegistry::builtin().unwrap();
     let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
     p.format = Format::Bc7;
@@ -633,6 +644,7 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     m.decide(LEAF, sdc_gui::model::Answer::Alpha(AlphaPolicy::Cutout));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.select_item(LEAF);
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -658,9 +670,15 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
         Format::Bc1
     );
     assert_eq!(top(&h, "1-bit alpha"), None, "no row outside BC1");
-    // Offsets from the Coverage row: what is drawn above the Alpha group may change with the format.
-    let next_row =
-        top(&h, "Exact opaque alpha").expect("the row after it") - top(&h, "Coverage").unwrap();
+    // Offsets from the Coverage row: what is drawn above the Alpha group may change with the format. Nothing follows
+    // the 1-bit alpha row in the Alpha group (the Channel guard row sits in Compression, Task 6g), so the thing after
+    // it is the Mipmaps tick.
+    let mipmaps = |h: &egui_kittest::Harness<'_, sdc_gui::model::AppModel>| {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Mipmaps")
+            .rect()
+            .top()
+    };
+    let next_row = mipmaps(&h) - top(&h, "Coverage").unwrap();
 
     h.state_mut()
         .set_field(LEAF, "format", serde_json::json!("bc1"));
@@ -669,11 +687,15 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     let coverage = top(&h, "Coverage").unwrap();
     let row = top(&h, "1-bit alpha").expect("the row under BC1") - coverage;
     assert!(row > 0.0, "inside the Alpha group, after Coverage");
+    // Shown, the row pushes the Mipmaps tick down by one row: hidden, it left no gap. `row` is the pitch of the
+    // Coverage combo's row and the tick row is a pixel shorter (measured 21.5 and 20.5), so the margin is 2 px; a
+    // gap or a missing row is a whole row.
+    let after = mipmaps(&h) - coverage;
     assert!(
-        (row - next_row).abs() < 1.0,
-        "hidden, the row left a gap: {row} vs {next_row}"
+        (after - (next_row + row)).abs() < 2.0,
+        "hidden, the row left a gap: {after} vs {next_row} + {row}"
     );
-    assert!(top(&h, "Exact opaque alpha").unwrap() - coverage > row);
+    assert!(after > row);
 }
 
 /// Note FM38: RGB8 is listed beside RGBA8 UNORM, linear only; a cubemap and a Gray map keep their own lists.

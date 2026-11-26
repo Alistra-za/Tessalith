@@ -196,6 +196,7 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
         .expect("the unstated-green question")
         .message
         .clone();
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     assert_eq!(
@@ -206,9 +207,11 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
     // egui 0.37 also names the tile with its hover text, which holds the message; the Info line is the shown one.
     assert_eq!(shown_containing(&h, unstated.as_str()).len(), 1);
     // Exact labels: "Input content" and "DDS tag" also name their `?` ("Help: Input content", Note HI9).
-    for label in ["Input content", "DDS tag", "Compression"] {
+    for label in ["Input content", "DDS tag"] {
         h.get_by_label(label);
     }
+    // Only a group header's name has the ", " after its title.
+    h.get_by_label_contains("Compression, ");
     // One frame with a Kaiser profile selected: the live Filter combo and the Edge row draw.
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
@@ -223,6 +226,7 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
     );
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/rock01.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     h.get_by_value("Kaiser");
@@ -330,6 +334,7 @@ fn the_alpha_dropdown_writes_the_policy_and_the_reset_button_takes_it_back() {
     );
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     h.get_by_label("Undecided");
@@ -389,6 +394,7 @@ fn the_texture_panel_waits_for_the_plan_its_answer_started() {
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
     use eframe::egui::accesskit::Role;
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     // Note FM35: the alpha question is one dropdown, open on the proposed type.
@@ -482,6 +488,7 @@ fn two_alpha_decisions_in_a_row_do_not_wait_for_the_full_plan() {
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
     model.hold_plan_results = true;
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     let policy = |h: &Harness<'static, AppModel>| {
@@ -556,6 +563,12 @@ fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
         .unwrap()
         .set_error("broken on purpose");
     assert!(model.fix_off().is_some_and(|w| w.contains("read-only")));
+    // The state this test needs is set here, not left to the default (R3-2).
+    sdc_gui::model::panel_groups::set_open(
+        &mut model.settings,
+        sdc_gui::model::panel_groups::PanelGroup::Compression,
+        true,
+    );
     let mut h = harness(model);
     h.run();
     // The answers and rows are off …
@@ -563,21 +576,22 @@ fn a_read_only_project_keeps_the_texture_panel_groups_openable() {
         .get_by_label("Alpha type: Cutout")
         .accesskit_node()
         .is_disabled());
-    let format_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("Format").count();
-    assert!(format_rows(&h) >= 1, "the Compression group starts open");
-    // … the group header is not: it collapses the group.
+    // A Compression row: "DDS tag" (Format is on the first screen, outside every group).
+    let tag_rows = |h: &Harness<'static, AppModel>| h.query_all_by_label("DDS tag").count();
+    assert!(tag_rows(&h) >= 1, "the Compression group is open");
+    // … the group header is not: it collapses the group. Only the header's name has the ", " after its title.
     let header = h
-        .query_all_by_label("Compression")
+        .query_all_by_label_contains("Compression, ")
         .find(|n| !n.accesskit_node().is_disabled())
         .expect("an enabled Compression header");
     header.hover();
     h.run();
-    h.query_all_by_label("Compression")
+    h.query_all_by_label_contains("Compression, ")
         .find(|n| !n.accesskit_node().is_disabled())
         .unwrap()
         .click();
     h.run();
-    assert_eq!(format_rows(&h), 0, "the Compression group did not collapse");
+    assert_eq!(tag_rows(&h), 0, "the Compression group did not collapse");
 }
 
 #[test]
@@ -591,6 +605,7 @@ fn the_threshold_commits_when_the_drag_stops_not_while_dragging() {
     );
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     let before = h
@@ -666,9 +681,10 @@ fn a_packed_item_lists_its_channels_and_a_raw_map_points_to_the_output() {
         .key
         .clone();
     model.select_item(&packed);
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
-    h.get_by_label("Channels");
+    h.get_by_label_contains("Channels, ");
     h.get_by_label_contains("R: from ");
     h.get_by_label_contains("B: from rock01_ao.png");
     h.get_by_label("A: default value 1");
@@ -687,6 +703,7 @@ fn a_locked_field_is_disabled_and_says_why() {
     model.set_target(engine::config::Target::Vanilla);
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/rock01.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     h.get_by_label("_SRGB is only written under cs");
@@ -833,11 +850,14 @@ fn the_settings_strip_is_compact() {
     model.select_item("landscape/rock01_rmaos");
     let mut h = harness(model);
     h.run();
-    assert!(h.query_all_by_label_contains("built-in default").count() > 0);
+    assert!(h.query_all_by_label_contains("Tessalith's default").count() > 0);
+    assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
     // The strip keeps Alpha, Mipmaps and Compression and drops that text.
     let mut model = opened(d.path());
     model.expand("landscape/rock01_rmaos");
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    // The groups start closed (Note LQ5): open them, so the absences below are the strip's filter, not a closed group.
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     // At 1280×800 the settings start open (Note FC8, supersedes CE16's strip there).
@@ -845,11 +865,14 @@ fn the_settings_strip_is_compact() {
     for group in ["Alpha", "Mipmaps", "Compression"] {
         assert!(h.query_all_by_label_contains(group).count() > 0, "{group}");
     }
-    // Note HI2: the colour rows moved into Compression, and the strip still leaves them out.
+    // Note LQ2: the colour rows moved into Compression, and the strip still leaves them out.
     for row in ["Colour", "Input content", "DDS tag"] {
         assert!(h.query_by_label_contains(row).is_none(), "{row}");
     }
-    assert_eq!(h.query_all_by_label_contains("built-in default").count(), 0);
+    assert_eq!(
+        h.query_all_by_label_contains("Tessalith's default").count(),
+        0
+    );
 }
 
 /// The preview's toolbar panel rect (A7: every toolbar lookup is scoped to it).
@@ -1541,6 +1564,7 @@ fn leaf_with_policy(policy: engine::config::AlphaPolicy) -> Harness<'static, App
     model.select_item("landscape/leaf.png");
     // The temp folder is only read while the model opens; the harness keeps the model.
     std::mem::forget(d);
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     h
@@ -1582,6 +1606,7 @@ fn a_mip_count_shows_ticked_with_a_note() {
     model.set_field("landscape/leaf.png", "mips.levels", serde_json::json!(3));
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     let tick = h.get_by_role_and_label(Role::CheckBox, "Mipmaps");
@@ -1610,6 +1635,7 @@ fn an_edited_mip_count_has_one_reset() {
     model.set_field("landscape/leaf.png", "mips.levels", serde_json::json!(3));
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     model.select_item("landscape/leaf.png");
+    open_texture_groups(&mut model);
     let mut h = harness(model);
     h.run();
     let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
@@ -1691,6 +1717,7 @@ fn an_8_bit_emissive_says_why_it_is_bc7() {
     m.open_folder(d.path().join("textures"));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.select_item("pbr/lamp_g.png");
+    open_texture_groups(&mut m);
     let mut h = harness(m);
     h.run();
     // Exact and unique: shown once, under Compression, without the code prefix of the Warnings list.

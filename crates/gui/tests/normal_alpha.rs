@@ -5,6 +5,7 @@ use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb, Rgba};
 use sdc_gui::model::{Answer, AppModel};
 use serde_json::json;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -281,11 +282,49 @@ fn a_follow_only_recording_does_not_claim_high_confidence() {
         .iter()
         .find(|r| r.text.contains("set automatically"))
         .unwrap();
-    assert!(!row.text.contains("High confidence"), "{}", row.text);
+    assert_eq!(row.text, "1 type set automatically: wall_n.png");
     let detail = row.detail.as_deref().unwrap();
     assert!(
-        detail.contains("wall_n.png") && !detail.contains("High confidence"),
+        detail.contains("wall_n.png") && !detail.contains("sets a type on its own"),
         "{detail}"
+    );
+}
+
+/// A batch with an alpha write and only a guarded normal follow: the hover has both details and no paragraph on
+/// when Tessalith decides (the follow retypes a file already typed; it is not a first automatic type).
+#[test]
+fn an_alpha_write_beside_a_normal_follow_has_no_confidence_paragraph() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.accept = engine::policy::AcceptSuggestions::None;
+    ImageBuffer::from_fn(16, 16, |x, _| Rgba([90u8, 60, 30, (x * 16) as u8]))
+        .save(t.join("door.png"))
+        .unwrap();
+    m.mesh_alpha.insert(
+        "textures/test/door".to_string(),
+        vec![engine::shader::MeshAlpha {
+            blend: false,
+            test: true,
+            threshold: 90,
+        }],
+    );
+    m.scan_store_unsettled = true;
+    add_rmaos(&t, &mut m);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|r| r.text.contains("set automatically"))
+        .unwrap();
+    let detail = row.detail.as_deref().unwrap();
+    assert!(
+        detail.contains("wall_n.png: ") && detail.contains("door.png: cutout"),
+        "{detail}"
+    );
+    assert!(!detail.contains("sets a type on its own"), "{detail}");
+    assert!(
+        !detail.contains("\n\n"),
+        "no blank line or paragraph: {detail}"
     );
 }
 
@@ -3592,7 +3631,7 @@ fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
     assert_eq!(
         held(&m, IRON_N, "subtype"),
         typed,
-        "the pick leaves the sub-type"
+        "the pick leaves the type"
     );
     assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
 }
@@ -4063,7 +4102,7 @@ fn emptied_borrower_with(dir: &Path, twice: bool) -> (AppModel, String) {
     if twice {
         let f = dir.join("textures/sdc-project.toml");
         let mut text = std::fs::read_to_string(&f).unwrap();
-        text.push_str(&format!("\n[[sets]]\nid = \"{id}\"\n"));
+        let _ = write!(text, "\n[[sets]]\nid = \"{id}\"\n");
         std::fs::write(&f, text).unwrap();
     }
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
@@ -4239,9 +4278,10 @@ fn a_step_walks_the_files_keys_once_per_document_state() {
     let mut toml = String::from("[files.'ARMOR/STEEL_N.PNG']\nsubtype = \"normal\"\n\n");
     let mut listed = Vec::new();
     for i in 0..4_000 {
-        toml.push_str(&format!(
+        let _ = write!(
+            toml,
             "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"data\"\n\n"
-        ));
+        );
         if i % 4 == 0 {
             listed.push(format!("\"old/f{i:04}.png\""));
         }
@@ -4453,9 +4493,10 @@ fn a_share_that_creates_the_normals_table_walks_the_keys_once_per_document_state
         .unwrap();
     let mut toml = String::new();
     for i in 0..4_000 {
-        toml.push_str(&format!(
+        let _ = write!(
+            toml,
             "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"remove\"\n\n"
-        ));
+        );
     }
     std::fs::write(t.join("sdc.toml"), toml).unwrap();
     std::fs::write(
@@ -4911,7 +4952,7 @@ fn keep_alpha_writes_one_literal_table_and_undo_restores_both_documents() {
         let mut files =
             String::from("[[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n");
         for k in &spellings {
-            files.push_str(&format!("[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n"));
+            let _ = write!(files, "[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n");
         }
         let mut m = open_saved_share(d.path(), &files, LISTED_AND_BORROWED);
         assert_eq!(
@@ -5159,7 +5200,7 @@ fn keep_alpha_refuses_a_table_that_also_names_another_input() {
              [[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n"
         );
         if let Some(table) = table {
-            files.push_str(&format!("[files.'{table}']\nsubtype = 'pbr_normal'\n"));
+            let _ = write!(files, "[files.'{table}']\nsubtype = 'pbr_normal'\n");
         }
         let mut m = open_saved_share(d.path(), &files, STEEL_BORROWS);
         assert_eq!(keep_rows(&m, IRON_N), 1);
@@ -5480,7 +5521,8 @@ fn keep_alpha_names_each_project_relative_path() {
     }
 }
 
-fn keep_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
+fn keep_harness(mut m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
+    open_texture_groups(&mut m); // groups default to closed; this test reads rows inside them
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

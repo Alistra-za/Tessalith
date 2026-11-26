@@ -1,4 +1,4 @@
-//! BC1 encode at an rgbcx level of [`LEVELS`]. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
+//! BC1 encode at an rgbcx level of [`LEVELS`](super::LEVELS). A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain): `encode_bc1(void*, const uint8_t*, flags, total_orderings_to_try, total_orderings_to_try3,
 //! ..)` for those levels' flags, `encode_bc1_solid_block`, `try_3color_block`, `encode_bc1_endpoint_search`,
 //! `bc1_encode4` and `bc1_encode3` (Notes HY3, HY4, HY15).
@@ -15,8 +15,13 @@
 //! levels take or reads the level's `Params`; `allow_3color` is the one flag left. The level is a const generic: each
 //! level is its own code, with constant loop bounds.
 
-// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+    not(test),
+    allow(
+        unused_imports,
+        reason = "`hit!` expands to nothing outside the unit tests, so `Hit` is unused there"
+    )
+)]
 use crate::hits::{hit, Hit};
 
 use super::fit::{ls_endpoints3, ls_endpoints4, order_tables, precise_round_565, Hist3, Hist4};
@@ -27,29 +32,14 @@ use super::params::params;
 use super::seen::Seen;
 use super::sels::{find_sels3, find_sels4, Texels};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4};
-use super::{BlockStats, Ends, DUAL, LEVELS};
-
-/// [`encode`] at a level given at run time, one of [`LEVELS`]. Panics on any other level.
-pub(crate) fn encode_level(
-    px: &[[u8; 4]; 16],
-    level: u32,
-    allow_3color: bool,
-    weights: [i32; 3],
-) -> [u8; 8] {
-    // A const generic needs a literal per level; `every_level_is_rgbcx` fails when `LEVELS` gains one without an arm.
-    match level {
-        10 => encode::<10>(px, allow_3color, weights),
-        12 => encode::<12>(px, allow_3color, weights),
-        13 => encode::<13>(px, allow_3color, weights),
-        15 => encode::<15>(px, allow_3color, weights),
-        18 => encode::<18>(px, allow_3color, weights),
-        _ => panic!("BC1 level {level} is not one of {LEVELS:?}"),
-    }
-}
+use super::{BlockStats, Ends, DUAL};
+use crate::path::Isa;
 
 /// `encode_bc1(LEVEL, .., allow_3color, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with R, G, B
-/// error weights `weights`.
+/// error weights `weights`, compiled for `isa` (inlined into each frame entry of `frames.rs`).
+#[inline(always)]
 pub(crate) fn encode<const LEVEL: u32>(
+    isa: impl Isa,
     px: &[[u8; 4]; 16],
     allow_3color: bool,
     weights: [i32; 3],
@@ -119,7 +109,7 @@ pub(crate) fn encode<const LEVEL: u32>(
 
         // The start is recorded, never skipped: its result is needed.
         seen4.insert(&round_ends);
-        let mut round_err = find_sels4(&texels, &round_ends, &mut round_sels, u32::MAX);
+        let mut round_err = find_sels4(isa, &texels, &round_ends, &mut round_sels, u32::MAX);
 
         // cEncodeBC1TwoLeastSquaresPasses.
         for _ls_pass in 0..2 {
@@ -138,7 +128,7 @@ pub(crate) fn encode<const LEVEL: u32>(
             // scored can be taken here (measured at level 18 on 16 textures: 39% of the blocks take such a pair).
             let repeat = seen4.insert(&trial);
             let mut trial_sels = [0u8; 16];
-            let trial_err = find_sels4(&texels, &trial, &mut trial_sels, round_err);
+            let trial_err = find_sels4(isa, &texels, &trial, &mut trial_sels, round_err);
 
             if trial_err < round_err {
                 hit!(Hit::LsPassBetter);
@@ -171,6 +161,7 @@ pub(crate) fn encode<const LEVEL: u32>(
         for _iter_index in 0..p.passes {
             let orig_err = cur_err;
             total_orderings::<LEVEL>(
+                isa,
                 px,
                 &texels,
                 &s,
@@ -201,6 +192,7 @@ pub(crate) fn encode<const LEVEL: u32>(
         if cur_err != 0 {
             hit!(Hit::Try3Run);
             three = try_3color_block::<LEVEL>(
+                isa,
                 px,
                 &texels,
                 &s,
@@ -224,6 +216,7 @@ pub(crate) fn encode<const LEVEL: u32>(
             _ => &mut seen4,
         };
         endpoint_search::<LEVEL>(
+            isa,
             px,
             &texels,
             three,
@@ -246,9 +239,9 @@ pub(crate) fn encode<const LEVEL: u32>(
 /// encode, so the argument in `seen.rs` is checked on each. `bound` and the score are in kernel units; `u32::MAX`
 /// stays a cutoff and is never scaled.
 #[cfg(test)]
-fn shadow4(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
+fn shadow4(isa: impl Isa, px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
     let mut scratch = [0u8; 16];
-    let err = find_sels4(t, trial, &mut scratch, u32::MAX);
+    let err = find_sels4(isa, t, trial, &mut scratch, u32::MAX);
     assert!(
         err >= bound,
         "skipped 4-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
@@ -257,9 +250,9 @@ fn shadow4(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
 
 /// [`shadow4`] for a 3-colour pair.
 #[cfg(test)]
-fn shadow3(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
+fn shadow3(isa: impl Isa, px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
     let mut scratch = [0u8; 16];
-    let err = find_sels3(t, trial, &mut scratch, u32::MAX);
+    let err = find_sels3(isa, t, trial, &mut scratch, u32::MAX);
     assert!(
         err >= bound,
         "skipped 3-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
@@ -268,6 +261,7 @@ fn shadow3(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
 
 /// The 4-colour single-colour match of the block average (`g_bc1_match*_equals_1[avg]`): `m_hi` as the low
 /// endpoint, `m_lo` as the high one, as `encode_bc1` stores them.
+#[inline(always)]
 fn single_colour_ends(avg: [i32; 3]) -> Ends {
     let t = single_tables();
     let (r, g, b) = (
@@ -283,6 +277,7 @@ fn single_colour_ends(avg: [i32; 3]) -> Ends {
 
 /// The 3-colour single-colour match of the block average (`g_bc1_match*_half[avg]`), stored as
 /// [`single_colour_ends`] stores the 4-colour one.
+#[inline(always)]
 pub(super) fn single_colour_ends3(avg: [i32; 3]) -> Ends {
     let t = single_tables();
     let (r, g, b) = (
@@ -298,6 +293,7 @@ pub(super) fn single_colour_ends3(avg: [i32; 3]) -> Ends {
 
 /// Rounds a least-squares result to endpoint codes. The C++ calls `precise_round_565(xl, xh, trial_h*, trial_l*)`:
 /// the low fit becomes the high endpoint and the high fit the low one.
+#[inline(always)]
 pub(super) fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
     let (from_xl, from_xh) = precise_round_565(xl, xh);
     Ends {
@@ -309,7 +305,7 @@ pub(super) fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
 /// The prefix sums `encode_bc1` and `try_3color_block` build for their total-ordering loops: the texels sorted by
 /// their dot product with the current endpoints' axis (the texel index breaks ties), `sums[c][i]` the sum of channel
 /// `c` over the first `i` of them and `sums[c][16]` the block total.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[inline(always)]
 pub(super) fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] {
     let (lr, lg, lb) = (e.l[0], e.l[1], e.l[2]);
     let (hr, hg, hb) = (e.h[0], e.h[1], e.h[2]);
@@ -356,7 +352,13 @@ pub(super) fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u3
 /// One iteration of `encode_bc1`'s total-ordering loop: sort the texels along the current endpoints' axis, then try
 /// the level's first `orderings4` of the orderings `g_best_total_orderings4` lists for the current selector histogram,
 /// keeping a strictly better one. Their pairs are fitted first ([`order_keys::keys4`]), then scored in order.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the block's state, plus the code path"
+)]
+#[inline(always)]
 fn total_orderings<const LEVEL: u32>(
+    isa: impl Isa,
     px: &[[u8; 4]; 16],
     texels: &Texels,
     s: &BlockStats,
@@ -376,6 +378,7 @@ fn total_orderings<const LEVEL: u32>(
 
     let p = const { params(LEVEL) };
     let keys = order_keys::keys4::<LEVEL>(
+        isa,
         s.total,
         &sums,
         &BEST_TOTAL_ORDERINGS4[orig_total_order_index],
@@ -392,13 +395,13 @@ fn total_orderings<const LEVEL: u32>(
         if seen.insert_key(key) {
             hit!(Hit::OrderingRepeat);
             #[cfg(test)]
-            shadow4(px, texels, &Seen::ends_of(key), *cur_err);
+            shadow4(isa, px, texels, &Seen::ends_of(key), *cur_err);
             continue;
         }
 
         let trial = Seen::ends_of(key);
         let mut trial_sels = [0u8; 16];
-        let trial_err = find_sels4(texels, &trial, &mut trial_sels, *cur_err);
+        let trial_err = find_sels4(isa, texels, &trial, &mut trial_sels, *cur_err);
 
         if trial_err < *cur_err {
             hit!(Hit::OrderingBetter);
@@ -417,9 +420,13 @@ fn total_orderings<const LEVEL: u32>(
 /// Every selector array this reads was written by [`find_sels3`] because its total was below the cutoff the search was
 /// given (the first search passes `UINT32_MAX`, a block's error is far below it), and a search writes `sels` only
 /// then. The searches return full totals, so a trial's error is its whole block error, not a partial one.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-#[allow(clippy::too_many_arguments)] // The C++ call's own list, plus the block's set of scored pairs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the C++ call's own list, plus the code path and the block's set of scored pairs"
+)]
+#[inline(always)]
 fn try_3color_block<const LEVEL: u32>(
+    isa: impl Isa,
     px: &[[u8; 4]; 16],
     texels: &Texels,
     s: &BlockStats,
@@ -433,7 +440,7 @@ fn try_3color_block<const LEVEL: u32>(
     let mut e = start;
     seen.insert(&e);
     let mut trial_sels = [0u8; 16];
-    let mut trial_err = find_sels3(texels, &e, &mut trial_sels, u32::MAX);
+    let mut trial_err = find_sels3(isa, texels, &e, &mut trial_sels, u32::MAX);
 
     if trial_err != 0 {
         hit!(Hit::Try3Fit);
@@ -452,7 +459,7 @@ fn try_3color_block<const LEVEL: u32>(
             // Recorded, never skipped (the pass's result is the next pass's input).
             seen.insert(&trial);
             let mut trial_sels2 = [0u8; 16];
-            let trial_err2 = find_sels3(texels, &trial, &mut trial_sels2, trial_err);
+            let trial_err2 = find_sels3(isa, texels, &trial, &mut trial_sels2, trial_err);
 
             if trial_err2 < trial_err {
                 hit!(Hit::Ls3PassBetter);
@@ -483,6 +490,7 @@ fn try_3color_block<const LEVEL: u32>(
         // The pairs of the level's first `orderings3` orderings of the row are fitted first, then scored in order (see
         // `order_keys`); `keys3` fills only those.
         let keys = order_keys::keys3::<LEVEL>(
+            isa,
             s.total,
             &sums,
             &BEST_TOTAL_ORDERINGS3[orig_total_order_index],
@@ -496,7 +504,7 @@ fn try_3color_block<const LEVEL: u32>(
             if seen.insert_key(key) {
                 hit!(Hit::Ordering3Repeat);
                 #[cfg(test)]
-                shadow3(px, texels, &Seen::ends_of(key), trial_err);
+                shadow3(isa, px, texels, &Seen::ends_of(key), trial_err);
                 continue;
             }
 
@@ -506,7 +514,7 @@ fn try_3color_block<const LEVEL: u32>(
             // `trial_err` instead: the trial is taken only when its total is below `trial_err` and its selectors are
             // read only then (they go into a fresh array per trial), so the search need not build them otherwise.
             let mut trial_sels2 = [0u8; 16];
-            let trial_err2 = find_sels3(texels, &trial, &mut trial_sels2, trial_err);
+            let trial_err2 = find_sels3(isa, texels, &trial, &mut trial_sels2, trial_err);
 
             if trial_err2 < trial_err {
                 hit!(Hit::Ordering3Better);
@@ -558,9 +566,21 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
 /// the C++. A step to a pair in `seen` is not scored but runs the stop test, as it did when it was scored and
 /// rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour blocks (`use_black` false, see
 /// [`find_sels3`]).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the block's state, plus the code path"
+)]
+#[inline(always)]
 fn endpoint_search<const LEVEL: u32>(
-    // Read only by the shadow checks (the searches take `texels`).
-    #[cfg_attr(not(test), allow(unused_variables))] px: &[[u8; 4]; 16],
+    isa: impl Isa,
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_variables,
+            reason = "read only by the shadow checks in the unit tests; the searches take texels"
+        )
+    )]
+    px: &[[u8; 4]; 16],
     texels: &Texels,
     three: bool,
     seen: &mut Seen,
@@ -603,20 +623,20 @@ fn endpoint_search<const LEVEL: u32>(
             hit!(Hit::SearchRepeat);
             #[cfg(test)]
             if three {
-                shadow3(px, texels, &trial, cur_err);
+                shadow3(isa, px, texels, &trial, cur_err);
             } else {
-                shadow4(px, texels, &trial, cur_err);
+                shadow4(isa, px, texels, &trial, cur_err);
             }
             None
         } else if three {
             hit!(Hit::SearchThree);
             let mut trial_sels = [0u8; 16];
-            let err = find_sels3(texels, &trial, &mut trial_sels, cur_err);
+            let err = find_sels3(isa, texels, &trial, &mut trial_sels, cur_err);
             Some((err, trial_sels))
         } else {
             hit!(Hit::SearchFour);
             let mut trial_sels = [0u8; 16];
-            let err = find_sels4(texels, &trial, &mut trial_sels, cur_err);
+            let err = find_sels4(isa, texels, &trial, &mut trial_sels, cur_err);
             Some((err, trial_sels))
         };
 

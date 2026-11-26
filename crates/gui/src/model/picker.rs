@@ -24,6 +24,20 @@ pub enum PickerPurpose {
     MakeMarker,
     /// Map to target…: the project's target mod folder (Note HL4).
     TargetMod,
+    /// A 3D panel's View menu: the HDRI file for its background (`Viewport3d::picker` takes the result itself).
+    HdriFile,
+}
+
+/// The file picker of the HDRI background: the title and the filter it opens with.
+pub fn hdri_spec(start: Option<PathBuf>) -> PickerSpec {
+    PickerSpec {
+        title: Some("Choose an HDRI"),
+        kind: PickerKind::File {
+            filter: ("Radiance HDR", &["hdr"]),
+        },
+        start,
+        start_candidates: Vec::new(),
+    }
 }
 
 /// The hover text of every picker button while one is open.
@@ -394,8 +408,8 @@ impl AppModel {
             PickerPurpose::SaveReport => self.save_report(path),
             PickerPurpose::MakeMarker => self.marker_picked(&path),
             PickerPurpose::TargetMod => self.target_picked(path),
-            // The meshes model handles its own.
-            PickerPurpose::ChooseMo2 | PickerPurpose::ScanFolder => {}
+            // The meshes model and each 3D viewport handle their own.
+            PickerPurpose::ChooseMo2 | PickerPurpose::ScanFolder | PickerPurpose::HdriFile => {}
         }
     }
 }
@@ -424,7 +438,7 @@ impl AppModel {
                 format!("Could not write the report to {}: {e}", path.display()),
             ),
         };
-        self.status_line = note.clone();
+        self.status_line.clone_from(&note);
         self.messages.notify(sev, note);
     }
 }

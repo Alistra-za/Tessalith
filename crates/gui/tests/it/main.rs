@@ -7,9 +7,10 @@
 //! change what the tests on the other threads see. `every_test_file_is_built` fails when a file is in neither place
 //! or in both.
 
-// Every file declares `mod support;` for itself, as it did as its own binary. A few also declare the fixture builder
-// of another crate (`nif`, `esp`, `modscan`) the same way. So those files are loaded as a module more than once.
-#![allow(clippy::duplicate_mod)]
+#![allow(
+    clippy::duplicate_mod,
+    reason = "each file declares mod support (and a few the nif, esp or modscan fixture builder) for itself, as it did as its own binary"
+)]
 
 #[path = "../accepted_037.rs"]
 mod accepted_037;
@@ -49,6 +50,8 @@ mod bulk_ui;
 mod by_hand_rows;
 #[path = "../centre_tabs.rs"]
 mod centre_tabs;
+#[path = "../channel_guard.rs"]
+mod channel_guard;
 #[path = "../checks.rs"]
 mod checks;
 #[path = "../checks_corpus.rs"]
@@ -271,6 +274,8 @@ mod set_editor_width;
 mod set_groups;
 #[path = "../set_groups_ui.rs"]
 mod set_groups_ui;
+#[path = "../set_json_copy.rs"]
+mod set_json_copy;
 #[path = "../set_order.rs"]
 mod set_order;
 #[path = "../set_panel.rs"]
@@ -321,6 +326,8 @@ mod subtype_hints;
 mod target_mod;
 #[path = "../tessalith.rs"]
 mod tessalith;
+#[path = "../texture_groups.rs"]
+mod texture_groups;
 #[path = "../texture_panel_layout.rs"]
 mod texture_panel_layout;
 #[path = "../textures_filter.rs"]
@@ -331,6 +338,8 @@ mod truepbr_cards;
 mod txst_map;
 #[path = "../type_picker.rs"]
 mod type_picker;
+#[path = "../type_words.rs"]
+mod type_words;
 #[path = "../ui_smoke.rs"]
 mod ui_smoke;
 #[path = "../unknown_suffix.rs"]
@@ -357,6 +366,9 @@ mod xpmf_card;
 mod xpmf_export;
 #[path = "../xpmf_json.rs"]
 mod xpmf_json;
+// Beside this file in `tests/it/`, so it needs no `#[path]`: the return scan that
+// `every_early_return_in_a_test_says_why` runs.
+mod return_scan;
 
 /// `autotests = false` (Cargo.toml): a file that is neither a module here nor a `[[test]]` target is never compiled,
 /// and its tests would pass by not running. A file that is both runs twice, once beside tests it can disturb.
@@ -395,9 +407,9 @@ fn every_test_file_is_built() {
     );
 }
 
-/// The process-state needles, built here so this file is not a hit. The first four are std's; the last two are the
-/// GUI's own wrappers (`crash_log::install_in` takes and sets the panic hook, `crash_log::watch_device` sets the
-/// device-lost flag), which the std needles cannot see from a test file.
+/// The process-state needles, built here so this file is not a hit. The first four and the last (the global allocator
+/// attribute) are std's; the fifth and sixth are the GUI's own wrappers (`crash_log::install_in` takes and sets the
+/// panic hook, `crash_log::watch_device` sets the device-lost flag), which the std needles cannot see from a test file.
 fn process_state_needles() -> Vec<String> {
     vec![
         format!("{}_var(", "set"),
@@ -406,6 +418,7 @@ fn process_state_needles() -> Vec<String> {
         format!("{}_hook", "take"),
         format!("crash_log::{}", "install"),
         format!("{}_device(", "watch"),
+        format!("{}_allocator", "global"),
     ]
 }
 
@@ -503,8 +516,9 @@ fn no_it_module_changes_process_state() {
 /// least one needle, and the list is the manifest's (Note HU2).
 #[test]
 fn process_state_needles_match_the_files_kept_apart() {
-    // Kept apart for process-wide state: the seven that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
-    // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
+    // Kept apart for process-wide state: the eight that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
+    // `app_harness`; the last of them is `alloc_frame`, which also holds a global allocator), the two that install the
+    // panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
     // `it` is the shared binary and `ui_drive` is a driver with its own `main` (`harness = false`), not kept apart
     // for state, so neither is on the list.
     let apart = [
@@ -519,6 +533,7 @@ fn process_state_needles_match_the_files_kept_apart() {
         "fonts_crash_hook",
         "device_lost",
         "fonts_env",
+        "alloc_frame",
     ];
     let manifest = include_str!("../../Cargo.toml").replace('\r', "");
     let mut targets: Vec<&str> = manifest
@@ -560,6 +575,33 @@ fn process_state_needles_match_the_files_kept_apart() {
     );
 }
 
+// shortcut: it follows directory links, so a link cycle would recurse without end; upgrade when a link appears under
+// a scanned root.
+/// Pushes every `.rs` file under `root`, recursively, following links to directories. A `root` that does not exist is
+/// skipped unless `required`; every other read error (listing a directory, reading an entry, reading an entry's
+/// metadata) propagates.
+pub(crate) fn rs_files(
+    root: &std::path::Path,
+    required: bool,
+    out: &mut Vec<std::path::PathBuf>,
+) -> std::io::Result<()> {
+    match std::fs::metadata(root) {
+        Err(e) if !required && e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+        Ok(_) => {}
+    }
+    for e in std::fs::read_dir(root)? {
+        let e = e?;
+        let p = e.path();
+        if std::fs::metadata(&p)?.is_dir() {
+            rs_files(&p, true, out)?;
+        } else if p.extension().is_some_and(|x| x == "rs") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
 /// kittest's accessibility and glyph checks stay on in every test file and in the GUI's own source.
 #[test]
 fn kittest_checks_are_never_switched_off() {
@@ -570,22 +612,10 @@ fn kittest_checks_are_never_switched_off() {
         format!("with_accessibility_{}(", "check"),
         format!("allow_missing_{}(", "glyphs"),
     ];
-    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        for e in std::fs::read_dir(dir).unwrap() {
-            let p = e.unwrap().path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                out.push(p);
-            }
-        }
-    }
     let mut files = Vec::new();
     for sub in ["tests", "src"] {
-        walk(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(sub),
-            &mut files,
-        );
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(sub);
+        rs_files(&root, true, &mut files).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
     }
     let mut hits = Vec::new();
     for f in &files {
@@ -606,4 +636,13 @@ fn kittest_checks_are_never_switched_off() {
         "{} files read; a test or source file switches off a kittest check; remove the call and fix what the check reports instead: {hits:#?}",
         files.len()
     );
+}
+
+/// The shared walker skips an absent root only when it is not required (AF-R2).
+#[test]
+fn the_walker_skips_only_an_absent_optional_root() {
+    let absent = std::env::temp_dir().join("sdc-it-no-such-root");
+    let mut out = Vec::new();
+    assert!(rs_files(&absent, true, &mut out).is_err());
+    assert!(rs_files(&absent, false, &mut out).is_ok() && out.is_empty());
 }

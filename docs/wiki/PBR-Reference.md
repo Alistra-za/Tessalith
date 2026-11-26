@@ -31,7 +31,7 @@ What each True PBR effect does in Community Shaders. The files in your set turn 
 
 ### Which map drives each effect
 
-Each setting multiplies its channel, so a white channel gives you the setting as you typed it. Formats and sRGB flags are in [Texture types](Texture-Types.md#sub-types-what-each-file-becomes).
+Each setting multiplies its channel, so a white channel gives you the setting as you typed it. Formats and sRGB flags are in [Texture types](Texture-Types.md#types-what-each-file-becomes).
 
 | Slot | File | Channel | Effect | Setting that scales it |
 |---|---|---|---|---|

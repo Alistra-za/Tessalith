@@ -1,5 +1,8 @@
 //! Helpers shared by the WARP integration tests: the repo-owned stand-in shader, nifly fixtures, tiny DDS files.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses every helper"
+)]
 use render3d::device::Gpu;
 use render3d::Renderer;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,60 @@ pub fn fixture(name: &str) -> Vec<u8> {
         env!("CARGO_MANIFEST_DIR")
     ))
     .unwrap()
+}
+
+/// A flat (uncompressed) Radiance RGBE file of `w × h` pixels, `rgb(x, y)` linear.
+pub fn hdr_bytes(w: usize, h: usize, rgb: impl Fn(usize, usize) -> [f32; 3]) -> Vec<u8> {
+    let mut b = format!("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n").into_bytes();
+    for y in 0..h {
+        for x in 0..w {
+            let c = rgb(x, y);
+            let m = c.into_iter().fold(0.0f32, f32::max);
+            let px = if m < 1e-30 {
+                [0, 0, 0, 0]
+            } else {
+                let e = m.log2().floor() as i32 + 1;
+                let s = 256.0 / 2f32.powi(e);
+                let q = |v: f32| ((v * s) as u32).min(255) as u8;
+                [q(c[0]), q(c[1]), q(c[2]), (e + 128) as u8]
+            };
+            // A flat first pixel that starts 2, 2, <128 would be read as a run-length scanline header.
+            let px = if x == 0 && px[0] == 2 && px[1] == 2 && px[2] < 128 {
+                [3, px[1], px[2], px[3]]
+            } else {
+                px
+            };
+            b.extend(px);
+        }
+    }
+    b
+}
+
+/// A smooth `w × 2:1` test image that differs by direction (all channels above zero, green 0.05..0.85).
+pub fn test_image(w: usize) -> render3d::hdri::Hdr {
+    let h = w / 2;
+    let mut rgb = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        for x in 0..w {
+            let d =
+                render3d::hdri::uv_to_dir((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            rgb.extend([
+                0.5 + 0.3 * d[1],
+                0.45 + 0.3 * d[0] + 0.1 * d[2],
+                0.4 + 0.2 * d[2],
+            ]);
+        }
+    }
+    render3d::hdri::Hdr {
+        width: w,
+        height: h,
+        rgb,
+    }
+}
+
+/// [`test_image`] as an [`render3d::hdri::Environment`].
+pub fn test_env() -> std::sync::Arc<render3d::hdri::Environment> {
+    std::sync::Arc::new(render3d::hdri::Environment::from_image(test_image(256)).unwrap())
 }
 
 /// A WARP renderer on the stand-in shader with exactly `features` as CS feature defines.

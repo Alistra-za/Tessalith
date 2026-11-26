@@ -320,7 +320,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             }
             if ui
                 .button("Reset preset")
-                .on_hover_text("Drop every sub-type override, so the base shows through")
+                .on_hover_text("Drop every type override, so the base shows through")
                 .clicked()
             {
                 acts.push(Act::ResetAll);
@@ -632,7 +632,10 @@ fn label_of(opts: &Options, v: &Value) -> String {
 
 /// A field row: label, the value's combo, the base's (or, in a branch, the sub-type's) value as a hint, ↺ when the
 /// scope sets it.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the presets model, the row and profile being shown, the scope, field key and label of one setting, and the act queue; each comes from a different owner per frame, so a struct would be built per row only to be taken apart here"
+)]
 fn field_row(
     ui: &mut egui::Ui,
     pm: &PresetsModel,
@@ -669,7 +672,7 @@ fn field_row(
         r.response.on_disabled_hover_text(why);
     } else if default_effort {
         r.response
-            .on_hover_text("BC6H default: no preset sets the effort, so BC6H encodes at slowest (the peak-preserving mode). Pick Veryslow for the plain mode.");
+            .on_hover_text("BC6H default: no preset sets the effort, so BC6H encodes at slowest (the peak-preserving mode). Pick Very slow for the plain mode.");
     }
     if let Some(v) = r.inner.0 {
         acts.push(set(st, scope, field, v));
@@ -858,11 +861,11 @@ fn suffixes(ui: &mut egui::Ui, pm: &PresetsModel, row: &Row, acts: &mut Vec<Act>
     let st = row.subtype;
     let own = pm.suffixes(st);
     if own.is_empty() {
-        ui.weak("No canonical suffix names this sub-type, so it takes no alias.");
+        ui.weak("No canonical suffix names this type, so it takes no alias.");
         return;
     }
     ui.weak(
-        "No suffix: the sub-type's settings below. A suffix's branch overrides them for its files.",
+        "No suffix: the type's settings below. A suffix's branch overrides them for its files.",
     );
     let canon: std::collections::BTreeMap<String, String> =
         pm.aliases_for(st).into_iter().collect();

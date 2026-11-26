@@ -440,7 +440,10 @@ fn unstore(owner: &Owner, mode: Mode) -> (String, Option<Value>) {
 
 /// A texture match pill: how it matches (a drop-down: exact in a slot, or path contains), the path, a picker of
 /// known paths for that kind of match, and ×.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the model it reads, then the owner, mode, path and derived text of one pill, the modes already taken, and the act queue it pushes to; they come from the row loop's own locals, so a struct would be built per pill only to be taken apart here"
+)]
 fn match_pill(
     ui: &mut egui::Ui,
     model: &AppModel,

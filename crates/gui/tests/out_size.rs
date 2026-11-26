@@ -5,6 +5,7 @@ use engine::config::{
 };
 use engine::presets::PresetRegistry;
 use sdc_gui::model::out_size::{estimate, human};
+use std::fmt::Write as _;
 
 fn profile(format: Format, tag: ColorTag, levels: MipLevels) -> Profile {
     let mut p = PresetRegistry::builtin()
@@ -302,7 +303,8 @@ fn the_resized_size_agrees_in_all_three_places() {
         image::RgbImage::from_pixel(*w, *h, image::Rgb([120, 90, 60]))
             .save(i.join(format!("s{n}.png")))
             .unwrap();
-        toml += &format!(
+        let _ = write!(
+            toml,
             "\n[files.\"s{n}.png\"]\nsubtype = \"diffuse\"\nresize = \"{resize}\"\nresize_floor = {floor}\nmips.levels = {levels}\n"
         );
     }

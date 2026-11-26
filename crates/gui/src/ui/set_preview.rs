@@ -12,6 +12,7 @@ use crate::model::AppModel;
 use crate::ui::status::{AMBER, RED};
 use eframe::egui;
 use render3d::ShapeStatus;
+use std::fmt::Write as _;
 
 /// SLSF1.29 External Emittance: the preview draws the NIF colour (captures C1, frame6171: the engine sends exactly that
 /// in an interior); outdoors the engine can substitute the cell or weather colour.
@@ -21,6 +22,8 @@ const EMISSIVE_APPROX: &str =
 const SLSF1_EMISSIVE: u32 = 1 << 29;
 /// The width the centre pane keeps at the least.
 pub const CENTRE_MIN: f32 = 360.0;
+/// The 3D settings window's width when it has no saved rect (it can be resized narrower; egui sets no minimum).
+pub const SETTINGS_WINDOW_W: f32 = 460.0;
 /// The tallest the shape warnings above the frame get.
 const LIST_MAX: f32 = 80.0;
 
@@ -288,7 +291,7 @@ fn members(ui: &mut egui::Ui, s: &SetPreview, view: Option<&SetView>, attention:
             let mut text = member_text(view, m);
             // The time of the bytes on show, so the two modes can be compared (Fresh already says it).
             if let (false, Some(e)) = (matches!(m.state, EncState::Fresh(_)), m.state.shown()) {
-                text += &format!(" · last {:.0} ms", e.ms);
+                let _ = write!(text, " · last {:.0} ms", e.ms);
             }
             match &m.state {
                 EncState::Failed(_) => ui.colored_label(RED, text),
@@ -525,7 +528,10 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
         None => "TruePBR settings".to_string(),
     };
     let rect = m.settings.layout.settings_window.map_or(
-        egui::Rect::from_min_size(egui::pos2(120.0, 120.0), egui::vec2(460.0, 620.0)),
+        egui::Rect::from_min_size(
+            egui::pos2(120.0, 120.0),
+            egui::vec2(SETTINGS_WINDOW_W, 620.0),
+        ),
         |[x, y, w, h]| egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)),
     );
     let mut open = true;
@@ -538,7 +544,12 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
         .scroll([false, true])
         .show(ctx, |ui| {
             if let Some(k) = item {
-                crate::ui::settings_panel::draw(ui, m, k, false);
+                crate::ui::settings_panel::draw(
+                    ui,
+                    m,
+                    k,
+                    crate::ui::settings_panel::Surface::Window,
+                );
             }
             let current = m.resolved_selection();
             if let Some(v) = current.view() {

@@ -1798,7 +1798,12 @@ fn labels_sit_bottom_left_on_every_tile() {
         let shapes = crate::support::shapes(&h);
         let start = shapes
             .iter()
-            .rposition(|s| matches!(s, egui::Shape::Rect(r) if r.rect == *strip))
+            // the strip holds only the letter grid (3d-T5-1); the background is that grid and the captions under it
+            .rposition(|s| {
+                matches!(s, egui::Shape::Rect(r) if r.rect.min == strip.min
+                    && r.rect.width() == strip.width()
+                    && r.rect.height() >= strip.height())
+            })
             .expect("strip background");
         let painted = &shapes[start + 1..];
         let cells: Vec<_> = painted
@@ -2023,8 +2028,10 @@ fn no_card_label_is_nameless_and_the_card_lists_its_empty_slots() {
 fn the_texture_settings_checkboxes_have_their_row_names() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
-        let (_d, h) = crate::replay(
+        // The groups default to closed; the row under test is in the Alpha group.
+        let (_d, h) = crate::replay_with(
             "demo",
+            |h| crate::support::open_texture_groups(&mut h.state_mut().model),
             &[
                 resize.as_str(),
                 r#"{"op":"click","mods":"Shift","at":{"label":"RMAOS","index":0}}"#,
@@ -2032,12 +2039,13 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
             ],
         );
         let at = format!("at {w}x{h_px}");
-        // The RMAOS settings panel draws two checkbox rows, "Exact opaque alpha" and "Mipmaps" (measured); the column
-        // toggles left the header for the Settings tab (Note JI1). All must have a name.
-        let named = h
-            .query_all_by_role_and_label(Role::CheckBox, "Exact opaque alpha")
-            .count();
-        assert_eq!(named, 1, "{at}: one CheckBox named Exact opaque alpha");
+        // The RMAOS settings panel draws two checkbox rows, the Channel guard row's four ticks and "Mipmaps"
+        // (measured; Task 6g); the column toggles left the header for the Settings tab (Note JI1). All must have a name.
+        for tick in ["R", "G", "B", "A"] {
+            let name = format!("Channel guard {tick}");
+            let named = h.query_all_by_role_and_label(Role::CheckBox, &name).count();
+            assert_eq!(named, 1, "{at}: one CheckBox named {name}");
+        }
         let empty: Vec<_> = h
             .query_all_by_role(Role::CheckBox)
             .filter(|n| n.accesskit_node().label().unwrap_or_default().is_empty())

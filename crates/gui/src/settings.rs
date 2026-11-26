@@ -15,6 +15,9 @@ pub struct GuiSettings {
     pub recent: Vec<PathBuf>,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
     pub live_encode: bool,
+    /// Note LG: exports decode and check each DDS again (BatchRequest::validate); off on a fresh install and in a
+    /// gui.toml without the key.
+    pub validate_exports: bool,
     /// The Textures and Sets columns: shown at all (the header's checkboxes), and collapsed to a strip (the
     /// arrows on each column).
     pub textures_hidden: bool,
@@ -44,6 +47,9 @@ pub struct GuiSettings {
     /// group that is open is not stored.
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub group_collapsed: std::collections::BTreeSet<String>,
+    /// The texture panel's groups, open or closed, by `PanelGroup::id`; a group not listed takes its default. Always
+    /// written, even empty, so the `[texture_groups]` table merges per key (`merge`) and a hand edit survives a save.
+    pub texture_groups: std::collections::BTreeMap<String, bool>,
 }
 
 /// The analysis disk cache's limit when `analysis_cache_mb` is unset (Note HV2), in MB.

@@ -485,7 +485,10 @@ fn a_panel_is_stored_under_its_parents_scope() {
         },
     );
     h.run();
-    #[allow(deprecated)]
+    #[allow(
+        deprecated,
+        reason = "the test pins that no panel state is stored under the deprecated `Id::new(salt)` (it equals `Id::unique(salt)`), so it has to build that id"
+    )]
     let new = egui::Id::new("g-scoped");
     assert_eq!(new, egui::Id::unique("g-scoped"));
     assert!(

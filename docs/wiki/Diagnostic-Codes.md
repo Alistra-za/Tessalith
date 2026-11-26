@@ -17,7 +17,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 |---|---|---|---|
 | `IN-DUPLICATE` | blocking | Two inputs would write one output (two raw maps of one name write nothing, so they don't count), or two outputs land on one path (for example two packed outputs after a raw map moved to another set). The first keeps the path. | Exclude or rename one, or change an output path. |
 | `IN-DDS-SKIPPED` | info | A DDS input isn't re-encoded by default. | Use the source, or set `reencode = true`. |
-| `IN-PACKING-INPUT` | warning | A raw map isn't packed because its recipe is off (`packing.enabled = false`). | Enable packing, or give the file a sub-type. |
+| `IN-PACKING-INPUT` | warning | A raw map isn't packed because its recipe is off (`packing.enabled = false`). | Enable packing, or give the file a type. |
 | `IN-GREEN-UNSTATED` | info | A plain `_normal`/`_nrm`/`_norm` doesn't state its green convention; it was converted as DirectX. | Set `channels.green_convention = "opengl"` if it is an OpenGL map. |
 | `IN-DECODE` | error | The source can't be read. | Fix or re-save the file. |
 | `IN-NONFINITE` | warning | NaN or infinite samples were replaced. | Fix the source. |
@@ -37,14 +37,14 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CHAN-NOT-GRAY` | warning | A grayscale sub-type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it's reported only when that channel holds one value (an `a` pick on a source with no alpha reads 255). The message names the pick and, when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the sub-type. |
-| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. On a file already exported, the row then waits as a queued note until you export again ([Problems](GUI-Problems.md#rows-and-their-fixes)). |
+| `CHAN-NOT-GRAY` | warning | A grayscale type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it's reported only when that channel holds one value (an `a` pick on a source with no alpha reads 255). The message names the pick and, when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the type. |
+| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the type. On a file already exported, the row then waits as a queued note until you export again ([Problems](GUI-Problems.md#rows-and-their-fixes)). |
 
 ## Format and tag
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](Texture-Types.md#sub-types-what-each-file-becomes)). | Use BC7. |
+| `FMT-BC5-NORMAL` | blocking | BC4, BC5, R8 or RG8 on a normal map ([why](Texture-Types.md#types-what-each-file-becomes)). | Use BC7. |
 | `FMT-LANDSCAPE-BC1` | blocking | BC1 on `landscape_diffuse` destroys the snow mask. | Use BC7 or BC3. |
 | `FMT-CS-SKIN-LOADER` | blocking | Community Shaders' loader reads only RGBA8, BGRA8, BC1, BC2, BC3 and BC7 on a skin map (BC5 on `skin_detail`); any other format loads as nothing. Acknowledging it doesn't lift it. | Pick a format the loader reads. |
 | `FMT-BC1-ALPHA` | blocking | BC1 with alpha kept, without `encoder.bc1_alpha` or with `data` alpha that isn't empty ([BC1 alpha](Texture-Types.md#alpha)). | Turn on `encoder.bc1_alpha`, use BC7 or BC3, or `remove`. |
@@ -52,16 +52,16 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | `FMT-PERCEPTUAL-DATA` | error | Perceptual encoding on a data map. | Turn `encoder.perceptual` off. |
 | `FMT-HDR-SOURCE` | info | Why a `pbr_emissive` is BC6H (float source above 1.0) or BC7 sRGB. | Set `format` on the file to choose. |
 | `TAG-SRGB-VANILLA` | error | `_SRGB` under `vanilla`. | UNORM ([rule](Texture-Types.md#srgb-or-unorm)). |
-| `TAG-SRGB-NONPBR` | blocking | `_SRGB` on a non-PBR sub-type under `cs`; renders darker. | Remove the `color.tag = "srgb"` override, or set the PBR sub-type ([rule](Texture-Types.md#srgb-or-unorm)). |
+| `TAG-SRGB-NONPBR` | blocking | `_SRGB` on a non-PBR type under `cs`; renders darker. | Remove the `color.tag = "srgb"` override, or set the PBR type ([rule](Texture-Types.md#srgb-or-unorm)). |
 | `TAG-UNORM-PBR` | blocking | UNORM on PBR colour; looks washed out with linear lighting off. | Remove the `color.tag = "unorm"` override ([rule](Texture-Types.md#srgb-or-unorm)). |
 | `TAG-SRGB-LOD` | blocking | `_SRGB` under a `lod` folder; LOD shaders reject it. | UNORM. |
-| `TAG-CONTENT-MISMATCH` | warning | Content and tag disagree: linear content tagged `_SRGB`, a colour sub-type with linear content, or a roughness member with sRGB content (then not variance-baked). | Check `color.content` and `color.tag`. |
+| `TAG-CONTENT-MISMATCH` | warning | Content and tag disagree: linear content tagged `_SRGB`, a colour type with linear content, or a roughness member with sRGB content (then not variance-baked). | Check `color.content` and `color.tag`. |
 
 ## Alpha
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `ALPHA-EXACT-OFF-M` | blocking | `exact_opaque` turned off on a BC7 `_m`; decoded 254s may trip PGPatcher's 50% rule or ENB checks. | Keep it on, or acknowledge. |
+| `ALPHA-EXACT-OFF-M` | blocking | Channel guard A (`alpha.exact_opaque`) turned off on a BC7 `_m`; alpha 0 and 255 may not stay exact, which can trip PGPatcher's 50% rule or ENB checks. An `_m` whose alpha is 0 throughout is exempt. | Keep it on, or acknowledge. |
 | `ALPHA-PARALLAX-NO-ALPHA` | warning | A complex `_m` has [`alpha.parallax`](Project-Config.md#alpha) on and no source alpha. It's written with alpha 0: complex material on, parallax off. | Give the source a height alpha, or set `alpha.parallax = false`. |
 | `ALPHA-BC1-ONE-BIT` | warning | BC1 1-bit alpha on a source whose soft alpha would turn hard ([BC1 alpha](Texture-Types.md#alpha)). | Use BC7 or BC3 to keep the soft edges, or accept. |
 
@@ -69,7 +69,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `CFG-UNAVAILABLE` | blocking | The sub-type or format isn't available under the target. | Accept the fallback, or change the sub-type or target. |
+| `CFG-UNAVAILABLE` | blocking | The type or format isn't available under the target. | Accept the fallback, or change the type or target. |
 | `CFG-INVALID` | error | A value is outside its range or settings conflict (legacy header on BC7 or `_SRGB`, bad swizzle or filter scope). A config, preset or rule with an invalid value is refused. After layering, only the affected file fails. On `normal`, `landscape_normal` or `pbr_normal`, `mips.normal_base = "keep"` conflicts with BC5, RG8, BC4 or R8 even if you acknowledge `FMT-BC5-NORMAL`. <!-- D:LA1 --> | Fix the invalid value. For Keep, choose XYZ storage such as BC7, or set `mips.normal_base = "renormalize"`. |
 | `CFG-FILE-UNMATCHED` | info | A `[files]` key matches no file. | Fix or remove the entry. |
 | `CFG-FILTER-IGNORED` | info | An unscoped [`mips.filter`](Project-Config.md#mipmaps) this texture can't use; it uses box. | Scope the filter to colour maps, or ignore. |
@@ -100,11 +100,12 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 |---|---|---|---|
 | `SET-MISSING-COMPANION` | info | A roughness bake lacks a usable normal, or its normal lacks a roughness companion. A lender skips the missing-roughness Info when its normal supplies a borrower with an eligible roughness member. Also raised for an `_msn` without `_s` (except Eye) or a `_flow` without `_n`. <!-- D:R8,JS2 --> | Add the companion or ignore the Info. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the companion's original image. |
+| `SET-SHARED-ROUGHNESS-NORMAL` | warning | The sets sharing this roughness map use different normals, or a set has no eligible normal Tessalith can verify. The roughness mips skip the variance bake. | Use the same normal in each set, or give each its own roughness map. |
 | `SET-BAKE-RATIO` | warning | Tessalith no longer raises it. A size difference from the `_n` does not by itself prevent the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
 | `SET-SLOT-BORROWED-UNUSED` | warning | A set borrows a slot and still has its own file for it. The file is written, but the set's PGPatcher entry or skin material uses the borrowed one. | See [Slot rows](GUI-Set-Editor.md#slot-rows) for what to change or mark as intended. |
-| `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
-| `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the sub-type. |
+| `SUG-LOW-CONFIDENCE` | blocking | A type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
+| `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the type. |
 
 ## Validation
 
@@ -119,7 +120,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `VAL-M-COMPLEX-MARGIN` | warning | A complex `_m`'s smallest-mip alpha is 247/255 or more: within the margin below Community Shaders' 251/255 gate, or past it (complex off). | Adjust the height range. |
 | `VAL-M-GRAYSCALE` | warning | A complex `_m`'s smallest mip is grey, so it reads as a plain env mask. | Check the channels. |
 | `VAL-M-HEIGHT-CLIP` | warning | Large `_m` alpha areas with no parallax. | Remap the height. |
-| `VAL-PGPATCHER-50` | warning | A plain `_m` with alpha is 50% or more non-white; PGPatcher would treat it as complex. | Use BC4, or turn `exact_opaque` on. |
+| `VAL-PGPATCHER-50` | warning | A plain `_m` with alpha is 50% or more non-white; PGPatcher would treat it as complex. | Use BC4, or turn channel guard A (`alpha.exact_opaque`) on. |
 | `VAL-BC6H-PEAK` | warning | A BC6H texture's peak ratio is below 0.8. | Remove the `encoder.effort` set for that texture ([the BC6H default](Project-Config.md#encoder)). |
 | `VAL-GRASS-DETECT` | error | The encoded complex-grass corner texel still fails detection after a slowest re-encode. The file is written. | Fix the source corner. |
 

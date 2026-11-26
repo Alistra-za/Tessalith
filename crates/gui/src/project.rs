@@ -1107,8 +1107,8 @@ impl ProjectDoc {
 
     /// Write `[export]` as `cfg`: only the fields that differ from the default, so a tick does not freeze today's
     /// recipe defaults into the file (CN60); none at all removes the table. No edit when nothing changes.
-    // shortcut: the table is rewritten, so comments inside `[export]` are lost on a GUI edit; upgrade to per-key
-    // `set_value` if users hand-annotate it.
+    // shortcut: the table is rewritten, so comments inside `[export]` are lost on a GUI edit (a skip rename keeps
+    // them, `rename_skips_also`); upgrade to per-key `set_value` if users hand-annotate it.
     pub fn set_export_config(&mut self, cfg: &ExportConfig) {
         if self.read_only() || self.export_config() == *cfg {
             return;
@@ -1152,11 +1152,43 @@ impl ProjectDoc {
 
     /// TA31: a renamed set keeps its opt-out.
     pub fn rename_skip_also(&mut self, old: &str, new: &str) {
-        let mut c = self.export_config();
-        for s in c.skip.iter_mut().filter(|s| engine::sets::same_id(s, old)) {
-            *s = new.to_string();
+        self.rename_skips_also(&[(old.to_string(), new.to_string())]);
+    }
+
+    /// TA31 for a whole mapping: each `[export] skip` element moves at most once, by the first pair whose `from` it
+    /// matches (a chain `a -> b`, `b -> c` leaves `a` on `b`). The matching elements are replaced in place, keeping
+    /// their decor, so the table's comments survive; the document is touched only when one changed.
+    pub fn rename_skips_also(&mut self, map: &[(String, String)]) {
+        if self.read_only() || map.is_empty() {
+            return;
         }
-        self.set_export_config(&c);
+        let Some(skip) = self
+            .f
+            .doc
+            .get_mut("export")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|t| t.get_mut("skip"))
+            .and_then(Item::as_array_mut)
+        else {
+            return;
+        };
+        let mut changed = false;
+        for v in skip.iter_mut() {
+            let Some(to) = v.as_str().and_then(|s| {
+                map.iter()
+                    .find(|(from, _)| engine::sets::same_id(s, from))
+                    .map(|(_, to)| to)
+            }) else {
+                continue;
+            };
+            let mut moved = Value::from(to.as_str());
+            *moved.decor_mut() = v.decor().clone();
+            *v = moved;
+            changed = true;
+        }
+        if changed {
+            self.touch();
+        }
     }
 
     pub fn changed_on_disk(&self) -> bool {

@@ -1033,16 +1033,86 @@ fn invalid_configs_are_exit_2_and_valid_ones_are_really_read() {
     );
 }
 
-/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
-fn noise(fx: &Fx, name: &str) {
-    let mut state = 12345u32;
-    let mut next = move || {
+/// The bytes of a linear congruential generator seeded with `seed`.
+fn lcg(seed: u32) -> impl FnMut() -> u8 {
+    let mut state = seed;
+    move || {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
         (state >> 24) as u8
-    };
+    }
+}
+
+/// Deterministic white noise (an LCG) at `in/textures/a/<name>`.
+fn noise(fx: &Fx, name: &str) {
+    let mut next = lcg(12345);
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([next(), next(), next()]))
         .save(fx.p(&format!("in/textures/a/{name}")))
         .unwrap();
+}
+
+/// Note LI (BC45-R13): each spelling of `encoder.bc45_search_radius` reaches the encoder. `fast`, `default` and
+/// `slowest` write rgbcx's radius 4, 5 and 10 (`slowest` is what `max` wrote before); `max` writes other bytes.
+#[test]
+fn bc45_search_radius_spellings_reach_the_encoder() {
+    let fx = Fx::new();
+    let mut next = lcg(777);
+    let grey: Vec<u8> = (0..32 * 32).map(|_| next()).collect();
+    ImageBuffer::from_fn(32, 32, |x, y| image::Luma([grey[(y * 32 + x) as usize]]))
+        .save(fx.p("in/textures/a/g.png"))
+        .unwrap();
+    let texels: Vec<[u8; 4]> = grey.iter().map(|&g| [g, g, g, 255]).collect();
+    let src = encoders_sys::gather_blocks(&texels, 32, 32);
+    let mut payloads: BTreeMap<&str, Vec<u8>> = BTreeMap::new();
+    for (spelling, r) in [
+        ("fast", Some(4)),
+        ("default", Some(5)),
+        ("slowest", Some(10)),
+        ("max", None),
+    ] {
+        let out = format!("out_{spelling}");
+        let setting = format!("encoder.bc45_search_radius={spelling}");
+        let o = fx.convert_to(
+            &out,
+            &[
+                "--set",
+                "subtype=height",
+                "--set",
+                "format=bc4",
+                "--set",
+                &setting,
+            ],
+        );
+        assert_eq!(code(&o), 0, "{spelling}: {}", text(&o.stderr));
+        let manifest = std::fs::read_to_string(fx.p(&out).join("_sdc/manifest.jsonl")).unwrap();
+        let records: Vec<Value> = manifest
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(records.len(), 1, "{spelling}: {manifest}");
+        assert_eq!(
+            records[0]["profile"]["encoder"]["bc45_search_radius"], spelling,
+            "{spelling}"
+        );
+        let dds = std::fs::read_dir(fx.p(&out).join("textures/a"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.extension().is_some_and(|x| x == "dds"))
+            .unwrap();
+        let f = read_dds(&std::fs::read(dds).unwrap()).unwrap();
+        let (w, h, range) = f.surfaces()[0].clone();
+        assert_eq!((w, h), (32, 32));
+        let payload = f.data[range].to_vec();
+        // `max` has no rgbcx counterpart to compare with.
+        if let Some(r) = r {
+            let want: Vec<u8> = src
+                .chunks(16)
+                .flat_map(|b| encoders_sys::bc4_encode_block(b.try_into().unwrap(), 0, r))
+                .collect();
+            assert_eq!(payload, want, "{spelling}: radius {r}");
+        }
+        payloads.insert(spelling, payload);
+    }
+    assert_ne!(payloads["max"], payloads["slowest"]);
 }
 
 /// A layered value is not only reported: the engine acts on it. A noisy source misses the fixed 30 dB mip
@@ -1060,7 +1130,8 @@ fn a_layered_validation_mips_changes_what_validation_reports() {
     };
     // The defaults (`alpha.exact_opaque` off, alpha removed) hold the decoded-alpha guarantee on this noise (fix
     // batch 41), so every run exits 0 and only the warning moves.
-    let base = DIFFUSE;
+    let mut base = DIFFUSE.to_vec();
+    base.push("--validate");
     let o = fx.convert(&base);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert!(
@@ -1116,7 +1187,7 @@ impl Fx {
 fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     let fx = Fx::new();
     fx.rgb("checker.png");
-    let o = fx.convert_failing_validation(&[]);
+    let o = fx.convert_failing_validation(&["--validate"]);
     assert_eq!(code(&o), 4, "{}", text(&o.stderr));
     let done = batch_done(&o);
     assert_eq!(
@@ -1131,15 +1202,155 @@ fn failed_validation_exits_4_unless_the_batch_is_also_partial() {
     // The output is still written (the report says so; the file is not deleted).
     assert!(fx.dds("textures/a/checker.dds").exists());
     // A failed validation is not up to date: the next run encodes it again and reports it again.
-    let o = fx.convert_failing_validation(&[]);
+    let o = fx.convert_failing_validation(&["--validate"]);
     assert_eq!(code(&o), 4, "{}", text(&o.stderr));
     assert_eq!(batch_done(&o)["converted"], 1);
 
     // Partial (exit 1) outranks validation failed (exit 4).
     fx.rgb("bad.png");
-    let o = fx.convert_failing_validation(&["--set", "file:**/bad.png.alpha.threshold=0"]);
+    let o = fx.convert_failing_validation(&[
+        "--validate",
+        "--set",
+        "file:**/bad.png.alpha.threshold=0",
+    ]);
     assert_eq!(code(&o), 1, "{}", text(&o.stderr));
     assert_eq!(batch_done(&o)["validation_failed"], 1);
+}
+
+/// Validation runs only with `--validate` (Note LG): without it the same failing fixture exits 0 and the record says
+/// `validation.skipped`.
+#[test]
+fn convert_validates_only_with_the_flag() {
+    let fx = Fx::new();
+    fx.rgb("checker.png");
+    let o = fx.convert_failing_validation(&[]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let done = batch_done(&o);
+    assert_eq!(done["validation_failed"], 0);
+    assert_eq!(done["converted"], 1);
+    let err = text(&o.stderr);
+    assert!(!err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(!err.contains("VAL-HEADER"), "{err}");
+    assert!(err.contains("failed, validation off,"), "{err}");
+    let lines = manifest_lines(&fx.p("out"));
+    let rec: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+    assert_eq!(rec["validation"]["skipped"], true, "{rec}");
+    assert_eq!(rec["validation"]["passed"], true, "{rec}");
+
+    let o = fx.convert_failing_validation(&["--validate", "--on-existing", "overwrite"]);
+    assert_eq!(code(&o), 4, "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    assert!(err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(!err.contains("validation off"), "{err}");
+    assert!(err.contains("1 failed validation,"), "{err}");
+    assert!(!err.contains("complex types only"), "{err}");
+}
+
+#[test]
+fn convert_validate_checks_in_place_and_exits_4_on_a_failure() {
+    let fx = Fx::new();
+    fx.rgb("checker.png");
+    assert_eq!(code(&fx.convert_failing_validation(&[])), 0);
+    let path = fx.dds("textures/a/checker.dds");
+    let bytes = std::fs::read(&path).unwrap();
+    let o = fx.convert_failing_validation(&["--validate"]);
+    let err = text(&o.stderr);
+    assert_eq!(code(&o), 4, "{err}");
+    let done = batch_done(&o);
+    for (field, n) in [
+        ("converted", 0),
+        ("up_to_date", 1),
+        ("checked", 1),
+        ("checked_failed", 1),
+    ] {
+        assert_eq!(done[field], n, "{done}");
+    }
+    for fragment in [
+        "VAL-HEADER",
+        ": up to date; checked in place: failed validation",
+        "1 checked in place (1 failed)",
+    ] {
+        assert!(err.contains(fragment), "{err}");
+    }
+    assert!(!err.contains("[VALIDATION FAILED]"), "{err}");
+    assert!(std::fs::read(path).unwrap() == bytes);
+    let lines = manifest_lines(&fx.p("out"));
+    let rec: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+    assert_eq!(rec["output"], "textures/a/checker.dds");
+    assert_eq!(rec["validation"]["passed"], false);
+    assert!(rec["validation"].get("skipped").is_none());
+
+    let o = fx.convert_failing_validation(&["--validate"]);
+    assert_eq!(code(&o), 4);
+    assert_eq!(batch_done(&o)["converted"], 1);
+    assert_eq!(batch_done(&o)["checked"], 0);
+    assert!(text(&o.stderr).contains("[VALIDATION FAILED]"));
+}
+
+#[test]
+fn a_failed_pbr_check_reencodes_the_vanilla_copy() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.project_config(ALSO_ALL);
+    let run = |args: &[&str]| {
+        fx.convert_cmd("out", args)
+            .env("SDC_TEST_FAIL_VALIDATION", "cup_n")
+            .output()
+            .unwrap()
+    };
+    let key = "textures/clutter/cup_n.dds";
+    let van = fx.dds("in Vanilla");
+    let latest = |folder: &Path| {
+        engine::manifest::Manifest::at(folder)
+            .read()
+            .unwrap()
+            .remove(key)
+            .unwrap()
+            .raw
+    };
+    assert_eq!(code(&run(&HI)), 0);
+    let copy = latest(&van);
+    assert!(!copy["copied_from"].is_null());
+    let o = run(&[HI[0], HI[1], "--validate"]);
+    let err = text(&o.stderr);
+    assert_eq!(code(&o), 4, "{err}");
+    assert_eq!(latest(&fx.dds("in PBR"))["validation"]["passed"], false);
+    let after = latest(&van);
+    assert!(after.get("copied_from").is_none());
+    assert_eq!(after["validation"]["passed"], false);
+    let ev = events(&o);
+    assert!(ev.iter().any(|e| e["job_key"] == key
+        && e["kind"] == "file_skipped"
+        && e["reason"] == "up to date; checked in place: failed validation"));
+    assert!(ev
+        .iter()
+        .any(|e| e["job_key"] == format!("in Vanilla/{key}") && e["kind"] == "file_done"));
+}
+
+#[test]
+fn a_check_in_a_later_also_phase_keys_its_events_with_the_phase_prefix() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.project_config(ALSO_ALL);
+    assert_eq!(code(&fx.convert_cmd("out", &HI).output().unwrap()), 0);
+    let o = fx
+        .convert_cmd("out", &[HI[0], HI[1], "--validate"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let checked: Vec<String> = events(&o)
+        .iter()
+        .filter(|e| {
+            e["kind"] == "file_skipped"
+                && e["reason"]
+                    .as_str()
+                    .is_some_and(|r| r.ends_with("checked in place"))
+        })
+        .map(|e| e["job_key"].as_str().unwrap().to_string())
+        .collect();
+    // The key the phase's other events carry (a file_done of the same output in the first run uses it too).
+    let key = "in Vanilla/textures/arm/steel.dds";
+    assert!(checked.iter().any(|k| k == key), "{checked:?}");
 }
 
 /// DECISIONS Note M5: `--set packing.fill.<role>` writes a packed channel that has no source; it is provenance

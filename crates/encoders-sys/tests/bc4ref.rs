@@ -1,12 +1,34 @@
 //! Pins the BC4 reference search (docs/research/bc4-family.md): `upstream` to the upstream rgbcx path, `search` to its
 //! never-worse rule and to the patched C++ (BC3/BC4/BC5 entry points). The engine's end-to-end check is in
 //! `crates/engine/tests/encode.rs`.
-use bcenc::bc4::{search, upstream};
+use bcenc::bc4::{search_on, upstream};
 use encoders_sys::{bc3_encode_block, bc4_encode_block, bc5_encode_block};
 use gen::blocks;
 
 #[path = "../../bcenc/tests/support/gen.rs"]
 mod gen;
+#[path = "../../bcenc/tests/support/paths.rs"]
+mod paths;
+
+/// `bc4::search` on every code path the machine has (`paths::paths()`, so `SDC_BCENC_PATHS` is honoured and a
+/// named path that is missing panics): the paths must agree byte for byte, and the one result goes to the caller's
+/// comparison, so every check below holds on every path.
+fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
+    let mut all = paths::paths().into_iter();
+    let first = all.next().expect("no code path available");
+    let want = search_on(first, v, radius, guard);
+    for p in all {
+        assert_eq!(
+            search_on(p, v, radius, guard),
+            want,
+            "{v:?} r {radius} guard {guard:?}: path {} differs from {}",
+            p.name(),
+            first.name()
+        );
+    }
+    want
+}
+
 fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
     let mut p = [[7u8; 4]; 16];
     for i in 0..16 {

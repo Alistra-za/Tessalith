@@ -56,7 +56,7 @@ pub fn is_pbr_set(c: &SuggestContext) -> bool {
                 .any(|s| c.set_suffixes.contains(*s))
             || RawMap::INPUTS
                 .iter()
-                .any(|r| r.starts_rmaos() && c.set_suffixes.contains(&r.id())))
+                .any(|r| r.starts_rmaos() && c.set_suffixes.contains(r.id())))
 }
 
 /// Whether a game path is landscape: under `textures/landscape/` or with a whole `landscape` component.

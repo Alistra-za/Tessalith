@@ -1,0 +1,2 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+LQ2	LQ		back	LR		partial	2026-11-25		adds: exact opaque (alpha.exact_opaque) is the Channel guard row's A, in Compression with its R, G and B fields (LR8; ruling BC7-C42); implied before: Alpha (the field-to-group table); stays: the rest

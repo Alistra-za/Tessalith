@@ -15,7 +15,8 @@ use engine::config::Format;
 use engine::cube::layout::HCROSS;
 use std::sync::Arc;
 
-pub(crate) const SETTINGS_WIDTH: f32 = 280.0;
+/// The width of the preview strip's settings panel.
+pub const SETTINGS_WIDTH: f32 = 280.0;
 /// The narrowest the viewports get (A10): below it the settings collapse to a strip.
 pub const PREVIEW_MIN: f32 = 480.0;
 /// From this window width the settings start open (Note FC8).
@@ -166,7 +167,9 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| settings_panel::draw(ui, model, &key, true));
+                    .show(ui, |ui| {
+                        settings_panel::draw(ui, model, &key, settings_panel::Surface::Strip)
+                    });
             });
     } else {
         // Its own id: a strip under "preview-settings" would store 24 px as that panel's width (A6).
@@ -543,7 +546,10 @@ fn legend(ui: &mut egui::Ui, full_scale: &mut f32, label: &str, updating: bool) 
 }
 
 /// Draws the two viewports and handles their input. True when the preview should collapse (a double-click).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Ui and the model it edits, the item info and GPU status it reads, the pane rect and the frame's requests, the preview state and the item key; each comes from a different owner per frame, so a struct would be built per frame only to be taken apart here"
+)]
 fn viewports(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -843,7 +849,6 @@ fn face_labels(ui: &egui::Ui, pic: Rect, visible: Rect) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_encoded_pane(
     ui: &mut egui::Ui,
     model: &AppModel,

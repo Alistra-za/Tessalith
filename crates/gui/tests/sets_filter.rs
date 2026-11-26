@@ -247,27 +247,19 @@ fn ctrl_a_with_every_set_hidden_keeps_the_selection() {
 
 #[test]
 fn no_false_no_match_while_the_first_plan_runs() {
-    // Pills restored from gui.toml, then a folder opens: until the views exist there is no "No sets match" and no
-    // Clear filter that would wipe them.
+    // A pill is on, then a folder opens: until the views exist there is no "No sets match" and no Clear filter
+    // that would wipe it. (Pills are not restored from gui.toml, review E19, so the test sets it on the model.)
     let d = tempfile::tempdir().unwrap();
     let root = mod_folder(d.path());
-    let mut s = GuiSettings {
+    let s = GuiSettings {
         export_folder: Some(d.path().join("export")),
         ..GuiSettings::default()
     };
-    s.layout.sets_filters = vec!["ready".into()];
     let mut m = AppModel::new(s, None, session());
     // As `support::opened`: suggestions stay undecided, so no set is ready. Accepted, rock01 is ready, since its
     // PACK-DEFAULTED rows are notes (review E2).
     m.accept = engine::policy::AcceptSuggestions::None;
-    sdc_gui::layout::restore_model(
-        &m.settings.layout.clone(),
-        &mut m.filter,
-        &mut m.prefs,
-        &mut m.sets_filter,
-        &mut sdc_gui::model::view::ViewState::default(),
-    );
-    assert!(m.sets_filter.ready);
+    m.sets_filter.ready = true;
     m.open_folder(root);
     assert!(views(&m).is_empty(), "the plan has not arrived yet");
     let mut h = harness(m);
@@ -277,7 +269,7 @@ fn no_false_no_match_while_the_first_plan_runs() {
     assert!(h.query_by_label("Clear filter").is_none());
     assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
     h.run();
-    assert!(h.state().sets_filter.ready, "the restored pill stays");
+    assert!(h.state().sets_filter.ready, "the pill stays");
     // Nothing is ready in this fixture: now the message is true.
     h.get_by_label("No sets match the filter (3 hidden)");
     h.get_by_label("Clear filter");
@@ -463,7 +455,7 @@ fn a_set_made_under_a_filter_stays_shown_until_the_filter_changes() {
 }
 
 #[test]
-fn the_pills_and_shader_persist_and_the_search_does_not() {
+fn the_shader_persists_and_the_pills_and_search_do_not() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     let mut s = GuiSettings::default();
@@ -488,13 +480,13 @@ fn the_pills_and_shader_persist_and_the_search_does_not() {
         SetsFilter {
             search: "rock".into(),
             attention: false,
-            ready: true,
-            no_json: true,
+            ready: false,
+            no_json: false,
             shader: Some(Shader::PbrLandscape),
         },
-        "the search is the model's own"
+        "the pills are not restored; the search is the model's own"
     );
-    m.sets_filter.ready = false;
+    m.sets_filter.ready = true;
     m.sets_filter.attention = true;
     let ctx = egui::Context::default();
     let cur = sdc_gui::layout::capture(
@@ -506,7 +498,7 @@ fn the_pills_and_shader_persist_and_the_search_does_not() {
         &sdc_gui::model::view::ViewState::default(),
         (&Default::default(), &Default::default()),
     );
-    assert_eq!(cur.sets_filters, ["attention", "no-json"]);
+    assert!(cur.sets_filters.is_empty(), "the pills are not saved");
     assert_eq!(cur.sets_shader.as_deref(), Some("pbr_landscape"));
     let mut saved = s.clone();
     saved.layout = cur;
@@ -524,7 +516,8 @@ fn the_pills_and_shader_persist_and_the_search_does_not() {
         &mut sdc_gui::model::view::ViewState::default(),
     );
     assert_eq!(fresh.sets_filter.search, "");
-    assert!(fresh.sets_filter.attention && fresh.sets_filter.no_json);
+    assert!(!fresh.sets_filter.attention && !fresh.sets_filter.no_json);
+    assert_eq!(fresh.sets_filter.shader, Some(Shader::PbrLandscape));
 }
 
 #[test]

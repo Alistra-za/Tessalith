@@ -165,7 +165,58 @@ Alpha-test flips at 128 (BC3, percent of texels that cross 128, mean per image):
 
 Never-worse check (`search_max_never_worse_than_v4` in crates/bench/tests/bc4ref.rs, 2000 synthetic blocks at radius 10): SSE(max, no guard) <= SSE(search r10, no guard) on all 2000, 103 strictly better; SSE(max, guard) <= SSE(search r10, guard) and flips(max, guard) <= flips(upstream r10) on all 2000; on 28 the exhaustive pass raised flips and the guard fell back to guarded v4.
 
-The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Not shipped: the owner declined it after this timing (2026-11-01, "no exhaustive"), so `search_max` exists only in the Rust reference.
+The extra gain over the v4 search is 0.02-0.03 dB on BC4/BC5/BC3 masks and 0.2 dB at most on the guarded cutout set, for 2.4x the v4 time. Shipped as `max` (Note LI). On BC4, BC5 and BC3 at cut 128 the port in `bcenc` writes the bench's bytes (pinned against the bench code in `crates/bcenc/tests/bc4.rs`); at another alpha-test cut the BC3 guard tests that cut instead of 128, so those bytes can differ from the bench's.
+
+Time in `bcenc` for the BC4 pair-search pruning (Note HY24), complete block encoders (BC3 includes its colour half). The run: the `max_speed` example (`max_speed 5`, the Windows release exe) on 20 PNGs picked at random from the owner's 10,000-texture test folder (1,310,720 blocks), on `Path::best()` (AVX2), at commits `fca6cb41` (before) and `f78c9a6b` (after), on the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, Wine 11.0). Each commit ran 3 alternating rounds, each round the median of 5 passes; every round was clean (no other process busy at its start or end); recorded 2026-11-22 to 2026-11-23. Times are for whole passes. The first two columns are the median and the range over the rounds of Max over `slowest` (radius 10); the last two are `min(after) / min(before)`, the least time over the rounds after the change over the least time before it:
+
+| format | max over `slowest`, before | max over `slowest`, after | `slowest` after/before | `max` after/before |
+|---|---|---|---|---|
+| BC3 (alpha at cut 128 and colour) | 1.182x (1.180-1.182) | 1.061x (1.059-1.062) | 0.923 | 0.831 |
+| BC4 (channel 0) | 4.902x (4.848-4.913) | 2.652x (2.648-2.654) | 0.718 | 0.388 |
+| BC5 (both channels) | 4.764x (4.754-4.774) | 2.606x (2.605-2.612) | 0.701 | 0.384 |
+
+The pruning skips an endpoint pair when a lower bound on its error is at or above the best so far, so the bytes are the same (Note HY24; per block on the 20 PNGs at cut 128 for BC4 channel 0, BC5 and BC4 alpha Max, 0 mismatches on both paths). BC4 and BC5 Max now take about 0.39 of their old time; BC3 Max 0.83, because its colour half is untouched. An older figure, about 4 times `slowest` on BC4 and 5 on BC5 from a busy machine and the base SSE2 code, is replaced by these quiet ones. Earlier records of Max over `slowest` are from older commits and other builds; do not mix them with this table. The bench's 2.4x above is its Rust reference against v4, not `bcenc`. The synthetic blocks the example generates when it gets no PNG are not texture content and are not quoted.
+
+The default radius, from `speed.exe` on the same VM and commits (radius 5 for BC3, BC4 and BC5, alpha cut 128, 5 runs per round, 3 alternating rounds, 16 PNGs, 1,048,576 blocks; every row `same_bytes yes`). Figure: after over before of the minimum bcenc time over the rounds:
+
+| row | `--path=base` | `--path=avx2` |
+|---|---|---|
+| bc3 (radius 5, cut 128) | 0.948 | 0.942 |
+| bc4 (radius 5) | 1.011 | 0.981 |
+| bc5 (radius 5) | 1.006 | 0.973 |
+| bc3-fast (fast colour search, alpha radius 5, cut 128) | 0.842 | 0.829 |
+| bc1, bc1p, bc1-4, bc1a, bc1-fast (untouched) | 0.997 to 1.002 | 0.998 to 1.001 |
+
+These rows compare two whole commits, so they do not isolate the bound: the bound's own cost at radius 5 is in the next section, where it slows BC4 and BC5 down, and the BC3 and bc3-fast gains above came from the rest of the commit. The base path is the code a CPU without AVX2 runs; it was timed here on the VM's AVX2-capable CPU with the path forced.
+
+### The bound per radius (2026-11-24)
+
+What the bound costs and saves at each radius, measured on its own. Run: the Linux test VM (13th Gen Intel Core i9-13900K host, 6 pinned vCPUs, the Windows exes under Wine 11.0), the 16 PNGs of the `speed.exe` set (1,048,576 blocks), quiet (no other process busy).
+
+Direct probe (main `8f98807a` plus a throwaway probe, not committed): per-block time of the radius-r search with the bound as built before it was limited to radius 10, over the same search with no bound at all; median of 5 interleaved passes. Above 1 the bound costs more than it saves. 90% of the BC3 alpha blocks are solid:
+
+| radius | path | BC4 / BC5 first channel | BC5 second channel | BC3 alpha |
+|---|---|---|---|---|
+| 4 (`fast`) | base | 1.115 | 1.108 | 1.120 |
+| 4 | avx2 | 1.099 | 1.091 | 1.144 |
+| 5 (`default`) | base | 1.077 | 1.070 | 1.115 |
+| 5 | avx2 | 1.049 | 1.037 | 1.127 |
+| 10 (`slowest`) | base | 0.911 | 0.908 | 1.051 |
+| 10 | avx2 | 0.859 | 0.868 | 1.024 |
+
+At radius 5, skipping the bound below radius 6 in two shapes, over the search with the bound: two calls of `searched` (the shipped shape; 6 was the probe's threshold and behaves the same at radius 4 and 5 as the shipped 10) 0.933 on base and 0.974 on avx2 for the first channel, 0.939 and 0.982 for the second; one call with the bound picked at run time 0.965 and 0.979, 0.973 and 0.985. A second quiet probe at radius 5: building one bound costs about 236 ns (59 table entries on average, 4.0 ns each), 8 to 9% of the search; the pruning saves 1.0 to 1.4% of it on base and 4.3 to 4.5% on avx2. Radii 6 to 9 were not measured; no engine setting uses them.
+
+`speed.exe --no-ref --rows=bc3,bc4,bc5,bc1-fast,bc3-fast`, 5 runs per round, 3 interleaved rounds, all clean: the build that builds the bound only from radius 10 (`d6d179fc`) over the one before it (`8f98807a`), ratio of the minima over the rounds. The rows are those of the default-radius table above (radius 5, alpha cut 128; `bc3-fast` takes the fast colour search), and `bc1-fast` is untouched:
+
+| `speed.exe` row | base | avx2 |
+|---|---|---|
+| `bc3` | 0.998 | 1.000 |
+| `bc4` | 0.930 | 0.975 |
+| `bc5` | 0.932 | 0.979 |
+| `bc3-fast` | 0.984 | 1.013 |
+| `bc1-fast` | 1.005 | 1.004 |
+
+Every variant of the probe and every `speed.exe` row wrote the same bytes (every hash equal on both paths and both builds).
 
 ## Shipped: end to end and bench re-run (2026-11-01)
 
@@ -202,5 +253,5 @@ The deltas against the old rows equal the probe's v5 (BC3) and v4 (BC4, BC5) pre
 
 ## What Tessalith does because of this
 
-- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, and v5 (v4 plus the coverage guard) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `max` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals the Rust reference `search` byte for byte. The guard tests each texture's own alpha-test cutoff, 128 at the default (Note FM19). Existing BC3/BC4/BC5 outputs re-encoded once through the manifest's `rgbcx_patch` tag.
-- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; the fast presets take the new search; `max` stays the new search at radius 10, without the near-exhaustive pass ("no exhaustive", see [max: near-exhaustive](#max-near-exhaustive)).
+- **Shipped (engine 1.2.0, DECISIONS Note FJ):** v4's search for BC4 and BC5's two channels, and v5 (v4 plus the coverage guard) for BC3 alpha, at every search radius (`fast` 4, `default` 5, `slowest` 10). It lives in the vendored rgbcx (`encode_bc4_hq`, flags `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128`, set by the shim) and equals the Rust reference `search` byte for byte. The guard tests each texture's own alpha-test cutoff, 128 at the default (Note FM19). Existing BC3/BC4/BC5 outputs re-encoded once through the manifest's `rgbcx_patch` tag.
+- Owner calls (2026-11-01): the coverage guard on BC3 alpha, yes; the fast presets take the new search; the radius-10 value stayed the new search without the near-exhaustive pass ("no exhaustive"). It is `slowest` now, and the near-exhaustive pass ships as `max` (Note LI; see [max: near-exhaustive](#max-near-exhaustive)).

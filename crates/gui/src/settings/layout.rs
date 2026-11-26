@@ -7,15 +7,18 @@ use std::collections::BTreeMap;
 /// panel (fixed at 280 pt today, so its saved width changes nothing yet). The set 3D side panel (AG78) and the
 /// Advanced drawer (Note JI7) are gone: an old `set-3d` or `advanced` width is ignored like any unknown name.
 pub const WIDTH_IDS: [&str; 4] = ["textures", "sets", "meshes-tree", "preview-settings"];
-/// The Textures filter toggles, by their `gui.toml` names.
+/// The one Textures filter that is saved and restored, by its `gui.toml` name.
+pub const HIDE_HELPERS: &str = "hide-helpers";
+/// The Textures filter names the loader accepts, so an old file loads without an error. Only [`HIDE_HELPERS`] is
+/// restored; the status pills are read and ignored (review E19).
 pub const FILTER_NAMES: [&str; 5] = [
     "needs-decision",
     "warnings",
     "failed",
     "not-in-set",
-    "hide-helpers",
+    HIDE_HELPERS,
 ];
-/// What `[layout] sets_filters` may name: the Sets column's pills.
+/// The Sets column pill names the loader accepts from an old file; they are read and ignored (review E19).
 pub const SETS_FILTER_NAMES: [&str; 3] = ["attention", "ready", "no-json"];
 /// A saved panel width outside this range (points) is ignored.
 pub const WIDTH_RANGE: (f32, f32) = (200.0, 8000.0);
@@ -98,11 +101,16 @@ pub struct WindowSettings {
 }
 
 /// `[layout.look]`: the 3D panel's View controls. A field that is missing or invalid keeps the default look.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LookSettings {
-    #[serde(deserialize_with = "lenient")]
+    /// The key of the studio HDRI toggle before the HDRI came from a file: read and ignored (`hdri = true` loads as
+    /// Solid), never written.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub hdri: Option<bool>,
+    /// What is behind the model: `solid` or `hdri`; none or an unknown name is Solid.
+    #[serde(deserialize_with = "lenient")]
+    pub mode: Option<String>,
     #[serde(deserialize_with = "lenient")]
     pub grey: Option<f32>,
     /// The solid background colour, sRGB 0..=1 per channel (GUI suggestions item 2). `grey` is read only when this is
@@ -134,6 +142,8 @@ impl LookSettings {
             .bg
             .filter(|c| c.iter().all(|f| f.is_finite()))
             .map(|c| c.map(|f| f.clamp(0.0, 1.0)));
+        // The legacy `hdri` flag is read and dropped, so a look saved back unchanged (`look_now`) never writes it.
+        self.hdri = None;
         // A legacy `grey` becomes `bg` on load, so a look saved back unchanged (`look_now`) never writes `grey`.
         self.bg = self.bg.or(self.grey.take().map(|g| [g; 3]));
         fix(&mut self.sun, (0.0, 4.0));
@@ -159,7 +169,8 @@ pub struct LayoutSettings {
     /// The Meshes view instead of the Textures view.
     #[serde(deserialize_with = "lenient")]
     pub meshes_view: bool,
-    /// The Textures filters that are on, by [`FILTER_NAMES`] name.
+    /// The Textures filters that are kept, by [`FILTER_NAMES`] name: only `hide-helpers` is saved and restored. The
+    /// status pills in an old file are read and ignored, and the next save drops them (review E19).
     #[serde(deserialize_with = "lenient_strings")]
     pub filters: Vec<String>,
     /// The Textures combo filters: a sub-type id, a format id (none: Any), and the set membership one
@@ -175,9 +186,12 @@ pub struct LayoutSettings {
     pub sort: String,
     #[serde(deserialize_with = "lenient_tile")]
     pub tile: f32,
-    /// The Sets column pills that are on, by [`SETS_FILTER_NAMES`] name, and its shader filter (a `Shader` id; none:
-    /// Any). Its search is not saved (R17).
-    #[serde(deserialize_with = "lenient_strings")]
+    /// The Sets column pills of an old file, by [`SETS_FILTER_NAMES`] name: read and ignored, never saved (review
+    /// E19). Its shader filter below (a `Shader` id; none: Any) is kept; its search is not saved (R17).
+    #[serde(
+        deserialize_with = "lenient_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub sets_filters: Vec<String>,
     #[serde(deserialize_with = "lenient")]
     pub sets_shader: Option<String>,
@@ -189,6 +203,9 @@ pub struct LayoutSettings {
     pub look: Option<LookSettings>,
     #[serde(deserialize_with = "lenient")]
     pub set_look: Option<LookSettings>,
+    /// The HDRI file behind both 3D panels' "HDRI file…" background: one path for the two panels.
+    #[serde(deserialize_with = "lenient")]
+    pub hdri_file: Option<std::path::PathBuf>,
     /// The 3D view settings window: x, y, width, height in points (AG132).
     #[serde(deserialize_with = "lenient")]
     pub settings_window: Option<[f32; 4]>,
@@ -217,6 +234,7 @@ impl Default for LayoutSettings {
             preview_channel: 0,
             look: None,
             set_look: None,
+            hdri_file: None,
             settings_window: None,
             details: vec![],
         }

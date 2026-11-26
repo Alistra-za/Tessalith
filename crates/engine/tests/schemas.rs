@@ -202,6 +202,40 @@ fn config_schema_version_minimum_is_one() {
     assert_eq!(sv["minimum"], 1, "{sv}");
 }
 
+/// Note LR (LR8): a settings table may write the channel guard's A as `encoder.channel_guard.a`, so the partial-profile
+/// schema (presets, configs, `[files]`) lists it as a boolean naming `alpha.exact_opaque`; the `Profile` schema has no
+/// `a`, since a profile stores A as `alpha.exact_opaque`.
+#[test]
+fn the_channel_guard_a_is_in_the_partial_schema_only() {
+    let guard = |kind: SchemaKind, root: &str| -> serde_json::Value {
+        let v: serde_json::Value = serde_json::from_str(&schema_json(kind)).unwrap();
+        let defs = &v["$defs"];
+        let mut node = defs[root].clone();
+        for part in ["encoder", "channel_guard"] {
+            let next = node["properties"][part].clone();
+            let next = match next["$ref"].as_str() {
+                Some(r) => defs[r.trim_start_matches("#/$defs/")].clone(),
+                None => next,
+            };
+            assert!(!next.is_null(), "{kind:?} {root} lacks {part}");
+            node = next;
+        }
+        node["properties"].clone()
+    };
+    for kind in [SchemaKind::Preset, SchemaKind::Config] {
+        let props = guard(kind, "PartialProfile");
+        for c in ["r", "g", "b", "a"] {
+            assert_eq!(props[c]["type"], "boolean", "{kind:?} {c}: {props}");
+        }
+        let doc = props["a"]["description"].as_str().unwrap_or_default();
+        assert!(doc.contains("alpha.exact_opaque"), "{doc}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&schema_json(SchemaKind::Profile)).unwrap();
+    let props = &v["$defs"]["ChannelGuard"]["properties"];
+    assert_eq!(props["g"]["type"], "boolean", "{props}");
+    assert!(props.get("a").is_none(), "{props}");
+}
+
 /// Audit REPORT #17 (Note BC): every settable field (`FIELD_PATHS`, which `[files]` entries accept) is in the
 /// config schema's `[files]` entry, including `reencode`; `subtype` is not a `[files]` field.
 #[test]

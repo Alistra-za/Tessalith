@@ -135,6 +135,12 @@ pub enum EventKind {
     BatchDone {
         converted: u32,
         up_to_date: u32,
+        /// Of `up_to_date`, outputs checked in place during this run.
+        #[serde(default)]
+        checked: u32,
+        /// Of `checked`, outputs whose validation reported an error.
+        #[serde(default)]
+        checked_failed: u32,
         /// Every `file_skipped` that is not up to date and not a packing input.
         skipped: u32,
         /// Of `skipped`, those skipped on purpose (`IN-DDS-SKIPPED`, `PACK-CONFLICT`, `--on-existing skip`); they

@@ -373,7 +373,7 @@ fn eye_n_is_model_space() {
     let (p, _) = plan(d.path(), Target::Vanilla, &["set:wall.shader=eye"], &[]);
     let n = job(&p, "wall_n.dds");
     assert_eq!(
-        (n.profile.subtype.id().as_str(), prov(n, "subtype").as_str()),
+        (n.profile.subtype.id(), prov(n, "subtype").as_str()),
         ("msn", "shader:eye")
     );
 }
@@ -606,7 +606,7 @@ fn under_accept_high_an_auto_shader_decides_its_member_subtype() {
     );
     let n = job(&p, "eye_n.dds");
     assert_eq!(
-        (n.profile.subtype.id().as_str(), prov(n, "subtype").as_str()),
+        (n.profile.subtype.id(), prov(n, "subtype").as_str()),
         ("msn", "suggestion")
     );
     assert!(

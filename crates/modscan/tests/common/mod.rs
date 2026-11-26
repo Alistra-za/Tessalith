@@ -30,7 +30,10 @@ pub fn instance_fixture(modlist: &str) -> tempfile::TempDir {
 }
 
 /// Writes `bytes` to `root/rel`, creating parent directories.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses this helper"
+)]
 pub fn put(root: &std::path::Path, rel: &str, bytes: &[u8]) {
     let p = root.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -39,7 +42,10 @@ pub fn put(root: &std::path::Path, rel: &str, bytes: &[u8]) {
 
 /// An uncompressed v105 BSA (archive flags 0x1|0x2) of (folder, file, bytes) entries; the entries of one folder must be
 /// adjacent. Uncompressed so modscan needs no lz4 dev-dependency (Cargo.lock unchanged).
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "not every test binary that includes this file uses this helper"
+)]
 pub fn bsa(entries: &[(&str, &str, &[u8])]) -> Vec<u8> {
     let mut folders: Vec<&str> = entries.iter().map(|e| e.0).collect();
     folders.dedup();

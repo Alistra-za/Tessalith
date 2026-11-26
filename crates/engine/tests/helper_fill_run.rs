@@ -512,7 +512,7 @@ fn cube_never_takes_a_fill() {
 
 /// Owner data (`SDC_HELPER_SKIN_DIR`, read only): every PNG there fills a generated diffuse of its size.
 #[test]
-#[ignore]
+#[ignore = "owner data: set SDC_HELPER_SKIN_DIR"]
 fn owner_skin_f_files_plan() {
     let Ok(dir) = std::env::var("SDC_HELPER_SKIN_DIR") else {
         eprintln!("SDC_HELPER_SKIN_DIR unset; skipped");

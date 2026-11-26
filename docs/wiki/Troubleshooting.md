@@ -10,7 +10,7 @@ The mesh decides whether a varying alpha is a cutout, a blend or unused, so the 
 
 ### A normal map waits for a type
 
-A lone `rock_nm.png` has no suffix Tessalith knows, so it waits instead of becoming a colour map. Rename it `_n`, or give it a normal sub-type ([how](Texture-Types.md#suffixes)).
+A lone `rock_nm.png` has no suffix Tessalith knows, so it waits instead of becoming a colour map. Rename it `_n`, or give it a normal type ([how](Texture-Types.md#suffixes)).
 
 ## It looks wrong in game
 

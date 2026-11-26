@@ -11,6 +11,7 @@ mod support;
 
 use compare::{compare, overlay};
 use image::{Rgba, RgbaImage};
+use std::fmt::Write as _;
 use std::path::Path;
 
 fn grey(w: u32, h: u32) -> RgbaImage {
@@ -117,7 +118,7 @@ fn manifest_scenarios_and_pages_agree() {
 /// PNG and writes `<page>/<id>.png`, `<page>/<id>.diff.png` (changed shots), `summary.tsv` and `summary.md`. Needs a
 /// GPU or WARP; run it through `tools\doc-shots.ps1`.
 #[test]
-#[ignore]
+#[ignore = "needs a GPU or WARP; run through tools/doc-shots.ps1"]
 fn render_doc_shots() {
     let out = std::path::PathBuf::from(std::env::var_os("DOC_SHOTS_OUT").expect("DOC_SHOTS_OUT"));
     let only: Option<Vec<String>> = std::env::var("DOC_SHOTS_ONLY").ok().map(|v| {
@@ -142,7 +143,7 @@ fn render_doc_shots() {
         let Some((_, scenario)) = scenarios::SCENARIOS.iter().find(|(n, _)| *n == s.scenario)
         else {
             failed.push(format!("{}: no scenario {}", s.id, s.scenario));
-            tsv.push_str(&format!("{}\t{}\tfailed\t\t{used_by}\n", s.id, s.page));
+            let _ = writeln!(tsv, "{}\t{}\tfailed\t\t{used_by}", s.id, s.page);
             continue;
         };
         let dir = tmp.path().join(format!("shot-{i}"));
@@ -156,7 +157,7 @@ fn render_doc_shots() {
                     .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
                     .unwrap_or_default();
                 failed.push(format!("{}: {msg}", s.id));
-                tsv.push_str(&format!("{}\t{}\tfailed\t\t{used_by}\n", s.id, s.page));
+                let _ = writeln!(tsv, "{}\t{}\tfailed\t\t{used_by}", s.id, s.page);
                 rows.push(format!("| {} | {} | failed | | {used_by} |", s.id, s.page));
                 continue;
             }
@@ -185,10 +186,7 @@ fn render_doc_shots() {
         } else {
             ("new", String::new())
         };
-        tsv.push_str(&format!(
-            "{}\t{}\t{status}\t{percent}\t{used_by}\n",
-            s.id, s.page
-        ));
+        let _ = writeln!(tsv, "{}\t{}\t{status}\t{percent}\t{used_by}", s.id, s.page);
         rows.push(format!(
             "| {} | {} | {status} | {percent} | {used_by} |",
             s.id, s.page
@@ -217,9 +215,9 @@ fn render_doc_shots() {
             warn.join("; ")
         )
     };
-    md.push_str(&format!("adapter = {adapter:?}\n\n[render.fonts]\n"));
+    let _ = write!(md, "adapter = {adapter:?}\n\n[render.fonts]\n");
     for (f, h) in &fonts {
-        md.push_str(&format!("\"{f}\" = \"{h}\"\n"));
+        let _ = writeln!(md, "\"{f}\" = \"{h}\"");
     }
     md.push_str("\n| Shot | Page | Status | Changed % | Used by |\n|---|---|---|---:|---|\n");
     for r in &rows {
@@ -228,7 +226,7 @@ fn render_doc_shots() {
     }
     md.push_str("\n## Exempt\n\n");
     for x in &m.exempt {
-        md.push_str(&format!("- {} — {} — {}\n", x.what, x.page, x.reason));
+        let _ = writeln!(md, "- {} — {} — {}", x.what, x.page, x.reason);
     }
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("summary.tsv"), tsv).unwrap();

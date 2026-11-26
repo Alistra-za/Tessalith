@@ -1,0 +1,11 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+FZ4	FZ		back	LR3,LR12		partial	2026-11-25		goes: "Bc7Tune is only weights"; stays: the research-only fields removed, unset slots send -1 (Bc7Tune is weights, flat_tolerance and exact_constants since LR3 and LR12)
+HZ7	HZ		back	LR6		partial	2026-11-25		goes: the probe tests look for blocks bc7e writes on AVX2 only; stays: the early return on AVX-512 (since patch 0005's Q2t no path writes a broken rotated block on their inputs, LR6)
+JA2	JA		back	LR4		partial	2026-11-25		goes: the encoder tag list without bc7e_fixes; stays: the rest (BC7 records also carry the bc7e_fixes tag, LR4)
+JC2	JC		back	LR2		partial	2026-11-23		archived by hand: main's wording, which Task 4 (S1) edited without a row; goes: the level_identity list without s1_fixture_is_pinned; stays: the rest
+JC2	JC		back	LR6,LR15		partial	2026-11-25		goes: the probe sentence of the engine test and the level_identity list without linear_calls_write_the_x16_bytes; stays: the rest
+LN1	LN		back	LR15		partial	2026-11-25		goes: "they give bc7e [1, 1, 1, w]" without the ranking; stays: the rest (bc7e ranks every linear call as x16 would, LR15)
+Digest¶- An engine change that alters a type's bytes or verdict moves	Digest		back	LR4		partial	2026-11-25		goes: the exception list without LR4; stays: the rest (bc7e patch 0005 is recorded by a BC7-only tag, not by arms)
+Digest¶- A constant alpha-0 block of a `complex_material`	Digest		back	LR18		partial	2026-11-25		goes: the line without the A route; stays: the gated fix (an alpha-0 complex _m encodes with the channel guard's A even with exact_opaque off, LR18); two blocks under this row: main's wording, archived by hand because Task 6r edited the line without a row, then the 6r wording the tool archived
+Digest¶- bc7e has an effort level `max`	Digest		back	LR		partial	2026-11-25		goes: "the default stays byte-identical"; stays: the rest (patch 0005 changed every level's bytes)
+Digest¶- `encoder.bc7_weights` (the BC7 weighting dropdown)	Digest		back	LR8,LR15		partial	2026-11-25		goes: the tuned entry only with weights set, unit weights give the plain bytes; stays: the field, its reach, no preset sets it (the tuned entry also carries the tolerance and the guard, and linear calls rank as x16)

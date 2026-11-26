@@ -66,6 +66,8 @@ pub struct AlsoSummary {
 fn add(a: &mut BatchSummary, b: &BatchSummary) {
     a.converted += b.converted;
     a.up_to_date += b.up_to_date;
+    a.checked += b.checked;
+    a.checked_failed += b.checked_failed;
     a.kept_older_encode += b.kept_older_encode;
     a.kept_lower_target += b.kept_lower_target;
     a.skipped += b.skipped;
@@ -733,7 +735,7 @@ fn do_copies(
             fail(sum, Stage::Write, e.to_string());
             continue;
         }
-        rec.output = key.clone();
+        rec.output.clone_from(&key);
         rec.ts = crate::manifest::now_rfc3339();
         rec.output_stamp = SourceStamp::of(&job.output);
         rec.copied_from = c.twin.output_stamp;
@@ -861,7 +863,10 @@ fn rebase_write_only(r: &mut BatchRequest, from: &Path) {
 }
 
 /// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "run_also's state, each from a different owner (the engine and its analysis cache, the request, spec, sink and cancel token, the PBR phase's reporter, the recorder), handed down from its only caller"
+)]
 fn run_phases(
     engine: &Engine,
     cache: &AnalysisCache,

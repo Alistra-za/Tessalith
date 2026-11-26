@@ -1,0 +1,142 @@
+diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+index 9a8a776e..b57fb87a 100644
+--- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
++++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+@@ -14,12 +14,21 @@
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ // Modified for Tessalith (sdc patch 0001, 2026-10-31, patches/0001-bc6h-peak-mode.patch): BC6H peak-preserving mode,
+ // on when a bc6h_enc_settings has both slow_mode and fast_mode set (no upstream profile does). Every upstream
+-// profile encodes as before. Changes are marked "sdc patch 0001".
++// profile encoded as before (until patch 0004). Changes are marked "sdc patch 0001".
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ // Modified for Tessalith (sdc patch 0003, 2026-11-14, patches/0003-bc6h-only.patch): with SDC_BC6H_ONLY defined, only
+ // the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
+ // marked "sdc patch 0003". Without the define the file compiles as before.
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
++// Modified for Tessalith (sdc patch 0004, 2026-11-22, patches/0004-bc6h-kernel-fixes.patch): BC6H kernel fixes found by
++// an audit. Changes are marked "sdc patch 0004". #5, #1, #3 and #2 change BC6H bytes; #6 and #7 do not.
++// #6 bc6h_bounds' rgb_span holds three floats.
++// #7 bc6h_enc_2p clamps the partition count to the 32 entries of part_list.
++// #5 get_span returns the float span (it truncated through an int).
++// #1 block_quant keeps each texel's error as a float (an int overflowed on high-contrast blocks).
++// #3 bc6h_enc_1p submits the best of its first quantisation and refinements (it submitted the last).
++// #2 ep_quant_bc6h takes the endpoint code the decoder rebuilds nearest (its rounding missed it near both ends).
++///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #ifndef ISPC_UINT_IS_DEFINED
+ //these are defined in ISPC version 1.13.0 and later
+@@ -1297,7 +1306,7 @@ float block_quant(uint32 qblock[2], float block[64], uniform int bits, float ep[
+ 			err1 += sq(dec_v1 - block[k+p*16]);
+ 		}
+ 		
+-		int best_err = err1;
++		float best_err = err1; // sdc patch 0004: was int; a UF16 texel error can exceed 2^31
+ 		int best_q = q1;
+ 		if (err0<err1)
+ 		{
+@@ -2239,7 +2248,7 @@ inline uniform float get_span(uniform int mode)
+         6,                  // (13) 3 / 16
+     };
+ 
+-    uniform int span = span_table[mode];
++    uniform float span = span_table[mode]; // sdc patch 0004: was int, which truncated 921.6, 204.8, 1843.2, 3686.3, 14745.4, 7782.3 and 1945.6
+     assert(span > 0);
+     return span;
+ }
+@@ -2276,7 +2285,36 @@ void ep_quant_bc6h(int qep[], float ep[], int bits, uniform int pairs)
+ 
+     for (uniform int i = 0; i < 8 * pairs; i++)
+     {
+-        int v = ((int)(ep[i] / (256 * 256f - 1) * (levels - 1) + 0.5));
++        // sdc patch 0004: take the code the decoder rebuilds nearest to ep, the lower one on a tie (upstream's
++        // round(ep * (levels - 1) / 65535) missed it by up to one code near both ends of the range).
++        // With s = 65536 / levels, unpack_to_uf16 rebuilds an interior code q (1..levels-2) at (q + 0.5) * s, so the
++        // interior code nearest to e is the q with q * s < e <= (q + 1) * s: ceil(e / s) - 1, clamped to 1..levels-2.
++        // At e = (q + 1) * s the codes q and q + 1 tie and ceil keeps the lower. e / s = e * levels / 65536 is exact in
++        // float (both are powers of two), so this is one multiply.
++        // The end codes are not centred: 0 rebuilds 0 and levels - 1 rebuilds 65535. Code 0 can be nearer than the
++        // interior code only when that is 1 (e <= 0.75 * s), and levels - 1 only when it is levels - 2, so one compare
++        // there decides, with the same distances and tie rule as a search of every code.
++        // Clamping ep first keeps out-of-range endpoints at the end codes and keeps (int) in range.
++        // bits >= 15 (mode 13) keeps upstream's rule, which is already nearest there.
++        int v;
++        if (bits >= 15)
++        {
++            v = ((int)(ep[i] / (256 * 256f - 1) * (levels - 1) + 0.5));
++        }
++        else
++        {
++            float e = clamp(ep[i], 0.0f, 65535.0f);
++            v = clamp((int)ceil(e * levels / 65536.0f) - 1, 1, levels - 2);
++            if (v == 1)
++            {
++                if (e <= abs((float)unpack_to_uf16(1, bits) - e)) v = 0; // e is code 0's distance; a tie keeps 0
++            }
++            else if (v == levels - 2)
++            {
++                float d_top = abs((float)unpack_to_uf16((uint32)(levels - 1), bits) - e);
++                if (d_top < abs((float)unpack_to_uf16((uint32)v, bits) - e)) v = levels - 1; // a tie keeps levels - 2
++            }
++        }
+         qep[i] = clamp(v, 0, levels - 1);
+     }
+ }
+@@ -2438,8 +2476,9 @@ void bc6h_enc_2p(bc6h_enc_state state[])
+         part_list[part] = part + bound * 64;
+     }
+     
+-    partial_sort_list(part_list, 32, state->fastSkipTreshold);
+-    bc6h_enc_2p_list(state, part_list, state->fastSkipTreshold);
++    uniform int n = min(state->fastSkipTreshold, 32); // sdc patch 0004: part_list holds 32 partitions
++    partial_sort_list(part_list, 32, n);
++    bc6h_enc_2p_list(state, part_list, n);
+ }
+ 
+ void bc6h_enc_1p(bc6h_enc_state state[])
+@@ -2454,6 +2493,14 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+     float err = block_quant(qblock, state->block, 4, ep, 0, 3);
+     err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
+ 
++    // sdc patch 0004: keep the best of the first quantisation and every refinement (upstream submitted the last).
++    // Each pass still refits from the previous pass's indices, so the result is never worse than upstream's.
++    float best_err = err;
++    int best_qep[8];
++    uint32 best_qblock[2];
++    for (uniform int i = 0; i < 8; i++) best_qep[i] = qep[i];
++    for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
++
+     // refine
+     uniform int refineIterations = state->refineIterations_1p;
+     for (uniform int i = 0; i<refineIterations; i++)
+@@ -2462,12 +2509,19 @@ void bc6h_enc_1p(bc6h_enc_state state[])
+         ep_quant_dequant_bc6h(state, qep, ep, 1);
+         err = block_quant(qblock, state->block, 4, ep, 0, 3);
+         err = bc6h_peak_guard(state, err, ep, qblock, 0, 4);
++
++        if (err < best_err) // sdc patch 0004
++        {
++            best_err = err;
++            for (uniform int j = 0; j < 8; j++) best_qep[j] = qep[j];
++            for (uniform int k = 0; k < 2; k++) best_qblock[k] = qblock[k];
++        }
+     }
+ 
+-    if (err < state->best_err)
++    if (best_err < state->best_err) // sdc patch 0004: the best, not the last
+     {
+-        state->best_err = err;
+-        bc6h_code_1p(state->best_data, qep, qblock, state->mode);
++        state->best_err = best_err;
++        bc6h_code_1p(state->best_data, best_qep, best_qblock, state->mode);
+     }
+ }
+ 
+@@ -3224,7 +3278,7 @@ void bc6h_bounds(bc6h_enc_state state[])
+     state->max_span = 0;
+     state->max_span_idx = 0;
+ 
+-    float rgb_span[0] = { 0, 0, 0 };
++    float rgb_span[3] = { 0, 0, 0 }; // sdc patch 0004: was rgb_span[0] (written and read out of bounds)
+     for (uniform int p = 0; p < 3; p++)
+     {
+         rgb_span[p] = state->rgb_bounds[3+p] - state->rgb_bounds[p];

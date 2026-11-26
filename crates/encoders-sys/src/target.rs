@@ -19,8 +19,10 @@ impl IspcTarget {
         *Self::ALL.iter().rev().find(|t| t.supported()).unwrap()
     }
 
-    /// Whether this CPU can run the target (ISPC 1.31: avx2 also needs FMA, F16C, BMI1/2; avx512skx needs AVX-512 F,
-    /// DQ, CD, BW and VL, as ISPC's dispatcher checks).
+    /// Whether this CPU can run the target: avx2 needs AVX2, FMA, F16C, BMI1 and BMI2; avx512skx needs that and
+    /// AVX-512 F, DQ, CD, BW and VL. ISPC's dispatcher (1.31.0 and 1.32.0 alike) tests other features: avx2 is AVX, OS
+    /// YMM state and either AVX-VNNI or (F16C, RDRAND and AVX2), with no FMA or BMI check; avx512skx is AVX2, AVX-512
+    /// F, DQ, CD, BW and VL and OS ZMM state, with no FMA, F16C or BMI check. See the `shortcut:` at `forced`.
     pub fn supported(self) -> bool {
         match self {
             Self::Sse2 => true,
@@ -114,9 +116,14 @@ fn capped(best: IspcTarget, lift: bool) -> IspcTarget {
 
 /// The dispatch rule, stated once: the shim gets `-1` (ISPC's dispatcher) for the best target, whose per-target
 /// init the dispatcher already ran, and the target's number otherwise (the shim inits that target once).
-// shortcut: the rule assumes `best()` is the target ISPC's dispatcher runs. On a CPU that reports AVX2, FMA and F16C
-// without BMI1/2, and on one with AVX-512 but no BMI, `best()` is `Sse2`; ISPC's dispatcher makes its own check
-// there, so the two may differ. No such CPU is known; upgrade if one appears.
+// shortcut: the rule assumes `best()` is the target ISPC's dispatcher runs, but `supported()` and the dispatcher test
+// other features (see `supported()`), so they can differ in both directions. (a) A CPU with AVX2 and RDRAND (or
+// AVX-VNNI) but no FMA, BMI1 or BMI2, and an AVX-512 CPU without them: `best()` is `Sse2` (or `Avx2`) while the
+// dispatcher runs the AVX2 (or AVX-512) object, so `forced(Sse2)` returns -1 and an explicit SSE2 encode gets AVX2
+// bytes labelled `sse2`. (b) A CPU with AVX2 but neither RDRAND nor AVX-VNNI (a hypervisor can hide the bit):
+// `best()` is `Avx2` while the dispatcher ranks it as AVX and runs the SSE2 object; the bytes are valid, but the
+// label (`isa`, `ispc_target()`) is wrong and the encode is slower. No such CPU is known; upgrade when one is
+// reported, by giving `supported()` the dispatcher's conditions.
 pub(crate) fn forced(target: IspcTarget) -> i32 {
     if target == IspcTarget::best() {
         -1
@@ -125,9 +132,46 @@ pub(crate) fn forced(target: IspcTarget) -> i32 {
     }
 }
 
+/// Test hook: how an encode reaches the shim. `Dispatcher` is ISPC's dispatcher whatever the CPU; `Direct(t)` is
+/// `t`'s own object, even when `t` is `best()`. The shim has no direct AVX-512 entry.
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShimRoute {
+    Dispatcher,
+    Direct(IspcTarget),
+}
+
+/// -1 for `Dispatcher`; `t as i32` for `Direct(t)`. Panics for `Direct(Avx512)` and for a target the CPU cannot run.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn shim_number(route: ShimRoute) -> i32 {
+    match route {
+        ShimRoute::Dispatcher => -1,
+        ShimRoute::Direct(t) => {
+            assert!(
+                t != IspcTarget::Avx512,
+                "the shim has no direct AVX-512 entry"
+            );
+            assert!(t.supported(), "this CPU cannot run the {t:?} path");
+            t as i32
+        }
+    }
+}
+
 #[cfg(all(test, feature = "test-hooks"))]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "no direct AVX-512 entry")]
+    fn a_direct_avx512_route_panics() {
+        shim_number(ShimRoute::Direct(IspcTarget::Avx512));
+    }
+
+    #[test]
+    fn the_route_numbers_are_the_shims() {
+        assert_eq!(shim_number(ShimRoute::Dispatcher), -1);
+        assert_eq!(shim_number(ShimRoute::Direct(IspcTarget::Sse2)), 0);
+    }
 
     #[test]
     fn the_cap_stops_at_avx2_unless_lifted() {

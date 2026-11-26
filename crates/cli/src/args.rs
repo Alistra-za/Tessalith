@@ -21,6 +21,7 @@ fn long_version() -> &'static str {
             format!("ispc {}", v.ispc),
         ];
         lines.extend(v.bc7e_patch.map(|p| format!("bc7e patch {p}")));
+        lines.extend(v.bc7e_fixes.map(|p| format!("bc7e fixes {p}")));
         lines.extend(v.rgbcx_patch.map(|p| format!("rgbcx patch {p}")));
         lines.join("\n")
     })
@@ -204,6 +205,11 @@ pub struct ConvertArgs {
     /// takes it).
     #[arg(long = "property", requires = "ev")]
     pub property: Vec<PropertyGroup>,
+    /// Decode each output again after encoding and check it (the VAL-* codes; exit 4 when one is an error). With
+    /// `--on-existing if-changed`, outputs an earlier run left unchecked are checked in place. Off by default, except for complex_material and complex_grass;
+    /// `sdc validate` checks files afterwards.
+    #[arg(long)]
+    pub validate: bool,
     #[arg(long)]
     pub dry_run: bool,
 }
@@ -342,7 +348,7 @@ pub fn build_request(b: &BatchArgs, output: PathBuf) -> Result<BatchRequest, Str
     }
     // `--preset-file` loads without selecting (spec §3.7, §8).
     r.preset_files.extend(b.preset_file.iter().cloned());
-    r.project_config = b.config.clone();
+    r.project_config.clone_from(&b.config);
     r.user_config = engine::presets::user_config_path();
     r.user_presets = engine::presets::user_presets_dir();
     // Ruling FR-a: every bad `--set` and `--allow` in one error, so a pasted 1.x command is fixed in one pass.

@@ -621,6 +621,11 @@ fn background_source() -> String {
     )
 }
 
+/// The repo-owned shadow-mask shader as `shadow.rs` compiles it (Note IH3).
+fn shadow_source() -> String {
+    render3d::shadow::mask_source()
+}
+
 /// (rel, target, entry, sorted defines).
 type PermKey = (String, String, String, Vec<String>);
 
@@ -757,8 +762,8 @@ fn dump_permutations() {
         println!("(b) skipped: set SDC_ACHERUS");
     }
 
-    // (c) The built-in compute and backdrop shaders (builtin.rs and hdri.rs compile nothing). The readback
-    // conversion's compute shader (convert.rs, Note IF) came after the compile trial and is not in this list.
+    // (c) The built-in compute, backdrop, shadow-mask, gradient and floor shaders (builtin.rs and hdri.rs compile nothing). The
+    // readback conversion's compute shader (convert.rs, Note IF) came after the compile trial and is not in this list.
     let cs: Vec<String> = std::iter::once("CSHADER".to_string())
         .chain(features.iter().cloned())
         .map(|d| kv(&d))
@@ -767,6 +772,12 @@ fn dump_permutations() {
     perms.add("c", prefilter, "cs_5_0", "main", cs);
     perms.add("c", "background.hlsl", "vs_5_0", "vs", vec![]);
     perms.add("c", "background.hlsl", "ps_5_0", "ps", vec![]);
+    perms.add("c", "shadow.hlsl", "vs_5_0", "vs", vec![]);
+    perms.add("c", "shadow.hlsl", "ps_5_0", "ps", vec![]);
+    perms.add("c", "gradient.hlsl", "vs_5_0", "vs", vec![]);
+    perms.add("c", "gradient.hlsl", "ps_5_0", "ps", vec![]);
+    perms.add("c", "floor.hlsl", "vs_5_0", "vs", vec![]);
+    perms.add("c", "floor.hlsl", "ps_5_0", "ps", vec![]);
 
     let mut texts: HashMap<String, Result<String, String>> = HashMap::new();
     let mut written = 0;
@@ -777,6 +788,12 @@ fn dump_permutations() {
             .or_insert_with(|| {
                 if rel == "background.hlsl" {
                     Ok(background_source())
+                } else if rel == "shadow.hlsl" {
+                    Ok(shadow_source())
+                } else if rel == "gradient.hlsl" {
+                    Ok(render3d::background::GRADIENT_SOURCE.to_string())
+                } else if rel == "floor.hlsl" {
+                    Ok(render3d::floor::source())
                 } else {
                     set.get(Path::new(rel)).map(|s| s.text.to_string())
                 }

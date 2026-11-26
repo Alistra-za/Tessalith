@@ -164,10 +164,15 @@ const SCREENS: &[&str] = &[
     "json editor",
     "presets",
     "rename dialog",
+    "copy json dialog",
+    "settings tab",
     "meshes view",
     "meshes mod filter open",
     "meshes skin browse popup",
     "meshes edit browse popup",
+    "texture groups open",
+    "cube groups open",
+    "bulk normals groups open",
 ];
 
 /// Rules 8.8 and 8.4 over everything on `screen` (a checkpoint's name, one of `SCREENS`), with today's hits allowed:
@@ -234,23 +239,14 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
 /// Inputs named only by their hover text today: none.
 const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
 
-const COLLAPSE: &str =
-    "column-collapse small_button: the glyph is the name, the hover names the column";
 const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
-const GROUP_ROW: &str =
-    "a group header named after its main row, whose control carries the same name";
-const SUBTYPE_ROWS: &str = "two open sub-type rows draw the same tree with fixed labels";
+
+const SUBTYPE_ROWS: &str = "two open type rows draw the same tree with fixed labels";
 
 /// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
 /// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
 const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
-    (
-        "textures view with filters",
-        "◀",
-        &["Button", "Button"],
-        COLLAPSE,
-    ),
     (
         "textures view with filters",
         "D",
@@ -258,18 +254,11 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         CHIP,
     ),
     (
-        "textures view with filters",
-        "Alpha",
-        &["ComboBox", "DisclosureTriangle"],
-        GROUP_ROW,
+        "settings tab",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
     ),
-    (
-        "textures view with filters",
-        "Mipmaps",
-        &["CheckBox", "DisclosureTriangle"],
-        GROUP_ROW,
-    ),
-    ("set editor", "◀", &["Button", "Button"], COLLAPSE),
     ("set editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "set editor",
@@ -289,7 +278,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["CheckBox", "SpinButton"],
         "CS PBR's texture-set tick and PGPatcher's number box, one key label",
     ),
-    ("json editor", "◀", &["Button", "Button"], COLLAPSE),
     ("json editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "json editor",
@@ -362,7 +350,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         &["DisclosureTriangle", "DisclosureTriangle"],
         SUBTYPE_ROWS,
     ),
-    ("rename dialog", "◀", &["Button", "Button"], COLLAPSE),
     (
         "rename dialog",
         "⚠ 2",
@@ -370,17 +357,50 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
     ),
     ("rename dialog", "D", &["Button", "Button", "Button"], CHIP),
+    // The copy dialog's own rows are named apart; these three are the Sets column behind it, as for the rename dialog.
     (
-        "rename dialog",
-        "Alpha",
-        &["ComboBox", "DisclosureTriangle"],
-        GROUP_ROW,
+        "copy json dialog",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    // The Sets column beside the open groups, as on the textures view: the grouped rows themselves share no name.
+    (
+        "texture groups open",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    ("cube groups open", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "cube groups open",
+        "⚠ 2",
+        &["Button", "Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and three cards have two warnings",
     ),
     (
-        "rename dialog",
-        "Mipmaps",
-        &["CheckBox", "DisclosureTriangle"],
-        GROUP_ROW,
+        "bulk normals groups open",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "bulk normals groups open",
+        "N",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "bulk normals groups open",
+        "⚠ 1",
+        &["Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have one warning",
+    ),
+    (
+        "bulk normals groups open",
+        "⚠ 2",
+        &["Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
     ),
     (
         "meshes skin browse popup",
@@ -473,6 +493,18 @@ fn every_input_has_a_name_in_the_textures_view() {
     );
 }
 
+/// Note LG: the Settings tab, with the header drawn too, so a name the tab shares with a header control is found.
+#[test]
+fn every_input_has_a_name_in_the_settings_tab() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.open_settings_tab();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Validate exported DDS");
+    audit_names(&h, "settings tab");
+}
+
 #[test]
 fn every_input_has_a_name_in_the_set_editor_and_json_editor() {
     let d = tempfile::tempdir().unwrap();
@@ -521,9 +553,9 @@ fn every_input_has_a_name_in_presets_and_rename() {
     m.presets_model().duplicate();
     let mut h = harness(m);
     h.run();
-    h.get_by_label("diffuse — BC7 · linear").click();
+    h.get_by_label("Diffuse — BC7 · linear").click();
     h.run();
-    h.get_by_label_contains("rmaos —").click();
+    h.get_by_label_contains("PBR RMAOS —").click();
     h.run();
     h.get_by_label("TOML preview").click();
     h.run();
@@ -556,6 +588,127 @@ fn every_input_has_a_name_in_presets_and_rename() {
     }
     h.get_by_role_and_label(Role::ComboBox, "Letter case");
     audit_names(&h, "rename dialog");
+
+    // The Sets menu's JSON copy dialog, with rows in two groups.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_shader("landscape/leaf", Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.set_json_value(
+        "landscape/rock01",
+        "emissive",
+        Some(serde_json::json!(true)),
+    );
+    m.add_cs_block("landscape/rock01", Kind::Txst);
+    m.set_cs_value(
+        "landscape/rock01",
+        Kind::Txst,
+        "fuzzWeight",
+        Some(serde_json::json!(0.5)),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let key = |m: &AppModel, id: &str| {
+        sdc_gui::model::sets::views(m)
+            .iter()
+            .find(|v| v.id == id)
+            .unwrap()
+            .key
+            .clone()
+    };
+    let (leaf, rock) = (key(&m, "landscape/leaf"), key(&m, "landscape/rock01"));
+    m.click_set(&leaf, false, false);
+    m.click_set(&rock, true, false);
+    m.run_menu(sdc_gui::model::bulk::MenuAction::CopyJsonFromActive);
+    let Some(sdc_gui::model::Dialog::CopySetJson { rows, .. }) = m.dialog.clone() else {
+        panic!("the copy dialog is open: {:?}", m.dialog);
+    };
+    let groups: std::collections::BTreeSet<_> = rows.iter().map(|r| r.0.group).collect();
+    assert!(groups.len() >= 2, "rows in two groups: {rows:?}");
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "PGPatcher JSON: Emissive: true");
+    h.get_by_role_and_label(Role::CheckBox, "CS PBR texture set: Fuzz weight: 0.5");
+    audit_names(&h, "copy json dialog");
+}
+
+/// `harness`, tall enough that the texture panel with every group open needs no scrolling, so every grouped row is on
+/// screen.
+fn tall_harness(m: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1600.0, 3200.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
+}
+
+/// The groups start closed (Note LQ5), so the textures-view screen reaches no grouped row: these screens open every
+/// group, on a single texture, on a cube (the Cubemap rows) and on a bulk selection of normal maps (its groups and the
+/// Green row).
+#[test]
+fn every_input_has_a_name_in_the_open_texture_groups() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.select_item("landscape/rock01.png");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    for g in ["Alpha", "Mipmaps", "Normal map", "Size", "Compression"] {
+        h.get_by_label_contains(&format!("{g}, expanded"));
+    }
+    h.get_by_role_and_label(Role::ComboBox, "Filter");
+    audit_names(&h, "texture groups open");
+
+    let d = tempfile::tempdir().unwrap();
+    let a = d.path().join("textures/a");
+    std::fs::create_dir_all(&a).unwrap();
+    image::RgbImage::from_fn(384, 64, |x, _| image::Rgb([(x % 256) as u8, 9, 9]))
+        .save(a.join("chrome.png"))
+        .unwrap();
+    let mut m = opened(d.path());
+    m.decide(
+        "a/chrome.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Cubemap),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_item("a/chrome.png");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    h.get_by_label_contains("Cubemap, expanded");
+    h.get_by_role_and_label(Role::ComboBox, "Cubemap layout");
+    audit_names(&h, "cube groups open");
+
+    let d = tempfile::tempdir().unwrap();
+    let g = d.path().join("textures/g");
+    std::fs::create_dir_all(&g).unwrap();
+    for n in ["a_n.png", "b_n.png"] {
+        image::RgbImage::from_pixel(64, 64, image::Rgb([128u8, 128, 255]))
+            .save(g.join(n))
+            .unwrap();
+    }
+    let mut m = opened(d.path());
+    for k in ["g/a_n.png", "g/b_n.png"] {
+        m.decide(
+            k,
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
+        );
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_item("g/a_n.png");
+    m.click_item("g/b_n.png", true, false);
+    assert!(m.in_bulk(), "premise: two normals selected");
+    open_texture_groups(&mut m);
+    let mut h = tall_harness(m);
+    h.run();
+    h.get_by_label("Treat as OpenGL (flip green)");
+    h.get_by_label_contains("Normal map, expanded");
+    audit_names(&h, "bulk normals groups open");
 }
 
 /// The Files tab's bar while an export runs (`drawer.rs`): a `ProgressIndicator`, which kittest's check does not
@@ -636,7 +789,7 @@ fn the_textures_filters_have_short_names() {
     h.run();
     open_filters(&mut h);
     for n in [
-        "Sub-type filter",
+        "Filter by type",
         "Output format filter",
         "Set membership filter",
         "Sort order",

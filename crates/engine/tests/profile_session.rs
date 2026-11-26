@@ -1,5 +1,8 @@
 //! The process-wide recorder counter makes recorder activity visible, so this is a test binary of its own.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "shared by the profile, profile_panic, profile_cancel and profile_session tests; each uses a subset"
+)]
 mod profile_support;
 use engine::api::{BatchRequest, CancelToken};
 use engine::config::Target;

@@ -26,3 +26,6 @@ test-hooks = []
 [dev-dependencies]
 tempfile.workspace = true
 modscan = { path = ".", features = ["test-hooks"] }
+
+[lints]
+workspace = true

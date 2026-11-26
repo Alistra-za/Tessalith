@@ -24,8 +24,11 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
     // keeps the focus (a single-line field gives it up on that Enter); a click outside does nothing (typed input).
     let (k, clicked) = dialog(ctx, "rename", false, 860.0, &title, &buttons, |ui| {
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut mode, RenameMode::Inputs, "Inputs")
-                .on_hover_text("Read the files under new names (sdc.toml [inputs]); the files on disk are not touched.");
+            // Note LJ3: absent over a set selection (Rename inputs is a Textures-view command).
+            if d.mode == RenameMode::Inputs || model.inputs_rename_offered() {
+                ui.selectable_value(&mut mode, RenameMode::Inputs, "Inputs")
+                    .on_hover_text("Read the files under new names (sdc.toml [inputs]); the files on disk are not touched.");
+            }
             // Note HJ1: absent, not greyed, when no selected set is a PGPatcher PBR set.
             if d.mode == RenameMode::Outputs || !model.rename_keys(RenameMode::Outputs).is_empty() {
                 ui.selectable_value(&mut mode, RenameMode::Outputs, "Outputs")

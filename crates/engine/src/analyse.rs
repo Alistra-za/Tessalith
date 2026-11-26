@@ -66,6 +66,17 @@ pub struct Analysis {
     pub checks: Option<CheckStats>,
 }
 
+/// `normal_len_err` below this reads as unit length, above it as "far from unit length" (CHAN-NORMAL-LENGTH).
+pub(crate) const NORMAL_LEN_TOL: f64 = 0.1;
+
+impl Analysis {
+    /// The pixels read as a tangent-space normal map: unit length when decoded as `*2 - 1`, with Z >= 0 so blue sits
+    /// high.
+    pub fn looks_like_tangent_normal(&self) -> bool {
+        self.normal_len_err < NORMAL_LEN_TOL && self.channels[2].mean >= 0.75
+    }
+}
+
 /// Which artist check stats [`analyse_with`] computes besides the §5.1 statistics. All off by default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AnalyseHints {

@@ -29,7 +29,10 @@ fn run(
     run_info(target, game, suffix, sets, img, &RGBA8, sets_cli, allow)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the test fixture's independent knobs (target, game path, suffix, sets, image, source info, --set strings, allow list); `run` fills the source info, so a struct would be spelled out at every call"
+)]
 fn run_info(
     target: Target,
     game: &str,
@@ -1505,6 +1508,244 @@ fn alpha_exact_off_warns_for_bc7_envmask_even_when_alpha_is_removed() {
     );
 }
 
+/// Note LR (LR8): A off on a BC7 `complex_material`, written as `encoder.channel_guard.a`, still raises
+/// ALPHA-EXACT-OFF-M, and the message names the channel guard's A. (`golden::exact_opaque_m_decodes_alpha_255_at_every_mip`
+/// covers the block with `alpha.exact_opaque = false`.)
+#[test]
+fn complex_material_without_a_still_blocks() {
+    let j = run(
+        Target::Cs,
+        "textures/a/x_m.png",
+        Some("m"),
+        &["m"],
+        Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 0.5]),
+        &[
+            "subtype=complex_material",
+            "alpha.parallax=true",
+            "encoder.channel_guard.a=false",
+        ],
+        &[],
+    );
+    assert_eq!(j.profile.format, Format::Bc7);
+    assert!(!j.profile.alpha.exact_opaque);
+    assert_eq!(
+        warning(&j, Code::AlphaExactOffM).message,
+        "channel guard A is off on an _m written as BC7; alpha 0 and 255 may not stay exact for PGPatcher/ENB"
+    );
+}
+
+/// A diffuse `rel` resolved under `cs-quality` with `project` and `--set` strings `sets`.
+fn diffuse_with(reg: &PresetRegistry, project: Option<&ConfigFile>, sets: &[&str]) -> ResolvedJob {
+    run_with(reg, "cs-quality", project, "a/x.png", None, sets)
+}
+
+/// Note LR (LR8): `encoder.channel_guard.a` is another name for `alpha.exact_opaque` in every settings layer: each
+/// table is rewritten at load, so the profile, the provenance, the profile hash and the bytes are those of the old key.
+/// One table with both keys is accepted when they agree and is CFG-INVALID, naming both and the table, when they do
+/// not.
+#[test]
+fn channel_guard_a_is_exact_opaque() {
+    let reg = PresetRegistry::builtin().unwrap();
+    let cfg = |text: &str| ConfigFile::parse(text, "sdc.toml");
+    let hash = |j: &ResolvedJob| engine::manifest::profile_sha256(&j.profile).unwrap();
+    let bytes = |j: &ResolvedJob| {
+        let px: Vec<[u8; 4]> = (0..64 * 64u32)
+            .map(|i| [(i * 7) as u8, (i * 13) as u8, (i * 3) as u8, 255])
+            .collect();
+        engine::encode::encode_level(
+            &engine::quantize::EncoderInput::Ldr(px),
+            64,
+            64,
+            &j.profile,
+            &engine::encode::EncodeCtx::default(),
+        )
+        .ok()
+        .unwrap()
+    };
+    let same = |a: &ResolvedJob, b: &ResolvedJob, what: &str| {
+        assert_eq!(a.profile, b.profile, "{what}");
+        assert_eq!(
+            a.provenance["alpha.exact_opaque"], b.provenance["alpha.exact_opaque"],
+            "{what}"
+        );
+        assert_eq!(hash(a), hash(b), "{what}");
+        assert!(bytes(a) == bytes(b), "{what}");
+    };
+
+    // sdc.toml: [defaults], [subtypes], [[rules]], and the inline-table form beside another guard channel.
+    for (old, new, rule) in [
+        (
+            "[defaults]\nalpha.exact_opaque = true\n",
+            "[defaults]\nencoder.channel_guard.a = true\n",
+            false,
+        ),
+        (
+            "[subtypes.diffuse]\nalpha.exact_opaque = true\n",
+            "[subtypes.diffuse]\nencoder.channel_guard.a = true\n",
+            false,
+        ),
+        (
+            "[[rules]]\nmatch = { glob = \"**/x.png\" }\noverrides = { alpha = { exact_opaque = true } }\n",
+            "[[rules]]\nmatch = { glob = \"**/x.png\" }\noverrides = { encoder = { channel_guard = { a = true } } }\n",
+            true,
+        ),
+    ] {
+        let (a, b) = (
+            diffuse_with(&reg, Some(&cfg(old).unwrap()), &[]),
+            diffuse_with(&reg, Some(&cfg(new).unwrap()), &[]),
+        );
+        assert!(a.profile.alpha.exact_opaque, "{new}");
+        let src = &a.provenance["alpha.exact_opaque"];
+        assert!(
+            if rule {
+                matches!(src, Provenance::Rule(_))
+            } else {
+                *src == Provenance::ProjectConfig
+            },
+            "{new}: {src:?}"
+        );
+        same(&a, &b, new);
+    }
+    let both = diffuse_with(
+        &reg,
+        Some(
+            &cfg("[subtypes.diffuse]\nencoder = { channel_guard = { a = true, g = true } }\n")
+                .unwrap(),
+        ),
+        &[],
+    );
+    let v = serde_json::to_value(&both.profile).unwrap();
+    assert_eq!(v["alpha"]["exact_opaque"], true, "{v}");
+    assert_eq!(
+        v["encoder"]["channel_guard"],
+        serde_json::json!({ "g": true }),
+        "the A key leaves the guard table: {v}"
+    );
+
+    // A user preset: [defaults], [subtypes] and a rule.
+    for body in [
+        "[defaults]\nencoder.channel_guard.a = true\n",
+        "[subtypes.diffuse]\nencoder.channel_guard.a = true\n",
+        "[[rules]]\nmatch = { glob = \"**/x.png\" }\noverrides = { encoder = { channel_guard = { a = true } } }\n",
+    ] {
+        let preset = |b: &str| {
+            let mut r = PresetRegistry::builtin().unwrap();
+            r.add_toml(&format!(
+                "schema_version = 1\nid = \"mine\"\nversion = \"1\"\nbase = \"cs-quality\"\n{b}"
+            ))
+            .unwrap();
+            r
+        };
+        let old = body
+            .replace("encoder.channel_guard.a", "alpha.exact_opaque")
+            .replace(
+                "encoder = { channel_guard = { a = true } }",
+                "alpha = { exact_opaque = true }",
+            );
+        let (ra, rb) = (preset(&old), preset(body));
+        let (a, b) = (
+            run_with(&ra, "mine", None, "a/x.png", None, &[]),
+            run_with(&rb, "mine", None, "a/x.png", None, &[]),
+        );
+        assert!(a.profile.alpha.exact_opaque, "{body}");
+        same(&a, &b, body);
+    }
+
+    // --set: unscoped, `subtype:` and `file:` scopes, both values.
+    for (old, new) in [
+        ("alpha.exact_opaque=true", "encoder.channel_guard.a=true"),
+        (
+            "subtype:diffuse.alpha.exact_opaque=true",
+            "subtype:diffuse.encoder.channel_guard.a=true",
+        ),
+        (
+            "file:**/x.png.alpha.exact_opaque=true",
+            "file:**/x.png.encoder.channel_guard.a=true",
+        ),
+    ] {
+        let o = parse_set(new).unwrap();
+        assert_eq!(o.field, "alpha.exact_opaque", "{new}");
+        let (a, b) = (
+            diffuse_with(&reg, None, &[old]),
+            diffuse_with(&reg, None, &[new]),
+        );
+        assert!(a.profile.alpha.exact_opaque, "{new}");
+        same(&a, &b, new);
+    }
+    let complex = |key: &str| {
+        run_with(
+            &reg,
+            "cs-quality",
+            None,
+            "a/x_m.png",
+            Some("m"),
+            &["subtype=complex_material", key],
+        )
+    };
+    let (a, b) = (
+        complex("alpha.exact_opaque=false"),
+        complex("encoder.channel_guard.a=false"),
+    );
+    assert!(!a.profile.alpha.exact_opaque);
+    same(&a, &b, "--set encoder.channel_guard.a=false");
+
+    // [files]: the entry's overrides name the old key.
+    let files = |text: &str| cfg(text).unwrap().file_entries().map(|(o, _)| o);
+    let (a, b) = (
+        files("[files.\"a/x.png\"]\nalpha.exact_opaque = true\n").unwrap(),
+        files("[files.\"a/x.png\"]\nencoder.channel_guard.a = true\n").unwrap(),
+    );
+    assert_eq!(a, b);
+    assert_eq!(b[0].field, "alpha.exact_opaque");
+
+    // One table, both keys: the same value is accepted, different values are CFG-INVALID naming both keys and the table.
+    let ok = cfg("[subtypes.diffuse]\nencoder.channel_guard.a = true\nalpha.exact_opaque = true\n")
+        .unwrap();
+    assert!(
+        diffuse_with(&reg, Some(&ok), &[])
+            .profile
+            .alpha
+            .exact_opaque
+    );
+    let refused = |e: String, table: &str| {
+        assert!(
+            e.contains("CFG-INVALID")
+                && e.contains("encoder.channel_guard.a")
+                && e.contains("alpha.exact_opaque")
+                && e.contains(table),
+            "{e}"
+        );
+    };
+    for (text, table) in [
+        ("[defaults]\nencoder.channel_guard.a = true\nalpha.exact_opaque = false\n", "[defaults]"),
+        (
+            "[subtypes.diffuse]\nencoder.channel_guard.a = false\nalpha.exact_opaque = true\n",
+            "[subtypes.diffuse]",
+        ),
+        (
+            "[[rules]]\nmatch = { glob = \"**\" }\noverrides = { encoder.channel_guard.a = true, alpha.exact_opaque = false }\n",
+            "rules[0]",
+        ),
+    ] {
+        refused(cfg(text).unwrap_err().to_string(), table);
+    }
+    refused(
+        files("[files.\"a/x.png\"]\nencoder.channel_guard.a = true\nalpha.exact_opaque = false\n")
+            .unwrap_err()
+            .to_string(),
+        "[files.\"a/x.png\"]",
+    );
+    let mut r = PresetRegistry::builtin().unwrap();
+    refused(
+        r.add_toml(
+            "schema_version = 1\nid = \"mine\"\nversion = \"1\"\nbase = \"cs-quality\"\n[subtypes.diffuse]\nencoder.channel_guard.a = true\nalpha.exact_opaque = false\n",
+        )
+        .unwrap_err()
+        .to_string(),
+        "[subtypes.diffuse]",
+    );
+}
+
 // ---- Fix batch 33: explicit legacy header ----
 
 /// The "no legacy FourCC" CFG-INVALID messages for a diffuse resolved with `sets_cli`.
@@ -2192,6 +2433,90 @@ fn kaiser_on_srgb_diffuse_without_alpha_is_allowed() {
             let j = m6_job(&["subtype=diffuse", &a, &m]);
             assert!(cfg_invalid(&j).is_empty(), "{alpha} {f}: {:?}", j.warnings);
         }
+    }
+}
+
+#[test]
+fn filter_reasons_cite_no_spec() {
+    let j = m6_job(&["subtype=normal", "file:**/x.png.mips.filter=tent"]);
+    let msgs = cfg_invalid(&j);
+    let reason = msgs
+        .iter()
+        .find(|m| m.starts_with("mips.filter = tent: ") && m.contains("sRGB colour only"))
+        .expect("file-scoped Tent on a normal emits the detailed CFG-INVALID");
+    assert!(!reason.contains('§'), "{reason}");
+}
+
+/// The two HDR filter reasons, read through the public `filter_allowed`, cite no spec either.
+#[test]
+fn hdr_filter_reasons_cite_no_spec() {
+    let mut p = PresetRegistry::builtin()
+        .unwrap()
+        .base_profile(Target::Cs, Subtype::Glow);
+    p.format = Format::Rgba16f;
+    p.mips.filter = MipFilter::Mitchell;
+    let non_tent = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(non_tent.contains("HDR mips use box or tent"), "{non_tent}");
+    p.mips.filter = MipFilter::Tent;
+    p.category = Category::Normal;
+    let not_colour = engine::filter::filter_allowed(&p).unwrap_err();
+    assert!(not_colour.contains("alpha weighting"), "{not_colour}");
+    for r in [non_tent, not_colour] {
+        assert!(!r.contains('§') && !r.contains("spec"), "{r}");
+    }
+}
+
+/// No user-visible engine message names a DECISIONS note or a spec cite: the RGBA16F and BC6H outside-cs errors and the
+/// two suffix-alias refusals.
+#[test]
+fn messages_cite_no_decision() {
+    // Each case's own phrase first, so a case that never reaches its message fails rather than passing on another text;
+    // the phrases span where the old cites sat ("[D#3]", "(DECISIONS S4)", "since Note AL").
+    let mut texts = vec![];
+    for (format, kept) in [
+        (
+            "rgba16f",
+            "RGBA16F is usable only under Community Shaders; choose another format",
+        ),
+        (
+            "bc6h_uf16",
+            "BC6H is usable only under Community Shaders; choose another format",
+        ),
+    ] {
+        let j = run(
+            Target::Vanilla,
+            "textures/a/x.png",
+            None,
+            &[],
+            opaque(),
+            &["subtype=glow", &format!("format={format}"), "color.tag=n/a"],
+            &[Code::CfgUnavailable],
+        );
+        let m = warning(&j, Code::CfgUnavailable).message.clone();
+        assert!(m.contains(kept), "{format}: {m}");
+        texts.push(m);
+    }
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (alias, kept) in [
+        (
+            "orm",
+            "orm is a built-in packing input (AO, roughness, metallic)",
+        ),
+        ("detail", "is a detail map name"),
+    ] {
+        let e = PresetRegistry::builtin()
+            .unwrap()
+            .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(kept), "{alias}: {e}");
+        texts.push(e);
+    }
+    for t in &texts {
+        assert!(
+            !t.contains("DECISIONS") && !t.contains("Note ") && !t.contains("[D#"),
+            "{t}"
+        );
     }
 }
 

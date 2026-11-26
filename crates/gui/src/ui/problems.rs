@@ -215,7 +215,7 @@ fn rows(ui: &egui::Ui, model: &AppModel, f: Option<ProblemsFilter>) -> Listed {
         all,
         filter: f,
         name_kind: kind,
-        hidden_kinds: hidden_kinds.clone(),
+        hidden_kinds,
         rows,
         checks,
         hidden,
@@ -374,7 +374,8 @@ pub fn forget_focus(ctx: &egui::Context) {
 }
 
 enum Act {
-    Texture(String),
+    /// The row's texture and its code: a code that maps to a panel field opens that field's group and focuses it.
+    Texture(String, Option<Code>),
     /// The source set and, from Go to set, the slot or file to outline (review E10).
     Set(SetTarget, Option<SlotTarget>),
     File(String),
@@ -683,7 +684,7 @@ fn fix_click(
         Fix::TagAsGrass(_) => button(
             ui,
             "Tag as grass",
-            "Set its sub-type to Complex grass (subtype = \"complex_grass\" in sdc.toml)",
+            "Set its type to Complex grass (subtype = \"complex_grass\" in sdc.toml)",
             off,
         ),
         Fix::StraightAlpha(_) => button(
@@ -973,7 +974,7 @@ fn row_ui(ui: &mut egui::Ui, c: &RowsIn, i: usize, out: &mut RowsOut) {
                         ui.label(link);
                     } else if ui.link(link).clicked() {
                         a = match &p.at {
-                            At::Texture(k) => Some(Act::Texture(k.clone())),
+                            At::Texture(k) => Some(Act::Texture(k.clone(), p.code)),
                             At::Set { key, id } => Some(Act::Set(SetTarget::of(key, id), None)),
                             At::File(k) => Some(Act::File(k.clone())),
                             // A NIF's link opens it, as its fix does.
@@ -1273,7 +1274,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     });
     // Every click-through lands in the Textures view.
     match act {
-        Some(Act::Texture(k)) => super::navigate(ui.ctx(), model, move |ctx, model| {
+        Some(Act::Texture(k, code)) => super::navigate(ui.ctx(), model, move |ctx, model| {
             // Note FB12: a helper in a collapsed Helpers group opens it, as the palette does. Local to this click:
             // `select_item` also runs for restores, which must not reopen a group the user collapsed.
             if model
@@ -1285,6 +1286,13 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
             model.select_item(&k);
             super::header::set_meshes_view(ctx, false);
+            // Once, on the click: the request and the group's forced open come after `select_item`, which clears any
+            // older request.
+            if let Some(field) =
+                code.and_then(|c| crate::model::panel_groups::fix_field(c.as_str()))
+            {
+                model.go_to_field(&k, field, ctx.cumulative_pass_nr());
+            }
         }),
         Some(Act::Set(target, slot)) => {
             super::navigate(ui.ctx(), model, move |_, m| m.go_to_target(target, slot))
@@ -1344,13 +1352,7 @@ fn apply_fix(ctx: &egui::Context, model: &mut AppModel, fix: Fix, at: At) {
             let active = model.resolved_selection();
             let id = active.view().map(|v| v.id.clone());
             if let Some(id) = id {
-                if model.settings.set_view_3d {
-                    model.settings.set_view_3d = false;
-                    model.save_settings();
-                }
-                super::set_editor::show_main_tab(ctx);
-                let at = ctx.cumulative_pass_nr();
-                ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
+                super::set_editor::focus_set_field(ctx, model, &id, &field);
             }
         }
         Fix::UndoLast => model.undo(),

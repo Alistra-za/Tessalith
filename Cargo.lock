@@ -457,7 +457,7 @@ checksum = "f09c37bc0e9f0924b7dae9988265ef3c76c88538f41a3b06caf4bed07cee5226"
 
 [[package]]
 name = "bcenc"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "encoders-sys",
  "image",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "encoders-sys"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "bcdec_rs",
  "bcenc",
@@ -1104,7 +1104,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "bcdec_rs",
  "bcenc",
@@ -1204,7 +1204,7 @@ checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 
 [[package]]
 name = "esp"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "flate2",
  "nif",
@@ -1903,12 +1903,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "lz4_flex"
-version = "0.14.0"
+name = "lzzzz"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecbdfe44b1bd960b68170b417450a628c43f7cf56bb3c5317e61cb230ee7f226"
+checksum = "ac94cca0c9c2ac03c63092f1377df5b83e4c35441f9d83a53ca214c58685f7bd"
 dependencies = [
- "twox-hash",
+ "cc",
 ]
 
 [[package]]
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "modscan"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "esp",
  "modscan",
@@ -2057,7 +2057,7 @@ dependencies = [
 
 [[package]]
 name = "nif"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "encoding_rs",
  "half",
@@ -2549,7 +2549,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pgpsim"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "nif",
  "pgpsim",
@@ -2964,7 +2964,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render3d"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "half",
  "hex",
@@ -3149,7 +3149,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdc"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "clap",
  "ctrlc",
@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "sdc-gui"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "arboard",
  "crc32fast",
@@ -3501,7 +3501,7 @@ dependencies = [
 
 [[package]]
 name = "texcore"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
  "bcdec_rs",
  "bytemuck",
@@ -3661,12 +3661,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "twox-hash"
-version = "2.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
-
-[[package]]
 name = "type-map"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3788,9 +3782,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vfs"
-version = "3.0.1"
+version = "3.2.0"
 dependencies = [
- "lz4_flex",
+ "lzzzz",
  "nif",
  "tempfile",
  "thiserror 2.0.21",

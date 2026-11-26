@@ -13,6 +13,7 @@ use engine::overrides::parse_set;
 use engine::policy::{allowed_encodings, AcceptSuggestions, JobStatus, Need, ResolvedJob};
 use engine::presets::PresetRegistry;
 use engine::shader::Shader;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -454,7 +455,10 @@ fn six_face_files_keys_and_the_stem_key_are_not_unmatched() {
     faces(d.path(), "textures/a/chrome_e", 32);
     let mut toml = String::from("[files.\"textures/a/chrome_e\"]\nalpha.threshold = 90\n");
     for f in FACES {
-        toml += &format!("[files.\"textures/a/chrome_e_{f}.png\"]\nalpha.threshold = 90\n");
+        let _ = write!(
+            toml,
+            "[files.\"textures/a/chrome_e_{f}.png\"]\nalpha.threshold = 90\n"
+        );
     }
     std::fs::write(d.path().join("in/sdc.toml"), toml).unwrap();
     let (p, ev) = plan_of(req(d.path(), &[], true));
@@ -756,7 +760,12 @@ fn a_square_image_names_the_accepted_sources() {
         r.contains("1024x1024 is not six faces, a cross or a strip"),
         "{r}"
     );
-    assert!(r.contains("sub-type") && !r.contains("equirect"), "{r}");
+    assert!(
+        r.contains("Change this file's type.")
+            && !r.contains("sub-type")
+            && !r.contains("equirect"),
+        "{r}"
+    );
 }
 
 #[test]

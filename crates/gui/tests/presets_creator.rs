@@ -73,7 +73,7 @@ fn an_invalid_alias_is_refused_with_its_message() {
     );
     assert!(err("my_n", "n").contains("lower-case ASCII letters and digits"));
     assert!(err("Bump", "n").contains("lower-case ASCII letters and digits"));
-    assert!(err("orm", "rmaos").contains("Note AL"));
+    assert!(err("orm", "rmaos").contains("is an exporter vocabulary term"));
     assert!(pm.check_alias("bumpy", "n").is_ok());
 }
 
