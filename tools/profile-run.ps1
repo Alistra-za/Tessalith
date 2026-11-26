@@ -21,13 +21,22 @@
              Nothing reads the corpus outside the command.
   Expected:  -Expected -Exe <base sdc.exe> -Corpus <folder> -Label <name> -RunRoot <folder> [-Set <string[]>]
              Dry run of the base build into a new empty folder under RunRoot with frozen APPDATA. Writes, each
-             created new: expected-<Label>.txt, planned-not-written-<Label>.txt, expected-<Label>-events.txt.
+             created new: expected-<Label>.txt, planned-not-written-<Label>.txt, skipped-inputs-<Label>.txt,
+             expected-<Label>-events.txt. Exit 1 (unresolved or blocked files) counts as finished when batch_done
+             shows nothing failed or cancelled (EP-C11); any other non-zero exit throws with the reason.
+  Finished:  an attempt finished when the child ran to its end and exited 0, or exited 1 with only the known
+             skips (EP-C11): its stderr done lines show nothing failed, cancelled or failing validation, and its
+             skipped set equals the dry run's planned-not-written-<Label>.txt (the -Expected run of the same
+             label in RunRoot). meta.json keeps the child's exitCode and the verdict in a knownSkips block.
+             -CopyFrom, the free-space figure, the corpus reference and the prune read this, not exit 0 alone.
+             The runner exits with the child's codes other than 0 and 1 first, then 3 (contaminated), then 4 (not
+             cold), then the child's 0 or 1: 3 and 4 take precedence over the child's 1.
   Prune:     -PruneOutputs -RunRoot <folder> -Attempt <attempt name> -Reference <attempt name> [-Keep <names>]
              EP-O5: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
-             equals the reference attempt's. The reference must be a base-build attempt of the same corpus that
-             finished with exit 0. Refused for the corpus reference (the oldest finished, exit-0 base-build
+             equals the reference attempt's. The reference must be a finished base-build attempt of the same
+             corpus. Refused for the corpus reference (the oldest finished base-build
              attempt of the attempt's corpus in RunRoot, EP-R4; kept whole), the -Reference itself, a name in
-             -Keep, an attempt that did not finish with exit 0, one already pruned, an
+             -Keep, an attempt that did not finish, one already pruned, an
              empty reference, a .dds on disk that hashes.csv lacks (or the reverse), and an out tree holding a
              junction or link. Before deleting, meta.json is copied to meta.before-prune.json (created new) and
              replaced by a copy with a "prune" block (reference, files, bytes, time).
@@ -144,7 +153,9 @@ function Read-Json([string]$path) {
     Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -DateKind String
 }
 
+# A property of a read-back JSON object, or a key of a dictionary (meta.json before it is written), or $null.
 function Get-Prop($obj, [string]$name) {
+    if ($obj -is [Collections.IDictionary]) { if ($obj.Contains($name)) { return $obj[$name] } else { return $null } }
     if ($null -ne $obj -and $obj.PSObject.Properties[$name]) { $obj.$name } else { $null }
 }
 
@@ -161,7 +172,7 @@ function Get-CopyFromProblem([string]$runRoot, [string]$name, [string]$corpus, [
     if (-not (Test-Path -LiteralPath $metaPath)) { return 'no meta.json' }
     $m = Read-Json $metaPath
     if ((Get-Prop $m 'cohort') -ne 'warm-fresh') { return 'is not a warm-fresh attempt' }
-    if ((Get-Prop $m 'finished') -ne $true -or (Get-Prop $m 'exitCode') -ne 0) { return 'did not finish with exit code 0' }
+    if (-not (Test-AttemptFinished $m)) { return 'did not finish (exit 0, or exit 1 with only the known skips, EP-C11)' }
     if ((Get-Prop (Get-Prop $m 'contention') 'contaminated') -ne $false) { return 'is contaminated or has no contention verdict' }
     if (-not [string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase')) { return 'is of another corpus' }
     if ((Get-Prop $m 'exeSha256') -ne $exeSha) { return 'was run with another exe' }
@@ -344,6 +355,12 @@ function Invoke-SelfTest {
     Case 'CopyFrom naming a failed attempt is refused' { [bool](Get-CopyFromProblem $rr 'failed' $corpus $sha) }
     Case 'CopyFrom naming a folder without meta.json is refused' { [bool](Get-CopyFromProblem $rr 'nometa' $corpus $sha) }
     Case 'CopyFrom naming an unfinished attempt (exit code 0 recorded) is refused' { [bool](Get-CopyFromProblem $rr 'unfinished' $corpus $sha) }
+    $ksOk = @{ ok = $true; reason = $null }; $ksBad = @{ ok = $false; reason = '1 planned-not-written key(s) not skipped' }
+    $exit1 = { param($ks) $c = $good.Clone(); $c['exitCode'] = 1; $c['knownSkips'] = $ks; $c }
+    New-Meta 'exit1-known' (& $exit1 $ksOk)
+    New-Meta 'exit1-other' (& $exit1 $ksBad)
+    Case 'CopyFrom naming an exit-1 attempt with only the known skips is accepted (EP-C11)' { -not (Get-CopyFromProblem $rr 'exit1-known' $corpus $sha) }
+    Case 'CopyFrom naming an exit-1 attempt whose skips differ is refused' { (Get-CopyFromProblem $rr 'exit1-other' $corpus $sha) -like '*did not finish*' }
 
     # free-space figure: never from the corpus (it does not even exist here)
     $eb = Join-Path $t 'expected-bytes'; New-NewDir $eb
@@ -366,6 +383,15 @@ function Invoke-SelfTest {
     & $mkAttempt '20260101-000004-a-warm-fresh-3-dddddddd' 'release' 700 1
     Case 'the free-space figure is the newest finished attempt of the same corpus and build (other build and failed ones ignored)' {
         (Get-ExpectedBytesFigure $eb $missingCorpus 'release' 4096) -eq 300
+    }
+    Case 'the free-space figure takes an exit-1 attempt with only the known skips, not one whose skips differ (EP-C11)' {
+        $e2 = Join-Path $t 'expected-bytes-exit1'; New-NewDir $e2
+        foreach ($a in @(@('20260101-000001-a-warm-fresh-1-aaaaaaaa', 200, $true), @('20260101-000002-a-warm-fresh-2-bbbbbbbb', 500, $false))) {
+            New-NewDir (Join-Path $e2 $a[0]); New-NewDir (Join-Path $e2 "$($a[0])\out")
+            Write-NewFile (Join-Path $e2 "$($a[0])\out\a.dds") ('x' * $a[1])
+            Write-NewJson (Join-Path $e2 "$($a[0])\meta.json") @{ corpus = $missingCorpus; build = 'release'; exitCode = 1; knownSkips = @{ ok = $a[2] } }
+        }
+        (Get-ExpectedBytesFigure $e2 $missingCorpus 'release' 4096) -eq 200
     }
     Case 'the attempt path never walks the corpus: no Get-DirBytes call takes the corpus' {
         $text = [IO.File]::ReadAllText($PSCommandPath)
@@ -402,6 +428,99 @@ function Invoke-SelfTest {
     Case 'plan stream: skip and failure events are listed with reasons, missing fields tolerated' {
         $ev = @($parsed.Events)
         $ev.Count -eq 3 -and $ev[2].StartsWith("failed`ttextures/e.png")
+    }
+
+    # EP-C11: exit 1 with only the known skips counts as finished
+    $doneJson = { param($failed, $cancelled) '{"kind":"batch_done","converted":0,"up_to_date":0,"skipped":2,"skipped_intentional":0,"failed":' + $failed + ',"validation_failed":0,"checked":0,"checked_failed":0,"cancelled":' + $cancelled + '}' }
+    $known = @(
+        '{"kind":"file_planned","path":"C:/c/textures/a.png","job_key":"textures/a.dds","job":{"status":{"state":"ready"}}}',
+        '{"kind":"file_planned","path":"C:/c/textures/u.png","job_key":"textures/u.dds","job":{"status":{"state":"unresolved","needs":["subtype"]}}}',
+        '{"kind":"file_planned","path":"C:/c/textures/b.png","job_key":"textures/b.dds","job":{"status":{"state":"blocked"}}}',
+        '{"kind":"file_skipped","path":"C:/c/textures/u.png","job_key":"textures/u.dds","skip":"unresolved","code":"SUG-LOW-CONFIDENCE","reason":"unknown suffix"}',
+        '{"kind":"file_skipped","path":"C:/c/textures/b.png","job_key":"textures/b.dds","skip":"blocked","code":"LOSS-ALPHA-DATA","reason":"blocked by LOSS-ALPHA-DATA"}',
+        '{"kind":"file_skipped","path":"C:/c/textures/a_ao.png","job_key":"textures/a.dds","skip":"packed_source","code":null,"reason":"packed into a"}',
+        (& $doneJson 0 '[]')
+    )
+    $kplan = ConvertFrom-PlanStream $known 'C:\c'
+    $kr = Join-Path $t 'known-skips'; New-NewDir $kr
+    [void](Write-ExpectedLists $kr 'fx' $kplan)
+    $okLog = @(
+        'warning C:/c/textures/u.png: SUG-LOW-CONFIDENCE unknown suffix',
+        'ok    C:/c/textures/a.png -> C:/o/textures/a.dds',
+        'skip  C:/c/textures/u.png: SUG-LOW-CONFIDENCE unknown suffix',
+        'skip  C:/c/textures/b.png: LOSS-ALPHA-DATA blocked by LOSS-ALPHA-DATA; acknowledge with --allow <code> or change the setting',
+        'done: 1 converted, 0 up to date, 2 skipped (0 on purpose), 0 failed, validation off, 0 cancelled'
+    )
+    $ksv = { param($lines, $label = 'fx') Get-KnownSkipsVerdict $kr $label $lines 'C:\c' }
+    $withDone = { param($done) @($okLog | Where-Object { -not $_.StartsWith('done: ') }) + $done }
+    Case 'expected exit: 0 passes, and 1 passes when batch_done shows nothing failed or cancelled' {
+        $null -eq (Get-ExpectedExitProblem 0 @()) -and $null -eq (Get-ExpectedExitProblem 1 $kplan.Done) -and @($kplan.Done).Count -eq 1 -and $kplan.Done[0].skipped -eq 2
+    }
+    Case 'expected exit: 1 with a failed file, a cancelled file or no batch_done throws a reason; 2 is refused' {
+        $f = (ConvertFrom-PlanStream @((& $doneJson 1 '[]')) 'C:\c').Done
+        $c = (ConvertFrom-PlanStream @((& $doneJson 0 '["C:/c/x.png"]')) 'C:\c').Done
+        (Get-ExpectedExitProblem 1 $f) -like '*failed = 1*' -and (Get-ExpectedExitProblem 1 $c) -like '*cancelled = 1*' -and
+        (Get-ExpectedExitProblem 1 @()) -like '*no batch_done*' -and (Get-ExpectedExitProblem 2 $kplan.Done) -like 'exit 2*'
+    }
+    Case 'known skips: exit 1 with the dry run''s skip set is finished' {
+        $v = & $ksv $okLog
+        $m = @{ finished = $true; exitCode = 1; knownSkips = $v }
+        $v.ok -and $v.expected -eq 2 -and $v.skipped -eq 2 -and $v.doneSkipped -eq 2 -and (Test-AttemptFinished $m) -and (Test-ExitAccepted $m)
+    }
+    Case 'known skips: up-to-date and kept lines of a noop run are written outputs, not skips' {
+        $v = & $ksv (@('skip  C:/c/textures/a.png: up to date', 'skip  C:/c/textures/a.png: kept: written by an older encode version (--ev re-encodes it)') +
+            (& $withDone 'done: 0 converted, 1 up to date, 2 skipped (0 on purpose), 0 failed, validation off, 0 cancelled'))
+        $v.ok
+    }
+    Case 'known skips: a different skip set (one missing, one the dry run did not skip) is refused' {
+        $less = & $ksv (@($okLog | Where-Object { $_ -notlike 'skip  C:/c/textures/b.png*' -and -not $_.StartsWith('done: ') }) + 'done: 1 converted, 0 up to date, 1 skipped (0 on purpose), 0 failed, validation off, 0 cancelled')
+        $more = & $ksv (@('skip  C:/c/textures/z.png: SUG-LOW-CONFIDENCE unknown suffix') + (& $withDone 'done: 1 converted, 0 up to date, 3 skipped (0 on purpose), 0 failed, validation off, 0 cancelled'))
+        $m = @{ finished = $true; exitCode = 1; knownSkips = $less }
+        (-not $less.ok) -and $less.missing -eq 1 -and $less.reason -like '*not skipped*' -and ($less.examples -contains 'textures/b.dds') -and
+        (-not $more.ok) -and $more.unmapped -eq 1 -and $more.reason -like '*did not skip*' -and -not (Test-AttemptFinished $m)
+    }
+    Case 'known skips: a failed file is refused (done count and FAIL line)' {
+        $v = & $ksv (@('FAIL  C:/c/textures/a.png at Encode: boom') + (& $withDone 'done: 0 converted, 0 up to date, 2 skipped (0 on purpose), 1 failed, validation off, 0 cancelled'))
+        (-not $v.ok) -and $v.reason -like '*failed = 1*' -and $v.reason -like '*1 FAIL line*'
+    }
+    Case 'known skips: a cancelled file, a failed validation or a failed check in place is refused' {
+        $c = & $ksv (& $withDone 'done: 1 converted, 0 up to date, 2 skipped (0 on purpose), 0 failed, validation off, 2 cancelled')
+        $vf = & $ksv (& $withDone 'done: 1 converted, 0 up to date, 2 skipped (0 on purpose), 0 failed, 1 failed validation, 0 cancelled')
+        $cf = & $ksv (& $withDone 'done: 0 converted, 1 up to date, 2 skipped (0 on purpose), 0 failed, validation off, 1 checked in place (1 failed), 0 cancelled')
+        $c0 = & $ksv (& $withDone 'done: 0 converted, 1 up to date, 2 skipped (0 on purpose), 0 failed, 0 failed validation, 1 checked in place (0 failed), 0 cancelled, 1 kept at a higher target')
+        (-not $c.ok) -and $c.reason -like '*cancelled = 2*' -and (-not $vf.ok) -and $vf.reason -like '*validationFailed = 1*' -and
+        (-not $cf.ok) -and $cf.reason -like '*checkedFailed = 1*' -and $c0.ok
+    }
+    Case 'known skips: no done line, an unparsed done line, or a done count unequal to the skip lines is refused' {
+        $none = & $ksv @($okLog | Where-Object { -not $_.StartsWith('done: ') })
+        $bad = & $ksv (& $withDone 'done: something else')
+        $count = & $ksv (& $withDone 'done: 1 converted, 0 up to date, 3 skipped (0 on purpose), 0 failed, validation off, 0 cancelled')
+        (-not $none.ok) -and $none.reason -like '*no batch_done*' -and (-not $bad.ok) -and $bad.reason -like '*did not parse*' -and
+        (-not $count.ok) -and $count.reason -like '*count 3 skipped*'
+    }
+    Case 'known skips: without the dry run''s lists for the label, exit 1 is refused' {
+        $v = & $ksv $okLog 'other'
+        (-not $v.ok) -and $v.reason -like '*run -Expected with label other*'
+    }
+    Case 'runner exit: 3 and 4 take precedence over the child''s 1; other child codes come first' {
+        ((Get-RunnerExit 1 $true $false) -eq 3) -and ((Get-RunnerExit 1 $false $true) -eq 4) -and ((Get-RunnerExit 1 $true $true) -eq 3) -and
+        ((Get-RunnerExit 1 $false $false) -eq 1) -and ((Get-RunnerExit 0 $false $false) -eq 0) -and ((Get-RunnerExit 0 $true $false) -eq 3) -and
+        ((Get-RunnerExit 2 $true $true) -eq 2)
+    }
+    Case 'runner exit: a warmup is clean at 0, or at 1 when the child''s 1 counts; never at 3 or 4' {
+        (Test-CleanRunnerExit 0 $false) -and (Test-CleanRunnerExit 1 $true) -and -not (Test-CleanRunnerExit 1 $false) -and
+        -not (Test-CleanRunnerExit 3 $true) -and -not (Test-CleanRunnerExit 4 $true)
+    }
+    Case 'samply elevation: an accepted exit 1 whose log names an "elevation" path is not read as needing elevation' {
+        $log = 'skip  C:/c/textures/elevation_map.png: SUG-LOW-CONFIDENCE unknown suffix'
+        -not (Test-SamplyNeedsElevation $true $true 1 $log) -and (Test-SamplyNeedsElevation $true $false 1 'Access is denied') -and
+        -not (Test-SamplyNeedsElevation $false $false 1 'Access is denied') -and -not (Test-SamplyNeedsElevation $true $false 0 'Access is denied')
+    }
+    Case 'the attempt path records knownSkips for a child exit 1, returns through Get-RunnerExit and checks its warmup with the same verdict' {
+        $text = [IO.File]::ReadAllText($PSCommandPath)
+        $text.Contains("`$meta['knownSkips'] = Get-KnownSkipsVerdict") -and $text.Contains('return (Get-RunnerExit $code') -and
+        $text.Contains('Test-CleanRunnerExit $wr $script:LastChildAccepted') -and $text.Contains('$why = Get-ExpectedExitProblem $ec $plan.Done') -and
+        @([regex]::Matches($text, '-eq 0\) \{ return \$code \}|-ne 0\) \{ return \$code \}')).Count -eq 0
     }
 
     # contention: gaps in the counter stream are flagged (Minor 1)
@@ -618,6 +737,31 @@ function Invoke-SelfTest {
         ((Get-CorpusReference $fr2 $corpus) -eq $refN) -and $msg -like '*is the corpus reference*' -and
         @([IO.Directory]::EnumerateFiles((Join-Path $fr2 "$refN\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 2
     }
+    Case 'exit 1 with only the known skips: the base attempt is the corpus reference, a release attempt is pruned against it (EP-C11)' {
+        $xr = Join-Path $t 'prune-exit1'; New-NewDir $xr
+        $k1 = { param($m, $ok) $c = $m.Clone(); $c['exitCode'] = 1; $c['knownSkips'] = @{ ok = $ok }; $c }
+        $bad = & $stamped 1 'parity'; $refN = & $stamped 2 'overhead'; $relN = & $stamped 3 'warm-fresh'; $relBad = & $stamped 4 'warm-fresh'
+        [void](New-PruneAttempt $xr $bad (& $k1 $baseMeta $false) $rowsAB $ab)
+        [void](New-PruneAttempt $xr $refN (& $k1 $baseMeta $true) $rowsAB $ab)
+        [void](New-PruneAttempt $xr $relN (& $k1 $attMeta $true) $rowsAB $ab)
+        [void](New-PruneAttempt $xr $relBad (& $k1 $attMeta $false) $rowsAB $ab)
+        $m1 = ''; $m2 = ''
+        try { [void](Invoke-PruneOutputs $xr $relBad $refN @()) } catch { $m1 = $_.Exception.Message }
+        try { [void](Invoke-PruneOutputs $xr $refN $bad @()) } catch { $m2 = $_.Exception.Message }
+        $r = Invoke-PruneOutputs $xr $relN $refN @()
+        ((Get-CorpusReference $xr $corpus) -eq $refN) -and $r.Files -eq 2 -and $m1 -like '*did not finish*' -and $m2 -like '*is the corpus reference*' -and
+        @([IO.Directory]::EnumerateFiles((Join-Path $xr "$relBad\out"), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 2
+    }
+    Case 'prune: a -Reference that exited 1 with skips that differ is refused' {
+        $xr2 = Join-Path $t 'prune-exit1-ref'; New-NewDir $xr2
+        $a1 = & $stamped 1 'overhead'; $a2 = & $stamped 2 'warm-fresh'
+        $rm = $baseMeta.Clone(); $rm['exitCode'] = 1; $rm['knownSkips'] = @{ ok = $false }
+        [void](New-PruneAttempt $xr2 $a1 $rm $rowsAB $ab)
+        [void](New-PruneAttempt $xr2 $a2 $attMeta $rowsAB $ab)
+        $msg = ''
+        try { [void](Invoke-PruneOutputs $xr2 $a2 $a1 @()) } catch { $msg = $_.Exception.Message }
+        $msg -like "*reference $a1 did not finish*" -and $null -eq (Get-CorpusReference $xr2 $corpus)
+    }
     Case 'prune: a -Reference that is not a base-build attempt is refused' { & $refusedIntact 'att-diff' 'att-keep' @() '*is not a base-build attempt*' }
     Case 'prune: a -Reference that did not finish with exit 0 is refused' { & $refusedIntact 'att-keep' 'ref-failed' @() '*reference ref-failed did not finish*' }
     Case 'prune: a -Reference of another corpus is refused' { & $refusedIntact 'att-keep' 'ref-other' @() '*of another corpus*' }
@@ -823,7 +967,7 @@ function Get-ExpectedBytesFigure([string]$runRoot, [string]$corpus, [string]$bui
         $out = Join-Path $d.FullName 'out'
         if (-not (Test-Path -LiteralPath $mp) -or -not (Test-Path -LiteralPath $out)) { continue }
         $m = Read-Json $mp
-        if ([string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase') -and (Get-Prop $m 'build') -eq $build -and (Get-Prop $m 'exitCode') -eq 0) {
+        if ([string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase') -and (Get-Prop $m 'build') -eq $build -and (Test-ExitAccepted $m)) {
             # A pruned attempt's out lost its DDS files: add back the bytes the prune recorded (EP-O5).
             return ((Get-DirBytes $out) + [int64](Get-Prop (Get-Prop $m 'prune') 'bytes'))
         }
@@ -838,19 +982,39 @@ function Get-NextK([string]$runRoot, [string]$label, [string]$cohort) {
     @(Get-ChildItem -LiteralPath $runRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $rx }).Count + 1
 }
 
-# Parses the dry run's JSONL (spec 7.3). Missing fields are tolerated (StrictMode).
+# The corpus root in event form (forward slashes, ending in a slash), and an event path made relative to it (an
+# input path outside the corpus is kept as it is). The one rule for the dry run's lists and the attempt's log.
+function Get-EventCorpusRoot([string]$corpusDir) {
+    ([IO.Path]::GetFullPath($corpusDir).TrimEnd('\') + '\').Replace('\', '/')
+}
+
+function Get-EventRelPath([string]$corpusRoot, $p) {
+    $s = [string]$p
+    $n = $s.Replace('\', '/')
+    if ($n.StartsWith($corpusRoot, 'OrdinalIgnoreCase')) { $n.Substring($corpusRoot.Length) } else { $s }
+}
+
+# Parses the dry run's JSONL (spec 7.3). Missing fields are tolerated (StrictMode). Done holds each batch_done's
+# failure counts (EP-C11).
 function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
-    $corpusRoot = ([IO.Path]::GetFullPath($corpusDir).TrimEnd('\') + '\').Replace('\', '/')
-    $rel = { param($p) $s = [string]$p; $n = $s.Replace('\', '/'); if ($n.StartsWith($corpusRoot, 'OrdinalIgnoreCase')) { $n.Substring($corpusRoot.Length) } else { $s } }
+    $corpusRoot = Get-EventCorpusRoot $corpusDir
     $ready = New-Object System.Collections.Generic.List[string]
     $notWritten = New-Object System.Collections.Generic.List[string]
     $skipped = New-Object System.Collections.Generic.List[string]
     $events = New-Object System.Collections.Generic.List[string]
+    $done = New-Object System.Collections.Generic.List[object]
     foreach ($line in $lines) {
         if (-not $line.Trim().StartsWith('{')) { continue }
         $e = $line | ConvertFrom-Json
-        $path = & $rel (Get-Prop $e 'path')
+        $path = Get-EventRelPath $corpusRoot (Get-Prop $e 'path')
         switch (Get-Prop $e 'kind') {
+            'batch_done' {
+                $done.Add([pscustomobject]@{
+                        failed = [int64](Get-Prop $e 'failed'); cancelled = @(Get-Prop $e 'cancelled' | Where-Object { $null -ne $_ }).Count
+                        validationFailed = [int64](Get-Prop $e 'validation_failed'); checkedFailed = [int64](Get-Prop $e 'checked_failed')
+                        skipped = [int64](Get-Prop $e 'skipped')
+                    })
+            }
             'file_planned' {
                 $status = Get-Prop (Get-Prop $e 'job') 'status'
                 $state = Get-Prop $status 'state'
@@ -866,7 +1030,151 @@ function ConvertFrom-PlanStream([string[]]$lines, [string]$corpusDir) {
             'file_failed' { $events.Add(("failed`t{0}`t{1}" -f $path, (Get-Prop $e 'error'))) }
         }
     }
-    [pscustomobject]@{ Ready = $ready.ToArray(); NotWritten = $notWritten.ToArray(); Skipped = $skipped.ToArray(); Events = $events.ToArray() }
+    [pscustomobject]@{ Ready = $ready.ToArray(); NotWritten = $notWritten.ToArray(); Skipped = $skipped.ToArray(); Events = $events.ToArray(); Done = $done.ToArray() }
+}
+
+# ---------------------------------------------------------------- exit 1 with only the known skips (EP-C11)
+
+# Reason a batch's done records show more than skips, or $null: no batch_done at all, a failed file, a cancelled
+# file, or a failed validation (a validation failure exits 4 on its own; exit 1 must not hide it).
+function Get-DoneProblem($done) {
+    $d = @($done | Where-Object { $null -ne $_ })
+    if ($d.Count -eq 0) { return 'no batch_done record' }
+    $sum = { param($f) [int64](($d | Measure-Object -Property $f -Sum).Sum) }
+    $why = @()
+    foreach ($f in 'failed', 'cancelled', 'validationFailed', 'checkedFailed') {
+        $n = & $sum $f
+        if ($n) { $why += "batch_done shows $f = $n" }
+    }
+    if ($why.Count) { return ($why -join '; ') }
+    $null
+}
+
+# The dry run's exit (EP-C11): 0, or 1 whose batch_done shows nothing failed or cancelled. Reason, or $null.
+function Get-ExpectedExitProblem([int]$exitCode, $done) {
+    if ($exitCode -eq 0) { return $null }
+    if ($exitCode -ne 1) { return "exit $exitCode (only 0, or 1 with nothing failed or cancelled, counts as finished)" }
+    $why = Get-DoneProblem $done
+    if ($why) { return "exit 1 with more than skips: $why" }
+    $null
+}
+
+# A real attempt's human log (stderr: the command has no --json): the done lines (the human form of batch_done),
+# the skip lines (relative input paths) and the FAIL lines. Up-to-date and kept outputs log a skip line with no
+# code ("up to date...", "kept: ..."); they are written outputs, not skips, and are left out. A raw map packed
+# into a recipe logs no line at all. A done line that does not parse is a problem, never a pass.
+function ConvertFrom-HumanLog([string[]]$lines, [string]$corpusDir) {
+    $corpusRoot = Get-EventCorpusRoot $corpusDir
+    $done = New-Object System.Collections.Generic.List[object]
+    $skips = New-Object System.Collections.Generic.List[string]
+    $fails = 0; $unparsed = 0
+    $doneRx = '^done: (\d+) converted, (\d+) up to date, (\d+) skipped \((\d+) on purpose\), (\d+) failed, (.*?)(\d+) cancelled(,.*)?$'
+    foreach ($line in $lines) {
+        if ($line.StartsWith('done: ')) {
+            $m = [regex]::Match($line, $doneRx)
+            if (-not $m.Success) { $unparsed++; continue }
+            $mid = $m.Groups[6].Value
+            $vf = [regex]::Match($mid, '(\d+) failed validation')
+            $cf = [regex]::Match($mid, 'checked in place \((\d+) failed\)')
+            $done.Add([pscustomobject]@{
+                    failed = [int64]$m.Groups[5].Value; cancelled = [int64]$m.Groups[7].Value; skipped = [int64]$m.Groups[3].Value
+                    validationFailed = $(if ($vf.Success) { [int64]$vf.Groups[1].Value } else { [int64]0 })
+                    checkedFailed = $(if ($cf.Success) { [int64]$cf.Groups[1].Value } else { [int64]0 })
+                })
+        } elseif ($line.StartsWith('skip  ')) {
+            # "skip  <path>: [CODE ]reason"; a Windows path holds no ':' after its drive, so the first ': ' ends it
+            $m = [regex]::Match($line, '^skip  (.+?): (.*)$')
+            if (-not $m.Success) { $unparsed++; continue }
+            if ($m.Groups[2].Value -match '^(up to date|kept: )') { continue }
+            $skips.Add((Get-EventRelPath $corpusRoot $m.Groups[1].Value))
+        } elseif ($line.StartsWith('FAIL  ')) { $fails++ }
+    }
+    [pscustomobject]@{ Done = $done.ToArray(); Skips = $skips.ToArray(); Fails = $fails; Unparsed = $unparsed }
+}
+
+# The known-skips verdict of a real attempt that exited 1 (EP-C11), for meta.json's knownSkips block. ok is true
+# only when the done lines show nothing failed, cancelled or failing validation, no FAIL line, and the attempt's
+# skipped set equals the dry run's planned-not-written-<label>.txt: each skip line's input path is mapped to its
+# job key through skipped-inputs-<label>.txt (packed_source rows left out: they log no line), and the key sets
+# must match both ways, with the done lines' skipped count equal to the skip lines.
+function Get-KnownSkipsVerdict([string]$runRoot, [string]$label, [string[]]$logLines, [string]$corpusDir) {
+    $pnwName = "planned-not-written-$label.txt"; $skName = "skipped-inputs-$label.txt"
+    $v = [ordered]@{ ok = $false; list = $pnwName; expected = $null; skipped = $null; doneSkipped = $null; missing = $null; extra = $null; unmapped = $null; examples = @(); reason = $null }
+    $why = @()
+    $pnwPath = Join-Path $runRoot $pnwName; $skPath = Join-Path $runRoot $skName
+    if (-not (Test-Path -LiteralPath $pnwPath -PathType Leaf) -or -not (Test-Path -LiteralPath $skPath -PathType Leaf)) {
+        $v.reason = "no $pnwName or $skName in RunRoot: run -Expected with label $label first"
+        return $v
+    }
+    $want = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($l in [IO.File]::ReadAllLines($pnwPath)) { if ($l) { [void]$want.Add($l.Split("`t")[0]) } }
+    $byPath = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[string]]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($l in [IO.File]::ReadAllLines($skPath)) {
+        if (-not $l) { continue }
+        $c = $l.Split("`t")
+        if ($c.Count -lt 4 -or $c[1] -eq 'packed_source') { continue }
+        if (-not $byPath.ContainsKey($c[0])) { $byPath[$c[0]] = New-Object System.Collections.Generic.List[string] }
+        $byPath[$c[0]].Add($c[3])
+    }
+    $log = ConvertFrom-HumanLog $logLines $corpusDir
+    $dp = Get-DoneProblem $log.Done
+    if ($dp) { $why += $dp }
+    if ($log.Fails) { $why += "$($log.Fails) FAIL line(s) in the log" }
+    if ($log.Unparsed) { $why += "$($log.Unparsed) done or skip line(s) did not parse" }
+    $got = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $unmapped = @()
+    foreach ($p in $log.Skips) {
+        if ($byPath.ContainsKey($p)) { foreach ($k in $byPath[$p]) { [void]$got.Add($k) } } else { $unmapped += $p }
+    }
+    $missing = Sort-Ordinal @($want | Where-Object { -not $got.Contains($_) })
+    $extra = Sort-Ordinal @($got | Where-Object { -not $want.Contains($_) })
+    $doneSkipped = [int64]0
+    foreach ($d in $log.Done) { $doneSkipped += $d.skipped }
+    $v.expected = $want.Count; $v.skipped = $log.Skips.Count; $v.doneSkipped = $doneSkipped
+    $v.missing = $missing.Count; $v.extra = $extra.Count; $v.unmapped = $unmapped.Count
+    if ($unmapped.Count) { $why += "$($unmapped.Count) skipped input(s) the dry run did not skip" }
+    if ($missing.Count) { $why += "$($missing.Count) planned-not-written key(s) not skipped" }
+    if ($extra.Count) { $why += "$($extra.Count) skipped key(s) not in $pnwName" }
+    if ($doneSkipped -ne $log.Skips.Count) { $why += "the done lines count $doneSkipped skipped, the log has $($log.Skips.Count) skip line(s)" }
+    $v.examples = @(@($unmapped | Select-Object -First 3) + @($missing | Select-Object -First 3) + @($extra | Select-Object -First 3))
+    if ($why.Count) { $v.reason = $why -join '; ' } else { $v.ok = $true }
+    $v
+}
+
+# The child's exit counts (EP-C11): 0, or 1 with a knownSkips block whose ok is true. No finished check here (the
+# free-space figure reads exitCode alone).
+function Test-ExitAccepted($m) {
+    $code = Get-Prop $m 'exitCode'
+    if ($code -is [bool] -or $null -eq $code) { return $false }
+    if ($code -eq 0) { return $true }
+    ($code -eq 1) -and ((Get-Prop (Get-Prop $m 'knownSkips') 'ok') -eq $true)
+}
+
+# An attempt finished (EP-C11): the child ran to its end and its exit counts. Every check that once read
+# "finished with exit 0" reads this.
+function Test-AttemptFinished($m) {
+    ((Get-Prop $m 'finished') -eq $true) -and (Test-ExitAccepted $m)
+}
+
+# The runner's exit code: the child's codes other than 0 and 1 first (as before); then 3 (contaminated) and 4 (not
+# cold), which take precedence over the child's 1 (EP-C11); then the child's 0 or 1 (meta.json's knownSkips says
+# whether a 1 counts as finished).
+function Get-RunnerExit([int]$childCode, [bool]$contaminated, [bool]$notCold) {
+    if ($childCode -ne 0 -and $childCode -ne 1) { return $childCode }
+    if ($contaminated) { return 3 }
+    if ($notCold) { return 4 }
+    $childCode
+}
+
+# Whether a runner exit is a clean attempt (what a warmup must be): 0, or 1 when the child's 1 counts as finished.
+function Test-CleanRunnerExit([int]$runnerExit, [bool]$childAccepted) {
+    ($runnerExit -eq 0) -or ($runnerExit -eq 1 -and $childAccepted)
+}
+
+# samply's "needs elevation" reading of stderr: only for a child exit that does not count. An accepted exit 1's
+# log holds every skipped input path, and a path may hold one of the words.
+function Test-SamplyNeedsElevation([bool]$samply, [bool]$childAccepted, [int]$code, [string]$errText) {
+    $samply -and $code -ne 0 -and -not $childAccepted -and ($errText -match '(?i)elevat|administrator|access (is )?denied|privilege')
 }
 # One quiet check (spec 7.6): banned processes, 10 s of CPU under 5 %, free space.
 function Test-Quiet([string]$runRoot, [int64]$neededBytes) {
@@ -1059,19 +1367,30 @@ function Invoke-Expected([hashtable]$A) {
     foreach ($s in $A.Set) { $cargs += @('--set', $s) }
     $c = Start-Child $A.Exe $cargs $dir @{ APPDATA = (Join-Path $dir 'appdata'); SDC_PROFILE = $null } (Join-Path $dir 'stdout.jsonl') (Join-Path $dir 'stderr.log')
     Stop-Child $c
-    if ($c.Process.ExitCode -ne 0) { throw "the dry run exited with $($c.Process.ExitCode); see $dir\stderr.log" }
+    $ec = $c.Process.ExitCode
     $plan = ConvertFrom-PlanStream @([IO.File]::ReadAllLines((Join-Path $dir 'stdout.jsonl'))) $A.Corpus
+    $why = Get-ExpectedExitProblem $ec $plan.Done
+    if ($why) { throw "the dry run exited with ${ec}: $why; see $dir\stderr.log" }
+    if ($ec -eq 1) { Say 'the dry run exited with 1 and batch_done shows nothing failed or cancelled: it counts as finished (EP-C11)' }
+    $n = Write-ExpectedLists $A.RunRoot $A.Label $plan
+    Say ('expected {0} key(s); {1} planned but not written; {2} skipped input(s); {3} skip/failure event(s); dry-run folder {4}' -f $n, @($plan.NotWritten).Count, @($plan.Skipped).Count, @($plan.Events).Count, $dir)
+}
+
+# The dry run's four lists in RunRoot, each created new. Returns the expected key count.
+function Write-ExpectedLists([string]$runRoot, [string]$label, $plan) {
     $sorted = Sort-Ordinal $plan.Ready
-    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label).txt") (Join-Lines $sorted)
-    Write-NewFile (Join-Path $A.RunRoot "planned-not-written-$($A.Label).txt") (Join-Lines (Sort-Ordinal $plan.NotWritten))
-    Write-NewFile (Join-Path $A.RunRoot "skipped-inputs-$($A.Label).txt") (Join-Lines (Sort-Ordinal $plan.Skipped))
-    Write-NewFile (Join-Path $A.RunRoot "expected-$($A.Label)-events.txt") (Join-Lines (Sort-Ordinal $plan.Events))
-    Say ('expected {0} key(s); {1} planned but not written; {2} skipped input(s); {3} skip/failure event(s); dry-run folder {4}' -f $sorted.Count, @($plan.NotWritten).Count, @($plan.Skipped).Count, @($plan.Events).Count, $dir)
+    Write-NewFile (Join-Path $runRoot "expected-$label.txt") (Join-Lines $sorted)
+    Write-NewFile (Join-Path $runRoot "planned-not-written-$label.txt") (Join-Lines (Sort-Ordinal $plan.NotWritten))
+    Write-NewFile (Join-Path $runRoot "skipped-inputs-$label.txt") (Join-Lines (Sort-Ordinal $plan.Skipped))
+    Write-NewFile (Join-Path $runRoot "expected-$label-events.txt") (Join-Lines (Sort-Ordinal $plan.Events))
+    $sorted.Count
 }
 
 # ---------------------------------------------------------------- one attempt (spec 7.3 to 7.7)
 
 $WarmCohorts = @('warm-fresh', 'warm-noop', 'warm-stale', 'overhead', 'parity')
+# Whether the last attempt's child exit counted as finished (EP-C11); read after a warmup Invoke-Attempt returns.
+$script:LastChildAccepted = $false
 $NoColdStamp = 'no unused cold stamp under 15 minutes old in RunRoot: run tools\profile-evict.ps1 -RunRoot <RunRoot> -Corpus <the same corpus folder>, or the owner runs tools\profile-purge.ps1 elevated'
 
 function Invoke-Attempt([hashtable]$A, [bool]$dry) {
@@ -1121,6 +1440,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         return 0
     }
     if ($problems) { throw ('refused: ' + ($problems -join '; ')) }
+    $script:LastChildAccepted = $false
 
     # quiet check; a warm chain whose check needed a retry gets a warmup first (spec 7.3)
     $qs = Get-Date
@@ -1129,7 +1449,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         Say 'the quiet check needed a retry: running a warmup first'
         $w = $A.Clone(); $w.Cohort = 'warmup'; $w.CopyFrom = $null; $w.Calibrate = $false; $w.Samply = $null
         $wr = Invoke-Attempt $w $false
-        if ($wr -ne 0) { throw "the warmup ended with code $wr; stopping" }
+        if (-not (Test-CleanRunnerExit $wr $script:LastChildAccepted)) { throw "the warmup ended with code $wr; stopping" }
         $qs = Get-Date
         $quiet = Wait-Quiet $A.RunRoot $needed
         if (-not $quiet.PassedFirstTry) { throw 'stopping: the quiet check after the warmup did not pass at its first try' }
@@ -1246,6 +1566,12 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         $meta['exitCode'] = $code
         $meta['externalWallMs'] = $wall.ElapsedMilliseconds
         $meta['finished'] = $true
+        # EP-C11: a child exit 1 counts as finished only with the known skips (the verdict is meta.json's knownSkips)
+        if ($code -eq 1) {
+            $logLines = [IO.File]::ReadAllLines((Join-Path $attempt 'stderr.log'), [Text.Encoding]::UTF8)
+            $meta['knownSkips'] = Get-KnownSkipsVerdict $A.RunRoot $A.Label $logLines $A.Corpus
+        }
+        $childAccepted = Test-ExitAccepted $meta
         $meta['disk'] = [ordered]@{
             start = [ordered]@{ corpus = (Get-DiskFigure $diskStart $A.Corpus); output = (Get-DiskFigure $diskStart $out) }
             end = [ordered]@{ corpus = (Get-DiskFigure $diskEnd $A.Corpus); output = (Get-DiskFigure $diskEnd $out) }
@@ -1263,7 +1589,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             Write-NewJson $baselinePath ([ordered]@{ otherCpuCores = $verdict.otherCpuCoresMean; otherIoBytesPerSec = $verdict.otherIoBytesPerSecMean; attempt = $name; samples = $verdict.samples; logicalCores = [Environment]::ProcessorCount })
         }
         $errText = [IO.File]::ReadAllText((Join-Path $attempt 'stderr.log'))
-        if ($A.Samply -and $code -ne 0 -and $errText -match '(?i)elevat|administrator|access (is )?denied|privilege') {
+        if (Test-SamplyNeedsElevation ([bool]$A.Samply) $childAccepted $code $errText) {
             $meta['samply'] = 'needs elevation'
             Say 'samply needs elevation: the owner runs this command from an elevated shell; stopping'
             return 5
@@ -1279,12 +1605,16 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
                 endedUnixMs = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
             })
         Say ('exit {0}, wall {1} ms, contention: {2}' -f $code, $wall.ElapsedMilliseconds, $(if ($verdict.contaminated) { 'CONTAMINATED ' + ($verdict.reasons -join '; ') } else { 'clean' }))
-        if ($coldVerdict -and $coldVerdict.Contains('cold') -and -not $coldVerdict.cold) { Say "NOT COLD: $($coldVerdict.reason)" }
+        $notCold = [bool]($coldVerdict -and $coldVerdict.Contains('cold') -and -not $coldVerdict.cold)
+        if ($notCold) { Say "NOT COLD: $($coldVerdict.reason)" }
+        if ($code -eq 1) {
+            $ks = $meta['knownSkips']
+            if ($childAccepted) { Say ('exit 1 counts as finished: only the known skips ({0} of {1}, EP-C11)' -f $ks.skipped, $ks.list) }
+            else { Say "exit 1 does NOT count as finished: $($ks.reason)" }
+        }
         Say $DetectionLimit
-        if ($code -ne 0) { return $code }
-        if ($verdict.contaminated) { return 3 }
-        if ($coldVerdict -and $coldVerdict.Contains('cold') -and -not $coldVerdict.cold) { return 4 }
-        return 0
+        $script:LastChildAccepted = $childAccepted
+        return (Get-RunnerExit $code ([bool]$verdict.contaminated) $notCold)
     } catch {
         $meta['error'] = $_.Exception.Message
         Say "attempt stopped: $($_.Exception.Message)"
@@ -1315,7 +1645,7 @@ function Get-HashRows([string]$dir) {
 }
 
 # A corpus's reference (EP-R4: the first base attempt): the oldest attempt in RunRoot, by its time-stamped name,
-# whose meta.json shows a base build of that corpus that finished with exit 0. $null when there is none. An
+# whose meta.json shows a base build of that corpus that finished (Test-AttemptFinished). $null when none. An
 # unreadable meta.json is skipped with a warning.
 function Get-CorpusReference([string]$runRoot, [string]$corpus) {
     $want = $corpus.TrimEnd('\')
@@ -1325,7 +1655,7 @@ function Get-CorpusReference([string]$runRoot, [string]$corpus) {
         if (-not (Test-Path -LiteralPath $mp -PathType Leaf)) { continue }
         try { $m = Read-Json $mp }
         catch { Write-Warning "skipped the unreadable $name\meta.json: $($_.Exception.Message)"; continue }
-        if ((Get-Prop $m 'build') -eq 'base' -and (Get-Prop $m 'finished') -eq $true -and (Get-Prop $m 'exitCode') -eq 0 -and
+        if ((Get-Prop $m 'build') -eq 'base' -and (Test-AttemptFinished $m) -and
             [string]::Equals(([string](Get-Prop $m 'corpus')).TrimEnd('\'), $want, 'OrdinalIgnoreCase')) { return $name }
     }
     $null
@@ -1356,12 +1686,12 @@ function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$refere
         throw "refused: $attempt is the corpus reference (the oldest finished base-build attempt of its corpus, EP-R4) and is kept whole (EP-O5)"
     }
     if (Get-Prop $meta 'prune') { throw "refused: $attempt was already pruned" }
-    if ((Get-Prop $meta 'finished') -ne $true -or (Get-Prop $meta 'exitCode') -ne 0) { throw "refused: $attempt did not finish with exit code 0" }
+    if (-not (Test-AttemptFinished $meta)) { throw "refused: $attempt did not finish (exit 0, or exit 1 with only the known skips, EP-C11)" }
     $refMetaPath = Join-Path (Join-Path $runRoot $reference) 'meta.json'
     if (-not (Test-Path -LiteralPath $refMetaPath -PathType Leaf)) { throw "refused: the reference $reference has no meta.json" }
     $refMeta = Read-Json $refMetaPath
     if ((Get-Prop $refMeta 'build') -ne 'base') { throw "refused: the reference $reference is not a base-build attempt (build $(Get-Prop $refMeta 'build'))" }
-    if ((Get-Prop $refMeta 'finished') -ne $true -or (Get-Prop $refMeta 'exitCode') -ne 0) { throw "refused: the reference $reference did not finish with exit code 0" }
+    if (-not (Test-AttemptFinished $refMeta)) { throw "refused: the reference $reference did not finish (exit 0, or exit 1 with only the known skips, EP-C11)" }
     $corpusOf = { param($m) ([string](Get-Prop $m 'corpus')).TrimEnd('\') }
     if (-not (& $corpusOf $meta) -or -not [string]::Equals((& $corpusOf $meta), (& $corpusOf $refMeta), 'OrdinalIgnoreCase')) {
         throw "refused: the reference $reference is of another corpus ($(& $corpusOf $refMeta), not $(& $corpusOf $meta))"

@@ -16,6 +16,9 @@ a per-file eviction attempt without a true verdict. Output (all created new): su
 cpu-<label>.svg. --allow-contaminated is for fixture checks only: it keeps the runner's contamination verdict
 out of the acceptance check and marks the summary NOT ACCEPTANCE EVIDENCE.
 
+An attempt's child exit counts when it is 0, or 1 with a true knownSkips verdict in meta.json (EP-C11: only the
+dry run's planned-not-written files were skipped, nothing failed or cancelled).
+
 --check: runs the acceptance checks on one attempt (exit 0 or 1). Without --reference the attempt is checked
 against the expected set alone (a reference is checked this way). expected-<label>.txt is read from RunRoot.
 
@@ -531,6 +534,21 @@ def stale_span_problems(att, expected, copied):
     return probs
 
 
+def exit_problems(m):
+    """The runner's finished verdict on the child's exit (EP-C11): 0, or 1 when meta.json's knownSkips block says
+    the attempt skipped exactly the dry run's planned-not-written set with nothing failed or cancelled."""
+    code = m.get("exitCode")
+    if type(code) is int and code == 0:
+        return []
+    if type(code) is int and code == 1:
+        ks = m.get("knownSkips")
+        if isinstance(ks, dict) and ks.get("ok") is True:
+            return []
+        why = (ks.get("reason") if isinstance(ks, dict) else None) or "meta.json has no true knownSkips verdict"
+        return ["exit code 1 with more than the known skips (EP-C11): " + why]
+    return ["exit code %s, not 0" % code]
+
+
 def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False):
     """Every reason this attempt is refused (an empty list accepts it). `ref` is another loaded attempt."""
     p = []
@@ -542,8 +560,8 @@ def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False
         p.append("a warmup or calibration attempt is never accepted")
     if m.get("finished") is not True:
         p.append("the attempt did not finish" + (": " + m["error"] if m.get("error") else ""))
-    elif m.get("exitCode") != 0:
-        p.append("exit code %s, not 0" % m.get("exitCode"))
+    else:
+        p += exit_problems(m)
     if not isinstance(m.get("externalWallMs"), (int, float)) or isinstance(m.get("externalWallMs"), bool):
         p.append("meta.json has no numeric externalWallMs (the command wall)")
     cont = m.get("contention")
@@ -1458,6 +1476,20 @@ def selftest_acceptance(t):
     cont = mk_att("k1", **good)
     cont["meta"]["contention"] = {"contaminated": True, "reasons": ["banned process appeared: cargo(1)"]}
     t.ok(n + ": a contaminated attempt is refused with the runner's reason", any("cargo(1)" in x for x in check_attempt(cont, exp, ref)))
+    # EP-C11: exit 1 counts only with the runner's true knownSkips verdict
+    ks_ok = {"ok": True, "expected": 2, "skipped": 2, "reason": None}
+    pr = check_attempt(mk_att("e1", exitCode=1, knownSkips=ks_ok, **good), exp, mk_att("ref", build="base", exe="B1", exitCode=1, knownSkips=ks_ok, **good))
+    t.ok(n + ": EP-C11, an exit-1 attempt and reference with only the known skips are accepted", pr == [], pr)
+    pr = check_attempt(mk_att("e2", exitCode=1, knownSkips={"ok": False, "reason": "1 planned-not-written key(s) not skipped"}, **good), exp, ref)
+    t.ok(n + ": EP-C11, an exit-1 attempt whose skips differ is refused with the runner's reason",
+         any("exit code 1" in x and "not skipped" in x for x in pr), pr)
+    pr = check_attempt(mk_att("e3", exitCode=1, **good), exp, ref)
+    t.ok(n + ": EP-C11, an exit-1 attempt without a knownSkips verdict is refused", any("no true knownSkips" in x for x in pr), pr)
+    pr = check_attempt(mk_att("e4", exitCode=2, knownSkips=ks_ok, **good), exp, ref)
+    t.ok(n + ": EP-C11, another exit code is refused whatever knownSkips says", any("exit code 2, not 0" in x for x in pr), pr)
+    pr = check_attempt(mk_att("e5", build="base", exe="B1", exitCode=1, knownSkips={"ok": False, "reason": "2 FAIL line(s) in the log"}, **good), exp, None)
+    t.ok(n + ": EP-C11, a reference checked on its own is refused when its exit 1 has more than the known skips",
+         any("exit code 1" in x and "FAIL line" in x for x in pr), pr)
     t.ok("parse_accept: groups and a reference line",
          parse_accept("[fx warm-fresh]\na1\na2\nreference r1\n[fx warm-noop]\nn1\n")[1] == {"fx": "r1"})
 
