@@ -57,7 +57,7 @@ Build folders fill the drive fast: one reaches 50–170 GB.
 - Do feature work on a branch in `.worktrees/<name>`, not on the base branch.
 - Commit explicit paths. Never `git add -A`.
 - Bug fixes start with a failing test. Make one commit per fix.
-- Merges into the base branch are local. The owner pushes.
+- Merges into the base branch are local; after a merge into `main`, push `main` and check CI (Gates). Feature branches are never pushed.
 - When two branches both append a note to `.claude/DECISIONS.md`, keep both.
 - Temporary files go in the session scratchpad or in `.claude/scratch/` (gitignored; delete your own when done), never loose in the repo root or `crates/`.
 - **Every commit builds.** Don't split a shared-file registration from the code that uses it.
