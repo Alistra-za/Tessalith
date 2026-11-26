@@ -6,9 +6,13 @@ r"""Engine profiling summariser (plan 2026-11-21-engine-profile, Task 5). Standa
   py -3.13 -I -X utf8 tools\profile-summary.py --self-test
 
 --accept: the list names accepted attempt folders (names inside RunRoot), one per line, grouped under
-`[<label> <cohort>]` headers; one `reference <attempt>` line per label (under any header of that label). Every
+`[<label> <cohort>]` headers; one `reference <attempt>` line per label (under any header of that label). An
+attempt's meta.json label and cohort must equal its header's, except on an explicit `relabel <attempt> from
+<recorded cohort>` line (EP-C9, review I5): only an `overhead` attempt of the `release` build may be listed
+under a `warm-fresh` header. Each relabel is printed and recorded in summary.json and summary.md. Every
 listed attempt, and every reference, is checked (spec 7.3, EP-R4) before anything is written; a failed check is
-exit 1 with the reason. Output (all created new): summary.json, summary.md, timeline-<label>-<cohort>.csv,
+exit 1 with the reason. A cold-fresh attempt whose meta.json cold verdict is false is refused (EP-C5), and so is
+a per-file eviction attempt without a true verdict. Output (all created new): summary.json, summary.md, timeline-<label>-<cohort>.csv,
 cpu-<label>.svg. --allow-contaminated is for fixture checks only: it keeps the runner's contamination verdict
 out of the acceptance check and marks the summary NOT ACCEPTANCE EVIDENCE.
 
@@ -50,6 +54,9 @@ RECORDER_BUILDS = ("release", "profiling")
 MANIFEST_IGNORED = {"ts", "output_stamp"}
 STALE_COHORTS = ("warm-stale",)
 FRESH_LIKE = ("warm-fresh", "cold-fresh", "overhead", "parity")
+# EP-C9 (review I5): the only relabels --accept takes, (recorded cohort, listed cohort) -> allowed builds.
+RELABELS = {("overhead", "warm-fresh"): ("release",)}
+EVICT_METHOD = "per-file-no-buffering"
 ENCODE_STAGE = "encode_band"
 
 # The stage table of spec section 5 (53 stages), used only to build synthetic reports in the self-test; real
@@ -547,6 +554,15 @@ def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False
         p.append("contaminated: " + "; ".join(cont.get("reasons") or ["no reason recorded"]))
     if cohort == "cold-fresh" and not m.get("purgeStamp"):
         p.append("a cold attempt must name the purge stamp it consumed (purgeStamp is empty)")
+    if cohort == "cold-fresh":
+        # EP-C5: the runner's cold verdict (a dict with "cold"); a purge stamp has none and needs none
+        cv = m.get("cold")
+        flag = cv.get("cold") if isinstance(cv, dict) else cv
+        if flag is False:
+            p.append("not cold (%s): %s" % (m.get("coldMethod") or "method not recorded",
+                                            (cv.get("reason") if isinstance(cv, dict) else None) or "the runner's cold verdict is false"))
+        elif m.get("coldMethod") == EVICT_METHOD and flag is not True:
+            p.append("a per-file eviction attempt has no cold verdict in meta.json (cold.cold is not true)")
     if m.get("build") in RECORDER_BUILDS and att["report"] is None:
         p.append("no single profile report under profile\\ (%d found)" % att.get("report_files", 0))
     # the key set, both ways (EP-R4): never a count
@@ -616,6 +632,7 @@ def attempt_figures(att, runroot):
     m = att["meta"]
     fig = {"attempt": att["name"], "build": m.get("build"), "cohort": m.get("cohort"),
            "wall_ms": m.get("externalWallMs"), "disk": disk_figures(m), "purgeStamp": m.get("purgeStamp"),
+           "coldMethod": m.get("coldMethod"), "cold": m.get("cold"),
            "contaminated": (m.get("contention") or {}).get("contaminated"), "quiet": m.get("quiet")}
     if m.get("purgeStamp") and runroot:
         t = try_read(os.path.join(runroot, m["purgeStamp"]))
@@ -705,10 +722,16 @@ def parse_accept(text):
             if not ln.endswith("]") or len(ln[1:-1].split()) != 2:
                 raise ValueError("line %d: a header is [<label> <cohort>]" % n)
             label, cohort = ln[1:-1].split()
-            cur = {"label": label, "cohort": cohort, "attempts": []}
+            cur = {"label": label, "cohort": cohort, "attempts": [], "relabels": {}}
             groups.append(cur)
         elif cur is None:
             raise ValueError("line %d: an attempt before any [label cohort] header" % n)
+        elif ln.startswith("relabel "):
+            parts = ln.split()
+            if len(parts) != 4 or parts[2] != "from":
+                raise ValueError("line %d: a relabel line is 'relabel <attempt> from <recorded cohort>'" % n)
+            cur["attempts"].append(parts[1])
+            cur["relabels"][parts[1]] = parts[3]
         elif ln.startswith("reference "):
             name = ln[len("reference "):].strip()
             if cur["label"] in refs and refs[cur["label"]] != name:
@@ -771,13 +794,29 @@ def build_summary(groups, refs, runroot, allow_contaminated):
         refloaded[label] = ref
         for x in check_attempt(ref, expected_by[label][0], None, None, allow_contaminated):
             problems.append("reference %s: %s" % (name, x))
+    relabelled = []
     for g in groups:
         g["loaded"] = []
         for name in g["attempts"]:
             att = load_attempt(os.path.join(runroot, name))
-            if att["meta"].get("cohort") != g["cohort"] or att["meta"].get("label") != g["label"]:
-                problems.append("%s: meta.json says %s %s, the list says %s %s" % (
-                    name, att["meta"].get("label"), att["meta"].get("cohort"), g["label"], g["cohort"]))
+            recorded, build = att["meta"].get("cohort"), att["meta"].get("build")
+            rel_from = g.get("relabels", {}).get(name)
+            if att["meta"].get("label") != g["label"]:
+                problems.append("%s: meta.json says label %s, the list says %s" % (name, att["meta"].get("label"), g["label"]))
+            if rel_from is None:
+                if recorded != g["cohort"]:
+                    problems.append("%s: meta.json says %s %s, the list says %s %s" % (
+                        name, att["meta"].get("label"), recorded, g["label"], g["cohort"]))
+            elif (rel_from, g["cohort"]) not in RELABELS:
+                problems.append("%s: relabel from %s to %s is not allowed (allowed: %s)" % (
+                    name, rel_from, g["cohort"], ", ".join("%s to %s" % k for k in RELABELS)))
+            elif recorded != rel_from:
+                problems.append("%s: the relabel line says from %s, meta.json says %s" % (name, rel_from, recorded))
+            elif build not in RELABELS[(rel_from, g["cohort"])]:
+                problems.append("%s: only a %s build may be relabelled from %s to %s (this one is %s)" % (
+                    name, " or ".join(RELABELS[(rel_from, g["cohort"])]), rel_from, g["cohort"], build))
+            else:
+                relabelled.append({"attempt": name, "label": g["label"], "recorded": recorded, "build": build, "listed": g["cohort"]})
             for x in check_attempt(att, expected_by[g["label"]][0], refloaded[g["label"]],
                                    load_copied_manifest(runroot, att), allow_contaminated):
                 problems.append("%s: %s" % (name, x))
@@ -787,7 +826,9 @@ def build_summary(groups, refs, runroot, allow_contaminated):
             problems.append("[%s %s] lists no attempts" % (g["label"], g["cohort"]))
     if problems:
         return None, problems
-    return summarise(groups, refs, expected_by, runroot, allow_contaminated), []
+    summary, figs_by = summarise(groups, refs, expected_by, runroot, allow_contaminated)
+    summary["relabelled"] = relabelled
+    return (summary, figs_by), []
 
 
 def summarise(groups, refs, expected_by, runroot, allow_contaminated):
@@ -897,6 +938,19 @@ def fmt_stat(d, scale=1.0, nd=3):
     return s
 
 
+def cold_text(a):
+    """What was done before a cold run, by the method meta.json records (EP-C5); '' for a warm one."""
+    stamp = a.get("purgeStamp")
+    if a.get("coldMethod") == EVICT_METHOD:
+        cv = a.get("cold") if isinstance(a.get("cold"), dict) else {}
+        return ("; cold: each corpus file's cached pages were dropped (per-file no-buffering open); the exe, DLLs and "
+                "file system metadata stay cached (evict stamp %s; corpus disk read %s of %s corpus bytes)" % (
+                    stamp, cv.get("diskReadBytes", "n/a"), cv.get("corpusBytes", "n/a")))
+    if stamp:
+        return "; cold: the standby list was purged before the run (purge stamp %s)" % stamp
+    return ""
+
+
 def render_md(summary):
     L = []
     if not summary["accepted"]:
@@ -957,16 +1011,22 @@ def render_md(summary):
                     "%+.2f" % cpu["unrecorded_mean_signed"] if cpu.get("unrecorded_mean_signed") is not None else "n/a",
                     "%.0f" % (mem["peak_working_set"] / 1048576) if mem.get("peak_working_set") else "n/a", a.get("contaminated")))
             L.append("")
-            L += ["Disk (bytes during the run; the standby list was purged before a cold run, nothing more is claimed):", ""]
+            L += ["Disk (bytes during the run; a cold run's line says what was done before it, nothing more is claimed):", ""]
             for a in g["per_attempt"]:
                 d = a.get("disk")
                 if d and "unreadable" in d:
-                    L.append("- %s: %s" % (a["attempt"], d["unreadable"]))
+                    L.append("- %s: %s%s" % (a["attempt"], d["unreadable"], cold_text(a)))
                 elif d:
                     L.append("- %s: corpus disk read %d write %d; output disk read %d write %d%s" % (
                         a["attempt"], d["corpus"]["read_bytes"], d["corpus"]["write_bytes"], d["output"]["read_bytes"],
-                        d["output"]["write_bytes"], "; purge stamp %s" % a["purgeStamp"] if a.get("purgeStamp") else ""))
+                        d["output"]["write_bytes"], cold_text(a)))
             L.append("")
+    if summary.get("relabelled"):
+        L += ["## Relabelled attempts (EP-C9)", "",
+              "Listed under a cohort other than the one the runner recorded; only an overhead attempt of the release build may count as warm-fresh.", ""]
+        for r in summary["relabelled"]:
+            L.append("- %s (%s): recorded %s, %s build; counted as %s" % (r["attempt"], r["label"], r["recorded"], r["build"], r["listed"]))
+        L.append("")
     for label, o in summary["overhead"].items():
         L += ["## Overhead (%s)" % label, "", "Outcome: **%s**." % o["outcome"], "",
               "| round | base ms | off ms | on ms | off - base | on - off |", "|---|---|---|---|---|---|"]
@@ -987,6 +1047,8 @@ def run_accept(args):
             print("FAIL " + x)
         return 1
     summary, figs_by = res
+    for r in summary.get("relabelled", []):
+        print("RELABEL %s (%s): recorded %s, %s build; counted as %s" % (r["attempt"], r["label"], r["recorded"], r["build"], r["listed"]))
     os.makedirs(args.out)  # fails when the folder exists (EP-R3)
     write_new(os.path.join(args.out, "summary.json"), json.dumps(summary, indent=2, default=float) + "\n")
     write_new(os.path.join(args.out, "summary.md"), render_md(summary))
@@ -1327,6 +1389,23 @@ def selftest_acceptance(t):
     t.ok(n + ": a noop with equal file lists is accepted", check_attempt(noop, exp, ref) == [])
     cold = mk_att("c1", cohort="cold-fresh", purgeStamp=None, **good)
     t.ok(n + ": a cold attempt without a consumed purge stamp is refused", any("purge stamp" in x for x in check_attempt(cold, exp, ref)))
+    # EP-C5: the runner's cold verdict
+    ev = dict(cohort="cold-fresh", purgeStamp="evict-20261126-000000.json", coldMethod=EVICT_METHOD)
+    pr = check_attempt(mk_att("c2", cold={"method": EVICT_METHOD, "cold": False, "reason": "the run read 10 bytes from the corpus disk"},
+                              **ev, **good), exp, ref)
+    t.ok(n + ": a cold attempt whose cold verdict is false is refused with the runner's reason and method",
+         any("not cold (per-file-no-buffering)" in x and "read 10 bytes" in x for x in pr), pr)
+    pr = check_attempt(mk_att("c3", cold=False, **ev, **good), exp, ref)
+    t.ok(n + ": a bare cold = false is refused too", any(x.startswith("not cold") for x in pr), pr)
+    pr = check_attempt(mk_att("c4", cold={"method": EVICT_METHOD, "cold": True, "corpusBytes": 100, "diskReadBytes": 99}, **ev, **good), exp, ref)
+    t.ok(n + ": a per-file eviction attempt with a true verdict is accepted", pr == [], pr)
+    pr = check_attempt(mk_att("c5", **ev, **good), exp, ref)
+    t.ok(n + ": a per-file eviction attempt without a verdict is refused", any("no cold verdict" in x for x in pr), pr)
+    pr = check_attempt(mk_att("c6", cohort="cold-fresh", purgeStamp="purge-20261126-000000.json", coldMethod="standby-purge",
+                              cold={"method": "standby-purge", "check": "not applied"}, **good), exp, ref)
+    t.ok(n + ": a standby-purge attempt (no byte check) is accepted", pr == [], pr)
+    pr = check_attempt(mk_att("c7", cohort="cold-fresh", purgeStamp="purge-20261126-000000.json", **good), exp, ref)
+    t.ok(n + ": an older purge attempt without coldMethod is accepted", pr == [], pr)
     cont = mk_att("k1", **good)
     cont["meta"]["contention"] = {"contaminated": True, "reasons": ["banned process appeared: cargo(1)"]}
     t.ok(n + ": a contaminated attempt is refused with the runner's reason", any("cargo(1)" in x for x in check_attempt(cont, exp, ref)))
@@ -1493,6 +1572,25 @@ def selftest_cli(t):
          and md.count("Verdict (the corpus verdict") == 1 and "Informational only" in md, md.count("Verdict"))
     out2, _ = summarise(groups, {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, True)
     t.ok(n + ": contaminated attempts allowed marks the markdown NOT ACCEPTANCE EVIDENCE", "NOT ACCEPTANCE EVIDENCE" in render_md(out2))
+    # the cold line says what was done, by the recorded method (EP-C5)
+    disk = {"start": {"corpus": {"name": "2 F:", "read": 0, "write": 0}, "output": {"name": "2 F:", "read": 0, "write": 0}},
+            "end": {"corpus": {"name": "2 F:", "read": 990, "write": 0}, "output": {"name": "2 F:", "read": 0, "write": 5}}}
+    cold_ev = mk_att("ce", cohort="cold-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk,
+                     purgeStamp="evict-20261126-000000.json", coldMethod=EVICT_METHOD,
+                     cold={"method": EVICT_METHOD, "cold": True, "corpusBytes": 1000, "diskReadBytes": 990})
+    cold_pu = mk_att("cp", cohort="cold-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk,
+                     purgeStamp="purge-20261126-000000.json", coldMethod="standby-purge")
+    out3, _ = summarise([{"label": "fx", "cohort": "cold-fresh", "attempts": ["ce", "cp"], "loaded": [cold_ev, cold_pu]}],
+                        {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
+    md3 = render_md(out3)
+    line_ev = next((x for x in md3.splitlines() if x.startswith("- ce:")), "")
+    line_pu = next((x for x in md3.splitlines() if x.startswith("- cp:")), "")
+    t.ok(n + ": a per-file eviction attempt's disk line says what EP-C5 did, not that the standby list was purged",
+         "each corpus file's cached pages were dropped (per-file no-buffering open); the exe, DLLs and file system metadata stay cached" in line_ev
+         and "standby" not in line_ev and "read 990 of 1000 corpus bytes" in line_ev, line_ev)
+    t.ok(n + ": a standby-purge attempt's disk line says the standby list was purged", "standby list was purged" in line_pu
+         and "per-file" not in line_pu, line_pu)
+    t.ok(n + ": the disk header claims no purge for every cold run", "the standby list was purged before a cold run" not in md3, md3[:300])
     # disk-backed: run_check exit codes, build_summary and run_accept
     tmp = tempfile.mkdtemp(prefix="profile-summary-selftest-")  # left in place (EP-R3)
     rr = os.path.join(tmp, "runroot")
@@ -1507,6 +1605,9 @@ def selftest_cli(t):
         write_new(os.path.join(d, "meta.json"), json.dumps(meta))
         write_new(os.path.join(d, "hashes.csv"), "path,sha256\n" + "".join("%s,h%s\n" % (k, k) for k in keys))
         write_new(os.path.join(d, "out", "_sdc", "manifest.jsonl"), "".join(json.dumps(rec(k)) + "\n" for k in keys))
+        if build in RECORDER_BUILDS:
+            os.makedirs(os.path.join(d, "profile"))
+            write_new(os.path.join(d, "profile", "profile-1.json"), json.dumps(rep))
         return d
     ref_d = mk_dir("ref", "warm-fresh", "base", "B1", ["a.dds", "b.dds"])
     ok_d = mk_dir("ok", "warm-fresh", "release-off", "E1", ["a.dds", "b.dds"])
@@ -1557,6 +1658,43 @@ def selftest_cli(t):
     t.ok(n + ": a header with no attempts is a named failure, not a traceback", code == 1 and "lists no attempts" in text, (code, text))
     code, text = captured(main, ["--accept", acc, "--runroot", os.path.join(tmp, "nope"), "--out", os.path.join(tmp, "summary-out4")])
     t.ok(n + ": a missing run root is a FAIL line, not a traceback", code == 1 and text.startswith("FAIL"), (code, text))
+    # EP-C9 (review I5): an overhead release attempt counts as warm-fresh only through an explicit, logged relabel
+    mk_dir("ov-base", "overhead", "base", "B1", ["a.dds", "b.dds"])
+    mk_dir("ov-off", "overhead", "release-off", "E1", ["a.dds", "b.dds"])
+    mk_dir("ov-rel", "overhead", "release", "E1", ["a.dds", "b.dds"])
+    overhead = "[fx overhead]\nov-base\nov-off\nov-rel\nreference ref\n"
+
+    def accept(tag, warm_lines):
+        path = os.path.join(tmp, "accept-%s.txt" % tag)
+        write_new(path, overhead + "[fx warm-fresh]\n" + warm_lines)
+        out = os.path.join(tmp, "summary-%s" % tag)
+        code, text = captured(main, ["--accept", path, "--runroot", rr, "--out", out])
+        return code, text, out
+    code, text, out = accept("plain", "ov-rel\n")
+    t.ok(n + ": an overhead attempt listed under warm-fresh without a relabel line is refused", code == 1
+         and "meta.json says fx overhead, the list says fx warm-fresh" in text and not os.path.exists(out), (code, text))
+    code, text, out = accept("relabel", "relabel ov-rel from overhead\n")
+    md = read_text(os.path.join(out, "summary.md")) if code == 0 else ""
+    sj = json.loads(read_text(os.path.join(out, "summary.json"))) if code == 0 else {}
+    t.ok(n + ": a relabelled overhead release attempt is accepted as warm-fresh, printed and recorded", code == 0
+         and "RELABEL ov-rel (fx): recorded overhead, release build; counted as warm-fresh" in text
+         and "## Relabelled attempts" in md and "ov-rel (fx): recorded overhead, release build; counted as warm-fresh" in md
+         and "### warm-fresh" in md and sj.get("relabelled") == [{"attempt": "ov-rel", "label": "fx", "recorded": "overhead", "build": "release", "listed": "warm-fresh"}],
+         (code, text))
+    code, text, out = accept("off", "relabel ov-off from overhead\n")
+    t.ok(n + ": a relabel of a release-off overhead attempt is refused", code == 1 and "only a release build may be relabelled" in text, (code, text))
+    code, text, out = accept("wrongfrom", "relabel ref from overhead\n")
+    t.ok(n + ": a relabel line whose recorded cohort is wrong is refused", code == 1
+         and "the relabel line says from overhead, meta.json says warm-fresh" in text, (code, text))
+    path = os.path.join(tmp, "accept-stale.txt")
+    write_new(path, overhead + "[fx warm-noop]\nrelabel ov-rel from overhead\n")
+    code, text = captured(main, ["--accept", path, "--runroot", rr, "--out", os.path.join(tmp, "summary-stale")])
+    t.ok(n + ": a relabel to any cohort but warm-fresh is refused", code == 1 and "relabel from overhead to warm-noop is not allowed" in text, (code, text))
+    try:
+        parse_accept("[fx warm-fresh]\nrelabel ov-rel overhead\nreference ref\n")
+        t.ok(n + ": a malformed relabel line is a named parse error", False)
+    except ValueError as e:
+        t.ok(n + ": a malformed relabel line is a named parse error", "relabel <attempt> from <recorded cohort>" in str(e), str(e))
 
 
 def self_test():
