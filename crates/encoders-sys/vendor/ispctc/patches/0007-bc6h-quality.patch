@@ -1,5 +1,5 @@
 diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
-index 1b68835c..904fba98 100644
+index 1b68835c..f3dcdd6d 100644
 --- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
 +++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
 @@ -29,16 +29,31 @@
@@ -23,12 +23,12 @@ index 1b68835c..904fba98 100644
 +// second audit. Changes are marked "sdc patch 0007". They change BC6H bytes; the S4 guard does not.
 +// PCA re-seed compute_axis restarts the power iteration at the largest-variance coordinate when the norm is zero.
 +// Q5 centre   bc6h_setup aims each channel at the centre of its half code's decode range, not at the bottom edge.
-+// astra #4    bc6h_enc_1p and _refine_2p refit endpoints at the decoder's weights table[q] / 64, not q / (levels - 1).
++// astra #4    bc6h_enc_1p and bc6h_refine_2p refit endpoints at the decoder's table[q] / 64, not q / (levels - 1).
 +// Q2 pair     bc6h_enc_1p and bc6h_refine_2p try a bracketing pair for a region the first quantisation collapsed.
 +// Q1 refine   bc6h_refine_2p refits each pass from the previous pass's indices, as bc6h_enc_1p does.
 +// Q4 gate     bc6h_test_mode admits mode 2 or 6 when the widest channel fits twice the window and the next fits one.
 +// Q6 floor    bc6h_setup floors a texel's luminance at 2^-12 of the peak (and 1e-6) in the peak gate's geometric mean.
-+// astra #6    at the slow levels bc6h_test_mode tries the widened variant with the lowest bound, if below the widest's.
++// astra #6    slow levels: bc6h_test_mode runs the widest variant and also the lowest-bound widened one, if lower.
 +// astra #5    bc6h_peak_retry lifts a texel below half 0.25 to 2^-12 of its largest channel as a subnormal half code.
 +// Q3 top-N    at the slow levels bc6h_enc_2p_list refines the Q3_N lowest-error partitions, not only the lowest.
 +// S4 guard    best_err starts at the finite 1e30f, not 1e99, and bc6h_mode_cannot_win prunes only once it is below it.

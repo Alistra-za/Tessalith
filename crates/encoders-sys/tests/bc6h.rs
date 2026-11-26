@@ -1270,11 +1270,10 @@ fn texels_of(planes: &[[u16; 16]; 3]) -> [[u16; 4]; 16] {
 }
 
 /// The refit witnesses' seeded blocks (`search_refit_witnesses`): odd `i` is `two_cluster(i / 2)`; even `i` is a
-/// one-region ramp with clustered texels, like
-/// the audit's grey block (four texels at half code 46, eight at 1038, four at 15918): 1 to 6 texels at the low end, 1
-/// to 6 at the high end and the rest 2/64 to 62/64 of the way along, in a shuffled texel order, with up to 16 half
-/// codes of noise. One ramp in two is grey (R = G = B); the others give each channel its own ends (low end 0..=0x2000,
-/// span 512..=0x4000). Integer arithmetic only.
+/// one-region ramp with clustered texels, like the audit's grey block (four texels at half code 46, eight at 1038, four
+/// at 15918): 1 to 6 texels at the low end, 1 to 6 at the high end and the rest 2/64 to 62/64 of the way along, in a
+/// shuffled texel order, with up to 16 half codes of noise. One ramp in two is grey (R = G = B); the others give each
+/// channel its own ends (low end 0..=0x2000, span 512..=0x4000). Integer arithmetic only.
 fn refit_blocks(i: u32) -> [[u16; 4]; 16] {
     if i % 2 == 1 {
         return two_cluster(i / 2);
@@ -1883,8 +1882,7 @@ const COLLAPSED_WITNESSES: &[(u32, Bc6hLevel, CollapseKind)] = &[
 /// The pair is oriented: where two source-varying channels run against each other in the region (a negative source
 /// covariance, the falling channel of an odd `OneRegionRamp` against the two rising ones), their decoded covariance
 /// over the region is negative too. A componentwise low-to-high pair would make it positive. Skipped on an Intel CPU,
-/// like
-/// the pins: the witnesses were selected on the Ryzen's output (Note JC).
+/// like the pins: the witnesses were selected on the Ryzen's output (Note JC).
 #[test]
 fn collapsed_regions_take_a_bracketing_pair() {
     if encoders_sys::skip_byte_pins() {

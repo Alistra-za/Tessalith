@@ -312,33 +312,31 @@ Q5: `bc6h_setup` converts each half code h to the UF16 target `(h + 0.5) / 31 * 
 targets). Test: `constant_blocks_decode_to_their_half_code`. It changes BC6H bytes at all six levels on SSE2, AVX2 and
 AVX-512 (the 18 pins, `identity.json` `hdr_sky` and every measured image).
 astra #4: the least-squares refit of `bc6h_enc_1p` and `bc6h_refine_2p` (`bc6h_enc_2p_list`'s refine passes before Q3
-moved them there) calls a BC6H-only fork,
-`bc6h_opt_endpoints`, that fits index q at the decoder's weight `table[q] / 64` (`get_unquant_table`) instead of
-`q / (levels - 1)`, with the determinant from the exact integer form `n * Sww - Sw * Sw` (a zero determinant flattens
-to the mean, as before); upstream's `opt_endpoints` is unchanged and only BC7 calls it, so in this build it is no
-longer called. Test: `refit_uses_the_decoder_weights`. It changes BC6H bytes at Fast, Basic, Slow, Veryslow and
-VeryslowPeak on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json` `hdr_sky` and every measured image at those
-levels); Veryfast, which has no refit, keeps its bytes.
+moved them there) calls a BC6H-only fork, `bc6h_opt_endpoints`, that fits index q at the decoder's weight
+`table[q] / 64` (`get_unquant_table`) instead of `q / (levels - 1)`, with the determinant from the exact integer form
+`n * Sww - Sw * Sw` (a zero determinant flattens to the mean, as before); upstream's `opt_endpoints` is unchanged and
+only BC7 calls it, so in this build it is no longer called. Test: `refit_uses_the_decoder_weights`. It changes BC6H
+bytes at Fast, Basic, Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (15 of the 18 pins, `identity.json`
+`hdr_sky` and every measured image at those levels); Veryfast, which has no refit, keeps its bytes.
 Q2: `bc6h_enc_1p` (its first quantisation) and `bc6h_refine_2p` (in `bc6h_enc_2p_list`, for each kept candidate since
-Q3: the chosen partition's first quantisation before it) hand the
-candidate to `bc6h_bracket_collapsed`; the refine passes then refit from the indices it kept and are not bracketed
-themselves. For a region whose two endpoints share one code in every channel, it gives each channel that varies in the
-region the largest code that rebuilds at or below the region's minimum and the smallest at or above its maximum (in the
-other order for a channel whose covariance with the region's widest channel is negative), clamped to `qbounds`, and
-keeps the pair when the whole block's error, peak guard included, is lower. Test:
-`collapsed_regions_take_a_bracketing_pair`. It changes BC6H bytes at all six levels on SSE2, AVX2 and AVX-512: of the
-pins only SSE2 Fast's, and `identity.json` `hdr_sky` not; every measured image at Fast and slower but one at Basic; at
-Veryfast 11 or 12 of the 18 `hdr_real` images and 2 or 3 of the 4 `hdr_grad` ones, by path. Bracketing every refine
-pass as well was measured and not kept: the same quality at 1.049 of the time against 1.018 in total.
+Q3: the chosen partition's first quantisation before it) hand the candidate to `bc6h_bracket_collapsed`; the refine
+passes then refit from the indices it kept and are not bracketed themselves. For a region whose two endpoints share one
+code in every channel, it gives each channel that varies in the region the largest code that rebuilds at or below the
+region's minimum and the smallest at or above its maximum (in the other order for a channel whose covariance with the
+region's widest channel is negative), clamped to `qbounds`, and keeps the pair when the whole block's error, peak guard
+included, is lower. Test: `collapsed_regions_take_a_bracketing_pair`. It changes BC6H bytes at all six levels on SSE2,
+AVX2 and AVX-512: of the pins only SSE2 Fast's, and `identity.json` `hdr_sky` not; every measured image at Fast and
+slower but one at Basic; at Veryfast 11 or 12 of the 18 `hdr_real` images and 2 or 3 of the 4 `hdr_grad` ones, by path.
+Bracketing every refine pass as well was measured and not kept: the same quality at 1.049 of the time against 1.018 in
+total.
 Q1: `bc6h_refine_2p` (`bc6h_enc_2p_list`'s refine passes before Q3) keeps a working index block `cur_qblock`, which
-starts as the ranked partition's indices (after
-Q2's bracket) and becomes each refine pass's indices whether or not the pass won, so the next pass refits from the last
-pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the best's indices again (a failed pass repeated
-exactly); the best `(qep, qblock, err)` is updated only on a lower error, and the block is packed once after the loop.
-Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at Basic, Slow, Veryslow and VeryslowPeak on SSE2,
-AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18 `hdr_real` images and 3 of the 4 `hdr_grad`
-ones at those levels); Veryfast has no two-region refine pass and Fast has one, with no earlier pass to refit from, so
-both keep their bytes (profiles: 2 passes at Basic and slower).
+starts as the ranked partition's indices (after Q2's bracket) and becomes each refine pass's indices whether or not the
+pass won, so the next pass refits from the last pass, as `bc6h_enc_1p` does since patch 0004, and no longer from the
+best's indices again (a failed pass repeated exactly); the best `(qep, qblock, err)` is updated only on a lower error,
+and the block is packed once after the loop. Test: `two_region_refine_keeps_its_best_pass`. It changes BC6H bytes at
+Basic, Slow, Veryslow and VeryslowPeak on SSE2, AVX2 and AVX-512 (none of the 18 pins; `identity.json` `hdr_sky`, all 18
+`hdr_real` images and 3 of the 4 `hdr_grad` ones at those levels); Veryfast has no two-region refine pass and Fast has
+one, with no earlier pass to refit from, so both keep their bytes (profiles: 2 passes at Basic and slower).
 Q4: `bc6h_test_mode` gates mode 2 and 6 (the modes that double the widest channel's window) on
 `max_span * margin > 2 * span` for the widest channel and `second_span * margin > span` for the next widest, instead of
 on the widest against `span`, so a block with R span 6000 and G, B 2000 reaches mode 6 (window 7372.6) at Fast and
