@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
   Engine profiling runner (plan 2026-11-21-engine-profile, Task 4). One attempt per call. Nothing in this script
-  deletes, empties, moves or overwrites a file or folder (EP-R3), with ONE exception: -PruneOutputs (EP-O4)
-  deletes the .dds outputs an accepted attempt hashed, and records that in its meta.json (the original kept as
-  meta.before-prune.json). Every folder is created new (the create fails when it exists) and every other file it
-  writes is created new. Old runs are removed by hand.
+  deletes, empties, moves or overwrites a file or folder (EP-R3), with ONE exception: -PruneOutputs (EP-O5,
+  which amends EP-R3) deletes the .dds outputs an accepted attempt hashed, and replaces that attempt's meta.json
+  with a copy that records the prune (the original is kept as meta.before-prune.json, created new). Every folder
+  is created new (the create fails when it exists), and every file it writes is created new, except that one
+  meta.json replace. Old runs are removed by hand.
 
 .DESCRIPTION
   Four parameter sets, each with only its own parameters (PowerShell rejects a mix).
@@ -22,11 +23,13 @@
              Dry run of the base build into a new empty folder under RunRoot with frozen APPDATA. Writes, each
              created new: expected-<Label>.txt, planned-not-written-<Label>.txt, expected-<Label>-events.txt.
   Prune:     -PruneOutputs -RunRoot <folder> -Attempt <attempt name> -Reference <attempt name> [-Keep <names>]
-             EP-O4: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
-             equals the reference attempt's. Refused for the reference itself, a name in -Keep, an attempt that did
-             not finish with exit 0, one already pruned, an empty reference, a .dds on disk that hashes.csv lacks
-             (or the reverse), and an out tree holding a junction or link. Before deleting, meta.json is copied to
-             meta.before-prune.json (created new) and gains a "prune" block (reference, files, bytes, time).
+             EP-O5: deletes the attempt's .dds files under <attempt>\out, and nothing else, once its hashes.csv
+             equals the reference attempt's. The reference must be a base-build attempt of the same corpus that
+             finished with exit 0. Refused for any base-build attempt (a corpus reference is kept whole), the
+             reference itself, a name in -Keep, an attempt that did not finish with exit 0, one already pruned, an
+             empty reference, a .dds on disk that hashes.csv lacks (or the reverse), and an out tree holding a
+             junction or link. Before deleting, meta.json is copied to meta.before-prune.json (created new) and
+             replaced by a copy with a "prune" block (reference, files, bytes, time).
   SelfTest:  -SelfTest [-RunRoot <folder>]   Works under a new folder <RunRoot or temp>\selftest-<stamp>, which
              it leaves in place.
 
@@ -161,7 +164,7 @@ function Get-CopyFromProblem([string]$runRoot, [string]$name, [string]$corpus, [
     if ((Get-Prop (Get-Prop $m 'contention') 'contaminated') -ne $false) { return 'is contaminated or has no contention verdict' }
     if (-not [string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase')) { return 'is of another corpus' }
     if ((Get-Prop $m 'exeSha256') -ne $exeSha) { return 'was run with another exe' }
-    if (Get-Prop $m 'prune') { return 'was pruned: its DDS outputs are deleted (EP-O4)' }
+    if (Get-Prop $m 'prune') { return 'was pruned: its DDS outputs are deleted (EP-O5)' }
     $null
 }
 
@@ -186,7 +189,8 @@ function Get-ColdStamp([string]$runRoot, [datetime]$now, [string]$corpus) {
         $age = ($now - $t).TotalMinutes
         if ($age -lt 0 -or $age -ge 15 -or $used.ContainsKey($f.Name)) { continue }
         if ($kind -eq 'evict') {
-            $s = Read-Json $f.FullName
+            try { $s = Read-Json $f.FullName }
+            catch { Write-Warning "skipped the unreadable cold stamp $($f.Name): $($_.Exception.Message)"; continue }
             if ((Get-Prop $s 'method') -ne 'per-file-no-buffering' -or (Get-Prop $s 'corpusKind') -ne 'folder') { continue }
             if (-not [string]::Equals(([string](Get-Prop $s 'corpus')).TrimEnd('\'), $corpus.TrimEnd('\'), 'OrdinalIgnoreCase')) { continue }
         }
@@ -472,6 +476,21 @@ function Invoke-SelfTest {
         $v = Get-ColdVerdict $e1.Dir $e1.Stamp (& $disk 'n/a (Z: has no physical-disk counter)' 0) (& $disk 'n/a (Z: has no physical-disk counter)' 0)
         (-not $v.cold) -and $v.reason -like '*no physical-disk counter*'
     }
+    Case 'cold verdict: Get-DiskFigure''s own objects, a drive with and without a counter' {
+        $raw0 = @([pscustomobject]@{ name = '2 F:'; read = [uint64]1000; write = [uint64]0 })
+        $raw1 = @([pscustomobject]@{ name = '2 F:'; read = [uint64]1950; write = [uint64]0 })
+        $yes = Get-ColdVerdict $e1.Dir $e1.Stamp (Get-DiskFigure $raw0 'F:\corpus\one') (Get-DiskFigure $raw1 'F:\corpus\one')
+        $no = Get-ColdVerdict $e1.Dir $e1.Stamp (Get-DiskFigure $raw0 'Q:\corpus') (Get-DiskFigure $raw1 'Q:\corpus')
+        $yes.cold -and $yes.diskReadBytes -eq 950 -and (-not $no.cold) -and $no.reason -like '*no physical-disk counter*'
+    }
+    Case 'a malformed evict stamp is skipped with a warning; an older good stamp is still found' {
+        $bad = New-EvictDir 'evict-malformed' 2 $corpus 'folder'
+        Write-NewFile (Join-Path $bad.Dir (& $evictName 1)) '{ not json'
+        $o = @(Get-ColdStamp $bad.Dir $now $corpus 3>&1)
+        $warn = @($o | Where-Object { $_ -is [Management.Automation.WarningRecord] })
+        $got = @($o | Where-Object { $_ -is [string] })
+        $got.Count -eq 1 -and $got[0] -eq $bad.Stamp -and $warn.Count -eq 1 -and "$($warn[0])" -like '*unreadable cold stamp*'
+    }
     Case 'cold verdict: a purge stamp records the method and no cold flag (the byte check is not applied)' {
         $v = Get-ColdVerdict $c3 $okStamp (& $disk '1 F:' 0) (& $disk '1 F:' 0)
         $v.method -eq 'standby-purge' -and -not $v.Contains('cold') -and $v.check -like 'not applied*'
@@ -523,7 +542,7 @@ function Invoke-SelfTest {
         $text.Contains('validate = [bool]$A.Validate') -and $text.Contains('Validate = [bool]$Validate')
     }
 
-    # prune (EP-O4): only an accepted attempt's hashed .dds files go, and every refusal deletes nothing
+    # prune (EP-O5): only an accepted attempt's hashed .dds files go, and every refusal deletes nothing
     $pr = Join-Path $t 'prune'; New-NewDir $pr
     $rowsAB = @('textures/a.dds,aaa', 'textures/b.dds,bbb')
     $attMeta = @{ cohort = 'warm-fresh'; finished = $true; exitCode = 0; corpus = $corpus; exeSha256 = $sha; build = 'release'; contention = @{ contaminated = $false } }
@@ -542,8 +561,11 @@ function Invoke-SelfTest {
         $d
     }
     $ab = @('textures/a.dds', 'textures/b.dds')
-    [void](New-PruneAttempt $pr 'ref' $attMeta $rowsAB $ab)
-    [void](New-PruneAttempt $pr 'ref-empty' $attMeta @() @())
+    $baseMeta = $attMeta.Clone(); $baseMeta['build'] = 'base'
+    [void](New-PruneAttempt $pr 'ref' $baseMeta $rowsAB $ab)
+    [void](New-PruneAttempt $pr 'ref-empty' $baseMeta @() @())
+    [void](New-PruneAttempt $pr 'ref-failed' ($baseMeta.Clone() | ForEach-Object { $_['exitCode'] = 1; $_ }) $rowsAB $ab)
+    [void](New-PruneAttempt $pr 'ref-other' ($baseMeta.Clone() | ForEach-Object { $_['corpus'] = 'F:\corpus\two'; $_ }) $rowsAB $ab)
     $att = New-PruneAttempt $pr 'att' $attMeta $rowsAB $ab
     [void](New-PruneAttempt $pr 'att-keep' $attMeta $rowsAB $ab)
     [void](New-PruneAttempt $pr 'att-nohash' $attMeta $null $ab)
@@ -563,6 +585,12 @@ function Invoke-SelfTest {
         ($msg -like $like) -and ((& $ddsLeft $name) -eq $before) -and $before -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $pr "$name\meta.before-prune.json"))
     }
     Case 'prune: the reference attempt itself is refused' { & $refusedIntact 'ref' 'ref' @() '*is the reference attempt*' }
+    Case 'prune: the base-build reference is refused even against a release sibling named as -Reference' {
+        & $refusedIntact 'ref' 'att-keep' @() '*is a base-build attempt*'
+    }
+    Case 'prune: a -Reference that is not a base-build attempt is refused' { & $refusedIntact 'att-diff' 'att-keep' @() '*is not a base-build attempt*' }
+    Case 'prune: a -Reference that did not finish with exit 0 is refused' { & $refusedIntact 'att-keep' 'ref-failed' @() '*reference ref-failed did not finish*' }
+    Case 'prune: a -Reference of another corpus is refused' { & $refusedIntact 'att-keep' 'ref-other' @() '*of another corpus*' }
     Case 'prune: an attempt in -Keep is refused' { & $refusedIntact 'att-keep' 'ref' @('other', 'ATT-KEEP') '*-Keep list*' }
     Case 'prune: an attempt without hashes.csv is refused' { & $refusedIntact 'att-nohash' 'ref' @() '*no hashes.csv*' }
     Case 'prune: hashes that differ from the reference are refused' { & $refusedIntact 'att-diff' 'ref' @() '*differs from the reference*' }
@@ -612,15 +640,40 @@ function Invoke-SelfTest {
         [void](Invoke-PruneOutputs $fr 'a-att' 'b-ref' @())
         ((Get-DirBytes (Join-Path $fa 'out')) -lt $before) -and ((Get-ExpectedBytesFigure $fr $corpus 'release' 0) -eq $before)
     }
-    Case 'the one file deletion in this script sits in Invoke-PruneOutputs and deletes files only' {
+    Case 'prune: hashes.csv written by the real writer (mixed case, nested, a comma) is read back and pruned' {
+        $wr = Join-Path $t 'prune-writer'; New-NewDir $wr
+        $names = @('Textures\Clutter\Cup.DDS', 'textures\a,b.dds', 'Textures\Sub Dir\deep\X.dds')
+        $made = @{}
+        foreach ($nm in 'w-ref', 'w-att') {
+            $m = if ($nm -eq 'w-ref') { $baseMeta } else { $attMeta }
+            $d = New-PruneAttempt $wr $nm $m $null @()
+            foreach ($k in $names) {
+                $p = Join-Path $d ('out\' + $k)
+                $pd = Split-Path -Parent $p
+                if (-not (Test-Path -LiteralPath $pd)) { New-Item -ItemType Directory -Path $pd | Out-Null }
+                Write-NewFile $p "dds $k"
+            }
+            $made[$nm] = Write-HashesCsv $d (Join-Path $d 'out')
+        }
+        $rows = Get-HashRows (Join-Path $wr 'w-att')
+        $keys = @($rows | ForEach-Object { Get-HashRowKey $_ }) -join '|'
+        $r = Invoke-PruneOutputs $wr 'w-att' 'w-ref' @()
+        $made['w-att'] -eq 3 -and $keys -eq 'textures/a,b.dds|textures/clutter/cup.dds|textures/sub dir/deep/x.dds' -and $r.Files -eq 3 -and
+        @([IO.Directory]::EnumerateFiles((Join-Path $wr 'w-att\out'), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 0 -and
+        @([IO.Directory]::EnumerateFiles((Join-Path $wr 'w-ref\out'), '*.dds', [IO.SearchOption]::AllDirectories)).Count -eq 3
+    }
+    Case 'the one file deletion and the one overwrite in this script sit in Invoke-PruneOutputs' {
         $text = [IO.File]::ReadAllText($PSCommandPath)
-        $del = 'Del' + 'ete('
         $start = $text.IndexOf('function Invoke-' + 'PruneOutputs(')
         $end = $text.IndexOf("`n# ----", $start)
         $body = $text.Substring($start, $end - $start)
-        $all = [regex]::Matches($text, [regex]::Escape($del)).Count
-        $inBody = [regex]::Matches($body, [regex]::Escape($del)).Count
-        $start -ge 0 -and $all -eq 1 -and $inBody -eq 1 -and $body.Contains('[IO.File]::' + $del) -and
+        $ok = $start -ge 0
+        foreach ($word in @(('::Del' + 'ete('), ('::Mo' + 've('))) {
+            $all = [regex]::Matches($text, [regex]::Escape($word)).Count
+            $inBody = [regex]::Matches($body, [regex]::Escape($word)).Count
+            if ($all -ne 1 -or $inBody -ne 1) { throw "$word occurs $all time(s), $inBody in the prune" }
+        }
+        $ok -and $body.Contains('[IO.File]::Del' + 'ete($f)') -and $body.Contains('[IO.File]::Mo' + 've($tmp, $metaPath, $true)') -and
         -not [regex]::IsMatch($text, '(?i)\[IO\.Directory\]::' + 'Del')
     }
     Case 'the script text has no delete, move, clear, mirror, purge or forced folder creation' {
@@ -693,6 +746,34 @@ function Get-BannedRunning($exempt) {
     $found
 }
 
+# The output key of a file under out: its path below out, forward slashes, lower case (output_key form). The one
+# key rule: hashes.csv is written with it and the prune maps the files on disk with it.
+function Get-OutputKey([string]$outRoot, [string]$path) {
+    $path.Substring($outRoot.Length).Replace('\', '/').ToLowerInvariant()
+}
+
+# Every .dds under out, with its output key.
+function Get-DdsEntries([string]$out) {
+    $outRoot = [IO.Path]::GetFullPath($out).TrimEnd('\') + '\'
+    foreach ($f in [IO.Directory]::EnumerateFiles($out, '*.dds', [IO.SearchOption]::AllDirectories)) {
+        [pscustomobject]@{ Key = (Get-OutputKey $outRoot ([IO.Path]::GetFullPath($f))); Path = $f }
+    }
+}
+
+# The key of a hashes.csv row ("<key>,<sha256>"; a key may hold a comma, the hash never does).
+function Get-HashRowKey([string]$row) { $row.Substring(0, $row.LastIndexOf(',')) }
+
+# Writes <attempt>\hashes.csv, created new: a header, then "<output key>,<sha256>" per .dds under out, sorted
+# ordinally. Returns the file count.
+function Write-HashesCsv([string]$attempt, [string]$out) {
+    $entries = @(Get-DdsEntries $out)
+    $rows = $entries | ForEach-Object -ThrottleLimit 4 -Parallel {
+        '{0},{1}' -f $_.Key, (Get-FileHash -LiteralPath $_.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    Write-NewFile (Join-Path $attempt 'hashes.csv') ("path,sha256`n" + (Join-Lines (Sort-Ordinal $rows)))
+    $entries.Count
+}
+
 function Get-DirBytes([string]$dir) {
     $n = [int64]0
     foreach ($f in [IO.Directory]::EnumerateFiles($dir, '*', [IO.SearchOption]::AllDirectories)) { $n += ([IO.FileInfo]$f).Length }
@@ -709,7 +790,7 @@ function Get-ExpectedBytesFigure([string]$runRoot, [string]$corpus, [string]$bui
         if (-not (Test-Path -LiteralPath $mp) -or -not (Test-Path -LiteralPath $out)) { continue }
         $m = Read-Json $mp
         if ([string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase') -and (Get-Prop $m 'build') -eq $build -and (Get-Prop $m 'exitCode') -eq 0) {
-            # A pruned attempt's out lost its DDS files: add back the bytes the prune recorded (EP-O4).
+            # A pruned attempt's out lost its DDS files: add back the bytes the prune recorded (EP-O5).
             return ((Get-DirBytes $out) + [int64](Get-Prop (Get-Prop $m 'prune') 'bytes'))
         }
     }
@@ -1156,15 +1237,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         if ($A.Samply) { $meta['samply'] = 'recorded' }
 
         # outputs: hashes in output_key form, and for noop the file lists after
-        $outRoot = [IO.Path]::GetFullPath($out).TrimEnd('\') + '\'
-        $files = @([IO.Directory]::EnumerateFiles($out, '*.dds', [IO.SearchOption]::AllDirectories))
-        $hashRows = $files | ForEach-Object -ThrottleLimit 4 -Parallel {
-            $prefix = $using:outRoot
-            $key = $_.Substring($prefix.Length).Replace('\', '/').ToLowerInvariant()
-            '{0},{1}' -f $key, (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
-        }
-        Write-NewFile (Join-Path $attempt 'hashes.csv') ("path,sha256`n" + (Join-Lines (Sort-Ordinal $hashRows)))
-        $meta['ddsFiles'] = $files.Count
+        $meta['ddsFiles'] = Write-HashesCsv $attempt $out
         if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-after.csv') ("path,size,mtime_utc_ticks`n" + (Join-Lines (Get-FileList $out))) }
 
         Write-NewJson (Join-Path $A.RunRoot "last-run-$name.json") ([ordered]@{
@@ -1187,7 +1260,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     }
 }
 
-# ---------------------------------------------------------------- prune (EP-O4)
+# ---------------------------------------------------------------- prune (EP-O5)
 
 # Reason a name is not an attempt folder directly in RunRoot, or $null (the -CopyFrom name rule).
 function Get-AttemptDirProblem([string]$runRoot, [string]$name) {
@@ -1207,10 +1280,12 @@ function Get-HashRows([string]$dir) {
     , @([IO.File]::ReadAllLines($p) | Select-Object -Skip 1 | Where-Object { $_ })
 }
 
-# EP-O4 (amends EP-R3): the ONLY deletion in this script. Deletes exactly the .dds files the attempt's hashes.csv
-# lists, under <attempt>\out, once that list equals the reference attempt's. meta.json is copied to
-# meta.before-prune.json (created new: also the "already pruned" lock) and gains a prune block before anything
-# is deleted. Throws "refused: ..." and deletes nothing on any problem.
+# EP-O5 (amends EP-R3): the ONLY deletion in this script. Deletes exactly the .dds files the attempt's hashes.csv
+# lists, under <attempt>\out, once that list equals the reference attempt's. A corpus reference is protected by
+# what it is, not only by the arguments: no base-build attempt is ever pruned, and -Reference must be a finished
+# base-build attempt of the same corpus. meta.json is copied to meta.before-prune.json (created new: also the
+# "already pruned" lock) and replaced by a copy with a prune block before anything is deleted. Throws
+# "refused: ..." and deletes nothing on any problem.
 function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$reference, [string[]]$keep) {
     foreach ($n in @($attempt, $reference)) {
         $why = Get-AttemptDirProblem $runRoot $n
@@ -1224,8 +1299,18 @@ function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$refere
     if (-not (Test-Path -LiteralPath $metaPath -PathType Leaf)) { throw "refused: $attempt has no meta.json" }
     if (Test-Path -LiteralPath $backup) { throw "refused: $attempt was already pruned (meta.before-prune.json exists)" }
     $meta = Read-Json $metaPath
+    if ((Get-Prop $meta 'build') -eq 'base') { throw "refused: $attempt is a base-build attempt (a corpus reference is kept whole, EP-O5)" }
     if (Get-Prop $meta 'prune') { throw "refused: $attempt was already pruned" }
     if ((Get-Prop $meta 'finished') -ne $true -or (Get-Prop $meta 'exitCode') -ne 0) { throw "refused: $attempt did not finish with exit code 0" }
+    $refMetaPath = Join-Path (Join-Path $runRoot $reference) 'meta.json'
+    if (-not (Test-Path -LiteralPath $refMetaPath -PathType Leaf)) { throw "refused: the reference $reference has no meta.json" }
+    $refMeta = Read-Json $refMetaPath
+    if ((Get-Prop $refMeta 'build') -ne 'base') { throw "refused: the reference $reference is not a base-build attempt (build $(Get-Prop $refMeta 'build'))" }
+    if ((Get-Prop $refMeta 'finished') -ne $true -or (Get-Prop $refMeta 'exitCode') -ne 0) { throw "refused: the reference $reference did not finish with exit code 0" }
+    $corpusOf = { param($m) ([string](Get-Prop $m 'corpus')).TrimEnd('\') }
+    if (-not (& $corpusOf $meta) -or -not [string]::Equals((& $corpusOf $meta), (& $corpusOf $refMeta), 'OrdinalIgnoreCase')) {
+        throw "refused: the reference $reference is of another corpus ($(& $corpusOf $refMeta), not $(& $corpusOf $meta))"
+    }
     $rows = Get-HashRows $dir
     if ($null -eq $rows) { throw "refused: $attempt has no hashes.csv" }
     $refRows = Get-HashRows (Join-Path $runRoot $reference)
@@ -1243,12 +1328,9 @@ function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$refere
     if ($outItem.LinkType -or ($outItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "refused: $attempt\out is a junction or link" }
     $links = @(Get-ChildItem -LiteralPath $out -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop)
     if ($links.Count) { throw "refused: $attempt\out holds a junction or link ($($links[0].FullName))" }
-    $outRoot = [IO.Path]::GetFullPath($out).TrimEnd('\') + '\'
     $onDisk = @{}
-    foreach ($f in [IO.Directory]::EnumerateFiles($out, '*.dds', [IO.SearchOption]::AllDirectories)) {
-        $onDisk[$f.Substring($outRoot.Length).Replace('\', '/').ToLowerInvariant()] = $f
-    }
-    $keys = @($rows | ForEach-Object { $_.Substring(0, $_.LastIndexOf(',')) })
+    foreach ($e in Get-DdsEntries $out) { $onDisk[$e.Key] = $e.Path }
+    $keys = @($rows | ForEach-Object { Get-HashRowKey $_ })
     $missing = @($keys | Where-Object { -not $onDisk.ContainsKey($_) })
     if ($missing.Count) { throw "refused: $($missing.Count) hashed file(s) are not on disk, e.g. $($missing[0])" }
     if ($onDisk.Count -ne $keys.Count) { throw "refused: $($onDisk.Count - $keys.Count) .dds file(s) under out are not in hashes.csv" }

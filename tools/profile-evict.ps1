@@ -94,19 +94,21 @@ function Invoke-EvictFiles([string[]]$files, [uint32]$flags) {
     $bytes = [int64]0
     $failed = New-Object System.Collections.Generic.List[string]
     foreach ($f in $files) {
-        try { $bytes += ([IO.FileInfo]$f).Length } catch { }
         $err = [NoBufferEvict]::Touch($f, $flags)
-        if ($err) { $failed.Add("$f`t$err") }
+        if ($err) { $failed.Add("$f`t$err"); continue }
+        try { $bytes += ([IO.FileInfo]$f).Length }
+        catch { $failed.Add("$f`tsize: $($_.Exception.Message)") }
     }
     [pscustomobject]@{ Files = $files.Count; Bytes = $bytes; Failed = $failed.ToArray() }
 }
 
 # Evicts the corpus and writes the stamp. Returns the stamp path; throws, with no stamp, on any failure.
-function Invoke-Evict([string]$runRoot, [string]$corpus, [uint32]$flags) {
+# $stampTime is a self-test seam (two stamps in one second); the script passes none.
+function Invoke-Evict([string]$runRoot, [string]$corpus, [uint32]$flags, $stampTime = $null) {
+    $runRoot = [IO.Path]::GetFullPath($runRoot).TrimEnd('\')   # normalised before the check, as profile-run.ps1 does
     $why = Get-RunRootProblem $runRoot (Get-ProtectedList)
     if ($why) { throw "refused: RunRoot $runRoot $why" }
     if (-not (Test-Path -LiteralPath $runRoot -PathType Container)) { throw "RunRoot does not exist: $runRoot (the runner creates it; pass the same folder)" }
-    $runRoot = [IO.Path]::GetFullPath($runRoot)
     $corpus = [IO.Path]::GetFullPath($corpus).TrimEnd('\')
     $c = Get-CorpusFiles $corpus
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -115,7 +117,7 @@ function Invoke-Evict([string]$runRoot, [string]$corpus, [uint32]$flags) {
     if ($r.Failed.Count) {
         throw ("{0} of {1} file(s) could not be evicted, no stamp written; first: {2}" -f $r.Failed.Count, $r.Files, $r.Failed[0])
     }
-    $stamp = Get-Date
+    $stamp = if ($null -ne $stampTime) { [datetime]$stampTime } else { Get-Date }
     $path = Join-Path $runRoot ('evict-' + $stamp.ToString('yyyyMMdd-HHmmss') + '.json')
     $json = [ordered]@{
         stamp = $stamp.ToString('o'); method = 'per-file-no-buffering'; corpus = $corpus; corpusKind = $c.Kind
@@ -173,22 +175,47 @@ function Invoke-SelfTest {
         'read after the eviction: {0:N0} disk bytes' -f $cold
         Case 'the hot read came from the cache (under 25 % of the file from disk; else the disk was busy, rerun)' { $hot -lt 0.25 * $size }
         Case 'the read after the eviction came from disk (at least 90 % of the file)' { $cold -ge 0.9 * $size }
-        Case 'a second stamp in the same second is not overwritten' {
-            $p = $script:stampPath
+        Case 'a second Invoke-Evict in the same second fails and the first stamp is unchanged' {
+            $rr = Join-Path $t 'rr-twice'
+            New-Item -ItemType Directory -Path $rr | Out-Null
+            $when = Get-Date
+            $first = Invoke-Evict $rr $corpusDir $NoBufferingFlag $when
+            $before = (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash
             $threw = $false
-            try { Write-NewText $p 'x' } catch { $threw = $true }
-            $threw -and (Get-Content -LiteralPath $p -Raw).Contains('per-file-no-buffering')
+            try { [void](Invoke-Evict $rr $corpusDir $NoBufferingFlag $when) } catch { $threw = $true }
+            $threw -and (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -eq $before -and @(Get-ChildItem -LiteralPath $rr -Filter 'evict-*.json').Count -eq 1
         }
-        Case 'a list file corpus is evicted, with relative paths refused' {
+        Case 'a list file corpus is evicted by Invoke-Evict into a list stamp, with relative paths refused' {
+            $rr = Join-Path $t 'rr-list'
+            New-Item -ItemType Directory -Path $rr | Out-Null
             $list = Join-Path $t 'list.txt'
             Write-NewText $list ($big + "`n`n")
-            $c = Get-CorpusFiles $list
+            $p = Invoke-Evict $rr $list $NoBufferingFlag
+            $s = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
             $rel = Join-Path $t 'rel.txt'
             Write-NewText $rel "corpus\big.bin`n"
             $threw = $false
-            try { [void](Get-CorpusFiles $rel) } catch { $threw = $true }
-            $r = Invoke-EvictFiles $c.Files $NoBufferingFlag
-            $c.Kind -eq 'list' -and $r.Files -eq 1 -and $r.Failed.Count -eq 0 -and $threw
+            try { [void](Invoke-Evict $rr $rel $NoBufferingFlag) } catch { $threw = $_.Exception.Message -like '*relative paths*' }
+            $s.corpusKind -eq 'list' -and $s.files -eq 1 -and $s.bytes -eq $size -and $s.corpus -eq [IO.Path]::GetFullPath($list) -and $threw -and
+            @(Get-ChildItem -LiteralPath $rr -Filter 'evict-*.json').Count -eq 1
+        }
+        Case 'a relative RunRoot is normalised before the protected-path check' {
+            $cwd = [Environment]::CurrentDirectory   # GetFullPath resolves against the process directory
+            [Environment]::CurrentDirectory = $t
+            try { $p = Invoke-Evict 'rr-list\..\rr-rel' $corpusDir $NoBufferingFlag } catch { $p = $_.Exception.Message } finally { [Environment]::CurrentDirectory = $cwd }
+            # rr-rel does not exist: the refusal names the full, normalised path
+            "$p" -like "*RunRoot does not exist: $(Join-Path $t 'rr-rel')*"
+        }
+        Case 'the script deletes nothing but its self-test file, in one place' {
+            $text = [IO.File]::ReadAllText($PSCommandPath)
+            $words = @(('Remove' + '-Item'), ('Move' + '-Item'), ('Clear' + '-Content'), ('::Mo' + 've('), ('[IO.Directory]::Del' + 'ete'))
+            $hit = @($words | Where-Object { $text.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+            if ($hit.Count) { throw ('found: ' + ($hit -join ', ')) }
+            $del = '::Del' + 'ete('
+            $start = $text.IndexOf('function Invoke-' + 'SelfTest')
+            $all = [regex]::Matches($text, [regex]::Escape($del)).Count
+            $inTest = [regex]::Matches($text.Substring($start), [regex]::Escape($del)).Count
+            $all -eq 1 -and $inTest -eq 1 -and $text.Contains('[IO.File]::Del' + 'ete($big)')
         }
         Case 'a corpus file that cannot be opened means no stamp' {
             $rr = Join-Path $t 'rr-missing'
