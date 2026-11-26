@@ -652,12 +652,13 @@ pub fn process_file(
         input: job.input.clone(),
         subtype: p.subtype.id().into(),
         format: p.format.id().into(),
-        // The serde name (Note LH4 removed the generic `serde_id`); profiling only, so the allocation is off the
-        // plain path.
+        // The serde name (Note LH4 removed the generic `serde_id`; `AlphaPolicy` has no `id`); profiling only, so the
+        // allocation is off the plain path.
         alpha_policy: serde_json::to_value(p.alpha.policy)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_owned))
-            .unwrap_or_default(),
+            .expect("unit enum serialises as a string")
+            .as_str()
+            .expect("unit enum serialises as a string")
+            .to_owned(),
         packed: job.pack.is_some(),
         baked: job.bake.is_some(),
         width,

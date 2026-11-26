@@ -4680,7 +4680,6 @@ mod tests {
     use super::*;
     use crate::manifest::ENGINE_VERSION;
 
-    /// DECISIONS DS7: admission counts a cube DDS as the 6w x h strip it loads as, in both header forms.
     #[test]
     fn empty_candidate_has_no_profile_input() {
         let recorder = profile::Recorder::new();
@@ -4694,6 +4693,7 @@ mod tests {
         assert!(recorder.report("empty", vec![]).inputs.is_empty());
     }
 
+    /// DECISIONS DS7: admission counts a cube DDS as the 6w x h strip it loads as, in both header forms.
     #[test]
     fn cube_dds_input_dims_are_the_loaded_strip() {
         use crate::dds::{dds_bytes_cube, DdsDesc, ResolvedHeader};

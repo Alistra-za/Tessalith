@@ -4,7 +4,7 @@ pub mod profile_fixture;
 use engine::api::{BatchRequest, BatchSummary, CancelToken, Engine, OnExisting, Plan};
 use engine::config::Target;
 use engine::events::{Reporter, VecSink};
-use engine::manifest::output_key;
+use engine::manifest::{output_key, Manifest};
 use engine::policy::{AcceptSuggestions, JobStatus};
 use engine::profile::{call_of_batch, Call, CallKind, Recorder, Report, Stage};
 use std::collections::{BTreeMap, BTreeSet};
@@ -195,6 +195,7 @@ pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
         planned.keys().collect()
     );
     assert_eq!(r.jobs.len(), planned.len());
+    let records = Manifest::at(out).read().unwrap();
     for job in &r.jobs {
         let files: Vec<_> = spans(r, Stage::File).filter(|s| s.1 == job.id).collect();
         assert_eq!(files.len(), 1, "File for {}", job.output);
@@ -210,12 +211,21 @@ pub fn check_spans(r: &Report, out: &Path, planned: &Facts) {
             Stage::Quantize,
             Stage::Encode,
             Stage::DdsAssemble,
-            Stage::Validate,
             Stage::Write,
             Stage::ManifestAppend,
         ] {
             assert!(has(stage), "{} missing {stage:?}", job.output);
         }
+        // Validation is opt-in (Note LG1): a Validate span exactly when the record's summary says it ran.
+        let validation = &records[&job.output].raw["validation"];
+        assert!(validation.is_object(), "{} has no validation", job.output);
+        let validated = validation["skipped"] != true;
+        assert_eq!(
+            has(Stage::Validate),
+            validated,
+            "{} Validate span, validated {validated}",
+            job.output
+        );
         for (name, stage) in [
             ("crate_rmaos.dds", Stage::BakeLoad),
             ("leaf.dds", Stage::Dilate),
