@@ -7,16 +7,16 @@ mod rgbcx;
 mod target;
 
 pub use bc6h::*;
-#[cfg(feature = "test-hooks")]
-pub use bc7::bc7e_level_flat_tolerance;
 pub use bc7::{
     bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
     bc7e_compress_blocks_tuned_on, Bc7FlatTolerance, Bc7Level, Bc7Params, Bc7Tune,
     BC7_FLAT_TOLERANCE_DATA, BC7_FLAT_TOLERANCE_DEFAULT,
 };
+#[cfg(feature = "test-hooks")]
+pub use bc7::{bc7e_compress_blocks_routed, bc7e_level_flat_tolerance};
 pub use rgbcx::*;
 #[cfg(feature = "test-hooks")]
-pub use target::{intel_cpu, skip_byte_pins};
+pub use target::{intel_cpu, skip_byte_pins, ShimRoute};
 pub use target::{ispc_target, IspcTarget};
 
 use std::sync::Once;

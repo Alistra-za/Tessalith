@@ -125,6 +125,31 @@ pub(crate) fn forced(target: IspcTarget) -> i32 {
     }
 }
 
+/// Test hook: how an encode reaches the shim. `Dispatcher` is ISPC's dispatcher whatever the CPU; `Direct(t)` is
+/// `t`'s own object, even when `t` is `best()`. The shim has no direct AVX-512 entry.
+#[cfg(feature = "test-hooks")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShimRoute {
+    Dispatcher,
+    Direct(IspcTarget),
+}
+
+/// -1 for `Dispatcher`; `t as i32` for `Direct(t)`. Panics for `Direct(Avx512)` and for a target the CPU cannot run.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn shim_number(route: ShimRoute) -> i32 {
+    match route {
+        ShimRoute::Dispatcher => -1,
+        ShimRoute::Direct(t) => {
+            assert!(t.supported(), "this CPU cannot run the {t:?} path");
+            assert!(
+                t != IspcTarget::Avx512,
+                "the shim has no direct AVX-512 entry"
+            );
+            t as i32
+        }
+    }
+}
+
 #[cfg(all(test, feature = "test-hooks"))]
 mod tests {
     use super::*;

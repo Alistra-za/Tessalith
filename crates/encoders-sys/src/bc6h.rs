@@ -1,4 +1,6 @@
 use crate::target::{forced, ispc_target, IspcTarget};
+#[cfg(feature = "test-hooks")]
+use crate::target::{shim_number, ShimRoute};
 use crate::{ffi, init};
 
 /// ISPC TC BC6H effort levels. The discriminants index `g_bc6` in the shim, which has no range check.
@@ -51,6 +53,31 @@ pub fn bc6h_compress_rows_on(
         target.supported(),
         "this CPU cannot run the {target:?} BC6H path"
     );
+    compress_rows(rgba_f16, width, rows, out, level, forced(target));
+}
+
+/// Test only. `bc6h_compress_rows` through `route`, whatever the CPU's best target is. `Direct(best())` re-runs that
+/// object's table init, so call it only while no other thread encodes.
+#[cfg(feature = "test-hooks")]
+pub fn bc6h_compress_rows_routed(
+    rgba_f16: &[[u16; 4]],
+    width: u32,
+    rows: u32,
+    out: &mut [u8],
+    level: Bc6hLevel,
+    route: ShimRoute,
+) {
+    compress_rows(rgba_f16, width, rows, out, level, shim_number(route));
+}
+
+fn compress_rows(
+    rgba_f16: &[[u16; 4]],
+    width: u32,
+    rows: u32,
+    out: &mut [u8],
+    level: Bc6hLevel,
+    shim: i32,
+) {
     assert!(
         width > 0 && width.is_multiple_of(4) && rows.is_multiple_of(4),
         "width and rows must be a multiple of 4"
@@ -83,7 +110,7 @@ pub fn bc6h_compress_rows_on(
     // forms in 32-bit `int` (`(yy * 4 + y) * stride`, `yy * width * data_size`) fit, by the
     // assert above; `out` holds `(width/4)*(rows/4)` 16-byte blocks, the number ISPC TC writes;
     // `level` comes from the closed `Bc6hLevel` enum (0..=5), which the shim indexes without a
-    // range check; `target` was checked above.
+    // range check; a forced `target` was checked by `bc6h_compress_rows_on` or `shim_number`.
     unsafe {
         ffi::sdc_bc6h_compress(
             rgba_f16.as_ptr() as *const u16,
@@ -92,7 +119,7 @@ pub fn bc6h_compress_rows_on(
             stride,
             out.as_mut_ptr(),
             level as i32,
-            forced(target),
+            shim,
         )
     };
 }

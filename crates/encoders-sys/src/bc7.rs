@@ -1,4 +1,6 @@
 use crate::target::{forced, ispc_target, IspcTarget};
+#[cfg(feature = "test-hooks")]
+use crate::target::{shim_number, ShimRoute};
 use crate::{ffi, init};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +50,18 @@ pub fn bc7e_compress_blocks_on(
     compress(pixels, out, p, forced(target));
 }
 
+/// Test only. `bc7e_compress_blocks` through `route`, whatever the CPU's best target is. `Direct(best())` re-runs that
+/// object's table init, so call it only while no other thread encodes.
+#[cfg(feature = "test-hooks")]
+pub fn bc7e_compress_blocks_routed(
+    pixels: &[[u8; 4]],
+    out: &mut [u8],
+    p: Bc7Params,
+    route: ShimRoute,
+) {
+    compress(pixels, out, p, shim_number(route));
+}
+
 fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     assert_eq!(pixels.len() % 16, 0, "pixels must hold whole 4x4 blocks");
     let n = pixels.len() / 16;
@@ -61,7 +75,7 @@ fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
     let mut dst = vec![0u64; n * 2];
     // SAFETY: `src` holds 16 * n texels and `dst` 2 * n u64 (16 bytes per block); `level` comes
     // from the closed `Bc7Level` enum (0..=7), which the shim indexes without a range check; a forced
-    // `target` was checked against the CPU by `bc7e_compress_blocks_on`.
+    // `target` was checked against the CPU by `bc7e_compress_blocks_on` or `shim_number`.
     unsafe {
         ffi::sdc_bc7e_compress(
             n as u32,
