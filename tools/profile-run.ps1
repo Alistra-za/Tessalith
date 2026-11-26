@@ -51,8 +51,14 @@
   hashes.csv, last-run-<attempt>.json, and for warm-noop files-before.csv and files-after.csv.
   -CopyFrom: warm-noop and warm-stale copy a finished, uncontaminated warm-fresh attempt's out (same RunRoot,
   same corpus and exe) with robocopy, timestamps kept; the source is never written.
-  -Calibrate: the first attempt of a session, on a fixture project; writes <RunRoot>\baseline.json. Later
-  attempts refuse to run without it.
+  -Calibrate: the first attempt of a session, on a fixture project. Before the command it samples the idle
+  machine for about 31 s and writes <RunRoot>\baseline.json from at least 30 samples covering at least 30 s (mean,
+  spread and maximum of other CPU and other I/O; EP-C14); with fewer, nothing is written. Later attempts refuse
+  to run without it, or with a baseline of fewer than 30 samples.
+  Contention (spec 7.6, EP-C14): a sampler thread in the runner snapshots every process once a second (see
+  Start-ContentionStream), so processes that start mid-attempt are seen, and the runner's own tree (sdc
+  included) is exempt by PID. contention.csv has one row per second; meta.json's contention block records the
+  sample-interval median and 95th percentile and the runner's own CPU.
   -DryRun: prints the quiet check, preconditions, the resolved command and folders; runs nothing.
   The script never elevates, downloads or installs anything. Cold attempts need a cold stamp under 15 minutes
   old that no earlier attempt used: an owner-run tools\profile-purge.ps1 stamp (purge-*.json), or a
@@ -554,6 +560,107 @@ function Invoke-SelfTest {
         $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 3010)) $base0 $false
         (-not $v.contaminated) -and $v.sampleGaps -eq 0
     }
+    Case 'contention: the verdict records the sample-interval median, 95th percentile and maximum' {
+        $iv = Get-IntervalStats @(1000, 2000, 3000, 4100, 5100, 7100 | ForEach-Object { & $mkRow $_ })
+        $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 3010)) $base0 $false
+        $iv.MedianMs -eq 1000 -and $iv.P95Ms -eq 2000 -and $iv.MaxMs -eq 2000 -and $v.sampleIntervalMedianMs -eq 1005 -and $v.sampleIntervalP95Ms -eq 1010
+    }
+
+    # EP-C14: the sampler sees processes started after it, exempts the measured tree by PID, keeps one row a second
+    Initialize-ContentionSampler
+    $busyExe = (Get-Process -Id $PID).Path
+    $startBusy = {
+        param($exe, [string[]]$argv)
+        $psi = New-Object Diagnostics.ProcessStartInfo $exe
+        foreach ($a in $argv) { $psi.ArgumentList.Add($a) }
+        $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+        [Diagnostics.Process]::Start($psi)
+    }
+    $busyArgs = @('-NoProfile', '-NonInteractive', '-Command', '$e = [DateTime]::UtcNow.AddSeconds(3); while ([DateTime]::UtcNow -lt $e) { }')
+    # Runs the sampler around $during (which returns the PIDs it started) and returns the rows and those PIDs.
+    $probe = {
+        param([int]$runnerPid, [scriptblock]$during)
+        $q = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
+        $ex = New-Object 'System.Collections.Concurrent.ConcurrentDictionary[int,bool]'
+        $s = New-Object ProfileContentionSampler($runnerPid, $ex, $q, [Diagnostics.Stopwatch]::StartNew(), [string[]]$BannedNames, [string[]]$SystemNames, [string]$TargetPathRx)
+        $s.Start()
+        Start-Sleep -Milliseconds 1500
+        $procs = @(& $during $ex)
+        foreach ($p in $procs) { [void]$p.WaitForExit(15000) }
+        Start-Sleep -Milliseconds 1300
+        $s.Stop()
+        if ($s.Error) { throw "sampler error: $($s.Error)" }
+        $rows = @(); $r = $null
+        while ($q.TryDequeue([ref]$r)) { $rows += $r }
+        [pscustomobject]@{ Rows = $rows; Pids = @($procs | ForEach-Object { $_.Id }) }
+    }
+    Case 'sampler: the snapshot names this process with its parent PID and CPU time' {
+        $snap = [ProfileContentionSampler]::Snapshot()
+        $me = @($snap | Where-Object Pid -eq $PID)[0]
+        $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
+        $cpu = (Get-Process -Id $PID).TotalProcessorTime.TotalSeconds
+        $me.ParentPid -eq $parent -and [ProfileContentionSampler]::NormalName($me.Name) -eq 'pwsh' -and [math]::Abs($me.CpuTicks / 1e7 - $cpu) -lt 2 -and
+        ([ProfileContentionSampler]::NormalName('Memory Compression') -eq 'memorycompression') -and $snap.Count -gt 20
+    }
+    $tgt = Join-Path $t 'cargo-target\release'
+    New-Item -ItemType Directory -Path $tgt | Out-Null
+    Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\PING.EXE') -Destination (Join-Path $tgt 'pingcopy.exe')
+    $late = & $probe -1 { param($ex) (& $startBusy $busyExe $busyArgs); (& $startBusy (Join-Path $tgt 'pingcopy.exe') @('-n', '3', '127.0.0.1')) }
+    Case 'sampler: a process that starts after the stream is seen in other, at about one core' {
+        $busy = $late.Pids[0]
+        $named = @($late.Rows | Where-Object { $_.top_other -like "pwsh($busy):*" })
+        $peak = ($late.Rows | Measure-Object other_cpu -Maximum).Maximum
+        $named.Count -ge 2 -and $peak -ge 0.6 -and (($late.Rows | Measure-Object exempt -Maximum).Maximum -eq 0)
+    }
+    Case 'sampler: a target-folder exe that starts after the stream is reported as banned' {
+        $ping = $late.Pids[1]
+        @($late.Rows | Where-Object { $_.banned -like "*pingcopy($ping)*" }).Count -ge 1 -and (Get-ContentionVerdict $late.Rows $base0 $false).reasons -like '*banned process appeared: pingcopy*'
+    }
+    Case 'sampler: one row a second (median 0.95-1.1 s, 95th percentile at most 1.5 s)' {
+        $iv = Get-IntervalStats $late.Rows
+        $late.Rows.Count -ge 5 -and $iv.MedianMs -ge 950 -and $iv.MedianMs -le 1100 -and $iv.P95Ms -le 1500
+    }
+    $tree = & $probe $PID { param($ex) & $startBusy $busyExe $busyArgs }
+    Case 'sampler: a child of the runner (sdc) started after the stream is exempt, not other' {
+        $peakEx = ($tree.Rows | Measure-Object exempt -Maximum).Maximum
+        $busy = $tree.Pids[0]
+        $peakEx -ge 0.6 -and -not @($tree.Rows | Where-Object { $_.top_other -like "pwsh($busy):*" }).Count -and
+        (($tree.Rows | Measure-Object runner -Maximum).Maximum -lt $peakEx)
+    }
+    $byPid = & $probe -1 { param($ex) $p = & $startBusy $busyExe $busyArgs; $ex[[int]$p.Id] = $true; $p }
+    Case 'sampler: a PID in the shared Exempt dictionary is exempt even outside the runner tree' {
+        $busy = $byPid.Pids[0]
+        (($byPid.Rows | Measure-Object exempt -Maximum).Maximum -ge 0.6) -and -not @($byPid.Rows | Where-Object { $_.top_other -like "pwsh($busy):*" }).Count
+    }
+
+    # EP-C14: calibration takes at least 30 samples over at least 30 s
+    $calRow = { param($ms, $cpu, $io) [pscustomobject]@{ interval_ms = $ms; other_cpu = $cpu; other_io = $io; sys_cpu = 0.1; banned = '' } }
+    Case 'calibration: one sample is refused and writes nothing' {
+        $msg = ''
+        try { [void](Get-CalibrationBaseline @((& $calRow 1000 0.2 100)) 'x') } catch { $msg = $_.Exception.Message }
+        $msg -like 'calibration unusable*1 sample(s), at least 30 needed*'
+    }
+    Case 'calibration: 30 one-second samples give the mean, spread and maximum' {
+        $rows30 = @(1..30 | ForEach-Object { & $calRow 1000 ($(if ($_ % 2) { 0.1 } else { 0.3 })) 1000 })
+        $b = Get-CalibrationBaseline $rows30 'cal-1'
+        $b.samples -eq 30 -and $b.coveredMs -eq 30000 -and $b.otherCpuCores -eq 0.2 -and $b.otherCpuCoresSd -gt 0.09 -and $b.otherCpuCoresSd -lt 0.11 -and
+        $b.otherCpuCoresMax -eq 0.3 -and $b.otherIoBytesPerSec -eq 1000 -and $b.attempt -eq 'cal-1'
+    }
+    Case 'calibration: 30 samples over 29 s, a gap or a banned process is refused' {
+        $short = @(1..30 | ForEach-Object { & $calRow 966 0.1 0 })
+        $gap = @(1..31 | ForEach-Object { & $calRow ($(if ($_ -eq 5) { 2000 } else { 1000 })) 0.1 0 })
+        $ban = @(1..31 | ForEach-Object { & $calRow 1000 0.1 0 }); $ban[3].banned = 'cargo(7)'
+        $m = foreach ($set in @(, $short) + @(, $gap) + @(, $ban)) { try { [void](Get-CalibrationBaseline $set 'x'); 'accepted' } catch { $_.Exception.Message } }
+        $m[0] -like '*s covered, at least 30 s needed*' -and $m[1] -like '*over 1.5 s apart*' -and $m[2] -like '*banned process seen: cargo(7)*'
+    }
+    Case 'a baseline.json of fewer than 30 samples is refused by later attempts' {
+        (Get-BaselineProblem ([pscustomobject]@{ samples = 1 })) -like '*1 sample(s)*at least 30*' -and $null -eq (Get-BaselineProblem ([pscustomobject]@{ samples = 31 }))
+    }
+    Case 'the attempt starts the sampler, writes the calibration baseline from the idle window and checks the sampler error' {
+        $text = [IO.File]::ReadAllText($PSCommandPath)
+        $text.Contains('$calBaseline = Get-CalibrationBaseline $rows.ToArray() $name') -and $text.Contains('Write-NewJson $baselinePath $calBaseline') -and
+        $text.Contains('if ($job.Error) { throw') -and -not $text.Contains('Start-' + 'ThreadJob') -and -not $text.Contains('Get-Counter -Counter ' + '$counters')
+    }
     Case 'hashes and list files: no rows give no blank line' {
         (Join-Lines @()) -eq '' -and (Join-Lines @('a', 'b')) -eq "a`nb`n"
     }
@@ -924,7 +1031,8 @@ function Invoke-SelfTest {
 # ---------------------------------------------------------------- machine state, quiet check, contention
 
 $BannedNames = @('cargo', 'rustc', 'link', 'cl', 'clippy-driver', 'tessalith', 'sdc', 'samply', 'wpr')
-$SystemNames = @('system', 'msmpeng', 'registry', 'memcompression')
+# Normalised image names (lower case, no .exe, no spaces): "Memory Compression" is memorycompression.
+$SystemNames = @('system', 'msmpeng', 'registry', 'memcompression', 'memorycompression', 'securesystem')
 $TargetPathRx = '(?i)\\(cargo-)?target[^\\]*\\(.+\\)?(debug|release|profiling)\\'
 $DetectionLimit = 'Detection limit: a process that starts and exits between two one-second samples is not seen.'
 
@@ -1285,52 +1393,291 @@ function Get-FileList([string]$dir) {
     }
 }
 
-# The per-second contention stream (spec 7.6): one Get-Counter -Continuous, started before the command.
-function Start-ContentionStream($shared) {
-    Start-ThreadJob -ArgumentList $shared -ScriptBlock {
-        param($sh)
-        $banned = $sh.Banned; $system = $sh.System; $rx = $sh.TargetRx
-        $counters = '\Processor(_Total)\% Processor Time', '\Process(*)\ID Process', '\Process(*)\% Processor Time', '\Process(*)\IO Read Bytes/sec', '\Process(*)\IO Write Bytes/sec'
-        Get-Counter -Counter $counters -SampleInterval 1 -Continuous | ForEach-Object {
-            $total = 0.0; $by = @{}
-            foreach ($c in $_.CounterSamples) {
-                if ($c.Path -match '\\processor\(_total\)\\') { $total = $c.CookedValue; continue }
-                if ($c.Path -match '\\process\((.+)\)\\([^\\]+)$') {
-                    if (-not $by.ContainsKey($Matches[1])) { $by[$Matches[1]] = @{} }
-                    $by[$Matches[1]][$Matches[2]] = $c.CookedValue
-                }
+# The per-second contention sampler (spec 7.6, EP-C14). One thread at high priority inside the runner takes a
+# snapshot of every process once a second with one NtQuerySystemInformation(SystemProcessInformation) call: PID,
+# parent PID, creation time, image name, user + kernel CPU time and read + write transfer bytes. Each row is the
+# difference between two snapshots, keyed by PID and creation time, so a process that starts after the stream (sdc
+# itself, or anything else mid-attempt) is seen from its first snapshot. The exempt tree is the runner PID, the PIDs
+# in the shared Exempt dictionary (sdc, samply's sdc child) and their descendants (a child created no earlier than
+# its parent), rebuilt from the snapshot only when a new process or exempt PID appears. The banned-name and
+# target-folder path checks run once per new process and are cached. No CIM, Get-Process or Get-Counter call is in
+# the loop. Columns: interval_ms (the time the row covers), runner (the runner process itself: runner + sampler
+# cost), exempt (the whole exempt tree, runner included), other, system (the SystemNames lines), top_other.
+$ContentionSamplerSource = @'
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+
+public sealed class ProfileProcInfo {
+    public int Pid; public int ParentPid; public long CreateTime; public string Name; public long CpuTicks; public long IoBytes;
+}
+
+public sealed class ProfileContentionRow {
+    public long t_ms { get; set; }
+    public long ctr_ms { get; set; }
+    public long interval_ms { get; set; }
+    public double total { get; set; }
+    public double exempt { get; set; }
+    public double runner { get; set; }
+    public double other_cpu { get; set; }
+    public double other_io { get; set; }
+    public double sys_cpu { get; set; }
+    public double sys_io { get; set; }
+    public string banned { get; set; }
+    public string top_other { get; set; }
+    public int processes { get; set; }
+}
+
+public sealed class ProfileContentionSampler {
+    [DllImport("ntdll.dll")] static extern int NtQuerySystemInformation(int cls, IntPtr buf, int len, out int ret);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr h, int flags, StringBuilder sb, ref int size);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+    static IntPtr buf = IntPtr.Zero;
+    static int bufLen;
+    static readonly object bufLock = new object();
+
+    // Every process now (SYSTEM_PROCESS_INFORMATION, x64 offsets).
+    public static List<ProfileProcInfo> Snapshot() {
+        lock (bufLock) {
+            if (buf == IntPtr.Zero) { bufLen = 1 << 20; buf = Marshal.AllocHGlobal(bufLen); }
+            int ret, st;
+            while ((st = NtQuerySystemInformation(5, buf, bufLen, out ret)) == unchecked((int)0xC0000004)) {
+                Marshal.FreeHGlobal(buf); bufLen = Math.Max(bufLen * 2, ret + 65536); buf = Marshal.AllocHGlobal(bufLen);
             }
-            $tree = New-Object 'System.Collections.Generic.HashSet[int]'
-            [void]$tree.Add($sh.RunnerPid)
-            $all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
-            do { $grew = $false; foreach ($p in $all) { if ($tree.Contains([int]$p.ParentProcessId) -and $tree.Add([int]$p.ProcessId)) { $grew = $true } } } while ($grew)
-            $exemptCpu = 0.0; $sysCpu = 0.0; $otherIo = 0.0; $sysIo = 0.0; $found = @()
-            foreach ($k in $by.Keys) {
-                $name = ($k -replace '#\d+$', '')
-                if ($name -eq '_total' -or $name -eq 'idle') { continue }
-                $m = $by[$k]
-                $procId = [int]$m['id process']
-                $cpu = [double]$m['% processor time'] / 100.0
-                $io = [double]$m['io read bytes/sec'] + [double]$m['io write bytes/sec']
-                if ($tree.Contains($procId) -or $sh.Exempt.ContainsKey($procId)) { $exemptCpu += $cpu; continue }
-                if ($system -contains $name) { $sysCpu += $cpu; $sysIo += $io; continue }
-                $otherIo += $io
-                if ($banned -contains $name) { $found += ('{0}({1})' -f $name, $procId) }
+            if (st != 0) throw new InvalidOperationException("NtQuerySystemInformation failed: 0x" + st.ToString("X8"));
+            var list = new List<ProfileProcInfo>(512);
+            long off = 0;
+            while (true) {
+                IntPtr p = new IntPtr(buf.ToInt64() + off);
+                int next = Marshal.ReadInt32(p, 0);
+                var e = new ProfileProcInfo();
+                e.CreateTime = Marshal.ReadInt64(p, 32);
+                e.CpuTicks = Marshal.ReadInt64(p, 40) + Marshal.ReadInt64(p, 48);
+                int nl = Marshal.ReadInt16(p, 56) & 0xFFFF;
+                IntPtr nb = Marshal.ReadIntPtr(p, 64);
+                e.Name = (nb == IntPtr.Zero || nl == 0) ? "" : Marshal.PtrToStringUni(nb, nl / 2);
+                e.Pid = (int)Marshal.ReadIntPtr(p, 80).ToInt64();
+                e.ParentPid = (int)Marshal.ReadIntPtr(p, 88).ToInt64();
+                e.IoBytes = Marshal.ReadInt64(p, 232) + Marshal.ReadInt64(p, 240);
+                list.Add(e);
+                if (next == 0) break;
+                off += next;
             }
-            foreach ($p in Get-Process) {
-                if ($tree.Contains([int]$p.Id) -or $sh.Exempt.ContainsKey([int]$p.Id)) { continue }
-                $path = $null; try { $path = $p.Path } catch { }
-                $tag = '{0}({1})' -f $p.ProcessName, $p.Id
-                if ($path -and $path -match $rx -and $found -notcontains $tag) { $found += $tag }
-            }
-            $totalCores = $total / 100.0 * $sh.Logical
-            $sh.Queue.Enqueue([pscustomobject]@{
-                    t_ms = $sh.Sw.ElapsedMilliseconds; ctr_ms = ([DateTimeOffset]$_.Timestamp).ToUnixTimeMilliseconds(); total = [math]::Round($totalCores, 3); exempt = [math]::Round($exemptCpu, 3)
-                    other_cpu = [math]::Round([math]::Max(0.0, $totalCores - $exemptCpu - $sysCpu), 3); other_io = [math]::Round($otherIo, 0)
-                    sys_cpu = [math]::Round($sysCpu, 3); sys_io = [math]::Round($sysIo, 0); banned = ($found -join ';')
-                })
+            return list;
         }
     }
+
+    // "sdc.exe" -> "sdc", "Memory Compression" -> "memorycompression".
+    public static string NormalName(string n) {
+        string s = (n ?? "").ToLowerInvariant();
+        if (s.EndsWith(".exe")) s = s.Substring(0, s.Length - 4);
+        return s.Replace(" ", "");
+    }
+
+    static string ImagePath(int pid) {
+        IntPtr h = OpenProcess(0x1000, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try {
+            var sb = new StringBuilder(1024); int size = sb.Capacity;
+            return QueryFullProcessImageNameW(h, 0, sb, ref size) ? sb.ToString(0, size) : null;
+        } finally { CloseHandle(h); }
+    }
+
+    readonly int runnerPid;
+    readonly ConcurrentDictionary<int, bool> exempt;
+    readonly ConcurrentQueue<object> queue;
+    readonly Stopwatch sw;
+    readonly HashSet<string> banned, system;
+    readonly Regex targetRx;
+    Thread thread;
+    volatile bool stopping;
+    public volatile string Error;
+    public int Rows;
+
+    public ProfileContentionSampler(int runnerPid, ConcurrentDictionary<int, bool> exempt, ConcurrentQueue<object> queue, Stopwatch sw,
+                                    string[] bannedNames, string[] systemNames, string targetPathRx) {
+        this.runnerPid = runnerPid; this.exempt = exempt; this.queue = queue; this.sw = sw;
+        banned = new HashSet<string>(bannedNames); system = new HashSet<string>(systemNames);
+        targetRx = new Regex(targetPathRx);
+    }
+
+    public void Start() {
+        thread = new Thread(Run);
+        thread.IsBackground = true;
+        thread.Priority = ThreadPriority.Highest;
+        thread.Start();
+    }
+
+    public void Stop() {
+        stopping = true;
+        if (thread != null) thread.Join(5000);
+    }
+
+    void Run() {
+        try { Loop(); } catch (Exception ex) { Error = ex.ToString(); }
+    }
+
+    void Loop() {
+        var prev = new Dictionary<ValueTuple<int, long>, ProfileProcInfo>();
+        var bannedTag = new Dictionary<ValueTuple<int, long>, string>();
+        var tree = new HashSet<ValueTuple<int, long>>();
+        int exemptSeen = -1;
+        long prevMs = -1;
+        long deadline = sw.ElapsedMilliseconds;
+        while (!stopping) {
+            long wait = deadline - sw.ElapsedMilliseconds;
+            while (wait > 0 && !stopping) { Thread.Sleep((int)Math.Min(wait, 100)); wait = deadline - sw.ElapsedMilliseconds; }
+            if (stopping) break;
+            var snap = Snapshot();
+            long nowMs = sw.ElapsedMilliseconds;
+            long unixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var cur = new Dictionary<ValueTuple<int, long>, ProfileProcInfo>(snap.Count);
+            bool fresh = false;
+            foreach (var e in snap) {
+                var k = ValueTuple.Create(e.Pid, e.CreateTime);
+                cur[k] = e;
+                if (!prev.ContainsKey(k)) {
+                    fresh = true;
+                    if (!bannedTag.ContainsKey(k)) {
+                        string tag = "";
+                        if (e.Pid > 4) {
+                            string nn = NormalName(e.Name);
+                            string path = banned.Contains(nn) ? null : ImagePath(e.Pid);
+                            if (banned.Contains(nn) || (path != null && targetRx.IsMatch(path))) tag = nn + "(" + e.Pid + ")";
+                        }
+                        bannedTag[k] = tag;
+                    }
+                }
+            }
+            if (fresh || exempt.Count != exemptSeen) {
+                exemptSeen = exempt.Count;
+                tree.Clear();
+                var roots = new HashSet<int>(exempt.Keys);
+                roots.Add(runnerPid);
+                var byParent = new Dictionary<int, List<ProfileProcInfo>>();
+                foreach (var e in snap) {
+                    List<ProfileProcInfo> l;
+                    if (!byParent.TryGetValue(e.ParentPid, out l)) { l = new List<ProfileProcInfo>(); byParent[e.ParentPid] = l; }
+                    l.Add(e);
+                }
+                var stack = new Stack<ProfileProcInfo>();
+                foreach (var e in snap) if (e.Pid > 4 && roots.Contains(e.Pid) && tree.Add(ValueTuple.Create(e.Pid, e.CreateTime))) stack.Push(e);
+                while (stack.Count > 0) {
+                    var p = stack.Pop();
+                    List<ProfileProcInfo> kids;
+                    if (!byParent.TryGetValue(p.Pid, out kids)) continue;
+                    foreach (var c in kids) if (c.Pid > 4 && c.CreateTime >= p.CreateTime && tree.Add(ValueTuple.Create(c.Pid, c.CreateTime))) stack.Push(c);
+                }
+            }
+            if (prevMs >= 0) {
+                double secs = Math.Max(0.001, (nowMs - prevMs) / 1000.0);
+                double total = 0, ex = 0, run = 0, other = 0, otherIo = 0, sys = 0, sysIo = 0, topCpu = 0;
+                string top = "";
+                var found = new List<string>();
+                foreach (var kv in cur) {
+                    var e = kv.Value;
+                    if (e.Pid == 0) continue;
+                    ProfileProcInfo p;
+                    bool had = prev.TryGetValue(kv.Key, out p);
+                    double cpu = (e.CpuTicks - (had ? p.CpuTicks : 0)) / 1e7 / secs;
+                    double io = (e.IoBytes - (had ? p.IoBytes : 0)) / secs;
+                    if (cpu < 0) cpu = 0;
+                    if (io < 0) io = 0;
+                    total += cpu;
+                    if (tree.Contains(kv.Key)) { ex += cpu; if (e.Pid == runnerPid) run += cpu; continue; }
+                    string nn = NormalName(e.Name);
+                    if (system.Contains(nn)) { sys += cpu; sysIo += io; continue; }
+                    other += cpu; otherIo += io;
+                    if (cpu > topCpu) { topCpu = cpu; top = nn + "(" + e.Pid + "):" + Math.Round(cpu, 2); }
+                    string tag;
+                    if (bannedTag.TryGetValue(kv.Key, out tag) && tag.Length > 0) found.Add(tag);
+                }
+                var row = new ProfileContentionRow {
+                    t_ms = nowMs, ctr_ms = unixMs, interval_ms = nowMs - prevMs, total = Math.Round(total, 3), exempt = Math.Round(ex, 3),
+                    runner = Math.Round(run, 3), other_cpu = Math.Round(other, 3), other_io = Math.Round(otherIo, 0), sys_cpu = Math.Round(sys, 3),
+                    sys_io = Math.Round(sysIo, 0), banned = string.Join(";", found), top_other = top, processes = cur.Count
+                };
+                queue.Enqueue(row);
+                Rows++;
+            }
+            // forget the caches of processes gone
+            foreach (var k in new List<ValueTuple<int, long>>(bannedTag.Keys)) if (!cur.ContainsKey(k)) bannedTag.Remove(k);
+            prev = cur;
+            prevMs = nowMs;
+            while (deadline <= sw.ElapsedMilliseconds) deadline += 1000;
+        }
+    }
+}
+'@
+
+function Initialize-ContentionSampler {
+    if (-not ('ProfileContentionSampler' -as [type])) { Add-Type -TypeDefinition $ContentionSamplerSource -Language CSharp }
+}
+
+# Starts the sampler; the caller stops it with .Stop() and checks .Error.
+function Start-ContentionStream($shared) {
+    Initialize-ContentionSampler
+    $s = New-Object ProfileContentionSampler([int]$shared.RunnerPid, $shared.Exempt, $shared.Queue, $shared.Sw, [string[]]$shared.Banned, [string[]]$shared.System, [string]$shared.TargetRx)
+    $s.Start()
+    $s
+}
+
+# The idle baseline of a -Calibrate attempt (EP-C14): at least 30 samples covering at least 30 s (the sum of their
+# interval_ms), with no gap and no banned process. Returns the baseline (means and spreads), or throws "calibration
+# unusable: ..." so that no baseline.json is written from fewer.
+function Get-CalibrationBaseline($rows, [string]$attempt) {
+    $r = @($rows | Where-Object { $null -ne $_ })
+    $n = $r.Count
+    $covered = [int64]0
+    foreach ($x in $r) { $covered += [int64]$x.interval_ms }
+    $why = @()
+    if ($n -lt 30) { $why += "$n sample(s), at least 30 needed" }
+    if ($covered -lt 30000) { $why += ('{0:N1} s covered, at least 30 s needed' -f ($covered / 1000)) }
+    $gaps = @($r | Where-Object { $_.interval_ms -gt 1500 }).Count
+    if ($gaps) { $why += "$gaps sample(s) over 1.5 s apart" }
+    $ban = @($r | Where-Object { $_.banned } | ForEach-Object { $_.banned -split ';' } | Sort-Object -Unique)
+    if ($ban.Count) { $why += ('banned process seen: ' + ($ban -join ', ')) }
+    if ($why.Count) { throw ('calibration unusable, baseline.json not written: ' + ($why -join '; ')) }
+    $stat = {
+        param($f)
+        $v = @($r | ForEach-Object { [double]$_.$f })
+        $m = ($v | Measure-Object -Average).Average
+        $ss = 0.0; foreach ($x in $v) { $ss += ($x - $m) * ($x - $m) }
+        [pscustomobject]@{ Mean = $m; Sd = [math]::Sqrt($ss / [math]::Max(1, $v.Count - 1)); Max = ($v | Measure-Object -Maximum).Maximum }
+    }
+    $c = & $stat 'other_cpu'; $io = & $stat 'other_io'; $sy = & $stat 'sys_cpu'
+    [ordered]@{
+        otherCpuCores = [math]::Round($c.Mean, 3); otherCpuCoresSd = [math]::Round($c.Sd, 3); otherCpuCoresMax = [math]::Round($c.Max, 3)
+        otherIoBytesPerSec = [math]::Round($io.Mean, 0); otherIoBytesPerSecSd = [math]::Round($io.Sd, 0); otherIoBytesPerSecMax = [math]::Round($io.Max, 0)
+        systemLineCpuCores = [math]::Round($sy.Mean, 3); samples = $n; coveredMs = $covered
+        method = 'idle window of the sampler before the calibration command (EP-C14)'; attempt = $attempt; logicalCores = [Environment]::ProcessorCount
+    }
+}
+
+# Reason a baseline.json cannot serve a later attempt, or $null (EP-C14: at least 30 samples).
+function Get-BaselineProblem($baseline) {
+    $n = [int64](Get-Prop $baseline 'samples')
+    if ($n -lt 30) { return "baseline.json holds $n sample(s); EP-C14 needs at least 30: calibrate again in a new RunRoot" }
+    $null
+}
+
+# Sample-interval figures of a row set: the median and 95th percentile of the gaps between counter stamps (ms).
+function Get-IntervalStats($rows) {
+    $stamps = @($rows | ForEach-Object { [int64]$_.ctr_ms } | Sort-Object)
+    $d = New-Object System.Collections.Generic.List[double]
+    for ($i = 1; $i -lt $stamps.Count; $i++) { $d.Add($stamps[$i] - $stamps[$i - 1]) }
+    if ($d.Count -eq 0) { return [pscustomobject]@{ MedianMs = $null; P95Ms = $null; MaxMs = $null } }
+    $a = $d.ToArray(); [Array]::Sort($a)
+    $pick = { param($q) $a[[math]::Min($a.Count - 1, [int][math]::Ceiling($q * $a.Count) - 1)] }
+    $mid = if ($a.Count % 2) { $a[($a.Count - 1) / 2] } else { ($a[$a.Count / 2 - 1] + $a[$a.Count / 2]) / 2 }
+    [pscustomobject]@{ MedianMs = $mid; P95Ms = (& $pick 0.95); MaxMs = $a[-1] }
 }
 
 # Contamination per spec 7.6 against the baseline (or the calibration figures themselves).
@@ -1356,9 +1703,13 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
         $spike = @($rows | Where-Object { $_.other_io -gt $baseline.otherIoBytesPerSec + 200MB }).Count
         if ($spike) { $reasons += "other I/O exceeded the baseline by 200 MB/s in $spike second(s)" }
     }
+    $iv = Get-IntervalStats $rows
+    $mean = { param($f) if ($n -and @($rows | Where-Object { $null -ne $_.PSObject.Properties[$f] }).Count -eq $n) { [math]::Round(($rows | Measure-Object $f -Average).Average, 3) } else { $null } }
     [ordered]@{
         contaminated = ($reasons.Count -gt 0); reasons = $reasons; samples = $n; sampleGaps = $gaps; calibrating = $calibrating
+        sampleIntervalMedianMs = $iv.MedianMs; sampleIntervalP95Ms = $iv.P95Ms; sampleIntervalMaxMs = $iv.MaxMs
         otherCpuCoresMean = [math]::Round($cpuMean, 3); otherIoBytesPerSecMean = [math]::Round($ioMean, 0); otherIoBytesPerSecMax = [math]::Round($ioMax, 0)
+        exemptCpuCoresMean = (& $mean 'exempt'); runnerCpuCoresMean = (& $mean 'runner')
         systemLineCpuCoresMean = [math]::Round($sysCpuMean, 3); systemLineIoBytesPerSecMean = [math]::Round($sysIoMean, 0)
         baseline = $baseline; detectionLimit = $DetectionLimit
     }
@@ -1458,6 +1809,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $baselinePath = Join-Path $A.RunRoot 'baseline.json'
     if ($A.Calibrate) { if (Test-Path -LiteralPath $baselinePath) { $problems += 'baseline.json already exists in this RunRoot (it is never overwritten)' } }
     elseif (-not (Test-Path -LiteralPath $baselinePath)) { $problems += 'no baseline.json: run a -Calibrate attempt on a fixture project first' }
+    else { $bp = Get-BaselineProblem (Read-Json $baselinePath); if ($bp) { $problems += $bp } }
     $copies = $cohort -in 'warm-noop', 'warm-stale'
     if ($copies) {
         if (-not $A.CopyFrom) { $problems += "-CopyFrom is required for $cohort" }
@@ -1566,13 +1918,13 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         $job = Start-ContentionStream $shared
         $contWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'contention.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
         $sampWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'sampler.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
-        $contWriter.WriteLine('t_ms,counter_unix_ms,total_cpu_cores,exempt_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,banned')
+        $contWriter.WriteLine('t_ms,counter_unix_ms,interval_ms,total_cpu_cores,exempt_cpu_cores,runner_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,processes,banned,top_other')
         $sampWriter.WriteLine('t_ms,pid,working_set,private_bytes,threads,cpu_ms')
         $rows = New-Object System.Collections.Generic.List[object]
         $drain = {
             $r = $null
             while ($shared.Queue.TryDequeue([ref]$r)) {
-                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8}' -f $r.t_ms, $r.ctr_ms, $r.total, $r.exempt, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.banned))
+                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}' -f $r.t_ms, $r.ctr_ms, $r.interval_ms, $r.total, $r.exempt, $r.runner, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.processes, $r.banned, $r.top_other))
                 $rows.Add($r)
             }
         }
@@ -1580,7 +1932,16 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             $wait = [Diagnostics.Stopwatch]::StartNew()
             while ($shared.Queue.IsEmpty -and $wait.Elapsed.TotalSeconds -lt 15) { Start-Sleep -Milliseconds 200 }
             & $drain
-            $rows.Clear()   # the stream's first sample is a warm-up, not part of the timed run
+            $rows.Clear()   # the stream's first row is a warm-up, not part of the timed run
+            if ($A.Calibrate) {
+                # EP-C14: the baseline is an idle window of at least 30 samples over at least 30 s, before the command
+                Say 'calibration: sampling the idle machine for about 31 s'
+                $cw = [Diagnostics.Stopwatch]::StartNew()
+                while (($rows.Count -lt 31 -or $cw.Elapsed.TotalSeconds -lt 31) -and $cw.Elapsed.TotalSeconds -lt 90) { Start-Sleep -Milliseconds 250; & $drain }
+                $calBaseline = Get-CalibrationBaseline $rows.ToArray() $name
+                $meta['calibration'] = $calBaseline
+                $rows.Clear()
+            }
 
             $diskStart = Get-DiskRaw
             $envMap = @{ APPDATA = (Join-Path $attempt 'appdata'); SDC_PROFILE = $(if ($useProfile) { $profileDir } else { $null }) }
@@ -1616,9 +1977,11 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             Start-Sleep -Milliseconds 1100   # let the stream deliver the last second
             & $drain
         } finally {
-            if ($job) { Stop-Job $job; Remove-Job $job -Force }
+            if ($job) { $job.Stop() }
+            & $drain
             $contWriter.Dispose(); $sampWriter.Dispose()
         }
+        if ($job.Error) { throw "the contention sampler failed: $($job.Error)" }
         $code = $proc.ExitCode
         $meta['exitCode'] = $code
         $meta['externalWallMs'] = $wall.ElapsedMilliseconds
@@ -1642,8 +2005,9 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         $verdict = Get-ContentionVerdict $timed $baseline ([bool]$A.Calibrate)
         $meta['contention'] = $verdict
         if ($A.Calibrate) {
-            if ($verdict.samples -eq 0 -or $verdict.reasons.Count) { throw ('calibration unusable, baseline.json not written: ' + ($verdict.reasons -join '; ')) }
-            Write-NewJson $baselinePath ([ordered]@{ otherCpuCores = $verdict.otherCpuCoresMean; otherIoBytesPerSec = $verdict.otherIoBytesPerSecMean; attempt = $name; samples = $verdict.samples; logicalCores = [Environment]::ProcessorCount })
+            # the idle window gives the baseline; the command's own window must still be free of gaps and banned processes
+            if ($verdict.reasons.Count) { throw ('calibration unusable, baseline.json not written: ' + ($verdict.reasons -join '; ')) }
+            Write-NewJson $baselinePath $calBaseline
         }
         $errText = [IO.File]::ReadAllText((Join-Path $attempt 'stderr.log'))
         if (Test-SamplyNeedsElevation ([bool]$A.Samply) $childAccepted $code $errText) {
