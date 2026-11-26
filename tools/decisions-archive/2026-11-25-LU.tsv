@@ -1,5 +1,5 @@
 id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
 JA2	JA		back	LU2		partial	2026-11-25		goes: "`ispc` on every format"; stays: the rest (the ispc tag counts on BC7 and BC6H only, LU2)
 Index¶- Manifest and outputs:	Index	20	back	LU		partial	2026-11-25		goes: the line without LU (LU2 governs the ispc tag compare); stays: the rest
-LT23	LT		back	LU		partial	2026-11-25		goes: the "S4 guard identity" sub-bullet without its "The same holds for the cand_err = 1e30f sentinel" sentences (Task 1 of the ISPC 1.32 plan, BC6H-C35); stays: the rest; the archive header is written by hand to cite BC6H-C35, not Note LU
+LT23	LT		back	LU		partial	2026-11-25		goes: the "S4 guard identity" sub-bullet without its "The same holds for the cand_err = 1e30f sentinel" sentences (Task 1 of the ISPC 1.32 plan, BC6H-C35), and ISPC-C2's rewording of its count and VM-time sentences (Task 7); stays: the rest; the archive header is written by hand to cite BC6H-C35, not Note LU
 Index¶- Encoders:	Index	15	back	LU		partial	2026-11-25		goes: the line without LU (LU1 governs the dispatcher test); stays: the rest

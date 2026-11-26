@@ -228,7 +228,7 @@ Differences between the base and the 1.32.0 objects, per path. Every pinned row 
 
 - No `identity.json` key, no witness in `tests/bc7.rs` or `tests/bc6h.rs`, no golden, no GUI pin and no CLI alpha-254 percentage moved. The bc6h quality deltas (mPSNR, RMSLE, peak ratio) and the bc7 RGB PSNR delta are +0.000 at every level, with a half-width of 0.000.
 - Limit: both BC7 corpus runs force alpha to 255, so BC7 with alpha on the changed SSE2 object rests on the pins and witnesses (`level_identity`, `bc7`, `bc7_fixup`, the goldens), which all pass.
-- New against 2026-11-13: every file rebuilt together, on today's kernels, with the pins, witnesses and corpus runs above on all three paths, and the Intel VM. The bytes equal those the replaced objects write on every path.
+- New against 2026-11-13: every file rebuilt together, on today's kernels, with the pins, witnesses and corpus runs above on all three paths. On the Ryzen the bytes equal those the replaced objects write on every path; the Intel VM runs show pass or fail only (the dispatcher test, the witnesses, the GUI pin), because the Intel byte pins skip.
 
 ### The dispatcher
 
@@ -260,14 +260,15 @@ On the Linux test VM, from the same objects, under Wine:
 | AVX2 | 1.0012 | 0.9988 to 1.0063 |
 | AVX-512 | 1.0050 | 1.0010 to 1.0049 |
 
-- The AVX2 and AVX-512 encoder objects and every BC6H object are byte-identical in both builds, so their ratios measure the method's own floor, and that floor is not centred on 1.00: the AVX-512 line reads +0.5 % on identical code, probably from run order (the 1.32.0 build always ran second in a pair) or the executable's layout. The SSE2 line (+0.3 %) lies inside that floor, and its five BC7 rows, the only changed code, sit in the same range as the AVX2 BC7 rows. So the change is not measurable on any path.
+- The AVX2 and AVX-512 encoder objects and every BC6H encoder object (the BC6H dispatcher differs, but it holds no encoder code) are byte-identical in both builds, so their ratios measure the method's own floor, and that floor is not centred on 1.00: the AVX-512 line reads +0.5 % on identical code, probably from run order (the 1.32.0 build always ran second in a pair) or the executable's layout. The SSE2 line (+0.3 %) lies inside that floor, and its five BC7 rows, the only changed code, sit in the same range as the AVX2 BC7 rows. So the change is not measurable on any path.
+- The ratio is of the medians over the three runs, not of the pair ratios, so it can lie just outside the pair range: the AVX-512 geometric mean is 1.00498 of the medians against a pair maximum of 1.0049.
 - A run took about 28 minutes; the three pairs ran from 23:09 to 01:58.
 
 ## Not measured
 
 - **An Intel CPU with AVX-512.** The AVX-512 pins were recorded on this AMD Zen 5 CPU only. Whether `vrcp14ps` gives the same bits on Intel is not known, so an Intel CPU may write other AVX-512 bytes (Note HW suspects the same of `vrcpps` on the AVX2 path).
 - **A machine with nothing else running.** The tables' rounds (one thread pinned at High priority) all ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table. The branch's last run had no build beside it but one other single-thread job, and used the example's unpinned thread.
-- **The dispatcher's choice on a CPU without AVX-512.** Shown since 2026-11-26 on an Intel CPU with AVX2: the test `the_dispatcher_runs_the_best_target` printed `best = avx2` and the dispatcher's bytes equalled the AVX2 object's, under Wine on the Linux test VM ([the section](#ispc-1320-for-every-object-2026-11-26)). On a CI runner whose CPU lacks AVX-512, `level_identity` also encodes through the dispatcher and compares with the AVX2 row.
+- **The dispatcher's choice on a CPU without AVX-512.** Shown since 2026-11-26 on an Intel CPU with AVX2: the test `the_dispatcher_runs_the_best_target` printed `best = avx2` and the dispatcher's bytes equalled the AVX2 object's, under Wine on the Linux test VM ([the section](#ispc-1320-for-every-object-2026-11-26)). On an AMD CI runner whose CPU lacks AVX-512, `level_identity` also encodes through the dispatcher and compares with the AVX2 row; on an Intel runner it skips whole (Note JC).
 
 ## How to repeat it
 

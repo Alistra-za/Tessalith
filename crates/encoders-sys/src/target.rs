@@ -21,8 +21,8 @@ impl IspcTarget {
 
     /// Whether this CPU can run the target: avx2 needs AVX2, FMA, F16C, BMI1 and BMI2; avx512skx needs that and
     /// AVX-512 F, DQ, CD, BW and VL. ISPC's dispatcher (1.31.0 and 1.32.0 alike) tests other features: avx2 is AVX, OS
-    /// YMM state and either AVX-VNNI or (F16C, RDRAND and AVX2), with no FMA or BMI check; avx512skx is AVX2, AVX-512 F,
-    /// DQ, CD, BW and VL and OS ZMM state, with no FMA, F16C or BMI check. See the `shortcut:` notes at `forced`.
+    /// YMM state and either AVX-VNNI or (F16C, RDRAND and AVX2), with no FMA or BMI check; avx512skx is AVX2, AVX-512
+    /// F, DQ, CD, BW and VL and OS ZMM state, with no FMA, F16C or BMI check. See the `shortcut:` at `forced`.
     pub fn supported(self) -> bool {
         match self {
             Self::Sse2 => true,
@@ -116,13 +116,14 @@ fn capped(best: IspcTarget, lift: bool) -> IspcTarget {
 
 /// The dispatch rule, stated once: the shim gets `-1` (ISPC's dispatcher) for the best target, whose per-target
 /// init the dispatcher already ran, and the target's number otherwise (the shim inits that target once).
-// shortcut: the rule assumes `best()` is the target ISPC's dispatcher runs. On a CPU that reports AVX2, FMA and F16C
-// without BMI1/2, and on one with AVX-512 but no BMI, `best()` is `Sse2`; ISPC's dispatcher makes its own check
-// there, so the two may differ. No such CPU is known; upgrade if one appears.
-// shortcut: on a CPU with AVX2 but no RDRAND and no AVX-VNNI (a hypervisor can hide the bit), `best()` reports
-// `Avx2` while the dispatcher ranks the CPU as AVX and runs the SSE2 object. The bytes are valid, but the label
-// (`isa`, `ispc_target()`) is wrong and the encode is slower. No such CPU is reported; upgrade when one is, by
-// giving `supported()` the dispatcher's conditions.
+// shortcut: the rule assumes `best()` is the target ISPC's dispatcher runs, but `supported()` and the dispatcher test
+// other features (see `supported()`), so they can differ in both directions. (a) A CPU with AVX2 and RDRAND (or
+// AVX-VNNI) but no FMA, BMI1 or BMI2, and an AVX-512 CPU without them: `best()` is `Sse2` (or `Avx2`) while the
+// dispatcher runs the AVX2 (or AVX-512) object, so `forced(Sse2)` returns -1 and an explicit SSE2 encode gets AVX2
+// bytes labelled `sse2`. (b) A CPU with AVX2 but neither RDRAND nor AVX-VNNI (a hypervisor can hide the bit):
+// `best()` is `Avx2` while the dispatcher ranks it as AVX and runs the SSE2 object; the bytes are valid, but the
+// label (`isa`, `ispc_target()`) is wrong and the encode is slower. No such CPU is known; upgrade when one is
+// reported, by giving `supported()` the dispatcher's conditions.
 pub(crate) fn forced(target: IspcTarget) -> i32 {
     if target == IspcTarget::best() {
         -1
