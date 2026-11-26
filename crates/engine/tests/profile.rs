@@ -146,17 +146,38 @@ fn profile_on_and_off_write_the_same_bytes() {
 #[test]
 fn spans_nest_per_thread_and_cover_each_job() {
     let mut f = Fixture::new();
-    f.validate = true; // Validation is opt-in (Note LG1); `check_spans` requires a Validate span for every job.
+    f.validate = true; // Validation is opt-in (Note LG1); on here, so `check_spans` sees a Validate span for every job.
     let rec = Recorder::new();
     let cancel = CancelToken::default();
     let plan = f.plan("out", Some(&rec), &cancel);
     let planned = facts(&plan);
     assert_eq!(run(plan, &cancel).converted as usize, f.expected.len());
-    check_spans(
-        &rec.report("fixture", vec![]),
-        &f.dir.path().join("out"),
-        &planned,
-    );
+    let r = rec.report("fixture", vec![]);
+    check_spans(&r, &f.dir.path().join("out"), &planned);
+}
+
+#[test]
+fn no_validate_span_when_validation_is_off() {
+    // Main's default (Note LG1): no fixture job is always validated, so no job validates and none has a Validate span.
+    let f = Fixture::new();
+    assert!(!f.validate);
+    let rec = Recorder::new();
+    let cancel = CancelToken::default();
+    let plan = f.plan("out", Some(&rec), &cancel);
+    let planned = facts(&plan);
+    assert_eq!(run(plan, &cancel).converted as usize, f.expected.len());
+    let r = rec.report("fixture", vec![]);
+    let out = f.dir.path().join("out");
+    let records = Manifest::at(&out).read().unwrap();
+    for job in &r.jobs {
+        assert_eq!(
+            records[&job.output].raw["validation"]["skipped"], true,
+            "{} was validated",
+            job.output
+        );
+    }
+    check_spans(&r, &out, &planned);
+    assert_eq!(spans(&r, Stage::Validate).count(), 0);
 }
 
 #[test]
