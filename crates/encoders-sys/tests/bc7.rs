@@ -339,11 +339,11 @@ fn exact_constant_fixture(g: u8, seed: u32) -> Vec<[u8; 4]> {
 /// decodes G exactly. `exact_constant_fixture`'s R and B pull the p-bits away from the value G needs in its clusters,
 /// solid-beside-noisy and near-solid blocks (its solid blocks take bc7e's mode 5 solid path). Raw bytes, 64-block
 /// calls, the data maps' tune (T_data, exact G) with weights unset, as the engine calls it, every level, exact opaque
-/// off and on, every path. Weights `[1; 4]` passed rank the same since L16 (both as x16), so that row is one byte
-/// comparison per level on this CPU's path (`unit_weights_write_the_unset_bytes`), not a second sweep. Without the
-/// one-colour p guard only ultrafast, veryfast and fast fail, so every level runs. With exact opaque on, alpha decodes 255 after the post-fix
-/// in every cell, and wins over G where both cannot hold (ruling BC7-C4): mode 6's forced p-bits cannot decode G 0, so
-/// G 0 is not asserted in `exact_g_waived`'s cells (Note LR, LR12).
+/// off and on, every path. Each cell also encodes weights `[1; 4]` passed and checks it writes the same bytes
+/// (`unit_weights_write_the_unset_bytes`). Without the one-colour p guard only ultrafast, veryfast and fast fail, so
+/// every level runs. With exact opaque on, alpha decodes 255 after the post-fix in every cell, and wins over G where
+/// both cannot hold (ruling BC7-C4): mode 6's forced p-bits cannot decode G 0, so G 0 is not asserted in
+/// `exact_g_waived`'s cells (Note LR, LR12).
 #[test]
 fn exact_constants_keep_a_flat_channel() {
     use encoders_sys::bc7_fixup::force_opaque_rotated;
@@ -366,14 +366,12 @@ fn exact_constants_keep_a_flat_channel() {
                 flat_tolerance: Some(Bc7FlatTolerance::Data),
                 exact_constants: Some(0b010),
             };
-            if !exact_opaque {
-                unit_weights_write_the_unset_bytes(&blocks, p, tune);
-            }
             for target in paths() {
                 let mut out = vec![0u8; blocks.len()];
                 for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
                     bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
                 }
+                unit_weights_write_the_unset_bytes(&blocks, p, tune, target, &out);
                 let what = format!("G {g} {level:?} exact={exact_opaque} {target:?}");
                 let errs: Vec<u8> = out
                     .chunks(16)
@@ -414,29 +412,31 @@ fn exact_constants_keep_a_flat_channel() {
     );
 }
 
-/// L16 (Note LR, LR15): a tune with weights `[1; 4]` passed writes the bytes of the same tune with weights unset, on
-/// this CPU's path. The exact-constants tests encode the unset form only and check this once per cell instead.
+/// The shim's weights slot: unset sends -1, which keeps the level's weights, and those are 1 on every channel at
+/// every level. So the same tune with weights `[1; 4]` passed must write `unset_bytes`, the bytes the caller encoded
+/// with weights unset on `target`. The exact-constants tests encode the unset form and check the passed form here, on
+/// every path and exact opaque off and on, so each cell costs one extra encode, not a second sweep.
 fn unit_weights_write_the_unset_bytes(
     blocks: &[[u8; 4]],
     p: Bc7Params,
     unset: encoders_sys::Bc7Tune,
+    target: IspcTarget,
+    unset_bytes: &[u8],
 ) {
     use encoders_sys::{bc7e_compress_blocks_tuned_on, Bc7Tune};
-    let encode = |tune: Bc7Tune| {
-        let mut out = vec![0u8; blocks.len()];
-        for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
-            bc7e_compress_blocks_tuned_on(b, o, p, tune, ispc_target());
-        }
-        out
-    };
     let unit = Bc7Tune {
         weights: Some([1; 4]),
         ..unset
     };
+    let mut out = vec![0u8; blocks.len()];
+    for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
+        bc7e_compress_blocks_tuned_on(b, o, p, unit, target);
+    }
     assert!(
-        encode(unit) == encode(unset),
-        "{:?}: weights [1; 4] passed are not the unset weights' bytes ({unset:?})",
-        p.level
+        out == unset_bytes,
+        "{:?} exact={} {target:?}: weights [1; 4] passed are not the unset weights' bytes ({unset:?})",
+        p.level,
+        p.exact_opaque
     );
 }
 
@@ -1254,9 +1254,9 @@ fn xc_fixture(seed: u32, flat: [Option<u8>; 3]) -> Vec<[u8; 4]> {
 
 /// Every masked channel stays exact when the masked channels agree (Task 5c's rule on several channels): each
 /// non-empty mask of R, G and B, its channels all 0 or all 255 on every texel of `xc_fixture` (the rest Task 5c's
-/// clusters), at basic and veryslow, T_data with weights unset, on every path; weights `[1; 4]` passed are one byte
-/// comparison per cell (`unit_weights_write_the_unset_bytes`; the same ranking since L16). With no conflict the
-/// priority never decides, so this guards Task 5c's behaviour on masks it never ran (Note LR, LR14).
+/// clusters), at basic and veryslow, T_data with weights unset, on every path; each cell also checks weights `[1; 4]`
+/// passed write the same bytes (`unit_weights_write_the_unset_bytes`). With no conflict the priority never decides,
+/// so this guards Task 5c's behaviour on masks it never ran (Note LR, LR14).
 #[test]
 fn exact_constants_keep_every_masked_channel() {
     use encoders_sys::{Bc7FlatTolerance, Bc7Tune};
@@ -1279,12 +1279,12 @@ fn exact_constants_keep_every_masked_channel() {
                     flat_tolerance: Some(Bc7FlatTolerance::Data),
                     exact_constants: Some(mask),
                 };
-                unit_weights_write_the_unset_bytes(&blocks, p, tune);
                 for target in paths() {
                     let mut out = vec![0u8; blocks.len()];
                     for (o, b) in out.chunks_mut(64 * 16).zip(blocks.chunks(64 * 16)) {
                         encoders_sys::bc7e_compress_blocks_tuned_on(b, o, p, tune, target);
                     }
+                    unit_weights_write_the_unset_bytes(&blocks, p, tune, target, &out);
                     let off = out
                         .chunks(16)
                         .flat_map(decode)
@@ -1307,7 +1307,7 @@ fn exact_constants_keep_every_masked_channel() {
 }
 
 /// Round 6 (A1): a lost channel's penalty is added to the solution's real error, and penalties count subsets, so among
-/// solutions that lose the same channels in the same number of subsets the closest wins. R 0 and G 255 on every
+/// solutions that lose each channel in the same number of subsets the closest wins. R 0 and G 255 on every
 /// texel, B a ramp 0 to 240: at ultrafast, veryfast and fast no opaque mode keeps both (p-bits), so every G keeper
 /// loses R. Guarding R and G must keep G exactly and write what guarding G alone writes (G's keepers ranked by their
 /// real error), unless its output loses R in strictly fewer subsets than G alone's (ruling BC7-C20: at veryfast and
