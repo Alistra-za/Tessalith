@@ -81,28 +81,28 @@ The objects hold three ISPC targets: SSE2, AVX2 and AVX-512 (`avx512skx-x16`). I
 
 #### tools\regen-ispc.ps1
 
-Use this script only to check the vendored objects or to change the ISPC sources. It needs two compilers and refuses any other version: ISPC 1.31.0 builds every file except the two AVX-512 objects, and ISPC 1.32.0 builds `bc7e_avx512skx.obj` and `kernel_avx512skx.obj`, because it fixes an AVX-512 miscompile of 1.31.0 (ISPC issue 3891). Without `-Ispc512` the check reports those two objects as `SKIP`; `-Update` needs both compilers.
+Use this script only to check the vendored objects or to change the ISPC sources. It needs one compiler, ISPC 1.32.0, and refuses any other version: that compiler builds every vendored object, and it fixes an AVX-512 miscompile of 1.31.0 (ISPC issue 3891).
 
 ```powershell
 # Rebuild into a temporary folder and compare with the vendored objects
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.32.0\bin\ispc.exe
 
 # Rebuild and replace the vendored objects and headers
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe -Update
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.32.0\bin\ispc.exe -Update
 
 # With -Update: replace only the bc7e objects, leave the ISPC Texture Compressor objects alone
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe -Update -Bc7eOnly
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.32.0\bin\ispc.exe -Update -Bc7eOnly
 ```
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `-Ispc` | `ispc.exe` (from `PATH`) | Path to the ISPC 1.31.0 compiler. |
-| `-Ispc512` | none | Path to the ISPC 1.32.0 compiler, for the two AVX-512 objects. Required by `-Update`. |
+| `-Ispc` | `ispc.exe` (from `PATH`) | Path to the ISPC 1.32.0 compiler. |
+| `-Ispc512` | none | Removed: passing it is an error. |
 | `-Bc7eSource` | `crates\encoders-sys\vendor\bc7e\bc7e.ispc` | The bc7e source to compile. |
 | `-Update` | off | Copy the rebuilt objects and headers into `vendor\ispc-objs`. |
 | `-Bc7eOnly` | off | With `-Update`, replace only the bc7e objects. |
 
-The script compiles for x86-64 Windows with the three targets, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH`, `DIFF` or `SKIP` for each object and exits with 0 when every object reports `MATCH` or `SKIP`. A vendored object the build does not produce is reported as `EXTRA` and fails the check; `-Update` never deletes one. The ISPC Texture Compressor kernel is compiled with `-DSDC_BC6H_ONLY` (ISPC TC patch 0003, BC6H only), and `build.rs` sets the same symbol for `ispc_texcomp.cpp`.
+The script compiles for x86-64 Windows with the three targets, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH` or `DIFF` for each of the ten files and exits with 0 when every one reports `MATCH`. A vendored object the build does not produce is reported as `EXTRA` and fails the check; `-Update` never deletes one. The ISPC Texture Compressor kernel is compiled with `-DSDC_BC6H_ONLY` (ISPC TC patch 0003, BC6H only), and `build.rs` sets the same symbol for `ispc_texcomp.cpp`.
 
 #### tools\hash-vendor.ps1
 
