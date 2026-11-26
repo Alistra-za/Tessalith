@@ -632,7 +632,7 @@ def attempt_figures(att, runroot):
     m = att["meta"]
     fig = {"attempt": att["name"], "build": m.get("build"), "cohort": m.get("cohort"),
            "wall_ms": m.get("externalWallMs"), "disk": disk_figures(m), "purgeStamp": m.get("purgeStamp"),
-           "coldMethod": m.get("coldMethod"), "cold": m.get("cold"),
+           "coldMethod": m.get("coldMethod"), "cold": m.get("cold"), "validate": m.get("validate") is True,
            "contaminated": (m.get("contention") or {}).get("contaminated"), "quiet": m.get("quiet")}
     if m.get("purgeStamp") and runroot:
         t = try_read(os.path.join(runroot, m["purgeStamp"]))
@@ -1002,7 +1002,7 @@ def render_md(summary):
                 cpu = a.get("cpu") or {}
                 mem = a.get("memory") or {}
                 L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-                    a["attempt"], a["wall_ms"], "%.0f" % a["recorder_wall_ms"] if "recorder_wall_ms" in a else "n/a",
+                    a["attempt"] + (" (--validate)" if a.get("validate") else ""), a["wall_ms"], "%.0f" % a["recorder_wall_ms"] if "recorder_wall_ms" in a else "n/a",
                     "%.0f" % a["plan_wall_ms"] if "plan_wall_ms" in a else "n/a",
                     "%.0f" % a["run_wall_ms"] if "run_wall_ms" in a else "n/a",
                     "%.0f" % a["tail_ms"] if a.get("tail_ms") is not None else "n/a",
@@ -1591,6 +1591,13 @@ def selftest_cli(t):
     t.ok(n + ": a standby-purge attempt's disk line says the standby list was purged", "standby list was purged" in line_pu
          and "per-file" not in line_pu, line_pu)
     t.ok(n + ": the disk header claims no purge for every cold run", "the standby list was purged before a cold run" not in md3, md3[:300])
+    val = mk_att("v1", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, validate=True)
+    plain = mk_att("v2", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")})
+    out4, _ = summarise([{"label": "fx", "cohort": "warm-fresh", "attempts": ["v1", "v2"], "loaded": [val, plain]}],
+                        {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
+    md4 = render_md(out4)
+    t.ok(n + ": an attempt run with -Validate says so in its line, and only that one",
+         any(x.startswith("| v1 (--validate) |") for x in md4.splitlines()) and any(x.startswith("| v2 |") for x in md4.splitlines()), md4)
     # disk-backed: run_check exit codes, build_summary and run_accept
     tmp = tempfile.mkdtemp(prefix="profile-summary-selftest-")  # left in place (EP-R3)
     rr = os.path.join(tmp, "runroot")

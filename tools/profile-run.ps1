@@ -13,6 +13,8 @@
              -Cohort <warmup|warm-fresh|warm-noop|warm-stale|cold-fresh|overhead|parity>
              -Build <release|base|release-off|profiling> [-RunRoot <folder>] [-Set <string[]>]
              [-CopyFrom <attempt name>] [-StaleEdge <clamp|wrap>] [-Samply <samply.exe>] [-Calibrate] [-DryRun]
+             [-Validate]  adds --validate to the command and records validate: true in meta.json; fresh runs
+             only (EP-C8): refused with -CopyFrom and for warm-noop and warm-stale.
              [-ExpectedBytes <n>]  size of the expected output; required for the first attempt of a corpus and
              build in a RunRoot, later ones size the free-space check from the newest earlier attempt's out.
              Nothing reads the corpus outside the command.
@@ -88,6 +90,8 @@ param(
     [switch]$Calibrate,
     [Parameter(ParameterSetName = 'Run')]
     [switch]$DryRun,
+    [Parameter(ParameterSetName = 'Run')]
+    [switch]$Validate,
     [Parameter(ParameterSetName = 'Expected', Mandatory)]
     [switch]$Expected,
     [Parameter(ParameterSetName = 'SelfTest', Mandatory)]
@@ -496,6 +500,29 @@ function Invoke-SelfTest {
         $b = Get-AttemptName 'fx' 'warm-fresh' 1
         ($a -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($b -match '^\d{8}-\d{6}-fx-warm-fresh-1-[0-9a-f]{8}$') -and ($a -ne $b)
     }
+    # -Validate (EP-C8): fresh runs only; the command gains --validate once
+    foreach ($c in 'warm-noop', 'warm-stale') {
+        Case "-Validate is refused for $c" { (Get-ValidateProblem $true $c 'src') -like "*refused for $c*" -and (Get-ValidateProblem $true $c $null) -like "*refused for $c*" }
+    }
+    Case '-Validate is refused with -CopyFrom whatever the cohort' { (Get-ValidateProblem $true 'warm-fresh' 'src') -like '*with -CopyFrom*' }
+    Case '-Validate is accepted for fresh cohorts without -CopyFrom' {
+        -not @('warmup', 'warm-fresh', 'cold-fresh', 'overhead', 'parity' | Where-Object { Get-ValidateProblem $true $_ $null }).Count
+    }
+    Case 'without -Validate nothing is refused (noop with -CopyFrom stays allowed here)' { -not (Get-ValidateProblem $false 'warm-noop' 'src') }
+    Case '-Validate adds --validate once to the convert command' {
+        $a = Get-ConvertArgs 'C:\c' 'C:\o' @('reencode=true') (Get-ExtraArgs 'warm-fresh' 'clamp' $true)
+        $b = Get-ConvertArgs 'C:\c' 'C:\o' @() (Get-ExtraArgs 'warm-fresh' 'clamp' $false)
+        (@($a | Where-Object { $_ -eq '--validate' }).Count -eq 1) -and ($a -contains 'reencode=true') -and ($b -notcontains '--validate')
+    }
+    Case 'warm-stale keeps its edge setting and gets no --validate' {
+        $s = Get-ExtraArgs 'warm-stale' 'wrap' $false
+        ($s -join ' ') -eq '--set mips.edge=wrap'
+    }
+    Case 'meta.json records validate from the switch' {
+        $text = [IO.File]::ReadAllText($PSCommandPath)
+        $text.Contains('validate = [bool]$A.Validate') -and $text.Contains('Validate = [bool]$Validate')
+    }
+
     # prune (EP-O4): only an accepted attempt's hashed .dds files go, and every refusal deletes nothing
     $pr = Join-Path $t 'prune'; New-NewDir $pr
     $rowsAB = @('textures/a.dds,aaa', 'textures/b.dds,bbb')
@@ -884,6 +911,22 @@ function Stop-Child($c) {
     $c.OutFs.Dispose(); $c.ErrFs.Dispose()
 }
 
+# EP-C8: --validate is for fresh runs only; a noop or stale run, or any copy, routes files through check_one.
+function Get-ValidateProblem([bool]$validate, [string]$cohort, [string]$copyFrom) {
+    if (-not $validate) { return $null }
+    if ($cohort -in 'warm-noop', 'warm-stale') { return "-Validate is refused for $cohort (EP-C8: fresh runs only)" }
+    if ($copyFrom) { return '-Validate is refused with -CopyFrom (EP-C8: fresh runs only)' }
+    $null
+}
+
+# The cohort's arguments after the shared ones: warm-stale's edge setting, and --validate.
+function Get-ExtraArgs([string]$cohort, [string]$staleEdge, [bool]$validate) {
+    $extra = @()
+    if ($cohort -eq 'warm-stale') { $extra += @('--set', "mips.edge=$staleEdge") }
+    if ($validate) { $extra += '--validate' }
+    , $extra
+}
+
 function Get-ConvertArgs([string]$corpus, [string]$out, [string[]]$sets, [string[]]$extra) {
     $a = @('convert', $corpus, '-o', $out, '--recursive', '--accept-suggestions', 'high', '--jobs', '0')
     foreach ($s in $sets) { $a += @('--set', $s) }
@@ -935,8 +978,9 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $figure = Get-ExpectedBytesFigure $A.RunRoot $A.Corpus $A.Build ([int64]$A.ExpectedBytes)
     if ($null -eq $figure) { $problems += 'no earlier attempt of this corpus and build in RunRoot to size the free-space check from: pass -ExpectedBytes (the corpus is never read outside the command)' }
 
-    $extra = @()
-    if ($cohort -eq 'warm-stale') { $extra = @('--set', "mips.edge=$($A.StaleEdge)") }
+    $vp = Get-ValidateProblem ([bool]$A.Validate) $cohort $A.CopyFrom
+    if ($vp) { $problems += $vp }
+    $extra = Get-ExtraArgs $cohort $A.StaleEdge ([bool]$A.Validate)
     $name = Get-AttemptName $A.Label $cohort (Get-NextK $A.RunRoot $A.Label $cohort)
     $attempt = Join-Path $A.RunRoot $name
     $out = Join-Path $attempt 'out'
@@ -996,7 +1040,7 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
     $meta = [ordered]@{
         attempt = $name; label = $A.Label; cohort = $cohort; build = $A.Build; corpus = $A.Corpus; exe = $A.Exe; exeSha256 = $exeSha
         commit = (& git -C $PSScriptRoot rev-parse HEAD 2>$null); command = ($exeToRun + ' ' + ($fullArgs -join ' ')); finished = $false
-        exitCode = $null; externalWallMs = $null; purgeStamp = $purge; coldMethod = $coldMethod; calibrate = [bool]$A.Calibrate; samply = $null
+        exitCode = $null; externalWallMs = $null; purgeStamp = $purge; coldMethod = $coldMethod; calibrate = [bool]$A.Calibrate; validate = [bool]$A.Validate; samply = $null
         quiet = [ordered]@{ passedFirstTry = $quiet.PassedFirstTry; tries = $quiet.Tries; waitedSec = $quiet.WaitedSec; cpuAvgPct = $quiet.Result.CpuAvgPct; freeGB = [math]::Round($quiet.Result.FreeBytes / 1GB, 1); neededGB = [math]::Round($needed / 1GB, 1) }
         logicalCores = [Environment]::ProcessorCount
     }
@@ -1255,5 +1299,5 @@ if ($PSCmdlet.ParameterSetName -eq 'Expected') {
     Invoke-Expected @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; RunRoot = $RunRoot; Set = $Set }
     exit 0
 }
-$code = Invoke-Attempt @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; Cohort = $Cohort; Build = $Build; RunRoot = $RunRoot; Set = $Set; CopyFrom = $CopyFrom; StaleEdge = $StaleEdge; Samply = $Samply; Calibrate = [bool]$Calibrate; ExpectedBytes = $ExpectedBytes } $dry
+$code = Invoke-Attempt @{ Exe = $Exe; Corpus = $Corpus; Label = $Label; Cohort = $Cohort; Build = $Build; RunRoot = $RunRoot; Set = $Set; CopyFrom = $CopyFrom; StaleEdge = $StaleEdge; Samply = $Samply; Calibrate = [bool]$Calibrate; Validate = [bool]$Validate; ExpectedBytes = $ExpectedBytes } $dry
 exit $code
