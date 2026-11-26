@@ -572,6 +572,14 @@ def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False
         p.append("%d expected key(s) not written: %s" % (len(missing), head(missing)))
     if extra:
         p.append("%d unexpected key(s) written: %s" % (len(extra), head(extra)))
+    # EP-C10: a --validate attempt against an unvalidated (main-default) reference has no validation to compare;
+    # its own records must show validation ran instead. Any other pairing compares validation objects exactly.
+    validated_pair = ref is not None and m.get("validate") is True and ref["meta"].get("validate") is not True
+    if m.get("validate") is True and att["manifest"] is not None:
+        not_run = sorted(k for k in expected if not (isinstance((att["manifest"].get(k) or {}).get("validation"), dict)
+                                                     and att["manifest"][k]["validation"].get("skipped") is not True))
+        if not_run:
+            p.append("%d record(s) of a --validate attempt show no validation run (skipped or missing): %s" % (len(not_run), head(not_run)))
     if ref is not None:
         rh = ref["hashes"]
         bad = sorted(k for k in expected & written if att["hashes"][k] != rh.get(k))
@@ -589,10 +597,10 @@ def check_attempt(att, expected, ref=None, copied=None, allow_contaminated=False
                 if a is None or r is None:
                     nov.append(k)
                     continue
-                if a.get("validation") != r.get("validation"):
+                if not validated_pair and a.get("validation") != r.get("validation"):
                     vbad.append(k)
                 if cohort in FRESH_LIKE:
-                    ignored = set(MANIFEST_IGNORED) | ({"engine_commit"} if cross else set())
+                    ignored = set(MANIFEST_IGNORED) | ({"engine_commit"} if cross else set()) | ({"validation"} if validated_pair else set())
                     fields = sorted(f for f in set(a) | set(r) if f not in ignored and a.get(f) != r.get(f))
                     if fields:
                         mbad.append("%s [%s]" % (k, ", ".join(fields)))
@@ -628,12 +636,31 @@ def disk_figures(meta):
     return out
 
 
+def validation_counts(manifest):
+    """The validation verdicts of an attempt's records: passed, failed, and skipped (validation did not run)."""
+    c = {"passed": 0, "failed": 0, "skipped": 0}
+    for r in (manifest or {}).values():
+        v = r.get("validation") if isinstance(r.get("validation"), dict) else {}
+        c["skipped" if v.get("skipped") is True or not v else ("passed" if v.get("passed") is True else "failed")] += 1
+    return c
+
+
+def validate_note(a):
+    """The attempt line's --validate mark, with the verdict counts (EP-C10)."""
+    if not a.get("validate"):
+        return ""
+    c = a.get("validation_counts") or {}
+    return " (--validate: %d passed, %d failed, %d skipped)" % (c.get("passed", 0), c.get("failed", 0), c.get("skipped", 0))
+
+
 def attempt_figures(att, runroot):
     m = att["meta"]
     fig = {"attempt": att["name"], "build": m.get("build"), "cohort": m.get("cohort"),
            "wall_ms": m.get("externalWallMs"), "disk": disk_figures(m), "purgeStamp": m.get("purgeStamp"),
            "coldMethod": m.get("coldMethod"), "cold": m.get("cold"), "validate": m.get("validate") is True,
            "contaminated": (m.get("contention") or {}).get("contaminated"), "quiet": m.get("quiet")}
+    if fig["validate"]:
+        fig["validation_counts"] = validation_counts(att["manifest"])
     if m.get("purgeStamp") and runroot:
         t = try_read(os.path.join(runroot, m["purgeStamp"]))
         if t:
@@ -770,7 +797,8 @@ def run_check(args):
     for x in probs:
         print("FAIL %s: %s" % (att["name"], x))
     if not probs:
-        print("OK %s" % att["name"])
+        print("OK %s%s" % (att["name"], validate_note({"validate": att["meta"].get("validate") is True,
+                                                       "validation_counts": validation_counts(att["manifest"])})))
     return 1 if probs else 0
 
 
@@ -1002,7 +1030,7 @@ def render_md(summary):
                 cpu = a.get("cpu") or {}
                 mem = a.get("memory") or {}
                 L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-                    a["attempt"] + (" (--validate)" if a.get("validate") else ""), a["wall_ms"], "%.0f" % a["recorder_wall_ms"] if "recorder_wall_ms" in a else "n/a",
+                    a["attempt"] + validate_note(a), a["wall_ms"], "%.0f" % a["recorder_wall_ms"] if "recorder_wall_ms" in a else "n/a",
                     "%.0f" % a["plan_wall_ms"] if "plan_wall_ms" in a else "n/a",
                     "%.0f" % a["run_wall_ms"] if "run_wall_ms" in a else "n/a",
                     "%.0f" % a["tail_ms"] if a.get("tail_ms") is not None else "n/a",
@@ -1406,6 +1434,27 @@ def selftest_acceptance(t):
     t.ok(n + ": a standby-purge attempt (no byte check) is accepted", pr == [], pr)
     pr = check_attempt(mk_att("c7", cohort="cold-fresh", purgeStamp="purge-20261126-000000.json", **good), exp, ref)
     t.ok(n + ": an older purge attempt without coldMethod is accepted", pr == [], pr)
+    # EP-C10: a --validate attempt against an unvalidated (main-default) reference
+    skipped = {"passed": True, "levels": 3, "skipped": True}
+    ran = {"passed": True, "levels": 3, "min_mip_psnr_db": 50.0}
+    uref = mk_att("uref", build="base", exe="B1", hashes=good["hashes"],
+                  manifest={"a.dds": rec("a.dds", validation=skipped), "b.dds": rec("b.dds", validation=skipped)})
+    vgood = dict(hashes=good["hashes"], manifest={"a.dds": rec("a.dds", validation=ran), "b.dds": rec("b.dds", validation=ran)})
+    pr = check_attempt(mk_att("v1", validate=True, **vgood), exp, uref)
+    t.ok(n + ": EP-C10, a --validate attempt against an unvalidated reference passes on bytes and keys", pr == [], pr)
+    vskip = dict(hashes=good["hashes"], manifest={"a.dds": rec("a.dds", validation=ran), "b.dds": rec("b.dds", validation=skipped)})
+    pr = check_attempt(mk_att("v2", validate=True, **vskip), exp, uref)
+    t.ok(n + ": EP-C10, a skipped record in the --validate attempt is refused and named",
+         any("show no validation run" in x and "b.dds" in x for x in pr) and not any("validation object" in x for x in pr), pr)
+    pr = check_attempt(mk_att("v3", validate=True, hashes={"a.dds": "ZZ", "b.dds": "hb"}, manifest=vgood["manifest"]), exp, uref)
+    t.ok(n + ": EP-C10, the pairing still refuses a byte difference", any("hash" in x and "a.dds" in x for x in pr), pr)
+    vref = mk_att("vref", build="base", exe="B1", validate=True, **vgood)
+    vdiff = dict(hashes=good["hashes"], manifest={"a.dds": rec("a.dds", validation=dict(ran, passed=False)), "b.dds": rec("b.dds", validation=ran)})
+    pr = check_attempt(mk_att("v4", validate=True, **vdiff), exp, vref)
+    t.ok(n + ": EP-C10, against a validated reference a different validation object still fails", any("validation object" in x and "a.dds" in x for x in pr), pr)
+    pr = check_attempt(mk_att("v5", **vgood), exp, uref)
+    t.ok(n + ": EP-C10, an unvalidated attempt against an unvalidated reference still compares validation objects",
+         any("validation object" in x for x in pr), pr)
     cont = mk_att("k1", **good)
     cont["meta"]["contention"] = {"contaminated": True, "reasons": ["banned process appeared: cargo(1)"]}
     t.ok(n + ": a contaminated attempt is refused with the runner's reason", any("cargo(1)" in x for x in check_attempt(cont, exp, ref)))
@@ -1596,8 +1645,16 @@ def selftest_cli(t):
     out4, _ = summarise([{"label": "fx", "cohort": "warm-fresh", "attempts": ["v1", "v2"], "loaded": [val, plain]}],
                         {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
     md4 = render_md(out4)
-    t.ok(n + ": an attempt run with -Validate says so in its line, and only that one",
-         any(x.startswith("| v1 (--validate) |") for x in md4.splitlines()) and any(x.startswith("| v2 |") for x in md4.splitlines()), md4)
+    t.ok(n + ": an attempt run with -Validate says so in its line with its verdict counts, and only that one",
+         any(x.startswith("| v1 (--validate: 1 passed, 0 failed, 0 skipped) |") for x in md4.splitlines())
+         and any(x.startswith("| v2 |") for x in md4.splitlines()), md4)
+    v3 = mk_att("v3", build="release-off", validate=True, hashes={"a.dds": "h", "b.dds": "h", "c.dds": "h"},
+                manifest={"a.dds": rec("a.dds"), "b.dds": rec("b.dds", validation={"passed": False, "levels": 3}),
+                          "c.dds": rec("c.dds", validation={"passed": True, "levels": 3, "skipped": True})})
+    out5, _ = summarise([{"label": "fx", "cohort": "warm-fresh", "attempts": ["v3"], "loaded": [v3]}],
+                        {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
+    t.ok(n + ": the verdict counts split passed, failed and skipped records",
+         any(x.startswith("| v3 (--validate: 1 passed, 1 failed, 1 skipped) |") for x in render_md(out5).splitlines()), render_md(out5))
     # disk-backed: run_check exit codes, build_summary and run_accept
     tmp = tempfile.mkdtemp(prefix="profile-summary-selftest-")  # left in place (EP-R3)
     rr = os.path.join(tmp, "runroot")
