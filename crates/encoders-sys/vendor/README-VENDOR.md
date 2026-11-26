@@ -203,7 +203,7 @@ ISPC TC patch 0004 "BC6H kernel fixes" (`ispctc/patches/0004-bc6h-kernel-fixes.p
 patches 0001 and 0003. It is produced with
 `git diff --output=<patch> <base> -- crates/encoders-sys/vendor/ispctc/kernel.ispc` against the post-0003 kernel at
 `fca6cb41a6703aaad61461700e083670cbcc3bd6` (the patch file is always regenerated whole, never edited by hand), and it
-is built with ISPC 1.32.0 like every object (Note LO1). Fix #6: `bc6h_bounds` declared
+is built with ISPC 1.32.0 like every object (Note LU3; flags: LO1). Fix #6: `bc6h_bounds` declared
 `float rgb_span[0]` and wrote and read three elements; it is now `rgb_span[3]`. ISPC 1.31.0 printed no diagnostic for
 it. BC6H bytes unchanged: every pin and every measured image hash equal (Note LO2). Fix #7: `bc6h_enc_2p` clamps the
 partition count to the 32 entries of `part_list`; no profile in Tessalith asks for more than 32, so it is unreachable

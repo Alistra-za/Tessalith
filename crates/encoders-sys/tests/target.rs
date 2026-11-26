@@ -53,8 +53,9 @@ fn which(d: &[u8], s: &[u8], a: Option<&[u8]>) -> &'static str {
     }
 }
 
-/// Fixtures (xorshift32, seed `0x9E37_79B9` for each; differing 16-byte blocks measured on the 1.31 objects on a Ryzen
-/// whose `best()` is AVX-512, as SSE2 vs AVX2 / dispatcher vs SSE2 / dispatcher vs AVX2): BC7 Veryslow, 128x128 (1024 blocks), alpha 255,
+/// Fixtures (xorshift32, seed `0x9E37_79B9` for each; differing 16-byte blocks measured on the 1.32 objects, the same
+/// counts as on the 1.31 objects, on a Ryzen whose `best()` is AVX-512, as SSE2 vs AVX2 / dispatcher vs SSE2 /
+/// dispatcher vs AVX2): BC7 Veryslow, 128x128 (1024 blocks), alpha 255,
 /// texel (x, y) channel c = clamp(200 * (x + y) / 256 + 20 * c + n, 0, 255), one n in [-8, 8] per texel (28 / 62 / 59).
 /// BC6H Veryslow, 64x256 (1024 blocks), b = (x + y) * 0.01, R = b + 0.3 u, G = 0.7 b + 0.3 u, B = 0.4 b + 0.3 u with
 /// u uniform in [0, 1] drawn per channel in that order, alpha 1 (19 / 26 / 15). White noise does not separate the paths

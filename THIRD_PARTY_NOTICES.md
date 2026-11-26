@@ -13,7 +13,7 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
 - **rgbcx** (bc7enc_rdo commit b943862), Richard Geldreich, Jr., MIT or Public Domain (Unlicense); Tessalith uses MIT (`LICENSES/bc7enc_rdo-LICENSE.txt`).
   Tessalith ships a modified `rgbcx.h`: patch "rgbcx BC4 round-to-nearest" (see `crates/encoders-sys/vendor/README-VENDOR.md`).
 - **Intel ISPC Texture Compressor** (commit 79ddbc9), Copyright (c) 2016-2019 Intel Corporation, MIT (`LICENSES/ISPCTextureCompressor-license.txt`).
-- The ISPC objects of the above were compiled with Intel ISPC 1.31.0; the two AVX-512 objects with ISPC 1.32.0 (BSD-3-Clause compilers; the objects carry the source files' licences).
+- The ISPC objects of the above were compiled with Intel ISPC 1.32.0 (a BSD-3-Clause compiler; the objects carry the source files' licences).
 - **liblz4** (the copy vendored in the `lzzzz` crate 1.1.0, compiled into `vfs` to read BSA archives), Copyright (c) 2011-2020 Yann Collet, BSD-2-Clause (`LICENSES/BSD-2-Clause-lz4.txt`). Only the library is compiled; upstream's programs directory (GPLv2) is not.
 - **PGPatcher JSON schemas** `crates/gui/assets/pbr.schema.json` and `crates/gui/assets/complex_material.schema.json` (https://github.com/hakasapl/PGPatcher, (c) hakasapl and contributors, GPL-3.0), vendored unmodified and embedded in the GUI to validate exported JSON. `pbr.schema.json` was fetched from `main` on 2026-10-09; `complex_material.schema.json` is upstream commit 0176567.
 - **XPMF profile schema** `crates/gui/assets/xpmf_profile.schema.json` (https://github.com/hakasapl/xpmf, (c) hakasapl, GPL-3.0 with modding exception), vendored unmodified and embedded in the GUI to validate exported XPMF profiles; upstream 0.8.1, commit 8078e1f.

@@ -1,0 +1,5 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+HZ1	HZ		back	LU3		partial	2026-11-26		goes: the two-compiler wording (every other object 1.31.0, `versions().ispc` stays 1.31.0, `-Ispc512`); stays: the rest; archived by hand from the pre-edit text
+LO1	LO		back	LU3		partial	2026-11-26		goes: the "both compilers (ISPC 1.31.0, and 1.32.0 for kernel_avx512skx.obj)" sentence; stays: the rest; archived by hand
+LR1	LR		back	LU3		partial	2026-11-26		goes: "built with ISPC 1.31.0 and, for bc7e_avx512skx.obj, 1.32.0"; stays: the rest; archived by hand
+Digest¶- An engine change that alters a type's bytes or verdict moves	Digest		back	LU5		partial	2026-11-26		goes: the exception list as LR4 left it (the ISPC 1.32.0 objects are no exception: no arm moves, LU4, LU5); stays: the rest; archived by hand from the pre-edit text
