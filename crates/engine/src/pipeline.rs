@@ -462,9 +462,14 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
-    // Note LV1: tempfile's Windows persist hands both paths to the Win32 calls as they are, so a path over
-    // MAX_PATH needs the long form that std::fs adds for its own calls.
-    let (dir, path) = (long_form(dir)?, long_form(path)?);
+    // Note LV1: tempfile's Windows persist hands both paths to the Win32 calls as they are, so a path that reaches
+    // MAX_PATH needs the long form that std::fs adds for its own calls. Below that the paths stay as given, so an
+    // error names the path the user knows.
+    let (dir, path) = if needs_long_form(dir, path)? {
+        (long_form(dir)?, long_form(path)?)
+    } else {
+        (dir.to_path_buf(), path.to_path_buf())
+    };
     let mut builder = tempfile::Builder::new();
     builder.prefix(".sdc-").suffix(".tmp");
     #[cfg(unix)]
@@ -479,10 +484,25 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     }
 }
 
+/// Whether the output `path` in `dir` needs the long form: std's own thresholds, 248 characters for a directory and 260
+/// for a file path (its `get_long_path`), checked for the folder, the output, and the longest temp file tempfile makes
+/// in the folder (`.sdc-` + 6 random characters + `.tmp`, and a separator). Lengths are of the absolute path, in bytes of
+/// the OS string, which is never fewer than the UTF-16 units Win32 counts, so a non-ASCII name converts a little early,
+/// never late (Note LV1).
+fn needs_long_form(dir: &Path, path: &Path) -> io::Result<bool> {
+    const DIR_LIMIT: usize = 248;
+    const FILE_LIMIT: usize = 260;
+    const TEMP_NAME: usize = 1 + ".sdc-".len() + 6 + ".tmp".len();
+    let dir = std::path::absolute(dir)?.as_os_str().len();
+    let file = std::path::absolute(path)?.as_os_str().len();
+    Ok(dir >= DIR_LIMIT || dir + TEMP_NAME >= FILE_LIMIT || file >= FILE_LIMIT)
+}
+
 /// `p` as an absolute verbatim (`\\?\`) path, the form Win32 file calls accept past MAX_PATH without a long-path
 /// manifest (Note LV1). `std::path::absolute` first applies the normalisation a verbatim path skips (separators, `.`
 /// and `..`), as std does before adding the prefix for its own calls; a UNC path takes `\\?\UNC\`, and a path that is
-/// already verbatim, or a device path, stays as it is.
+/// already verbatim stays as it is. A device path (`\\.\`) also stays as it is and is still capped at MAX_PATH: Win32
+/// normalises it again, so an output root given in that form does not work past 260 characters.
 #[cfg(windows)]
 fn long_form(p: &Path) -> io::Result<PathBuf> {
     use std::path::{Component, Prefix};
@@ -920,9 +940,86 @@ mod tests {
         );
         assert_eq!(long(r"\\?\C:\out\b.dds"), Path::new(r"\\?\C:\out\b.dds"));
         assert_eq!(long(r"\\.\pipe\x"), Path::new(r"\\.\pipe\x"));
+        // A relative path is made absolute from the current directory, whatever form that has.
         let rel = long("b.dds");
-        let want = std::env::current_dir().unwrap().join("b.dds");
-        assert_eq!(rel, Path::new(&format!(r"\\?\{}", want.display())));
+        let want = long_form(&std::env::current_dir().unwrap().join("b.dds")).unwrap();
+        assert_eq!(rel, want);
+        let cwd = std::env::current_dir().unwrap();
+        if matches!(cwd.components().next(), Some(std::path::Component::Prefix(p)) if matches!(p.kind(), std::path::Prefix::Disk(_)))
+        {
+            assert_eq!(rel, Path::new(&format!(r"\\?\{}\b.dds", cwd.display())));
+        } else {
+            eprintln!("skipped the drive-form check: the current directory is not a drive path");
+        }
+    }
+
+    /// A folder of exactly `len` characters under `root` (parts of at most 60 characters).
+    fn dir_of_len(root: &Path, len: usize) -> PathBuf {
+        let mut dir = std::path::absolute(root).unwrap();
+        assert!(dir.as_os_str().len() + 2 <= len, "{}", dir.display());
+        while dir.as_os_str().len() < len {
+            let room = len - dir.as_os_str().len() - 1;
+            dir.push("x".repeat(room.min(60)));
+        }
+        assert_eq!(dir.as_os_str().len(), len);
+        dir
+    }
+
+    /// Note LV1: the long form is added only where the folder, the output or its temp file reaches the legacy limit.
+    #[test]
+    fn the_long_form_is_only_for_paths_near_the_limit() {
+        let d = tempfile::tempdir().unwrap();
+        let short = d.path().join("out");
+        assert!(!needs_long_form(&short, &short.join("a.dds")).unwrap());
+        // A folder of 243: the temp (243 + 16 = 259) still fits.
+        let dir = dir_of_len(d.path(), 243);
+        assert!(!needs_long_form(&dir, &dir.join("a.dds")).unwrap());
+        // 244: the output is 250, but the temp is 260.
+        let dir = dir_of_len(d.path(), 244);
+        assert!(dir.join("a.dds").as_os_str().len() < 260);
+        assert!(needs_long_form(&dir, &dir.join("a.dds")).unwrap());
+        // A long file name in a short folder reaches the file limit.
+        let name = "n".repeat(250);
+        assert!(needs_long_form(&short, &short.join(name)).unwrap());
+    }
+
+    /// Note LV1: an output under MAX_PATH whose temp file in the same folder reaches it is written, and leaves no temp.
+    #[test]
+    fn a_new_dds_whose_temp_path_reaches_max_path_is_written() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = dir_of_len(d.path(), 245);
+        let path = dir.join("a.dds");
+        assert!(path.as_os_str().len() < 260, "{}", path.display());
+        assert!(write_new_dds(&path, b"first").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    /// Note LV1: a write that fails on a short path names the path as given, never in the `\\?\` form.
+    #[test]
+    fn a_failed_write_on_a_short_path_names_no_verbatim_path() {
+        // The temp cannot be created in the output folder: everyone is denied creating files there (the error
+        // names the temp's path).
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let icacls = |flag: &str, rule: &str| {
+            std::process::Command::new("icacls")
+                .arg(&out)
+                .arg(flag)
+                .arg(rule)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        };
+        if !icacls("/deny", "*S-1-1-0:(WD,AD)") {
+            eprintln!("skipped: icacls could not deny file creation");
+            return;
+        }
+        let r = write_new_dds(&out.join("a.dds"), b"x");
+        icacls("/remove:d", "*S-1-1-0");
+        let e = r.expect_err("the denied folder takes no new file");
+        assert!(!e.to_string().contains(r"\\?\"), "{e}");
+        assert!(e.to_string().contains("out"), "{e}");
     }
 
     /// Note LV1: a new DDS whose full path is over MAX_PATH is written, a second write to it is still a skip that
