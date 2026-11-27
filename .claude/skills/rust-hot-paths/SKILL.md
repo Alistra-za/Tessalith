@@ -28,5 +28,5 @@ Returning an owned `String` once, as the result, is fine. The cost is what runs 
 - **Shape 4 changes a type.** Do it only when the task changes that type, and with an allocation budget test. Otherwise leave it and mention it in your report.
 - **For a change under `crates/engine/src/` or to GUI frame code, run both budget tests** (a counting global allocator: `crates/engine/tests/alloc_budget.rs`, `crates/gui/tests/alloc_frame.rs`). Never raise a budget to make it pass. Report the new count and why it grew.
 - **A smaller count in a cold path is not worth a harder read.** Code that runs once per plan or once per click is not a hot path.
-- **No float rewrites for speed** (`mul_add`, reordered sums). Goldens are byte-identical.
+- **Float rewrites for speed** (`mul_add`, reordered sums) change bytes, so they are a planned task of their own under CLAUDE.md's "A measured speed change may alter bytes" rule, with timing, quality and Intel/AMD parity measured. Never make one in passing.
 - **No scope widening.** This skill applies to the code the task changes. If you see a costly shape elsewhere, leave it and mention it in your report if it matters.
