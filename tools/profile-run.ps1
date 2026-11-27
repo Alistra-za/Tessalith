@@ -57,8 +57,11 @@
   to run without it, or with a baseline of fewer than 30 samples.
   Contention (spec 7.6, EP-C14): a sampler thread in the runner snapshots every process once a second (see
   Start-ContentionStream), so processes that start mid-attempt are seen, and the runner's own tree (sdc
-  included) is exempt by PID. contention.csv has one row per second; meta.json's contention block records the
-  sample-interval median and 95th percentile and the runner's own CPU.
+  included) is exempt by PID. contention.csv has one row per second, with the top other process by CPU
+  (top_other) and by read+write bytes (top_other_io); meta.json's contention block records the sample-interval
+  median and 95th percentile and the runner's own CPU. Other I/O contaminates only by seconds (EP-C16): over the
+  baseline + 200 MB/s for more than 10 seconds in total, or for 3 or more seconds in a row; every such second is
+  listed in contention.ioSpikes with its time, MB/s and top other I/O process. The other-CPU rule is unchanged.
   -DryRun: prints the quiet check, preconditions, the resolved command and folders; runs nothing.
   The script never elevates, downloads or installs anything. Cold attempts need a cold stamp under 15 minutes
   old that no earlier attempt used: an owner-run tools\profile-purge.ps1 stamp (purge-*.json), or a
@@ -560,6 +563,38 @@ function Invoke-SelfTest {
         $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 3010)) $base0 $false
         (-not $v.contaminated) -and $v.sampleGaps -eq 0
     }
+    # EP-C16: other I/O spikes are counted in seconds
+    $ioBase = @{ otherCpuCores = 0.0; otherIoBytesPerSec = 5MB }
+    $ioRows = {
+        param([int[]]$spikeAt, [int]$count = 60)
+        foreach ($i in 1..$count) {
+            [pscustomobject]@{ t_ms = $i * 1000; ctr_ms = 1000000 + $i * 1000; total = 0; exempt = 0; other_cpu = 0; other_io = $(if ($spikeAt -contains $i) { 300MB } else { 1MB })
+                sys_cpu = 0; sys_io = 0; banned = ''; top_other_io = $(if ($spikeAt -contains $i) { "tiworker(77):300.0 MB/s" } else { "svchost(9):1.0 MB/s" }) }
+        }
+    }
+    Case 'I/O spikes: 5 single seconds spread out are clean, and each is recorded' {
+        $v = Get-ContentionVerdict @(& $ioRows @(5, 15, 25, 35, 45)) $ioBase $false
+        (-not $v.contaminated) -and $v.ioSpikes.seconds -eq 5 -and $v.ioSpikes.bursts -eq 5 -and $v.ioSpikes.longestSeconds -eq 1 -and
+        $v.ioSpikes.list[0].mbPerSec -eq 300 -and $v.ioSpikes.list[0].counterUnixMs -eq 1005000 -and $v.ioSpikes.list[0].at
+    }
+    Case 'I/O spikes: 2 seconds in a row plus 8 single seconds (10 in total) are clean' {
+        $v = Get-ContentionVerdict @(& $ioRows @(3, 4, 10, 15, 20, 25, 30, 35, 40, 45)) $ioBase $false
+        (-not $v.contaminated) -and $v.ioSpikes.seconds -eq 10 -and $v.ioSpikes.longestSeconds -eq 2
+    }
+    Case 'I/O spikes: 3 seconds in a row are contaminated' {
+        $v = Get-ContentionVerdict @(& $ioRows @(20, 21, 22)) $ioBase $false
+        $v.contaminated -and $v.ioSpikes.longestSeconds -eq 3 -and @($v.reasons -like '*3 second(s), 1 burst(s), the longest 3 s*').Count -eq 1
+    }
+    Case 'I/O spikes: 11 seconds spread out are contaminated' {
+        $v = Get-ContentionVerdict @(& $ioRows @(2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52)) $ioBase $false
+        $v.contaminated -and $v.ioSpikes.seconds -eq 11 -and $v.ioSpikes.longestSeconds -eq 1 -and @($v.reasons -like '*11 second(s), 11 burst(s)*').Count -eq 1
+    }
+    Case 'I/O spikes: each spike second names the top other I/O process; a high but steady mean alone does not contaminate' {
+        $v = Get-ContentionVerdict @(& $ioRows @(30)) $ioBase $false
+        $steady = @(& $ioRows @() | ForEach-Object { $_.other_io = 150MB; $_ })
+        $s = Get-ContentionVerdict $steady $ioBase $false
+        $v.ioSpikes.list[0].topOtherIo -eq 'tiworker(77):300.0 MB/s' -and (-not $s.contaminated) -and $s.ioSpikes.seconds -eq 0
+    }
     Case 'contention: the verdict records the sample-interval median, 95th percentile and maximum' {
         $iv = Get-IntervalStats @(1000, 2000, 3000, 4100, 5100, 7100 | ForEach-Object { & $mkRow $_ })
         $v = Get-ContentionVerdict @((& $mkRow 1000), (& $mkRow 2000), (& $mkRow 3010)) $base0 $false
@@ -619,6 +654,15 @@ function Invoke-SelfTest {
     Case 'sampler: one row a second (median 0.95-1.1 s, 95th percentile at most 1.5 s)' {
         $iv = Get-IntervalStats $late.Rows
         $late.Rows.Count -ge 5 -and $iv.MedianMs -ge 950 -and $iv.MedianMs -le 1100 -and $iv.P95Ms -le 1500
+    }
+    $ioFile = Join-Path $t 'io-writer.bin'
+    $ioArgs = @('-NoProfile', '-NonInteractive', '-Command', "`$b = New-Object byte[] 32MB; foreach (`$i in 1..16) { [IO.File]::WriteAllBytes('$ioFile', `$b); Start-Sleep -Milliseconds 100 }")
+    $ioProbe = & $probe -1 { param($ex) & $startBusy $busyExe $ioArgs }
+    Case 'sampler: the top other I/O process is named in top_other_io with its MB/s' {
+        $w = $ioProbe.Pids[0]
+        $named = @($ioProbe.Rows | Where-Object { $_.top_other_io -like "pwsh($w):* MB/s" })
+        $mb = @($named | ForEach-Object { [double](($_.top_other_io -split ':')[1] -replace ' MB/s$', '') })
+        $named.Count -ge 1 -and ($mb | Measure-Object -Maximum).Maximum -ge 50
     }
     $tree = & $probe $PID { param($ex) & $startBusy $busyExe $busyArgs }
     Case 'sampler: a child of the runner (sdc) started after the stream is exempt, not other' {
@@ -1430,6 +1474,7 @@ public sealed class ProfileContentionRow {
     public double sys_io { get; set; }
     public string banned { get; set; }
     public string top_other { get; set; }
+    public string top_other_io { get; set; }
     public int processes { get; set; }
 }
 
@@ -1578,8 +1623,9 @@ public sealed class ProfileContentionSampler {
             }
             if (prevMs >= 0) {
                 double secs = Math.Max(0.001, (nowMs - prevMs) / 1000.0);
-                double total = 0, ex = 0, run = 0, other = 0, otherIo = 0, sys = 0, sysIo = 0, topCpu = 0;
-                string top = "";
+                double total = 0, ex = 0, run = 0, other = 0, otherIo = 0, sys = 0, sysIo = 0, topCpu = 0, topIo = 0;
+                string top = "", topIoName = "";
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
                 var found = new List<string>();
                 foreach (var kv in cur) {
                     var e = kv.Value;
@@ -1595,14 +1641,15 @@ public sealed class ProfileContentionSampler {
                     string nn = NormalName(e.Name);
                     if (system.Contains(nn)) { sys += cpu; sysIo += io; continue; }
                     other += cpu; otherIo += io;
-                    if (cpu > topCpu) { topCpu = cpu; top = nn + "(" + e.Pid + "):" + Math.Round(cpu, 2); }
+                    if (cpu > topCpu) { topCpu = cpu; top = nn + "(" + e.Pid + "):" + cpu.ToString("0.00", inv); }
+                    if (io > topIo) { topIo = io; topIoName = nn + "(" + e.Pid + "):" + (io / 1048576.0).ToString("0.0", inv) + " MB/s"; }
                     string tag;
                     if (bannedTag.TryGetValue(kv.Key, out tag) && tag.Length > 0) found.Add(tag);
                 }
                 var row = new ProfileContentionRow {
                     t_ms = nowMs, ctr_ms = unixMs, interval_ms = nowMs - prevMs, total = Math.Round(total, 3), exempt = Math.Round(ex, 3),
                     runner = Math.Round(run, 3), other_cpu = Math.Round(other, 3), other_io = Math.Round(otherIo, 0), sys_cpu = Math.Round(sys, 3),
-                    sys_io = Math.Round(sysIo, 0), banned = string.Join(";", found), top_other = top, processes = cur.Count
+                    sys_io = Math.Round(sysIo, 0), banned = string.Join(";", found), top_other = top, top_other_io = topIoName, processes = cur.Count
                 };
                 queue.Enqueue(row);
                 Rows++;
@@ -1697,11 +1744,29 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
     if ($gaps) { $reasons += "$gaps gap(s) over 1.5 s between contention samples" }
     if ($n -eq 0) { $reasons += 'no contention samples were recorded' }
     if ($bannedSeen.Count) { $reasons += ('banned process appeared: ' + ($bannedSeen -join ', ')) }
+    # EP-C16: other I/O contaminates only by seconds over the baseline + 200 MB/s (one row is one second): more than
+    # 10 in total, or 3 or more in a row. Every spike second is recorded with its top other I/O process.
+    $spikes = New-Object System.Collections.Generic.List[object]
+    $bursts = 0; $longest = 0; $limit = $null
     if (-not $calibrating -and $baseline) {
         if ($cpuMean -gt $baseline.otherCpuCores + 0.5) { $reasons += ('other CPU averaged {0:N2} cores, baseline {1:N2} + 0.5' -f $cpuMean, $baseline.otherCpuCores) }
-        if ($ioMean -gt $baseline.otherIoBytesPerSec + 20MB) { $reasons += ('other I/O averaged {0:N1} MB/s, baseline {1:N1} + 20' -f ($ioMean / 1MB), ($baseline.otherIoBytesPerSec / 1MB)) }
-        $spike = @($rows | Where-Object { $_.other_io -gt $baseline.otherIoBytesPerSec + 200MB }).Count
-        if ($spike) { $reasons += "other I/O exceeded the baseline by 200 MB/s in $spike second(s)" }
+        $limit = [double]$baseline.otherIoBytesPerSec + 200MB
+        $run = 0
+        foreach ($r in @($rows | Sort-Object ctr_ms)) {
+            if ([double]$r.other_io -gt $limit) {
+                $run++
+                if ($run -eq 1) { $bursts++ }
+                if ($run -gt $longest) { $longest = $run }
+                $topIo = if ($r.PSObject.Properties['top_other_io']) { $r.top_other_io } else { $null }
+                $spikes.Add([ordered]@{
+                        at = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$r.ctr_ms).LocalDateTime.ToString('yyyy-MM-dd HH:mm:ss'); counterUnixMs = [int64]$r.ctr_ms
+                        tMs = [int64]$r.t_ms; mbPerSec = [math]::Round([double]$r.other_io / 1MB, 1); topOtherIo = $topIo
+                    })
+            } else { $run = 0 }
+        }
+        if ($spikes.Count -gt 10 -or $longest -ge 3) {
+            $reasons += ('other I/O exceeded the baseline by 200 MB/s in {0} second(s), {1} burst(s), the longest {2} s (EP-C16: more than 10 s in total, or 3 s in a row)' -f $spikes.Count, $bursts, $longest)
+        }
     }
     $iv = Get-IntervalStats $rows
     $mean = { param($f) if ($n -and @($rows | Where-Object { $null -ne $_.PSObject.Properties[$f] }).Count -eq $n) { [math]::Round(($rows | Measure-Object $f -Average).Average, 3) } else { $null } }
@@ -1710,6 +1775,7 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
         sampleIntervalMedianMs = $iv.MedianMs; sampleIntervalP95Ms = $iv.P95Ms; sampleIntervalMaxMs = $iv.MaxMs
         otherCpuCoresMean = [math]::Round($cpuMean, 3); otherIoBytesPerSecMean = [math]::Round($ioMean, 0); otherIoBytesPerSecMax = [math]::Round($ioMax, 0)
         exemptCpuCoresMean = (& $mean 'exempt'); runnerCpuCoresMean = (& $mean 'runner')
+        ioSpikes = [ordered]@{ seconds = $spikes.Count; bursts = $bursts; longestSeconds = $longest; limitBytesPerSec = $limit; list = $spikes.ToArray() }
         systemLineCpuCoresMean = [math]::Round($sysCpuMean, 3); systemLineIoBytesPerSecMean = [math]::Round($sysIoMean, 0)
         baseline = $baseline; detectionLimit = $DetectionLimit
     }
@@ -1918,13 +1984,13 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
         $job = Start-ContentionStream $shared
         $contWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'contention.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
         $sampWriter = New-Object IO.StreamWriter([IO.File]::Open((Join-Path $attempt 'sampler.csv'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read))
-        $contWriter.WriteLine('t_ms,counter_unix_ms,interval_ms,total_cpu_cores,exempt_cpu_cores,runner_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,processes,banned,top_other')
+        $contWriter.WriteLine('t_ms,counter_unix_ms,interval_ms,total_cpu_cores,exempt_cpu_cores,runner_cpu_cores,other_cpu_cores,other_io_bytes_per_s,system_cpu_cores,system_io_bytes_per_s,processes,banned,top_other,top_other_io')
         $sampWriter.WriteLine('t_ms,pid,working_set,private_bytes,threads,cpu_ms')
         $rows = New-Object System.Collections.Generic.List[object]
         $drain = {
             $r = $null
             while ($shared.Queue.TryDequeue([ref]$r)) {
-                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}' -f $r.t_ms, $r.ctr_ms, $r.interval_ms, $r.total, $r.exempt, $r.runner, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.processes, $r.banned, $r.top_other))
+                $contWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}' -f $r.t_ms, $r.ctr_ms, $r.interval_ms, $r.total, $r.exempt, $r.runner, $r.other_cpu, $r.other_io, $r.sys_cpu, $r.sys_io, $r.processes, $r.banned, $r.top_other, $r.top_other_io))
                 $rows.Add($r)
             }
         }

@@ -671,12 +671,21 @@ def validate_note(a):
     return " (--validate: %d passed, %d failed, %d skipped)" % (c.get("passed", 0), c.get("failed", 0), c.get("skipped", 0))
 
 
+def io_spike_note(a):
+    """EP-C16: the other-I/O spike count (bursts) and total seconds, from the runner's ioSpikes; '' without one."""
+    s = a.get("io_spikes")
+    if not isinstance(s, dict):
+        return ""
+    return "; other I/O spikes: %s (%s s)" % (s.get("bursts", 0), s.get("seconds", 0))
+
+
 def attempt_figures(att, runroot):
     m = att["meta"]
     fig = {"attempt": att["name"], "build": m.get("build"), "cohort": m.get("cohort"),
            "wall_ms": m.get("externalWallMs"), "disk": disk_figures(m), "purgeStamp": m.get("purgeStamp"),
            "coldMethod": m.get("coldMethod"), "cold": m.get("cold"), "validate": m.get("validate") is True,
-           "contaminated": (m.get("contention") or {}).get("contaminated"), "quiet": m.get("quiet")}
+           "contaminated": (m.get("contention") or {}).get("contaminated"), "quiet": m.get("quiet"),
+           "io_spikes": (m.get("contention") or {}).get("ioSpikes")}
     if fig["validate"]:
         fig["validation_counts"] = validation_counts(att["manifest"])
     if m.get("purgeStamp") and runroot:
@@ -1057,7 +1066,8 @@ def render_md(summary):
                     "%.2f" % cpu["cores_used_mean"] if cpu.get("cores_used_mean") is not None else "n/a",
                     "%.2f" % cpu["idle_cores_mean"] if cpu.get("idle_cores_mean") is not None else "n/a",
                     "%+.2f" % cpu["unrecorded_mean_signed"] if cpu.get("unrecorded_mean_signed") is not None else "n/a",
-                    "%.0f" % (mem["peak_working_set"] / 1048576) if mem.get("peak_working_set") else "n/a", a.get("contaminated")))
+                    "%.0f" % (mem["peak_working_set"] / 1048576) if mem.get("peak_working_set") else "n/a",
+                    "%s%s" % (a.get("contaminated"), io_spike_note(a))))
             L.append("")
             L += ["Disk (bytes during the run; a cold run's line says what was done before it, nothing more is claimed):", ""]
             for a in g["per_attempt"]:
@@ -1674,6 +1684,17 @@ def selftest_cli(t):
     t.ok(n + ": a standby-purge attempt's disk line says the standby list was purged", "standby list was purged" in line_pu
          and "per-file" not in line_pu, line_pu)
     t.ok(n + ": the disk header claims no purge for every cold run", "the standby list was purged before a cold run" not in md3, md3[:300])
+    # EP-C16: the attempt's line prints the runner's other-I/O spike count and seconds
+    spiky = mk_att("sp", cohort="warm-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk,
+                   contention={"contaminated": False, "reasons": [], "ioSpikes": {"seconds": 4, "bursts": 2, "longestSeconds": 2, "list": []}})
+    plain = mk_att("pl", cohort="warm-fresh", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, disk=disk)
+    out4, _ = summarise([{"label": "fx", "cohort": "warm-fresh", "attempts": ["sp", "pl"], "loaded": [spiky, plain]}],
+                        {"fx": "w"}, {"fx": ({"a.dds"}, [], [])}, None, False)
+    md4 = render_md(out4)
+    row_sp = next((x for x in md4.splitlines() if x.startswith("| sp ")), "")
+    row_pl = next((x for x in md4.splitlines() if x.startswith("| pl ")), "")
+    t.ok(n + ": EP-C16, an attempt's line prints its other-I/O spike count and total seconds",
+         row_sp.endswith("| False; other I/O spikes: 2 (4 s) |") and "spikes" not in row_pl, (row_sp, row_pl))
     val = mk_att("v1", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")}, validate=True)
     plain = mk_att("v2", build="release-off", hashes={"a.dds": "h"}, manifest={"a.dds": rec("a.dds")})
     out4, _ = summarise([{"label": "fx", "cohort": "warm-fresh", "attempts": ["v1", "v2"], "loaded": [val, plain]}],
