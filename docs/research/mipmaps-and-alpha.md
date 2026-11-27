@@ -1,6 +1,6 @@
 # Mipmap filters, normal maps and alpha coverage
 
-How mip levels should be built for each kind of texture, and how alpha-tested textures keep their shape at a distance: a review of published papers, engine documentation and tool source code, plus local tests made while building Tessalith. Written 2026-10-16 (commit 1bae037b); Result 6 is the 2026-11-03 alpha survey behind Note FM34.
+How mip levels should be built for each kind of texture, and how alpha-tested textures keep their shape at a distance: a review of published papers, engine documentation and tool source code, plus local tests made while building Tessalith. Written 2026-10-16 (commit 1bae037b); Result 6 is the 2026-11-03 alpha survey behind Note FM34; Result 7 is the 2026-11-26 measurement of mip quality on a corpus (build e315ac28).
 
 ## The questions
 
@@ -106,6 +106,38 @@ Tessalith's coverage step rebuilds the idea of AlphaBloom's Auto Coverage (by tk
 ## Result 6: a few low alpha texels are noise, a cutout is not
 
 A survey of 708 colour textures that asked about their alpha, checked against the meshes that use them, looked for a rule that clears stray low texels from re-encoded sources without silencing a real cutout. The smallest real cutout covers 0.31 % of its image (`weapons/elven/bow/bow`), so a limit of 0.1 % of the texels clears none of the 457 mesh-confirmed real alpha textures. Limits of 0.5 % and 1 % silence 4 and 20 real cutouts. On the other side, 3 glow maps lose a false blocking warning and 135 normals whose minimum alpha is 249 or 250 become opaque. 0.1 % of a 4K texture is 16 777 texels, so a second condition caps any connected group of low texels at 16; a small real cutout on a large texture still asks (`sprigganburnt2`, 12 alpha-test shapes).
+
+## Result 7: measured mip quality (2026-11-26)
+
+How much of a decoded mip's error comes from our filter, from rounding to 8 bits and from the encoder. The test takes 300 of the 9,228 outputs the 10,000-image corpus's reference run wrote (a fixed seed picks them; the base build a1eabd9c wrote them), re-builds each mip with build e315ac28 and scores three things against a reference built from the source's level 0 by a direct area average in f64, the same filter in exact arithmetic. Errors are mean squared error in 8-bit code units, pooled over texels, on the RGB channels. The run is described on [the time page](engine-time.md).
+
+- **e** is our float mip (before rounding) against the reference.
+- **q** is the 8-bit image handed to the encoder against the reference.
+- **d** is the decoded DDS against the reference. "d against q" is the encoder's own error.
+
+Levels are counted from the full size (top0, top1, top2) and from the smallest (bottom0, bottom1).
+
+| Format | Level | q | d | d against q |
+|---|---|---|---|---|
+| BC7 | top0 | 0.0168 | 4.2484 | 4.2455 |
+| BC7 | top1 | 0.0591 | 5.1662 | 5.1516 |
+| BC7 | top2 | 0.0596 | 5.4074 | 5.3965 |
+| BC7 | bottom1 | 0.0677 | 0.3184 | 0.2506 |
+| BC7 | bottom0 | 0.0000 | 0.5823 | 0.5823 |
+| BC4 | top0 | 0.0000 | 0.1684 | 0.1684 |
+| BC4 | top1 | 0.0739 | 0.6458 | 0.5745 |
+| BC4 | top2 | 0.0720 | 1.2096 | 1.1408 |
+| BC4 | bottom1 | 0.0737 | 0.1159 | 0.0385 |
+| BC4 | bottom0 | 0.0804 | 0.0804 | 0.0000 |
+
+- e is about exact. It is at most 5.1e-8 in every format and level row (121 dB or better, float rounding). Our filter does what the reference does.
+- q is small. At most 0.080, which is 59 dB or better. The 8-bit step costs little at every level.
+- The encoder owns the decoded loss at the top levels. On BC7, "d against q" is 99.7 to 99.9 % of d at top0 to top2, and 89 to 100 % on BC4. At the smallest levels the totals are under 0.6 and the 8-bit step is a larger part of them: on BC7 bottom1 q is 21 % of d, and on BC4 bottom0 q is all of d.
+- BC7 alpha follows the same pattern. At top2, e is 0.0000, q is 0.0298 and d is 6.0597.
+
+Every job used the defaults: the box filter with the wrap edge (box never reads the edge), no `--set` and no mip key in the corpus's `sdc.toml`. Counts, all scored and none skipped: 300 outputs, of which 274 are BC7 and 26 are BC4 (the `height` sub-type). By sub-type, BC7 has `diffuse`, `landscape_diffuse`, `landscape_normal`, `normal`, `pbr_albedo`, `pbr_emissive`, `pbr_fuzz`, `pbr_normal`, `pbr_subsurface` and `rmaos` at 26 each, `glow` 8, `ui_sky` 4 and `coat_normal` 2. The 4 `ui_sky` outputs have one level, the other 296 have 11. A rebuild check re-encoded level 1 and the last level of every output and found 0 byte mismatches against the files, so the two builds agree on these outputs (AVX-512 for BC7). Cubemaps, complex grass and HDR outputs are not scored.
+
+The mixed corpus has no mip quality run. Only the 10,000-image corpus was scored.
 
 ## What Tessalith does because of this
 
