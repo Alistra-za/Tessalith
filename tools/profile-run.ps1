@@ -1194,7 +1194,9 @@ function Get-BannedRunning($exempt) {
 }
 
 # The output key of a file under out: its path below out, forward slashes, lower case (output_key form). The one
-# key rule: hashes.csv is written with it and the prune maps the files on disk with it.
+# key rule: hashes.csv is written with it and the prune maps the files on disk with it. It mirrors
+# `engine::manifest::output_key` (crates/engine/src/manifest.rs); .NET `ToLowerInvariant` and Rust lower-casing could
+# differ on a rare non-ASCII name, which would show as a missing key.
 function Get-OutputKey([string]$outRoot, [string]$path) {
     $path.Substring($outRoot.Length).Replace('\', '/').ToLowerInvariant()
 }
