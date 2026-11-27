@@ -725,7 +725,9 @@ fn mip_quality_on_a_corpus() {
             jobs.push(score.row);
         }
     }
-    let result = json!({"isa":dispatched_isa(),"self_check":{"isa_skipped":isa_skips,
+    // The commit and the input set come first (CODING_STANDARDS: a long run keeps its per-item results).
+    let result = json!({"commit":crate::manifest::engine_commit(),"input":input.display().to_string(),
+        "isa":dispatched_isa(),"self_check":{"isa_skipped":isa_skips,
         "rebuild_mismatches":skipped.iter().filter(|s|s["why"]=="rebuild mismatch").count()},"jobs":jobs,"skipped":skipped});
     let mut file = std::io::BufWriter::new(fs::File::create_new(&report).unwrap());
     serde_json::to_writer_pretty(&mut file, &result).unwrap();
@@ -878,6 +880,12 @@ fn a_failed_corpus_job_is_recorded_and_the_other_jobs_are_scored() {
         String::from_utf8_lossy(&run.stderr)
     );
     let result: Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    // A long run keeps its per-item results and names the commit and input set (CODING_STANDARDS).
+    assert_eq!(result["commit"], json!(crate::manifest::engine_commit()));
+    assert_eq!(
+        result["input"],
+        json!(dir.path().join("in").display().to_string())
+    );
     let scored = result["jobs"].as_array().unwrap();
     let skipped = result["skipped"].as_array().unwrap();
     assert_eq!((scored.len(), skipped.len()), (10, 2));
