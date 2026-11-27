@@ -484,17 +484,24 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     }
 }
 
-/// Whether the output `path` in `dir` needs the long form: std's own thresholds, 248 characters for a directory and 260
-/// for a file path (its `get_long_path`), checked for the folder, the output, and the longest temp file tempfile makes
-/// in the folder (`.sdc-` + 6 random characters + `.tmp`, and a separator). Lengths are of the absolute path, in bytes of
-/// the OS string, which is never fewer than the UTF-16 units Win32 counts, so a non-ASCII name converts a little early,
-/// never late (Note LV1).
+/// Whether the output `path` in `dir` needs the long form: Win32 MAX_PATH (260, counting the NUL) for the file calls
+/// tempfile makes, 248 for folders (std's own legacy limit), checked for the folder, the output, and the longest temp
+/// file tempfile makes in the folder (`.sdc-` + 6 random characters + `.tmp`, and a separator). Each length is the
+/// larger of the raw path and the absolute path, in bytes of the OS string, which is never fewer than the UTF-16 units
+/// Win32 counts, so a non-ASCII name converts a little early, never late, and a raw path with `..` that is longer than
+/// its normalised form still converts (Note LV1).
 fn needs_long_form(dir: &Path, path: &Path) -> io::Result<bool> {
     const DIR_LIMIT: usize = 248;
     const FILE_LIMIT: usize = 260;
     const TEMP_NAME: usize = 1 + ".sdc-".len() + 6 + ".tmp".len();
-    let dir = std::path::absolute(dir)?.as_os_str().len();
-    let file = std::path::absolute(path)?.as_os_str().len();
+    let dir = dir
+        .as_os_str()
+        .len()
+        .max(std::path::absolute(dir)?.as_os_str().len());
+    let file = path
+        .as_os_str()
+        .len()
+        .max(std::path::absolute(path)?.as_os_str().len());
     Ok(dir >= DIR_LIMIT || dir + TEMP_NAME >= FILE_LIMIT || file >= FILE_LIMIT)
 }
 
@@ -958,8 +965,10 @@ mod tests {
         let mut dir = std::path::absolute(root).unwrap();
         assert!(dir.as_os_str().len() + 2 <= len, "{}", dir.display());
         while dir.as_os_str().len() < len {
-            let room = len - dir.as_os_str().len() - 1;
-            dir.push("x".repeat(room.min(60)));
+            // Each part is at least 1 character: never leave a gap of 1 that only a separator could fill.
+            let left = len - dir.as_os_str().len();
+            let part = if left == 62 { 59 } else { (left - 1).min(60) };
+            dir.push("x".repeat(part));
         }
         assert_eq!(dir.as_os_str().len(), len);
         dir
@@ -1019,7 +1028,9 @@ mod tests {
         icacls("/remove:d", "*S-1-1-0");
         let e = r.expect_err("the denied folder takes no new file");
         assert!(!e.to_string().contains(r"\\?\"), "{e}");
-        assert!(e.to_string().contains("out"), "{e}");
+        // The message prints the path with its backslashes escaped, as `Path`'s Debug does.
+        let given = format!("{out:?}");
+        assert!(e.to_string().contains(given.trim_matches('"')), "{e}");
     }
 
     /// Note LV1: a new DDS whose full path is over MAX_PATH is written, a second write to it is still a skip that
