@@ -98,7 +98,19 @@ fn write_fixture_project() {
 
 #[test]
 fn profile_on_and_off_write_the_same_bytes() {
-    let fixture = Fixture::new();
+    assert_parity(false);
+}
+
+#[test]
+fn profile_on_and_off_agree_when_validation_runs() {
+    // EP-C6 keeps the shared fixture's validation off, so the test above compares only `{"skipped": true}`
+    // records. Here both arms validate, and the verdicts, not just the bytes, must match.
+    assert_parity(true);
+}
+
+fn assert_parity(validate: bool) {
+    let mut fixture = Fixture::new();
+    fixture.validate = validate;
     let rec = Recorder::new();
     let cancel = CancelToken::default();
     for (out, recorder) in [("off", None), ("on", Some(&rec))] {
@@ -138,6 +150,11 @@ fn profile_on_and_off_write_the_same_bytes() {
             o
         };
         assert!(a[key].raw["validation"].is_object());
+        assert_eq!(
+            a[key].raw["validation"].get("skipped").is_some(),
+            !validate,
+            "{key}: validation ran only when asked"
+        );
         assert_eq!(a[key].raw["validation"], b[key].raw["validation"], "{key}");
         assert_eq!(normalized(&a[key].raw), normalized(&b[key].raw), "{key}");
     }
