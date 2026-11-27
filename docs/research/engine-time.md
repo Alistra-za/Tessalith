@@ -83,7 +83,7 @@ Nothing here is adopted, and no gain is measured: every gain is an `upper bound`
 
 - The double read. The plan phase reads every input (23.87 GB) and the run phase reads the ready ones again (21.94 GB), so a T10K run reads about 46 GB. The machine has 31.6 GiB of RAM and the corpus is 23.87 GB with about 12.4 GB written per run, so the second read comes from disk. A noop run reads 40.5 to 43.4 GB for the same reason. A 0.4 GB slice of the corpus read at most 0.25 GB when warm, so the second read depends on the RAM limit. A survey of where the reads happen is running.
 - The double hash. A noop run spends 132.4 thread-seconds in `currency_hash`, 23.8 % of its work. A stale run hashes the source in `currency_hash` and again in `hash_source`.
-- Long output paths. Outputs whose full path is 260 characters or more fail to write with os error 3 (path not found) although the system allows long paths. The MIX corpus found it, under the longer path: three outputs at 260, 265 and 270 characters failed and the longest that wrote was 259. The cause is not shown. A fix is in progress on its own branch.
+- Long output paths. Outputs whose full path was 260 characters or more failed to write with os error 3 (path not found) although the system allows long paths. The MIX corpus found it, under the longer path: three outputs at 260, 265 and 270 characters failed and the longest that wrote was 259. The cause was the temp file's rename, which handed Win32 the raw path; Note LV fixes it.
 - Not worth a row. Events (0.5 s) and the pool build (under 0.001 s) cost nothing measurable.
 
 ## What this does not show

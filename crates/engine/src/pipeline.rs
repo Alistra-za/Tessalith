@@ -506,18 +506,82 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
+    // Note LV1: tempfile's Windows persist hands both paths to the Win32 calls as they are, so a path that reaches
+    // MAX_PATH needs the long form that std::fs adds for its own calls. Below that the paths stay as given, so an
+    // error names the path the user knows.
+    let (dir, path) = if needs_long_form(dir, path)? {
+        (long_form(dir)?, long_form(path)?)
+    } else {
+        (dir.to_path_buf(), path.to_path_buf())
+    };
     let mut builder = tempfile::Builder::new();
     builder.prefix(".sdc-").suffix(".tmp");
     #[cfg(unix)]
     builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
-    let mut temp = builder.tempfile_in(dir)?;
+    let mut temp = builder.tempfile_in(&dir)?;
     temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
-    match temp.persist_noclobber(path) {
+    match temp.persist_noclobber(&path) {
         Ok(_) => Ok(true),
         Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
         Err(e) => Err(e.error),
     }
+}
+
+/// Whether the output `path` in `dir` needs the long form: Win32 MAX_PATH (260, counting the NUL) for the file calls
+/// tempfile makes, 248 for folders (std's own legacy limit), checked for the folder, the output, and the longest temp
+/// file tempfile makes in the folder (`.sdc-` + 6 random characters + `.tmp`, and a separator). Each length is the
+/// larger of the raw path and the absolute path, in bytes of the OS string, which is never fewer than the UTF-16 units
+/// Win32 counts, so a non-ASCII name converts a little early, never late, and a raw path with `..` that is longer than
+/// its normalised form still converts (Note LV1).
+fn needs_long_form(dir: &Path, path: &Path) -> io::Result<bool> {
+    const DIR_LIMIT: usize = 248;
+    const FILE_LIMIT: usize = 260;
+    const TEMP_NAME: usize = 1 + ".sdc-".len() + 6 + ".tmp".len();
+    let dir = dir
+        .as_os_str()
+        .len()
+        .max(std::path::absolute(dir)?.as_os_str().len());
+    let file = path
+        .as_os_str()
+        .len()
+        .max(std::path::absolute(path)?.as_os_str().len());
+    Ok(dir >= DIR_LIMIT || dir + TEMP_NAME >= FILE_LIMIT || file >= FILE_LIMIT)
+}
+
+/// `p` as an absolute verbatim (`\\?\`) path, the form Win32 file calls accept past MAX_PATH without a long-path
+/// manifest (Note LV1). `std::path::absolute` first applies the normalisation a verbatim path skips (separators, `.`
+/// and `..`), as std does before adding the prefix for its own calls; a UNC path takes `\\?\UNC\`, and a path that is
+/// already verbatim stays as it is. A device path (`\\.\`) also stays as it is and is still capped at MAX_PATH: Win32
+/// normalises it again, so an output root given in that form does not work past 260 characters.
+#[cfg(windows)]
+fn long_form(p: &Path) -> io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+    let abs = std::path::absolute(p)?;
+    let mut parts = abs.components();
+    let Some(Component::Prefix(prefix)) = parts.next() else {
+        return Ok(abs);
+    };
+    let mut out = match prefix.kind() {
+        Prefix::Disk(_) => std::ffi::OsString::from(r"\\?\"),
+        Prefix::UNC(server, share) => {
+            let mut s = std::ffi::OsString::from(r"\\?\UNC\");
+            s.push(server);
+            s.push(r"\");
+            s.push(share);
+            s.push(parts.as_path());
+            return Ok(s.into());
+        }
+        _ => return Ok(abs),
+    };
+    out.push(&abs);
+    Ok(out.into())
+}
+
+/// Elsewhere paths have no MAX_PATH form to add.
+#[cfg(not(windows))]
+fn long_form(p: &Path) -> io::Result<PathBuf> {
+    Ok(p.to_path_buf())
 }
 
 /// Convert one file and append its manifest record. Returns `None` when a late unrecorded output was kept.
@@ -934,5 +998,176 @@ mod tests {
         let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
         assert_eq!(base, Some(0.125));
         assert_eq!(chain[0], work.img);
+    }
+
+    /// A folder under `root` deep enough that a file in it has a full path over MAX_PATH (260 characters), built
+    /// from 60-character parts so the length does not depend on TEMP (Note LC3).
+    fn past_max_path(root: &Path) -> PathBuf {
+        let mut dir = std::path::absolute(root).unwrap();
+        while dir.as_os_str().len() < 265 {
+            dir.push("x".repeat(60));
+        }
+        dir
+    }
+
+    /// Note LV1: the long form normalises a drive path before its `\\?\`, gives a UNC path `\\?\UNC\`, keeps a
+    /// verbatim or device path, and makes a relative path absolute.
+    #[cfg(windows)]
+    #[test]
+    fn the_long_form_keeps_each_kind_of_path() {
+        let long = |p: &str| long_form(Path::new(p)).unwrap();
+        assert_eq!(long("C:/out/./a/../b.dds"), Path::new(r"\\?\C:\out\b.dds"));
+        assert_eq!(
+            long(r"\\server\share\out\b.dds"),
+            Path::new(r"\\?\UNC\server\share\out\b.dds")
+        );
+        assert_eq!(long(r"\\?\C:\out\b.dds"), Path::new(r"\\?\C:\out\b.dds"));
+        assert_eq!(long(r"\\.\pipe\x"), Path::new(r"\\.\pipe\x"));
+        // A relative path is made absolute from the current directory, whatever form that has.
+        let rel = long("b.dds");
+        let want = long_form(&std::env::current_dir().unwrap().join("b.dds")).unwrap();
+        assert_eq!(rel, want);
+        let cwd = std::env::current_dir().unwrap();
+        if matches!(cwd.components().next(), Some(std::path::Component::Prefix(p)) if matches!(p.kind(), std::path::Prefix::Disk(_)))
+        {
+            assert_eq!(rel, Path::new(&format!(r"\\?\{}\b.dds", cwd.display())));
+        } else {
+            eprintln!("skipped the drive-form check: the current directory is not a drive path");
+        }
+    }
+
+    /// A folder of exactly `len` characters under `root` (parts of at most 60 characters).
+    fn dir_of_len(root: &Path, len: usize) -> PathBuf {
+        let mut dir = std::path::absolute(root).unwrap();
+        assert!(dir.as_os_str().len() + 2 <= len, "{}", dir.display());
+        while dir.as_os_str().len() < len {
+            // Each part is at least 1 character: never leave a gap of 1 that only a separator could fill.
+            let left = len - dir.as_os_str().len();
+            let part = if left == 62 { 59 } else { (left - 1).min(60) };
+            dir.push("x".repeat(part));
+        }
+        assert_eq!(dir.as_os_str().len(), len);
+        dir
+    }
+
+    /// Note LV1: the long form is added only where the folder, the output or its temp file reaches the legacy limit.
+    #[test]
+    fn the_long_form_is_only_for_paths_near_the_limit() {
+        let d = tempfile::tempdir().unwrap();
+        let short = d.path().join("out");
+        assert!(!needs_long_form(&short, &short.join("a.dds")).unwrap());
+        // A folder of 243: the temp (243 + 16 = 259) still fits.
+        let dir = dir_of_len(d.path(), 243);
+        assert!(!needs_long_form(&dir, &dir.join("a.dds")).unwrap());
+        // 244: the output is 250, but the temp is 260.
+        let dir = dir_of_len(d.path(), 244);
+        assert!(dir.join("a.dds").as_os_str().len() < 260);
+        assert!(needs_long_form(&dir, &dir.join("a.dds")).unwrap());
+        // A long file name in a short folder reaches the file limit.
+        let name = "n".repeat(250);
+        assert!(needs_long_form(&short, &short.join(name)).unwrap());
+    }
+
+    /// Note LV1: an output under MAX_PATH whose temp file in the same folder reaches it is written, and leaves no temp.
+    #[test]
+    fn a_new_dds_whose_temp_path_reaches_max_path_is_written() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = dir_of_len(d.path(), 245);
+        let path = dir.join("a.dds");
+        assert!(path.as_os_str().len() < 260, "{}", path.display());
+        assert!(write_new_dds(&path, b"first").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    /// Note LV1: a write that fails on a short path names the path as given, never in the `\\?\` form.
+    #[test]
+    fn a_failed_write_on_a_short_path_names_no_verbatim_path() {
+        // The temp cannot be created in the output folder: everyone is denied creating files there (the error
+        // names the temp's path).
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let icacls = |flag: &str, rule: &str| {
+            std::process::Command::new("icacls")
+                .arg(&out)
+                .arg(flag)
+                .arg(rule)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        };
+        if !icacls("/deny", "*S-1-1-0:(WD,AD)") {
+            eprintln!("skipped: icacls could not deny file creation");
+            return;
+        }
+        let r = write_new_dds(&out.join("a.dds"), b"x");
+        icacls("/remove:d", "*S-1-1-0");
+        let e = r.expect_err("the denied folder takes no new file");
+        assert!(!e.to_string().contains(r"\\?\"), "{e}");
+        // The message prints the path with its backslashes escaped, as `Path`'s Debug does.
+        let given = format!("{out:?}");
+        assert!(e.to_string().contains(given.trim_matches('"')), "{e}");
+    }
+
+    /// Note LV1: a new DDS whose full path is over MAX_PATH is written, a second write to it is still a skip that
+    /// keeps the first bytes, and no temp file is left.
+    #[test]
+    fn a_new_dds_past_max_path_is_written_and_never_replaced() {
+        let d = tempfile::tempdir().unwrap();
+        let path = past_max_path(d.path()).join("stone.dds");
+        assert!(path.as_os_str().len() > 260, "{}", path.display());
+        assert!(write_new_dds(&path, b"first").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        assert!(!write_new_dds(&path, b"second").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from("stone.dds")]);
+    }
+
+    /// Note LV1: a convert from a short input writes its output and manifest record under an output folder whose
+    /// files are over MAX_PATH, and a changed source then replaces that output.
+    #[test]
+    fn a_convert_writes_and_replaces_an_output_past_max_path() {
+        use crate::api::Engine;
+        use crate::config::Target;
+        use crate::events::{EventKind, VecSink};
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("stone.png");
+        ::image::RgbImage::new(32, 32).save(&input).unwrap();
+        let out = past_max_path(d.path());
+        let run = || {
+            let mut req = BatchRequest::new(vec![input.clone()], out.clone(), Target::Cs);
+            req.overrides
+                .push(crate::overrides::parse_set("subtype=diffuse").unwrap());
+            let sink = std::sync::Arc::new(VecSink::default());
+            let rep = Reporter::new(sink.clone(), "long-paths");
+            let engine = Engine::new().unwrap();
+            let cancel = CancelToken::default();
+            let plan = engine.plan(req, &rep, &cancel).unwrap();
+            let output = plan.jobs[0].output.clone();
+            let summary = engine.run(plan, &rep, &cancel).unwrap();
+            let failures: Vec<String> = sink
+                .take()
+                .into_iter()
+                .filter_map(|e| match e.kind {
+                    EventKind::FileFailed { error, .. } => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(summary.converted, 1, "{failures:?}");
+            output
+        };
+        let output = run();
+        assert!(output.as_os_str().len() > 260, "{}", output.display());
+        let first = std::fs::read(&output).unwrap();
+        ::image::RgbImage::from_pixel(32, 32, ::image::Rgb([200, 40, 10]))
+            .save(&input)
+            .unwrap();
+        assert_eq!(run(), output);
+        assert_ne!(std::fs::read(&output).unwrap(), first);
+        assert_eq!(Manifest::at(&out).load().unwrap().len(), 1);
     }
 }

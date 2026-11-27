@@ -264,6 +264,24 @@ fn atomic_write_overwrites_preexisting_file_and_cleans_up_on_error() {
     assert!(leftovers.is_empty(), "temp left behind: {leftovers:?}");
 }
 
+/// Note LV1: `write_atomic` writes and replaces a file whose full path is over MAX_PATH (260 characters), creating
+/// its folders, and leaves no temp file. The folder is built from 60-character parts so the length does not depend
+/// on TEMP (Note LC3).
+#[test]
+fn atomic_write_works_past_max_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut dir = std::path::absolute(d.path()).unwrap();
+    while dir.as_os_str().len() < 265 {
+        dir.push("x".repeat(60));
+    }
+    let p = dir.join("sdc.toml");
+    assert!(p.as_os_str().len() > 260, "{}", p.display());
+    write_atomic(&p, b"one").unwrap();
+    write_atomic(&p, b"two").unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), b"two");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+}
+
 fn desc(w: u32, h: u32, format: Format, srgb: bool, header: ResolvedHeader) -> DdsDesc {
     DdsDesc {
         width: w,
