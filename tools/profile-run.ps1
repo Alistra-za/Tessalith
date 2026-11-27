@@ -59,9 +59,10 @@
   Start-ContentionStream), so processes that start mid-attempt are seen, and the runner's own tree (sdc
   included) is exempt by PID. contention.csv has one row per second, with the top other process by CPU
   (top_other) and by read+write bytes (top_other_io); meta.json's contention block records the sample-interval
-  median and 95th percentile and the runner's own CPU. Other I/O contaminates only by seconds (EP-C16): over the
-  baseline + 200 MB/s for more than 10 seconds in total, or for 3 or more seconds in a row; every such second is
-  listed in contention.ioSpikes with its time, MB/s and top other I/O process. The other-CPU rule is unchanged.
+  median and 95th percentile and the runner's own CPU. Other I/O contaminates by its mean (over the baseline + 20
+  MB/s) or by seconds (EP-C16): over the baseline + 200 MB/s for more than 10 seconds in total, or for 3 or more
+  seconds in a row; a single short spike does not. Every spike second is listed in contention.ioSpikes with its
+  time, MB/s and top other I/O process. The other-CPU rule is unchanged.
   -DryRun: prints the quiet check, preconditions, the resolved command and folders; runs nothing.
   The script never elevates, downloads or installs anything. Cold attempts need a cold stamp under 15 minutes
   old that no earlier attempt used: an owner-run tools\profile-purge.ps1 stamp (purge-*.json), or a
@@ -566,7 +567,7 @@ function Invoke-SelfTest {
     # EP-C16: other I/O spikes are counted in seconds
     $ioBase = @{ otherCpuCores = 0.0; otherIoBytesPerSec = 5MB }
     $ioRows = {
-        param([int[]]$spikeAt, [int]$count = 60)
+        param([int[]]$spikeAt, [int]$count = 300)   # 5 minutes: up to 11 spike seconds keep the mean under the baseline + 20 MB/s
         foreach ($i in 1..$count) {
             [pscustomobject]@{ t_ms = $i * 1000; ctr_ms = 1000000 + $i * 1000; total = 0; exempt = 0; other_cpu = 0; other_io = $(if ($spikeAt -contains $i) { 300MB } else { 1MB })
                 sys_cpu = 0; sys_io = 0; banned = ''; top_other_io = $(if ($spikeAt -contains $i) { "tiworker(77):300.0 MB/s" } else { "svchost(9):1.0 MB/s" }) }
@@ -589,11 +590,14 @@ function Invoke-SelfTest {
         $v = Get-ContentionVerdict @(& $ioRows @(2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52)) $ioBase $false
         $v.contaminated -and $v.ioSpikes.seconds -eq 11 -and $v.ioSpikes.longestSeconds -eq 1 -and @($v.reasons -like '*11 second(s), 11 burst(s)*').Count -eq 1
     }
-    Case 'I/O spikes: each spike second names the top other I/O process; a high but steady mean alone does not contaminate' {
+    Case 'I/O spikes: each spike second names the top other I/O process' {
         $v = Get-ContentionVerdict @(& $ioRows @(30)) $ioBase $false
+        (-not $v.contaminated) -and $v.ioSpikes.list[0].topOtherIo -eq 'tiworker(77):300.0 MB/s'
+    }
+    Case 'I/O mean: a steady 150 MB/s with no spike second is contaminated by the mean rule' {
         $steady = @(& $ioRows @() | ForEach-Object { $_.other_io = 150MB; $_ })
         $s = Get-ContentionVerdict $steady $ioBase $false
-        $v.ioSpikes.list[0].topOtherIo -eq 'tiworker(77):300.0 MB/s' -and (-not $s.contaminated) -and $s.ioSpikes.seconds -eq 0
+        $s.contaminated -and $s.ioSpikes.seconds -eq 0 -and @($s.reasons -like 'other I/O averaged*baseline*+ 20').Count -eq 1
     }
     Case 'contention: the verdict records the sample-interval median, 95th percentile and maximum' {
         $iv = Get-IntervalStats @(1000, 2000, 3000, 4100, 5100, 7100 | ForEach-Object { & $mkRow $_ })
@@ -1750,6 +1754,8 @@ function Get-ContentionVerdict($rows, $baseline, [bool]$calibrating) {
     $bursts = 0; $longest = 0; $limit = $null
     if (-not $calibrating -and $baseline) {
         if ($cpuMean -gt $baseline.otherCpuCores + 0.5) { $reasons += ('other CPU averaged {0:N2} cores, baseline {1:N2} + 0.5' -f $cpuMean, $baseline.otherCpuCores) }
+        # the steady-load rule stays beside the seconds rule (EP-C16 replaces only the single-spike trigger)
+        if ($ioMean -gt $baseline.otherIoBytesPerSec + 20MB) { $reasons += ('other I/O averaged {0:N1} MB/s, baseline {1:N1} + 20' -f ($ioMean / 1MB), ($baseline.otherIoBytesPerSec / 1MB)) }
         $limit = [double]$baseline.otherIoBytesPerSec + 200MB
         $run = 0
         foreach ($r in @($rows | Sort-Object ctr_ms)) {
