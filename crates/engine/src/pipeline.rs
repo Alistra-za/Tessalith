@@ -462,18 +462,55 @@ fn write_new_dds(path: &Path, bytes: &[u8]) -> io::Result<bool> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
+    // Note LV1: tempfile's Windows persist hands both paths to the Win32 calls as they are, so a path over
+    // MAX_PATH needs the long form that std::fs adds for its own calls.
+    let (dir, path) = (long_form(dir)?, long_form(path)?);
     let mut builder = tempfile::Builder::new();
     builder.prefix(".sdc-").suffix(".tmp");
     #[cfg(unix)]
     builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
-    let mut temp = builder.tempfile_in(dir)?;
+    let mut temp = builder.tempfile_in(&dir)?;
     temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
-    match temp.persist_noclobber(path) {
+    match temp.persist_noclobber(&path) {
         Ok(_) => Ok(true),
         Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
         Err(e) => Err(e.error),
     }
+}
+
+/// `p` as an absolute verbatim (`\\?\`) path, the form Win32 file calls accept past MAX_PATH without a long-path
+/// manifest (Note LV1). `std::path::absolute` first applies the normalisation a verbatim path skips (separators, `.`
+/// and `..`), as std does before adding the prefix for its own calls; a UNC path takes `\\?\UNC\`, and a path that is
+/// already verbatim, or a device path, stays as it is.
+#[cfg(windows)]
+fn long_form(p: &Path) -> io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+    let abs = std::path::absolute(p)?;
+    let mut parts = abs.components();
+    let Some(Component::Prefix(prefix)) = parts.next() else {
+        return Ok(abs);
+    };
+    let mut out = match prefix.kind() {
+        Prefix::Disk(_) => std::ffi::OsString::from(r"\\?\"),
+        Prefix::UNC(server, share) => {
+            let mut s = std::ffi::OsString::from(r"\\?\UNC\");
+            s.push(server);
+            s.push(r"\");
+            s.push(share);
+            s.push(parts.as_path());
+            return Ok(s.into());
+        }
+        _ => return Ok(abs),
+    };
+    out.push(&abs);
+    Ok(out.into())
+}
+
+/// Elsewhere paths have no MAX_PATH form to add.
+#[cfg(not(windows))]
+fn long_form(p: &Path) -> io::Result<PathBuf> {
+    Ok(p.to_path_buf())
 }
 
 /// Convert one file and append its manifest record. Returns `None` when a late unrecorded output was kept.
@@ -858,5 +895,95 @@ mod tests {
         let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
         assert_eq!(base, Some(0.125));
         assert_eq!(chain[0], work.img);
+    }
+
+    /// A folder under `root` deep enough that a file in it has a full path over MAX_PATH (260 characters), built
+    /// from 60-character parts so the length does not depend on TEMP (Note LC3).
+    fn past_max_path(root: &Path) -> PathBuf {
+        let mut dir = std::path::absolute(root).unwrap();
+        while dir.as_os_str().len() < 265 {
+            dir.push("x".repeat(60));
+        }
+        dir
+    }
+
+    /// Note LV1: the long form normalises a drive path before its `\\?\`, gives a UNC path `\\?\UNC\`, keeps a
+    /// verbatim or device path, and makes a relative path absolute.
+    #[cfg(windows)]
+    #[test]
+    fn the_long_form_keeps_each_kind_of_path() {
+        let long = |p: &str| long_form(Path::new(p)).unwrap();
+        assert_eq!(long("C:/out/./a/../b.dds"), Path::new(r"\\?\C:\out\b.dds"));
+        assert_eq!(
+            long(r"\\server\share\out\b.dds"),
+            Path::new(r"\\?\UNC\server\share\out\b.dds")
+        );
+        assert_eq!(long(r"\\?\C:\out\b.dds"), Path::new(r"\\?\C:\out\b.dds"));
+        assert_eq!(long(r"\\.\pipe\x"), Path::new(r"\\.\pipe\x"));
+        let rel = long("b.dds");
+        let want = std::env::current_dir().unwrap().join("b.dds");
+        assert_eq!(rel, Path::new(&format!(r"\\?\{}", want.display())));
+    }
+
+    /// Note LV1: a new DDS whose full path is over MAX_PATH is written, a second write to it is still a skip that
+    /// keeps the first bytes, and no temp file is left.
+    #[test]
+    fn a_new_dds_past_max_path_is_written_and_never_replaced() {
+        let d = tempfile::tempdir().unwrap();
+        let path = past_max_path(d.path()).join("stone.dds");
+        assert!(path.as_os_str().len() > 260, "{}", path.display());
+        assert!(write_new_dds(&path, b"first").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        assert!(!write_new_dds(&path, b"second").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from("stone.dds")]);
+    }
+
+    /// Note LV1: a convert from a short input writes its output and manifest record under an output folder whose
+    /// files are over MAX_PATH, and a changed source then replaces that output.
+    #[test]
+    fn a_convert_writes_and_replaces_an_output_past_max_path() {
+        use crate::api::Engine;
+        use crate::config::Target;
+        use crate::events::{EventKind, VecSink};
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("stone.png");
+        ::image::RgbImage::new(32, 32).save(&input).unwrap();
+        let out = past_max_path(d.path());
+        let run = || {
+            let mut req = BatchRequest::new(vec![input.clone()], out.clone(), Target::Cs);
+            req.overrides
+                .push(crate::overrides::parse_set("subtype=diffuse").unwrap());
+            let sink = std::sync::Arc::new(VecSink::default());
+            let rep = Reporter::new(sink.clone(), "long-paths");
+            let engine = Engine::new().unwrap();
+            let cancel = CancelToken::default();
+            let plan = engine.plan(req, &rep, &cancel).unwrap();
+            let output = plan.jobs[0].output.clone();
+            let summary = engine.run(plan, &rep, &cancel).unwrap();
+            let failures: Vec<String> = sink
+                .take()
+                .into_iter()
+                .filter_map(|e| match e.kind {
+                    EventKind::FileFailed { error, .. } => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(summary.converted, 1, "{failures:?}");
+            output
+        };
+        let output = run();
+        assert!(output.as_os_str().len() > 260, "{}", output.display());
+        let first = std::fs::read(&output).unwrap();
+        ::image::RgbImage::from_pixel(32, 32, ::image::Rgb([200, 40, 10]))
+            .save(&input)
+            .unwrap();
+        assert_eq!(run(), output);
+        assert_ne!(std::fs::read(&output).unwrap(), first);
+        assert_eq!(Manifest::at(&out).load().unwrap().len(), 1);
     }
 }
