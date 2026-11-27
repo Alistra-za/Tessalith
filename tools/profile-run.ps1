@@ -50,7 +50,9 @@
   <attempt>\out. Written per attempt: meta.json, sampler.csv, contention.csv, stderr.log, stdout.log,
   hashes.csv, last-run-<attempt>.json, and for warm-noop files-before.csv and files-after.csv.
   -CopyFrom: warm-noop and warm-stale copy a finished, uncontaminated warm-fresh attempt's out (same RunRoot,
-  same corpus and exe) with robocopy, timestamps kept; the source is never written.
+  same corpus and exe) with robocopy, timestamps kept; the source is never written. A release-build overhead
+  attempt stands in for warm-fresh (EP-C9 relabel, EP-C19) when its hashes.csv equals the corpus reference's;
+  meta.json then records copyFromRelabel = true. Any other cohort or build is refused.
   -Calibrate: the first attempt of a session, on a fixture project. Before the command it samples the idle
   machine for about 31 s and writes <RunRoot>\baseline.json from at least 30 samples covering at least 30 s (mean,
   spread and maximum of other CPU and other I/O; EP-C14); with fewer, nothing is written. Later attempts refuse
@@ -185,12 +187,45 @@ function Get-CopyFromProblem([string]$runRoot, [string]$name, [string]$corpus, [
     $metaPath = Join-Path $dir 'meta.json'
     if (-not (Test-Path -LiteralPath $metaPath)) { return 'no meta.json' }
     $m = Read-Json $metaPath
-    if ((Get-Prop $m 'cohort') -ne 'warm-fresh') { return 'is not a warm-fresh attempt' }
+    $cohort = Get-Prop $m 'cohort'
+    $relabel = Test-CopyFromRelabel $m
+    if ($cohort -eq 'overhead' -and -not $relabel) { return "is an overhead attempt of the $(Get-Prop $m 'build') build: only a release-build overhead attempt stands in for warm-fresh (EP-C19)" }
+    if ($cohort -ne 'warm-fresh' -and -not $relabel) { return 'is not a warm-fresh attempt (nor a release-build overhead attempt, EP-C19)' }
     if (-not (Test-AttemptFinished $m)) { return 'did not finish (exit 0, or exit 1 with only the known skips, EP-C11)' }
     if ((Get-Prop (Get-Prop $m 'contention') 'contaminated') -ne $false) { return 'is contaminated or has no contention verdict' }
     if (-not [string]::Equals((Get-Prop $m 'corpus'), $corpus, 'OrdinalIgnoreCase')) { return 'is of another corpus' }
     if ((Get-Prop $m 'exeSha256') -ne $exeSha) { return 'was run with another exe' }
     if (Get-Prop $m 'prune') { return 'was pruned: its DDS outputs are deleted (EP-O5)' }
+    if ($relabel) {
+        # EP-C19: the stand-in must have passed its reference comparison: its hashes equal the corpus reference's
+        $ref = Get-CorpusReference $runRoot $corpus
+        if (-not $ref) { return 'is an overhead attempt, and RunRoot has no corpus reference to compare it with (EP-C19)' }
+        $why = Get-HashComparisonProblem $runRoot $name $ref
+        if ($why) { return "is an overhead attempt that failed its reference comparison (EP-C19): $why" }
+    }
+    $null
+}
+
+# A -CopyFrom source that is not warm-fresh but stands in for it (EP-C9 relabel, EP-C19): an overhead attempt of the
+# release build. Get-CopyFromProblem still requires it to be finished, clean and equal to the corpus reference.
+function Test-CopyFromRelabel($m) {
+    (Get-Prop $m 'cohort') -eq 'overhead' -and (Get-Prop $m 'build') -eq 'release'
+}
+
+# Reason an attempt's hashes.csv does not equal the reference attempt's, or $null (the prune's comparison, EP-O5,
+# and the -CopyFrom stand-in check, EP-C19): rows compared both ways and by count, never a count alone.
+function Get-HashComparisonProblem([string]$runRoot, [string]$attempt, [string]$reference) {
+    $rows = Get-HashRows (Join-Path $runRoot $attempt)
+    if ($null -eq $rows) { return "$attempt has no hashes.csv" }
+    $refRows = Get-HashRows (Join-Path $runRoot $reference)
+    if ($null -eq $refRows -or $refRows.Count -eq 0) { return "the reference $reference has no hashes.csv rows" }
+    $mine = @{}; foreach ($r in $rows) { $mine[$r] = $true }
+    $theirs = @{}; foreach ($r in $refRows) { $theirs[$r] = $true }
+    $onlyMine = @($rows | Where-Object { -not $theirs.ContainsKey($_) }).Count
+    $onlyRef = @($refRows | Where-Object { -not $mine.ContainsKey($_) }).Count
+    if ($onlyMine -or $onlyRef -or $rows.Count -ne $refRows.Count) {
+        return "$attempt's hashes.csv differs from the reference $reference ($onlyMine row(s) only here, $onlyRef only in the reference)"
+    }
     $null
 }
 
@@ -391,6 +426,37 @@ function Invoke-SelfTest {
     New-Meta 'exit1-other' (& $exit1 $ksBad)
     Case 'CopyFrom naming an exit-1 attempt with only the known skips is accepted (EP-C11)' { -not (Get-CopyFromProblem $rr 'exit1-known' $corpus $sha) }
     Case 'CopyFrom naming an exit-1 attempt whose skips differ is refused' { (Get-CopyFromProblem $rr 'exit1-other' $corpus $sha) -like '*did not finish*' }
+    # EP-C19: a release-build overhead attempt that passed its reference comparison stands in for warm-fresh
+    $cfHash = { param($dir, $rows) Write-NewFile (Join-Path $rr "$dir\hashes.csv") ("path,sha256`n" + (Join-Lines $rows)) }
+    $refRows = @('textures/a.dds,aaa', 'textures/b.dds,bbb')
+    $ov = { param($build) $c = $good.Clone(); $c['cohort'] = 'overhead'; $c['build'] = $build; $c }
+    New-Meta 'aa-ref' ($good.Clone() | ForEach-Object { $_['cohort'] = 'parity'; $_['build'] = 'base'; $_ }); & $cfHash 'aa-ref' $refRows
+    New-Meta 'ov-release' (& $ov 'release'); & $cfHash 'ov-release' $refRows
+    New-Meta 'ov-release-off' (& $ov 'release-off'); & $cfHash 'ov-release-off' $refRows
+    New-Meta 'ov-base' (& $ov 'base'); & $cfHash 'ov-base' $refRows
+    New-Meta 'ov-diff' (& $ov 'release'); & $cfHash 'ov-diff' @('textures/a.dds,aaa', 'textures/b.dds,ccc')
+    New-Meta 'ov-nohash' (& $ov 'release')
+    Case 'CopyFrom: a release-build overhead attempt equal to the corpus reference is accepted (EP-C19)' {
+        ((Get-CorpusReference $rr $corpus) -eq 'aa-ref') -and -not (Get-CopyFromProblem $rr 'ov-release' $corpus $sha) -and
+        (Test-CopyFromRelabel (Read-Json (Join-Path $rr 'ov-release\meta.json'))) -and -not (Test-CopyFromRelabel (Read-Json (Join-Path $rr 'good\meta.json')))
+    }
+    Case 'CopyFrom: release-off and base overhead attempts are refused' {
+        (Get-CopyFromProblem $rr 'ov-release-off' $corpus $sha) -like '*overhead attempt of the release-off build*' -and
+        (Get-CopyFromProblem $rr 'ov-base' $corpus $sha) -like '*overhead attempt of the base build*'
+    }
+    Case 'CopyFrom: a release overhead attempt that failed its reference comparison, or has no hashes, is refused' {
+        (Get-CopyFromProblem $rr 'ov-diff' $corpus $sha) -like '*failed its reference comparison*differs from the reference aa-ref*' -and
+        (Get-CopyFromProblem $rr 'ov-nohash' $corpus $sha) -like '*failed its reference comparison*no hashes.csv*'
+    }
+    Case 'CopyFrom: a release overhead attempt with no corpus reference in RunRoot is refused' {
+        $nr = Join-Path $t 'copyfrom-noref'; New-NewDir $nr
+        New-NewDir (Join-Path $nr 'ov'); Write-NewJson (Join-Path $nr 'ov\meta.json') (& $ov 'release')
+        Write-NewFile (Join-Path $nr 'ov\hashes.csv') ("path,sha256`n" + (Join-Lines $refRows))
+        (Get-CopyFromProblem $nr 'ov' $corpus $sha) -like '*no corpus reference*'
+    }
+    Case 'meta.json records copyFromRelabel for a copy' {
+        [IO.File]::ReadAllText($PSCommandPath).Contains("`$meta['copyFromRelabel'] = [bool](Test-CopyFromRelabel")
+    }
 
     # free-space figure: never from the corpus (it does not even exist here)
     $eb = Join-Path $t 'expected-bytes'; New-NewDir $eb
@@ -1972,6 +2038,8 @@ function Invoke-Attempt([hashtable]$A, [bool]$dry) {
             $rc = $LASTEXITCODE
             $csw.Stop()
             $meta['copy'] = [ordered]@{ from = $A.CopyFrom; bytes = $bytes; ms = $csw.ElapsedMilliseconds; robocopyExit = $rc }
+            # EP-C19: true when the source is a release-build overhead attempt standing in for warm-fresh
+            $meta['copyFromRelabel'] = [bool](Test-CopyFromRelabel (Read-Json (Join-Path (Join-Path $A.RunRoot $A.CopyFrom) 'meta.json')))
             if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
         }
         if ($cohort -eq 'warm-noop') { Write-NewFile (Join-Path $attempt 'files-before.csv') ("path,size,mtime_utc_ticks`n" + (Join-Lines (Get-FileList $out))) }
@@ -2188,17 +2256,9 @@ function Invoke-PruneOutputs([string]$runRoot, [string]$attempt, [string]$refere
     if (-not (& $corpusOf $meta) -or -not [string]::Equals((& $corpusOf $meta), (& $corpusOf $refMeta), 'OrdinalIgnoreCase')) {
         throw "refused: the reference $reference is of another corpus ($(& $corpusOf $refMeta), not $(& $corpusOf $meta))"
     }
+    $hp = Get-HashComparisonProblem $runRoot $attempt $reference
+    if ($hp) { throw "refused: $hp" }
     $rows = Get-HashRows $dir
-    if ($null -eq $rows) { throw "refused: $attempt has no hashes.csv" }
-    $refRows = Get-HashRows (Join-Path $runRoot $reference)
-    if ($null -eq $refRows -or $refRows.Count -eq 0) { throw "refused: the reference $reference has no hashes.csv rows" }
-    $mine = @{}; foreach ($r in $rows) { $mine[$r] = $true }
-    $theirs = @{}; foreach ($r in $refRows) { $theirs[$r] = $true }
-    $onlyMine = @($rows | Where-Object { -not $theirs.ContainsKey($_) }).Count
-    $onlyRef = @($refRows | Where-Object { -not $mine.ContainsKey($_) }).Count
-    if ($onlyMine -or $onlyRef -or $rows.Count -ne $refRows.Count) {
-        throw "refused: $attempt's hashes.csv differs from the reference $reference ($onlyMine row(s) only here, $onlyRef only in the reference)"
-    }
     $out = Join-Path $dir 'out'
     if (-not (Test-Path -LiteralPath $out -PathType Container)) { throw "refused: $attempt has no out folder" }
     $outItem = Get-Item -LiteralPath $out -Force
